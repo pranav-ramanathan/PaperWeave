@@ -1,0 +1,15 @@
+\section{Preliminaries}\label{sec:prelim}
+
+Throughout, $\Seq$ denotes the set of finite sequences over a fixed alphabet,
+and $\len(s)$ is the length of $s \in \Seq$.
+
+\begin{definition}\label{def:splice}
+A \emph{splice} is a triple $(i, d, t)$ with $0 \le i \le \len(s)$, a deletion
+count $d \ge 0$ and inserted text $t \in \Seq$.
+\end{definition}
+
+We follow the notation of \textcite{shapiro2011}; see also \cite[Section~2]{shapiro2011}.
+%% A comment block
+%% spanning two lines.
+
+Two splices \emph{commute} when applying them in either order gives the same result.

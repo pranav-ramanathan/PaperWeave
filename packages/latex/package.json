@@ -1,0 +1,6 @@
+{
+  "name": "@paperweave/latex",
+  "private": true,
+  "type": "module",
+  "exports": "./src/index.ts"
+}

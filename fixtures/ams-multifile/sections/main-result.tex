@@ -1,0 +1,23 @@
+\section{Main result}\label{sec:main}
+
+\begin{lemma}\label{lem:commute}
+Splices with disjoint ranges commute.
+\end{lemma}
+
+\begin{proof}
+Let $(i_1, d_1, t_1)$ and $(i_2, d_2, t_2)$ be splices with $i_1 + d_1 \le i_2$.
+Applying the first shifts the second by $\len(t_1) - d_1$, and
+\[
+  i_2' = i_2 + \len(t_1) - d_1 .
+\]
+The same text results in either order.
+\end{proof}
+
+\begin{theorem}[Convergence]\label{thm:main}
+Any two replicas that have applied the same set of splices hold the same sequence.
+\end{theorem}
+
+\begin{proof}
+By Lemma~\ref{lem:commute} and induction on the number of splices; overlapping
+ranges are resolved by the tie-break of Definition~\ref{def:splice}.
+\end{proof}
