@@ -1,9 +1,10 @@
 // Keeps one visual document in step with one shared LaTeX text.
 import { DEFAULT_TRANSPARENT, parse, reparse } from '@paperweave/latex';
+import type { Node as PMNode, Schema } from '@tiptap/pm/model';
 import { ReplaceStep } from '@tiptap/pm/transform';
 import type { EditorState, Transaction } from '@tiptap/pm/state';
 import * as Y from 'yjs';
-import { locate, model, type Model, project } from './project.ts';
+import { locate, model, type Model, projector } from './project.ts';
 import { diff, type Edit, emphEdit, translate, type Translation } from './translate.ts';
 
 export type Host = { getState(): EditorState; dispatch(tr: Transaction): void };
@@ -28,16 +29,22 @@ export class Bridge {
   private pending = new WeakMap<Transaction, Translation>();
   private seen = new Set<string>();
   private observer = () => this.sync();
+  private project: (m: Model) => PMNode;
   readonly ytext: Y.Text;
 
-  constructor(ytext: Y.Text, transparent: ReadonlySet<string> = DEFAULT_TRANSPARENT) {
+  constructor(
+    ytext: Y.Text,
+    schema: Schema,
+    transparent: ReadonlySet<string> = DEFAULT_TRANSPARENT,
+  ) {
     this.ytext = ytext;
+    this.project = projector(schema);
     this.model = model(parse(ytext.toString(), transparent));
     ytext.observe(this.observer);
   }
 
   doc() {
-    return project(this.model);
+    return this.project(this.model);
   }
   attach(host: Host) {
     this.host = host;
@@ -49,7 +56,10 @@ export class Bridge {
   /** Decide whether a visual transaction may go ahead. Wire to filterTransaction. */
   filter = (tr: Transaction, state: EditorState): boolean => {
     if (!tr.docChanged || tr.getMeta('projection')) return true;
-    const t = translate(this.model, state.doc, tr.doc);
+    const step = tr.steps.length === 1 ? tr.steps[0] : null;
+    const plain = step instanceof ReplaceStep && !step.slice.openStart && !step.slice.openEnd;
+    const hint = plain ? { from: step.from, to: step.to, size: step.slice.size } : undefined;
+    const t = translate(this.model, state.doc, tr.doc, hint);
     if (!t) {
       this.onReject();
       return false;
@@ -62,18 +72,14 @@ export class Bridge {
   applied = (tr: Transaction) => {
     if (tr.getMeta('projection')) return;
     const t = this.pending.get(tr);
-    if (!t) {
-      // Leaving a still-empty new paragraph removes it.
-      const ph = this.model.phantom;
-      if (ph && locate(this.model, tr.doc, tr.selection.head)?.block !== -1) {
-        this.model.phantom = null;
-        this.sync();
-      }
-      return;
-    }
-    this.model.phantom = t.phantom;
-    if (t.edits.length) this.splice(t.edits);
-    else this.sync();
+    // A just-opened empty paragraph lasts only while the caret is in it.
+    let phantom = t ? t.phantom : this.model.phantom;
+    const $head = tr.doc.resolve(tr.selection.head);
+    if (phantom && ($head.depth !== 1 || $head.index(0) !== phantom.index)) phantom = null;
+    const dropped = phantom !== this.model.phantom;
+    this.model.phantom = phantom;
+    if (t?.edits.length) this.splice(t.edits);
+    else if (t || dropped) this.sync();
   };
 
   private splice(edits: Edit[]) {
@@ -98,15 +104,15 @@ export class Bridge {
       let s = 0;
       while (s < Math.min(old.length, src.length) - p && old.at(-1 - s) === src.at(-1 - s)) s++;
       const at = phantom.srcPos;
-      if (old.length - s <= at && p < at)
-        phantom = { ...phantom, srcPos: at + src.length - old.length };
+      // Text added exactly at the anchor grew the block before it, so the anchor moves along.
+      if (old.length - s <= at) phantom = { ...phantom, srcPos: at + src.length - old.length };
       else if (p < at) phantom = null;
     }
     this.model = model(parsed, phantom);
     if (phantom) phantom.index = this.model.blocks.filter((b) => b.start < phantom.srcPos).length;
     if (!this.host) return;
     const state = this.host.getState();
-    const next = project(this.model);
+    const next = this.project(this.model);
     const d = diff(state.doc, next);
     if (!d) return;
 

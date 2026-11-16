@@ -20,7 +20,6 @@ const ESCAPE: Record<string, string> = {
 for (const c of '%&$#_{}') ESCAPE[c] = '\\' + c;
 export const escape = (s: string) => s.replace(/[\\~^\xa0\n\r\t%&$#_{}]/g, (c) => ESCAPE[c]);
 
-const isW = (c: string | undefined) => c === ' ' || c === '\t' || c === '\n';
 // An odd run of backslashes then letters is a control word; an even run is a line break.
 const AFTER_WORD = /(^|[^\\])(\\\\)*\\[a-zA-Z]+$/;
 const AFTER_BREAK = /(^|[^\\])(\\\\)+$/;
@@ -100,9 +99,10 @@ function replaceText(
     const g = gapFor(pieces, off, marks);
     if (!g) return null;
     ({ at, gap } = g);
-    // A space next to a space would only be collapsed again: leave the source alone.
-    if (!del.length && /^\s+$/.test(ins) && (at === 0 || isW(text[at - 1]) || isW(text[at])))
-      return [];
+    // A space typed just after a line break would vanish into the next line's indentation, so
+    // it goes before the break instead. Both places show the same thing.
+    const prev = pieces[gap - 1];
+    if (prev?.k === 'ws' && /^ +$/.test(ins)) at = prev.s;
   }
 
   // A style group left with nothing in it goes too: \emph{} is noise.
@@ -120,14 +120,6 @@ function replaceText(
     if (shown && !kept) del.push([pieces[i].s, pieces[i].e], [p.s, p.e]);
   });
 
-  if (!ins && del.length) {
-    // Deleting a word between two spaces would leave a doubled space, or worse a blank line.
-    const first = Math.min(...del.map((r) => r[0]));
-    const last = Math.max(...del.map((r) => r[1]));
-    const next = pieces.find((p) => p.s === last && p.k === 'ws');
-    if (next && (first === 0 || isW(text[first - 1]))) del.push([next.s, next.e]);
-  }
-
   del.sort((x, y) => x[0] - y[0]);
   const edits: Edit[] = [];
   for (const [from, to] of del) {
@@ -140,6 +132,12 @@ function replaceText(
     if (host) host.insert = escape(ins);
     else edits.push({ from: at, to: at, insert: escape(ins) });
     edits.sort((x, y) => x.from - y.from);
+  }
+  for (const e of edits) {
+    // Deleting everything on a line must not leave a blank line: that would split the paragraph.
+    const eol = /^[ \t]*\n/.exec(text.slice(e.to, e.to + 80));
+    if (!e.insert && eol && /\n[ \t]*$/.test(text.slice(Math.max(0, e.from - 80), e.from)))
+      e.to += eol[0].length;
   }
   for (const e of edits)
     e.insert = guard(text.slice(0, e.from), e.insert || text[e.to] || '') + e.insert;
@@ -169,9 +167,20 @@ const breakAfter = (src: string, at: number) =>
  * Work out the source edits for a change to the visual document, or null if the change is not one
  * the visual editor can express (the caller then refuses it and points the author to source mode).
  */
-export function translate(m: Model, before: PMNode, after: PMNode): Translation | null {
+export function translate(
+  m: Model,
+  before: PMNode,
+  after: PMNode,
+  /** Where a single plain replacement happened, if the change was one. */
+  hint?: { from: number; to: number; size: number },
+): Translation | null {
   const dd = diff(before, after);
   if (!dd) return { edits: [], phantom: m.phantom };
+  // Comparing documents cannot tell where "ab" went into "abab". When the editor says exactly
+  // where it replaced text, use that, so the splice lands under the caret and nowhere else.
+  const $from = hint && before.resolve(hint.from);
+  if ($from?.parent.isTextblock && $from.sameParent(before.resolve(hint!.to)))
+    Object.assign(dd, { a: hint!.from, endA: hint!.to, endB: hint!.from + hint!.size });
   const { a, endA, endB } = dd;
   const src = m.parsed.src;
   const $a = before.resolve(a);
@@ -180,14 +189,17 @@ export function translate(m: Model, before: PMNode, after: PMNode): Translation 
     edits.map((e) => ({ from: e.from + base, to: e.to + base, insert: e.insert }));
   const para = (n: PMNode | null | undefined) => n?.type.name === 'paragraph';
 
-  // Enter at the end of a block: a new empty paragraph appears between blocks.
-  if (endA === a && $a.depth === 0 && endB === a + 2 && para(after.nodeAt(a))) {
+  // A new empty paragraph before block i. It is anchored to the end of the block before it.
+  const open = (i: number): Translation | null => {
     if (m.phantom) return null;
-    const i = $a.index(0);
     const prev = m.blocks[i - 1];
     const srcPos = prev ? prev.start + prev.body.text.length : (m.blocks[0]?.start ?? src.length);
     return { edits: [], phantom: { index: i, srcPos } };
-  }
+  };
+
+  // Enter at the end of a block: a new empty paragraph appears between blocks.
+  if (endA === a && $a.depth === 0 && endB === a + 2 && para(after.nodeAt(a)))
+    return open($a.index(0));
 
   // Enter inside a paragraph.
   const $x = after.resolve(a);
@@ -202,8 +214,9 @@ export function translate(m: Model, before: PMNode, after: PMNode): Translation 
       return null;
     const spot = locate(m, before, a)!;
     if (spot.block < 0) return null;
-    if (spot.off === 0)
-      return m.phantom ? null : { edits: [], phantom: { index: $a.index(0), srcPos: spot.base } };
+    // Enter at the end of one paragraph and Enter at the start of the next produce the same
+    // document. The bridge keeps the new paragraph only if the caret ends up inside it.
+    if (spot.off === 0) return open($a.index(0));
     const g = gapFor(spot.pieces, spot.off, '');
     return (
       g && { edits: abs(spot.base, [{ from: g.at, to: g.at, insert: '\n\n' }]), phantom: m.phantom }

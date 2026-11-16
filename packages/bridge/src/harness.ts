@@ -5,8 +5,10 @@ import { canJoin } from '@tiptap/pm/transform';
 import * as Y from 'yjs';
 import { fixtureFiles, type Rng } from '../../latex/src/testutil.ts';
 import { Bridge } from './bridge.ts';
-import { locate, model, project, width } from './project.ts';
+import { locate, model, projector, width } from './project.ts';
 import { schema } from './schema.ts';
+
+const project = projector(schema);
 
 export const fixtures = Object.fromEntries(
   Object.entries(fixtureFiles()).flatMap(([path, bytes]) => {
@@ -22,7 +24,7 @@ export function replica(text: string, from?: Y.Doc) {
   if (from) Y.applyUpdate(ydoc, Y.encodeStateAsUpdate(from));
   const ytext = ydoc.getText('t');
   if (!from) ytext.insert(0, text);
-  const bridge = new Bridge(ytext);
+  const bridge = new Bridge(ytext, schema);
   let state = EditorState.create({ schema, doc: bridge.doc() });
   bridge.attach({ getState: () => state, dispatch: (tr) => void (state = state.apply(tr)) });
   return {
@@ -98,6 +100,8 @@ export type Op = {
   hi: number;
   /** A token the edit typed, if any. */
   token?: string;
+  /** The edit emptied its text block. */
+  whole: boolean;
   accepted: boolean;
 };
 
@@ -111,23 +115,30 @@ export function visualOp(r: Rng, rep: Replica, only?: 'ins'): Op | null {
   const len = Math.min(tb.size - off, r.int(5));
   const pos = tb.start + off;
   const spot = locate(rep.bridge.model, rep.state.doc, pos)!;
-  const token = `v${serial++}q`;
+  // Fixed width, so a failing seed replays the same edits whatever ran before it.
+  const token = `v${String(serial++ % 100000).padStart(5, '0')}q`;
   const lo = spot.base + unit(spot.pieces, off - 1)[0];
   const roll = only ? 0 : r.int(100);
   const { state } = rep;
   let what = 'ins';
   let hi = spot.base + unit(spot.pieces, off)[1];
   let accepted: boolean;
-  if (roll < 40) accepted = rep.dispatch(state.tr.insertText(token, pos));
+  // Leave the caret where an editor would: after typed text, inside a new paragraph.
+  const caret = (tr: Transaction, at: number) =>
+    tr.setSelection(TextSelection.near(tr.doc.resolve(at)));
+  if (roll < 40)
+    accepted = rep.dispatch(caret(state.tr.insertText(token, pos), pos + token.length));
   else if (roll < 75) {
     what = roll < 62 ? 'del' : 'rep';
     hi = spot.base + unit(spot.pieces, off + len)[1];
+    // Deleting a whole line also takes the rest of that line: its trailing spaces and newline.
+    hi += /^[ \t]*\n/.exec(rep.src.slice(hi, hi + 80))?.[0].length ?? 0;
     accepted = rep.dispatch(
       what === 'del' ? state.tr.delete(pos, pos + len) : state.tr.insertText(token, pos, pos + len),
     );
   } else if (roll < 84) {
     what = 'enter';
-    accepted = rep.dispatch(state.tr.split(pos));
+    accepted = rep.dispatch(caret(state.tr.split(pos), pos + 2));
   } else if (roll < 92) {
     what = 'join';
     const at = tb.start + tb.size + 1;
@@ -143,5 +154,13 @@ export function visualOp(r: Rng, rep: Replica, only?: 'ins'): Op | null {
     const c = rep.bridge.emphCommand(rep.state);
     accepted = !!c && rep.bridge.applyCommand(c) === 'applied';
   }
-  return { what, lo, hi, accepted, token: what === 'ins' || what === 'rep' ? token : undefined };
+  const whole = len === tb.size;
+  return {
+    what,
+    lo,
+    hi,
+    accepted,
+    whole,
+    token: what === 'ins' || what === 'rep' ? token : undefined,
+  };
 }

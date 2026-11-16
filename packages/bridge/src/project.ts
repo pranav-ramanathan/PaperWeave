@@ -1,7 +1,6 @@
 // LaTeX blocks -> ProseMirror document, and positions between the two.
 import type { Block, Body, Mark, Parsed, Piece } from '@paperweave/latex';
-import { Fragment, Mark as PMMark, type Node as PMNode } from '@tiptap/pm/model';
-import { schema } from './schema.ts';
+import { Fragment, Mark as PMMark, type Node as PMNode, type Schema } from '@tiptap/pm/model';
 
 /**
  * An empty paragraph the author just opened with Enter. LaTeX cannot store an empty paragraph, so
@@ -22,61 +21,64 @@ export const width = (p: Piece) =>
   p.k === 'text' ? p.e - p.s : p.k === 'ws' || p.k === 'esc' || p.k === 'atom' ? 1 : 0;
 
 const ATOM = { math: 'math_inline', ref: 'ref', cite: 'cite', raw: 'raw_inline' } as const;
-const pmMarks = (marks: Mark[]) => PMMark.setFrom(marks.map((m) => schema.marks[m].create()));
 
-function inline(pieces: Piece[], text: string): Fragment {
-  const out: PMNode[] = [];
-  let buf = '';
-  let bufMarks: Mark[] = [];
-  const flush = () => {
-    if (buf) out.push(schema.text(buf, pmMarks(bufMarks)));
-    buf = '';
-  };
-  for (const p of pieces) {
-    if (p.k === 'atom') {
-      flush();
-      out.push(
-        schema.nodes[ATOM[p.type!]].create({ src: text.slice(p.s, p.e) }, null, pmMarks(p.marks)),
-      );
-      continue;
+/**
+ * Builds the visual document for a model. The editor owns the schema instance, so the projector is
+ * made per editor; unchanged blocks keep their parsed body object across edits, so their nodes are
+ * reused as they are.
+ */
+export function projector(schema: Schema): (m: Model) => PMNode {
+  const pmMarks = (marks: Mark[]) => PMMark.setFrom(marks.map((m) => schema.marks[m].create()));
+  const inline = (pieces: Piece[], text: string): Fragment => {
+    const out: PMNode[] = [];
+    let buf = '';
+    let bufMarks: Mark[] = [];
+    const flush = () => {
+      if (buf) out.push(schema.text(buf, pmMarks(bufMarks)));
+      buf = '';
+    };
+    for (const p of pieces) {
+      if (p.k === 'atom') {
+        flush();
+        const src = text.slice(p.s, p.e);
+        out.push(schema.nodes[ATOM[p.type!]].create({ src }, null, pmMarks(p.marks)));
+        continue;
+      }
+      const shown =
+        p.k === 'text' ? text.slice(p.s, p.e) : p.k === 'ws' ? ' ' : p.k === 'esc' ? p.ch! : '';
+      if (!shown) continue;
+      if (markKey(p.marks) !== markKey(bufMarks)) flush();
+      buf += shown;
+      bufMarks = p.marks;
     }
-    const shown =
-      p.k === 'text' ? text.slice(p.s, p.e) : p.k === 'ws' ? ' ' : p.k === 'esc' ? p.ch! : '';
-    if (!shown) continue;
-    if (markKey(p.marks) !== markKey(bufMarks)) flush();
-    buf += shown;
-    bufMarks = p.marks;
-  }
-  flush();
-  return Fragment.fromArray(out);
-}
-
-// Unchanged blocks keep their parsed body object across edits, so their nodes are reused as-is.
-const cache = new WeakMap<Body, PMNode>();
-function node(body: Body): PMNode {
-  let n = cache.get(body);
-  if (n) return n;
-  const { nodes } = schema;
-  if (body.kind === 'para') n = nodes.paragraph.create(null, inline(body.pieces, body.text));
-  else if (body.kind === 'heading')
-    n = nodes.heading.create({ level: body.level }, inline(body.pieces, body.text));
-  else if (body.kind === 'list')
-    n = nodes.list.create(
-      { ordered: body.ordered },
-      body.items.map((it) => nodes.list_item.create(null, inline(it.pieces, body.text))),
-    );
-  else if (body.kind === 'math') n = nodes.math_block.create({ src: body.text });
-  else if (body.kind === 'error')
-    n = nodes.frozen.create({ src: body.text, message: body.message });
-  else n = nodes.raw_block.create({ src: body.text, label: (body as { label: string }).label });
-  cache.set(body, n);
-  return n;
-}
-
-export function project(m: Model): PMNode {
-  const children = m.blocks.map((b) => node(b.body));
-  if (m.phantom) children.splice(m.phantom.index, 0, schema.nodes.paragraph.create());
-  return schema.topNodeType.create(null, children);
+    flush();
+    return Fragment.fromArray(out);
+  };
+  const cache = new WeakMap<Body, PMNode>();
+  const node = (body: Body): PMNode => {
+    let n = cache.get(body);
+    if (n) return n;
+    const { nodes } = schema;
+    if (body.kind === 'para') n = nodes.paragraph.create(null, inline(body.pieces, body.text));
+    else if (body.kind === 'heading')
+      n = nodes.heading.create({ level: body.level }, inline(body.pieces, body.text));
+    else if (body.kind === 'list')
+      n = nodes.list.create(
+        { ordered: body.ordered },
+        body.items.map((it) => nodes.list_item.create(null, inline(it.pieces, body.text))),
+      );
+    else if (body.kind === 'math') n = nodes.math_block.create({ src: body.text });
+    else if (body.kind === 'error')
+      n = nodes.frozen.create({ src: body.text, message: body.message });
+    else n = nodes.raw_block.create({ src: body.text, label: (body as { label: string }).label });
+    cache.set(body, n);
+    return n;
+  };
+  return (m) => {
+    const children = m.blocks.map((b) => node(b.body));
+    if (m.phantom) children.splice(m.phantom.index, 0, schema.nodes.paragraph.create());
+    return schema.topNodeType.create(null, children);
+  };
 }
 
 export type Spot = {
@@ -107,8 +109,12 @@ export function locate(m: Model, doc: PMNode, pos: number): Spot | null {
   return { ...spot, block, pieces, text: body.text, base: start };
 }
 
-/** Source offset of a caret at a visual position. */
-export function toSrc(m: Model, doc: PMNode, pos: number): number {
+/**
+ * Source offset of a visual position. Markup such as `\emph{` sits between two visible
+ * characters; `side` says which of them the offset should stay next to: -1 the one before (a
+ * caret, or the end of a selection), 1 the one after (the start of a selection).
+ */
+export function toSrc(m: Model, doc: PMNode, pos: number, side: -1 | 1 = -1): number {
   const spot = locate(m, doc, pos);
   if (!spot) {
     const i = doc.resolve(pos).index(0);
@@ -120,7 +126,10 @@ export function toSrc(m: Model, doc: PMNode, pos: number): number {
   for (const p of spot.pieces) {
     const w = width(p);
     if (!w) continue;
-    if (spot.off < d + w) return spot.base + (p.k === 'text' ? p.s + spot.off - d : at);
+    if (spot.off < d + w) {
+      if (p.k === 'text' && spot.off > d) return spot.base + p.s + spot.off - d;
+      return spot.base + (side > 0 ? p.s : at);
+    }
     d += w;
     at = p.e;
   }

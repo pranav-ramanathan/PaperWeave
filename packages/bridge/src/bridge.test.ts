@@ -1,4 +1,5 @@
 import { fragment, rng } from '../../latex/src/testutil.ts';
+import { TextSelection } from '@tiptap/pm/state';
 import { expect, test } from 'vitest';
 import * as Y from 'yjs';
 import { fixtures, replica, shown, textblocks, visualOp } from './harness.ts';
@@ -31,16 +32,20 @@ test('typing becomes the smallest splice', () => {
   expect(typed('\\LaTeX is\n', 1, 'x')).toBe('\\LaTeX{}x is\n');
   expect(typed('a\\\\ b\n', 2, '[', 1)).toBe('a\\\\{}[b\n');
   // Deleting the last text in a style group removes the empty group.
-  expect(typed('a \\emph{bc} d\n', 2, '', 2)).toBe('a d\n');
+  expect(typed('a \\emph{bc} d\n', 2, '', 2)).toBe('a  d\n');
   expect(typed('a\\emph{bc}d\n', 1, 'X', 2)).toBe('a\\emph{X}d\n');
   // Two characters at once (a paste, an IME commit) are still just typing.
   expect(typed('Hello world.\n', 5, 'ab')).toBe('Helloab world.\n');
   expect(typed('Hello world.\n', 3, '', 2)).toBe('Hel world.\n');
-  // Deleting a word between spaces removes one of the spaces, never leaving a blank line.
+  // Deleting everything on a line removes the line, never leaving a blank one.
   expect(typed('one\ntwo\nthree\n', 4, '', 3)).toBe('one\nthree\n');
-  // A second space next to a space changes nothing.
-  expect(typed('one two\n', 3, ' ')).toBe('one two\n');
+  // A space typed before a space, or at the end of a line, is kept so the next word lands
+  // where the author expects it.
+  expect(typed('one two\n', 3, ' ')).toBe('one  two\n');
+  expect(typed('one two\n', 3, ' and')).toBe('one and two\n');
   expect(typed('one two\n', 7, ' ')).toBe('one two \n');
+  expect(typed(typed('one\ntwo\n', 3, ' '), 4, 'x')).toBe('one x\ntwo\n');
+  expect(typed('one\ntwo\n', 4, ' ')).toBe('one \ntwo\n');
 });
 
 test('an edit the visual editor cannot express is refused and changes nothing', () => {
@@ -97,6 +102,7 @@ test(`${N} generated visual edits stay inside their intended range`, () => {
     for (let step = 0; step < 40 && done < N; step++) {
       const before = rep.src;
       const wasShown = shown(rep);
+      const paras = textblocks(rep).filter((t) => t.para).length;
       let op;
       try {
         op = visualOp(r, rep);
@@ -125,6 +131,9 @@ test(`${N} generated visual edits stay inside their intended range`, () => {
       const grew = shown(rep).length - wasShown.length - (op.token?.length ?? 0);
       if (op.what === 'ins') expect([0, 1], where).toContain(grew);
       if (op.token) expect(shown(rep), where).toContain(op.token);
+      // Deleting part of a paragraph never splits it in two.
+      if (op.what === 'del' && !op.whole)
+        expect(textblocks(rep).filter((t) => t.para).length, where).toBeLessThanOrEqual(paras);
     }
   }
   for (const k of ['ins', 'del', 'rep', 'enter', 'join', 'emph'])
@@ -233,7 +242,12 @@ test('broken LaTeX freezes only its region and recovers when repaired', () => {
 test('Enter opens a paragraph that reaches the source only once something is typed', () => {
   const r = replica(DOC);
   const first = textblocks(r)[0];
-  expect(r.dispatch(r.state.tr.split(first.start + first.size))).toBe(true);
+  // What Enter does: split, with the caret landing in the new paragraph.
+  const enter = (at: number) => {
+    const tr = r.state.tr.split(at);
+    return r.dispatch(tr.setSelection(TextSelection.near(tr.doc.resolve(at + 2))));
+  };
+  expect(enter(first.start + first.size)).toBe(true);
   expect(r.src).toBe(DOC);
   expect(r.state.doc.childCount).toBe(3);
   const empty = textblocks(r)[1];
@@ -241,13 +255,14 @@ test('Enter opens a paragraph that reaches the source only once something is typ
   expect(r.src).toBe(DOC.replace('text.\n\n', 'text.\n\nNew.\n\n'));
   r.check();
   // Opened and then abandoned: it goes away without a trace.
-  expect(r.dispatch(r.state.tr.split(first.start + first.size))).toBe(true);
+  expect(enter(first.start + first.size)).toBe(true);
+  expect(r.state.doc.childCount).toBe(4);
   r.select(first.start);
   expect(r.state.doc.childCount).toBe(3);
   expect(r.src).toBe(DOC.replace('text.\n\n', 'text.\n\nNew.\n\n'));
   // Enter in the middle of a paragraph and Backspace at the start of the next undo each other.
   const before = r.src;
-  expect(r.dispatch(r.state.tr.split(first.start + 5))).toBe(true);
+  expect(enter(first.start + 5)).toBe(true);
   expect(r.src).toBe(before.replace('First para', 'First\n\n para'));
   expect(r.dispatch(r.state.tr.join(first.start + 5 + 1))).toBe(true);
   expect(r.src).toBe(before.replace('First para', 'Firstpara'));

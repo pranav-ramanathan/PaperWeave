@@ -5,7 +5,10 @@ export type Mark = 'emph' | 'textbf' | 'textit' | 'texttt';
 
 /** A contiguous source range inside a block. Offsets are relative to the block start. */
 export type Piece = {
-  /** text/ws/esc/atom are displayed; open/close/pre/post are zero-width in the visual document. */
+  /**
+   * text, ws, esc and atom are displayed; open, close, pre and post take no room in the visual
+   * document. A ws piece is a line break plus indentation, shown as one space.
+   */
   k: 'text' | 'ws' | 'esc' | 'atom' | 'open' | 'close' | 'pre' | 'post';
   s: number;
   e: number;
@@ -333,25 +336,27 @@ function parseInto(
       const c = src[i];
       if (isW(c)) {
         const j = wsEnd(i);
-        const brk = isBreak(i, j);
-        if (depth > 0) {
-          if (brk) throw ABORT;
-          push('ws', i, j);
+        // Spaces are shown one for one. A line break with its indentation is shown as one space.
+        let k = i;
+        while (isS(src[k])) k++;
+        if (k > i) push('text', i, k);
+        if (k === j) {
           i = j;
           continue;
         }
-        const nextItem = list && (cmdAt(j, 'item') || !!envAt(j, 'end'));
-        if (list ? nextItem : brk || j === n || blockStartAt(j)) {
-          // Trailing spaces stay visible so a space typed at the end of a line is not swallowed.
-          let k = i;
-          while (isS(src[k])) k++;
-          if (k > i) push('ws', i, k);
-          if (!list) return k;
-          push('post', k, j);
-          return j;
+        const brk = isBreak(i, j);
+        if (depth > 0) {
+          if (brk) throw ABORT;
+        } else {
+          const nextItem = list && (cmdAt(j, 'item') || !!envAt(j, 'end'));
+          if (list ? nextItem : brk || j === n || blockStartAt(j)) {
+            if (!list) return k;
+            push('post', k, j);
+            return j;
+          }
+          if (list && brk) throw ABORT;
         }
-        if (list && brk) throw ABORT;
-        push('ws', i, j);
+        push('ws', k, j);
         i = j;
       } else if (c === '%') {
         // The newline stays outside the comment so it still separates words and paragraphs.

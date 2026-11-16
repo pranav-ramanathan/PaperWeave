@@ -1,0 +1,208 @@
+:root {
+  --ink: #1b1f24;
+  --muted: #5b6470;
+  --line: #d5dae1;
+  --paper: #ffffff;
+  --wash: #f4f6f8;
+  --accent: #1f5fbf;
+  --warn: #8a4b00;
+  --warn-wash: #fff4e0;
+}
+* {
+  box-sizing: border-box;
+}
+body {
+  margin: 0;
+  font:
+    15px/1.5 system-ui,
+    sans-serif;
+  color: var(--ink);
+  background: var(--wash);
+}
+.home {
+  max-width: 40rem;
+  margin: 4rem auto;
+  padding: 0 1rem;
+}
+.spike header {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.75rem 1.25rem;
+  align-items: center;
+  padding: 0.75rem 1rem;
+  background: var(--paper);
+  border-bottom: 1px solid var(--line);
+}
+.spike h1 {
+  font-size: 1.1rem;
+  margin: 0;
+}
+.spike h2 {
+  font-size: 0.95rem;
+  margin: 0 0 0.5rem;
+}
+.spike header p {
+  margin: 0;
+  color: var(--muted);
+  flex-basis: 100%;
+  min-height: 1.5em;
+}
+.spike input[type='number'] {
+  width: 5rem;
+}
+.spike button,
+.spike select,
+.spike input {
+  font: inherit;
+  padding: 0.2rem 0.55rem;
+  border: 1px solid var(--line);
+  border-radius: 6px;
+  background: var(--paper);
+  color: var(--ink);
+}
+.spike button {
+  cursor: pointer;
+}
+.spike button:hover {
+  border-color: var(--accent);
+}
+.spike button[aria-pressed='true'] {
+  background: var(--warn-wash);
+  border-color: var(--warn);
+}
+.spike :focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 1px;
+}
+.authors {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 1rem;
+  padding: 1rem;
+}
+.authors section {
+  min-width: 0;
+}
+.toolbar {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.4rem;
+  margin-bottom: 0.5rem;
+}
+.panes {
+  display: grid;
+  grid-template-rows: 46vh 30vh;
+  gap: 0.5rem;
+}
+.visual,
+.source {
+  background: var(--paper);
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  overflow: auto;
+  min-width: 0;
+}
+.source .cm-editor {
+  height: 100%;
+  font-size: 13px;
+}
+.source .cm-editor.cm-focused,
+.visual:focus-within {
+  outline: 2px solid var(--accent);
+}
+.visual .ProseMirror {
+  padding: 1rem 1.25rem;
+  min-height: 100%;
+  outline: none;
+  font-family: Georgia, 'Times New Roman', serif;
+  font-size: 16px;
+}
+.visual p {
+  margin: 0 0 0.8em;
+}
+.visual h2,
+.visual h3,
+.visual h4 {
+  font-family: system-ui, sans-serif;
+  margin: 1.1em 0 0.4em;
+}
+.visual h2 {
+  font-size: 1.25rem;
+}
+.visual h3 {
+  font-size: 1.08rem;
+}
+.visual ul,
+.visual ol {
+  margin: 0 0 0.8em;
+  padding-left: 1.5em;
+}
+.pw-atom {
+  font-family: ui-monospace, monospace;
+  font-size: 0.82em;
+}
+span.pw-atom {
+  background: var(--wash);
+  border: 1px solid var(--line);
+  border-radius: 4px;
+  padding: 0 0.25em;
+  white-space: nowrap;
+}
+span.pw-math:not(.pw-raw) {
+  background: none;
+  border: none;
+  font-size: 1em;
+}
+.pw-cite,
+.pw-ref {
+  color: var(--accent);
+}
+.pw-block {
+  display: block;
+  margin: 0 0 0.8em;
+}
+div.pw-math:not(.pw-raw) {
+  font-size: 1em;
+  text-align: center;
+}
+div.pw-raw,
+div.pw-frozen {
+  border: 1px dashed var(--line);
+  border-radius: 6px;
+  padding: 0.4rem 0.6rem;
+  background: var(--wash);
+}
+div.pw-frozen {
+  border: 1px solid var(--warn);
+  background: var(--warn-wash);
+}
+div.pw-frozen strong {
+  display: block;
+  font-family: system-ui, sans-serif;
+  color: var(--warn);
+}
+.pw-last {
+  font-family: Georgia, serif;
+  color: var(--muted);
+  margin: 0.2rem 0;
+}
+.pw-last:empty {
+  display: none;
+}
+.pw-label {
+  color: var(--muted);
+  font-family: system-ui, sans-serif;
+}
+.pw-block pre {
+  margin: 0.2rem 0;
+  white-space: pre-wrap;
+  max-height: 9em;
+  overflow: auto;
+}
+.pw-block button {
+  font-family: system-ui, sans-serif;
+  font-size: 0.85em;
+}
+.ProseMirror-selectednode {
+  outline: 2px solid var(--accent);
+}
