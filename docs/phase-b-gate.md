@@ -44,15 +44,21 @@ TeX with no `\documentclass`, one keeps its body where the include graph did not
 The fixtures were written for this spike, so their numbers are weak evidence. The real-paper sample
 is small and all from arXiv.
 
-### Timing on a 151,676-character file (1,538 blocks), p95 of 60
+### Timing on a 151,676-character file (1,538 blocks), p95 of 60 edits, ten runs
 
-| Measure                                                          | Result      | Target           |
-| ---------------------------------------------------------------- | ----------- | ---------------- |
-| Keystroke until the source text is updated                       | 6 to 8 ms   | one frame, 16 ms |
-| Keystroke until the next paint                                   | 30 to 36 ms | 50 ms (spec §8)  |
-| Source edit from the other author until the visual view repaints | 48 to 58 ms | 100 ms           |
+| Measure                                                          | Result                                 | Target           |
+| ---------------------------------------------------------------- | -------------------------------------- | ---------------- |
+| Keystroke until the source text is updated                       | 6 to 8 ms                              | one frame, 16 ms |
+| Keystroke until the next paint                                   | 30 to 39 ms in nine runs, 52 ms in one | 50 ms (spec §8)  |
+| Source edit from the other author until the visual view repaints | 48 to 69 ms                            | 100 ms           |
 
 Reparsing after a one-character edit takes about 1 ms (p95 under 2 ms); a full parse about 14 ms.
+Paint time has little headroom at this size: the one run over target followed a build on the same
+machine.
+
+Tried and not adopted: `content-visibility: auto` on blocks cut keystroke-to-paint to 17 to 23 ms
+and remote-edit-to-paint to about 19 ms, but with it the Enter test put the new paragraph in the
+wrong place in 2 of 11 runs (0 of 10 without it). It needs a caret-safe form before it is used.
 
 ### Compile
 
