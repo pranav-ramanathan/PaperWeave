@@ -46,6 +46,7 @@ function author(
   ydoc: Y.Doc,
   els: { source: HTMLElement; visual: HTMLElement },
   say: (message: string) => void,
+  sourceOnly: boolean,
 ) {
   const ytext = ydoc.getText('source');
   // One undo stack per author, covering both of their editors and nobody else's edits.
@@ -163,7 +164,7 @@ function author(
       },
     },
   });
-  bridge = new Bridge(ytext, editor.schema);
+  bridge = new Bridge(ytext, editor.schema, { sourceOnly });
   undo.addTrackedOrigin(bridge);
   bridge.onReject = () =>
     say(`${name}: that edit spans LaTeX structure. Make it in the source editor.`);
@@ -204,6 +205,7 @@ export function createSession(
   els: Record<'A' | 'B', { source: HTMLElement; visual: HTMLElement }>,
   text: string,
   onStatus: (s: Status) => void,
+  sourceOnly = false,
 ) {
   const docA = new Y.Doc();
   docA.getText('source').insert(0, text);
@@ -212,8 +214,8 @@ export function createSession(
 
   const status: Status = { pending: 0, message: '' };
   const say = (message: string) => onStatus({ ...Object.assign(status, { message }) });
-  const A = author('Author A', docA, els.A, say);
-  const B = author('Author B', docB, els.B, say);
+  const A = author('Author A', docA, els.A, say, sourceOnly);
+  const B = author('Author B', docB, els.B, say, sourceOnly);
 
   const relay = { delay: 150, paused: false };
   const held: (() => void)[] = [];

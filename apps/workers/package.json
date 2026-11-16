@@ -1,0 +1,13 @@
+{
+  "name": "@paperweave/workers",
+  "private": true,
+  "type": "module",
+  "exports": "./src/compile.ts",
+  "scripts": {
+    "compile": "node src/cli.ts"
+  },
+  "devDependencies": {
+    "@paperweave/bridge": "workspace:*",
+    "@paperweave/latex": "workspace:*"
+  }
+}

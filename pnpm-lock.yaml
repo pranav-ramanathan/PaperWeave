@@ -50,6 +50,9 @@ importers:
       '@paperweave/latex':
         specifier: workspace:*
         version: link:../../packages/latex
+      '@paperweave/workers':
+        specifier: workspace:*
+        version: link:../workers
       '@tiptap/core':
         specifier: ^3.34.0
         version: 3.34.0(@tiptap/pm@3.34.0)
@@ -84,6 +87,15 @@ importers:
       '@types/react-dom':
         specifier: ^19.3.0
         version: 19.3.0(@types/react@19.3.0)
+
+  apps/workers:
+    devDependencies:
+      '@paperweave/bridge':
+        specifier: workspace:*
+        version: link:../../packages/bridge
+      '@paperweave/latex':
+        specifier: workspace:*
+        version: link:../../packages/latex
 
   packages/bridge:
     dependencies:

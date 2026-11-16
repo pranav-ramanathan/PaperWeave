@@ -48,6 +48,25 @@ test('typing becomes the smallest splice', () => {
   expect(typed('one\ntwo\n', 4, ' ')).toBe('one \ntwo\n');
 });
 
+test('macro definitions are shown whole and cannot be deleted or wrapped from the visual editor', () => {
+  const src =
+    'Text \\newcommand{\\todo}[1]{\\textbf{#1}} and \\def\\eg#1{e.g.} and \\let\\a=\\b end.\n';
+  const r = replica(src);
+  const atoms: string[] = [];
+  r.state.doc.descendants((n) => void (n.type.name === 'raw_inline' && atoms.push(n.attrs.src)));
+  expect(atoms).toEqual([
+    '\\newcommand{\\todo}[1]{\\textbf{#1}}',
+    '\\def\\eg#1{e.g.}',
+    '\\let\\a=\\b',
+  ]);
+  const tb = textblocks(r)[0];
+  expect(r.dispatch(r.state.tr.delete(tb.start + 3, tb.start + 7))).toBe(false);
+  r.select(tb.start, tb.start + 8);
+  expect(r.bridge.emphCommand(r.state)).toBeNull();
+  expect(r.dispatch(r.state.tr.insertText('More ', tb.start))).toBe(true);
+  expect(r.src).toBe('More ' + src);
+});
+
 test('an edit the visual editor cannot express is refused and changes nothing', () => {
   const r = replica(DOC);
   const [a, b] = textblocks(r);

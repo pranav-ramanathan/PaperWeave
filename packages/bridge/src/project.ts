@@ -20,7 +20,13 @@ export const markKey = (marks: readonly string[]) => [...new Set(marks)].sort().
 export const width = (p: Piece) =>
   p.k === 'text' ? p.e - p.s : p.k === 'ws' || p.k === 'esc' || p.k === 'atom' ? 1 : 0;
 
-const ATOM = { math: 'math_inline', ref: 'ref', cite: 'cite', raw: 'raw_inline' } as const;
+const ATOM = {
+  math: 'math_inline',
+  ref: 'ref',
+  cite: 'cite',
+  raw: 'raw_inline',
+  def: 'raw_inline',
+} as const;
 
 /**
  * Builds the visual document for a model. The editor owns the schema instance, so the projector is

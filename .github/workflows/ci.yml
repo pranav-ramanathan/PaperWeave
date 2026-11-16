@@ -18,3 +18,19 @@ jobs:
       - run: pnpm lint
       - run: pnpm typecheck
       - run: pnpm test
+
+  # The compile sandbox and the browser tests both need the TeX image.
+  sandbox-and-browser:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: pnpm/action-setup@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: pnpm
+      - run: pnpm install --frozen-lockfile
+      - run: docker build -t paperweave-tex infra/tex
+      - run: pnpm test:sandbox
+      - run: pnpm exec playwright install --with-deps chromium
+      - run: pnpm e2e

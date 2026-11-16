@@ -1,6 +1,6 @@
 import { readdirSync, readFileSync, statSync } from 'node:fs';
 import { join, relative } from 'node:path';
-import { decodeFile } from '@paperweave/latex';
+import { decodeFile, findRoot, includeGraph } from '@paperweave/latex';
 import Spike from './Spike';
 
 const FIXTURES = join(process.cwd(), '../../fixtures');
@@ -40,5 +40,12 @@ export const dynamic = 'force-dynamic';
 export default async function Page({ searchParams }: { searchParams: Promise<{ big?: string }> }) {
   const projects = Object.fromEntries(PROJECTS.map((p) => [p, load(p)]));
   if ((await searchParams).big) projects['big'] = { 'main.tex': big() };
-  return <Spike projects={projects} />;
+  // Files read before \\begin{document} hold definitions: shown, but edited in source only.
+  const sourceOnly = Object.fromEntries(
+    Object.entries(projects).map(([name, files]) => {
+      const root = findRoot(files);
+      return [name, root ? includeGraph(files, root).preamble : []];
+    }),
+  );
+  return <Spike projects={projects} sourceOnly={sourceOnly} compilable={PROJECTS} />;
 }

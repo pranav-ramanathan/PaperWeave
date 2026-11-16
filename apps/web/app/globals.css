@@ -206,3 +206,20 @@ div.pw-frozen strong {
 .ProseMirror-selectednode {
   outline: 2px solid var(--accent);
 }
+
+.problems {
+  margin: 1rem 1rem 0;
+  padding: 0.6rem 0.9rem;
+  border: 1px solid var(--warn);
+  border-radius: 8px;
+  background: var(--warn-wash);
+}
+.problems ul {
+  margin: 0.3rem 0 0;
+  padding-left: 1.2rem;
+  font-family: ui-monospace, monospace;
+  font-size: 0.85em;
+}
+.spike a {
+  color: var(--accent);
+}

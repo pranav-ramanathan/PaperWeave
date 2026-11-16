@@ -11,7 +11,17 @@ declare global {
 
 const AUTHORS = ['A', 'B'] as const;
 
-export default function Spike({ projects }: { projects: Record<string, Record<string, string>> }) {
+type Build = { state: 'idle' | 'building' | 'failed'; url?: string; problems: string[] };
+
+export default function Spike({
+  projects,
+  sourceOnly,
+  compilable,
+}: {
+  projects: Record<string, Record<string, string>>;
+  sourceOnly: Record<string, string[]>;
+  compilable: string[];
+}) {
   const names = Object.keys(projects);
   const [project, setProject] = useState(names.includes('big') ? 'big' : names[0]);
   const files = Object.keys(projects[project]);
@@ -32,6 +42,7 @@ export default function Spike({ projects }: { projects: Record<string, Record<st
       },
       text,
       setStatus,
+      !!sourceOnly[project]?.includes(file),
     );
     session.current = window.__spike = s;
     return () => {
@@ -39,7 +50,31 @@ export default function Spike({ projects }: { projects: Record<string, Record<st
       setPaused(false);
       setStatus({ pending: 0, message: '' });
     };
+    // The session is rebuilt when the file changes; `text` is that file's content.
   }, [text]);
+  const [build, setBuild] = useState<Build>({ state: 'idle', problems: [] });
+  const compile = async () => {
+    setBuild({ state: 'building', problems: [] });
+    const body = JSON.stringify({ project, file, text: session.current!.A.src() });
+    const res = await fetch('/api/spike/compile', { method: 'POST', body });
+    if (res.ok)
+      return setBuild({ state: 'idle', problems: [], url: URL.createObjectURL(await res.blob()) });
+    const { diagnostics = [], error, timedOut } = await res.json();
+    const problems = diagnostics
+      .filter((d: { severity: string }) => d.severity === 'error')
+      .map(
+        (d: { file?: string; line?: number; message: string }) =>
+          `${d.file}:${d.line}: ${d.message}`,
+      );
+    setBuild({
+      state: 'failed',
+      problems: [
+        ...problems,
+        ...(timedOut ? ['The build ran out of time.'] : []),
+        ...(error ? [error] : []),
+      ],
+    });
+  };
   useEffect(() => {
     if (session.current) session.current.relay.delay = delay;
   }, [delay, text]);
@@ -86,6 +121,16 @@ export default function Spike({ projects }: { projects: Record<string, Record<st
         <button type="button" aria-pressed={paused} onClick={() => setPaused(!paused)}>
           {paused ? 'Reconnect authors' : 'Disconnect authors'}
         </button>
+        {compilable.includes(project) && (
+          <button type="button" onClick={compile} disabled={build.state === 'building'}>
+            {build.state === 'building' ? 'Compiling…' : 'Compile PDF'}
+          </button>
+        )}
+        {build.url && (
+          <a href={build.url} target="_blank" rel="noreferrer">
+            Open the compiled PDF
+          </a>
+        )}
         <p role="status" aria-live="polite">
           {paused ? 'Disconnected. ' : ''}
           {status.pending
@@ -94,6 +139,16 @@ export default function Spike({ projects }: { projects: Record<string, Record<st
           {status.message}
         </p>
       </header>
+      {build.state === 'failed' && (
+        <div className="problems" role="alert">
+          <strong>The paper did not compile.</strong>
+          <ul>
+            {build.problems.map((p, i) => (
+              <li key={i}>{p}</li>
+            ))}
+          </ul>
+        </div>
+      )}
       <div className="authors">
         {AUTHORS.map((a) => (
           <section key={a} aria-label={`Author ${a}`}>

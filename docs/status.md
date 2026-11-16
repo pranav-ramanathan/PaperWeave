@@ -1,0 +1,50 @@
+# Status
+
+Read this first. Update it in every pull request.
+
+## Done
+
+- **Scaffold.** pnpm workspace, TypeScript, ESLint, Prettier, Vitest, Playwright, CI.
+- **Fixtures.** `fixtures/`: article, IEEE and AMS multi-file papers, encoding variants, a
+  shell-escape probe. `fixtures/digests.json` pins their bytes; run `node fixtures/digest.mjs`
+  after changing one on purpose.
+- **Phase B spike.** Gate report: `docs/phase-b-gate.md`. Recommendation: go.
+  - `packages/latex`: lossless block parser, incremental reparse, include graph, encoding round
+    trip, coverage.
+  - `packages/bridge`: projection to a ProseMirror document, visual edits as source splices.
+  - `apps/web`: `/spike`, two authors with a source and a visual editor each.
+  - `apps/workers`: sandboxed compile (`src/compile.ts`, CLI in `src/cli.ts`).
+
+## Next
+
+Plan items C1 to C5 at single-user depth give the first end-to-end slice (import, edit, build,
+export). Start with C1: database, blob store, sign-in, roles and one `authorize()`.
+
+The Phase A replays are waiting on a person with accounts: `docs/rea/matrix.md`. The Prism export
+has to be captured before 1 January 2027.
+
+## Decisions waiting on the owner
+
+See "What I need from you" in `docs/plan.md`. None blocks C1.
+
+## How things fit
+
+- LaTeX text in a `Y.Text` is the only stored document. Buffers hold LF and no BOM; the file's
+  newline style and BOM are reapplied on export (`packages/latex/src/encoding.ts`).
+- `parse` splits a file into blocks; each text block is a list of pieces that together cover every
+  source character. A wrong parse can change what is shown, never what is stored.
+- `Bridge.filter` turns a visual transaction into source splices or refuses it. `Bridge.applied`
+  writes the splices. `Bridge.sync` re-derives the visual document after any source change and
+  replaces only what differs.
+- The bridge never generates LaTeX from the tree.
+
+## Conventions
+
+- Tests that use randomness take a seed and print it on failure. `FUZZ=<n>` changes how many
+  cases run.
+- Tests that need Docker and the TeX image are named `*.sandbox.test.ts` and run with
+  `pnpm test:sandbox`.
+- Browser tests run against a production build on port 3100. The dev server reloads the page when
+  any file in the repo changes, test output included.
+- Never log manuscript text. Log IDs and counts.
+- The ponytail skill in `.claude/skills/` applies to all work here: the smallest complete change.

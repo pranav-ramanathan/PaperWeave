@@ -1,6 +1,12 @@
 // Which files a project pulls in, found without running TeX.
 
-export type Include = { kind: 'input' | 'bib' | 'graphics'; target: string; dynamic: boolean };
+export type Include = {
+  kind: 'input' | 'bib' | 'graphics';
+  target: string;
+  dynamic: boolean;
+  /** Offset of the command in the text with comments removed. */
+  at: number;
+};
 
 const CMD =
   /\\(input|include|subfile|bibliography|addbibresource|includegraphics)\*?(?:\[[^\]]*\])?\{([^{}]*)\}/g;
@@ -11,8 +17,10 @@ const KIND: Record<string, Include['kind']> = {
 };
 const GRAPHICS = ['', '.pdf', '.png', '.jpg', '.jpeg', '.eps'];
 
+const uncomment = (src: string) => src.replace(/(^|[^\\])%.*$/gm, '$1');
+
 export function includes(src: string): Include[] {
-  const live = src.replace(/(^|[^\\])%.*$/gm, '$1');
+  const live = uncomment(src);
   const out: Include[] = [];
   for (const m of live.matchAll(CMD)) {
     const kind = KIND[m[1]] ?? 'input';
@@ -20,7 +28,7 @@ export function includes(src: string): Include[] {
     for (const t of m[1] === 'bibliography' ? m[2].split(',') : [m[2]]) {
       const target = t.trim();
       // A macro or parameter in the path can only be resolved by TeX: such files are source-only.
-      if (target) out.push({ kind, target, dynamic: /[\\#]/.test(target) });
+      if (target) out.push({ kind, target, dynamic: /[\\#]/.test(target), at: m.index });
     }
   }
   return out;
@@ -48,6 +56,11 @@ const norm = (path: string) => {
 export type Graph = {
   /** Text files reachable from the root, root first. */
   order: string[];
+  /**
+   * Files read before \begin{document}. They hold definitions, not prose, and text typed into
+   * them would break the build, so they are edited in the source editor only.
+   */
+  preamble: string[];
   edges: { from: string; to: string; kind: Include['kind'] }[];
   missing: { from: string; target: string }[];
   dynamic: { from: string; target: string }[];
@@ -62,15 +75,17 @@ export function includeGraph(
 ): Graph {
   const all = new Set(paths);
   const dir = root.includes('/') ? root.slice(0, root.lastIndexOf('/') + 1) : '';
-  const g: Graph = { order: [], edges: [], missing: [], dynamic: [], cycles: [] };
+  const g: Graph = { order: [], preamble: [], edges: [], missing: [], dynamic: [], cycles: [] };
+  const body = uncomment(files[root] ?? '').indexOf('\\begin{document}');
   const stack: string[] = [];
-  const visit = (from: string) => {
+  const visit = (from: string, preamble = false) => {
     if (stack.includes(from)) {
       g.cycles.push([...stack.slice(stack.indexOf(from)), from]);
       return;
     }
     if (g.order.includes(from)) return;
     g.order.push(from);
+    if (preamble) g.preamble.push(from);
     stack.push(from);
     for (const inc of includes(files[from] ?? '')) {
       if (inc.dynamic) {
@@ -89,7 +104,7 @@ export function includeGraph(
         continue;
       }
       g.edges.push({ from, to, kind: inc.kind });
-      if (inc.kind === 'input') visit(to);
+      if (inc.kind === 'input') visit(to, preamble || (from === root && inc.at < body));
     }
     stack.pop();
   };

@@ -195,6 +195,41 @@ test('an edit across LaTeX structure is refused with a pointer to the source edi
   expect(await src(page, 'A')).toBe(before);
 });
 
+test('a file of definitions is shown but only editable in source', async ({ page }) => {
+  await open(page);
+  await page.locator('header select').nth(1).selectOption('macros.tex');
+  await page.waitForFunction(() => window.__spike!.A.src().includes('Project macros'));
+  await expect(visual(page, 'A').locator('.pw-raw')).toContainText('LaTeX: source only');
+  const before = await src(page, 'A');
+  await page.evaluate(() => window.__spike!.A.editor.view.focus());
+  await page.keyboard.type('x');
+  expect(await src(page, 'A')).toBe(before);
+});
+
+// Needs Docker and the TeX image, like the sandbox tests.
+test('a visually edited paper compiles to a PDF, and a broken one reports where', async ({
+  page,
+}) => {
+  await open(page);
+  await visualCaret(page, 'A', 'Authors of technical');
+  await page.keyboard.type(' & 100% scientific');
+  await page.getByRole('button', { name: 'Compile PDF' }).click();
+  const link = page.getByRole('link', { name: 'Open the compiled PDF' });
+  await expect(link).toBeVisible({ timeout: 60_000 });
+  const head = await link.evaluate(async (a: HTMLAnchorElement) => {
+    const bytes = await (await fetch(a.href)).arrayBuffer();
+    return new TextDecoder().decode(bytes.slice(0, 5));
+  });
+  expect(head).toBe('%PDF-');
+
+  await sourceCaret(page, 'A', 'Reviewers then');
+  await page.keyboard.type('\\nosuchmacro ');
+  await page.getByRole('button', { name: 'Compile PDF' }).click();
+  await expect(page.locator('.problems')).toContainText(
+    'sections/intro.tex:8: Undefined control sequence.',
+  );
+});
+
 test('editing stays responsive on a 150 KB file', async ({ page }) => {
   await open(page, '?big=1');
   const result = await page.evaluate(async () => {

@@ -149,6 +149,7 @@ test('the include graph finds the root, nested inputs, missing files, cycles and
   ]);
   expect(g.edges).toContainEqual({ from: 'main.tex', to: 'refs.bib', kind: 'bib' });
   expect(g.missing).toEqual([]);
+  expect(g.preamble).toEqual(['macros.tex']);
 
   const bad = includeGraph(
     {

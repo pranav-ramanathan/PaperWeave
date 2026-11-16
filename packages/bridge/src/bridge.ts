@@ -1,5 +1,5 @@
 // Keeps one visual document in step with one shared LaTeX text.
-import { DEFAULT_TRANSPARENT, parse, reparse } from '@paperweave/latex';
+import { DEFAULT_TRANSPARENT, parse, reparse, sourceOnly } from '@paperweave/latex';
 import type { Node as PMNode, Schema } from '@tiptap/pm/model';
 import { ReplaceStep } from '@tiptap/pm/transform';
 import type { EditorState, Transaction } from '@tiptap/pm/state';
@@ -32,14 +32,21 @@ export class Bridge {
   private project: (m: Model) => PMNode;
   readonly ytext: Y.Text;
 
+  /** True for a file that is shown but only edited in the source editor. */
+  private whole: boolean;
+
   constructor(
     ytext: Y.Text,
     schema: Schema,
-    transparent: ReadonlySet<string> = DEFAULT_TRANSPARENT,
+    opts: { transparent?: ReadonlySet<string>; sourceOnly?: boolean } = {},
   ) {
     this.ytext = ytext;
     this.project = projector(schema);
-    this.model = model(parse(ytext.toString(), transparent));
+    this.whole = !!opts.sourceOnly;
+    const src = ytext.toString();
+    this.model = model(
+      this.whole ? sourceOnly(src) : parse(src, opts.transparent ?? DEFAULT_TRANSPARENT),
+    );
     ytext.observe(this.observer);
   }
 
@@ -96,7 +103,7 @@ export class Bridge {
     const m = this.model;
     const old = m.parsed.src;
     const src = this.ytext.toString();
-    const parsed = reparse(m.parsed, src);
+    const parsed = this.whole ? sourceOnly(src) : reparse(m.parsed, src);
     let phantom = m.phantom;
     if (phantom && src !== old) {
       let p = 0;

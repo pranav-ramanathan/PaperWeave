@@ -15,8 +15,8 @@ export type Piece = {
   marks: Mark[];
   /** esc: the character shown. */
   ch?: string;
-  /** atom: what it is. */
-  type?: 'math' | 'ref' | 'cite' | 'raw';
+  /** atom: what it is. A def is a macro definition: shown, but never touched by a visual edit. */
+  type?: 'math' | 'ref' | 'cite' | 'raw' | 'def';
   /** open/close: which style. */
   mark?: Mark;
 };
@@ -48,6 +48,12 @@ const CITE = new Set([
   ...['cite', 'citep', 'citet', 'citeauthor', 'citeyear', 'nocite'],
   ...['parencite', 'textcite', 'autocite', 'footcite'],
 ]);
+/** Commands that define something: their arguments include bare names and mid-way brackets. */
+const DEFS = new Set([
+  ...['newcommand', 'renewcommand', 'providecommand', 'DeclareRobustCommand', 'newenvironment'],
+  ...['renewenvironment', 'def', 'gdef', 'edef', 'xdef', 'let', 'newtheorem'],
+  ...['DeclareMathOperator'],
+]);
 const TEXT_ESC: Record<string, string> = {
   textbackslash: '\\',
   textasciitilde: '~',
@@ -65,7 +71,7 @@ const VERBATIM = new Set(['verbatim', 'verbatim*', 'lstlisting', 'minted', 'Verb
 export const DEFAULT_TRANSPARENT: ReadonlySet<string> = new Set([
   ...['abstract', 'quote', 'quotation', 'center', 'flushleft', 'flushright', 'appendices'],
   ...['IEEEkeywords', 'keywords', 'proof', 'theorem', 'lemma', 'corollary', 'proposition'],
-  ...['definition', 'remark', 'example'],
+  ...['definition', 'remark', 'example', 'sloppypar', 'multicols', 'multicols*'],
 ]);
 
 /** Environments declared with \newtheorem hold prose too. */
@@ -106,6 +112,12 @@ export function parse(src: string, transparent: ReadonlySet<string> = DEFAULT_TR
   }
   parseInto(blocks, src, i, transparent, () => false);
   return { src, blocks, transparent };
+}
+
+/** A file the visual editor shows as one untouchable block, such as a file of definitions. */
+export function sourceOnly(src: string): Parsed {
+  const body: Body = { kind: 'raw', text: src, label: 'source only' };
+  return { src, blocks: src ? [{ start: 0, body }] : [], transparent: DEFAULT_TRANSPARENT };
 }
 
 /**
@@ -285,6 +297,22 @@ function parseInto(
     const sym = !isL(src[i + 1]);
     if (sym && src[i + 1] !== '\\') return j;
     if (src[j] === '*') j++;
+    if (DEFS.has(src.slice(i + 1, word(i)))) {
+      // \newcommand{\x}[1]{...}, \def\x#1{...}, \let\a=\b: take the whole definition.
+      for (let body = false; ;) {
+        const c = src[j];
+        if (c === '{') {
+          const g = group(j);
+          if (g < 0) throw new Unbalanced('hard', 'unclosed {');
+          j = g;
+          body = true;
+        } else if (c === '[' && bracket(j) > 0) j = bracket(j);
+        else if (c === '#' && src[j + 1] >= '1' && src[j + 1] <= '9') j += 2;
+        else if (c === '\\' && !body && isL(src[j + 1])) j = word(j);
+        else if (c === '=' && !body) j++;
+        else return j;
+      }
+    }
     while (src[j] === '[') {
       const b = bracket(j);
       if (b < 0) break;
@@ -439,7 +467,7 @@ function parseInto(
         }
         if (e < 0) {
           e = unit(i);
-          type = 'raw';
+          type = DEFS.has(name) ? 'def' : 'raw';
         }
         push('atom', i, e, { type });
         i = e;
@@ -562,8 +590,14 @@ function parseInto(
       if (begin) {
         const { name: env, end } = begin;
         if (transparent.has(env) || env === 'document') {
-          const b = src[end] === '[' ? bracket(end) : -1;
-          return raw(i, b > 0 ? b : end, env);
+          // Its arguments belong to the \begin line: \begin{theorem}[Name], \begin{multicols}{2}.
+          let k = end;
+          for (;;) {
+            const e = src[k] === '[' ? bracket(k) : src[k] === '{' ? group(k) : -1;
+            if (e < 0) break;
+            k = e;
+          }
+          return raw(i, k, env);
         }
         if (VERBATIM.has(env)) {
           const k = src.indexOf(`\\end{${env}}`, end);

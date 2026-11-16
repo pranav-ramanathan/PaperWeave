@@ -23,7 +23,7 @@ export function coverage(parsed: Parsed) {
         const len = p.e - p.s;
         if (p.k === 'text' || p.k === 'ws' || p.k === 'esc') c.editable += len;
         else if (p.k === 'atom') {
-          if (p.type === 'raw') {
+          if (p.type === 'raw' || p.type === 'def') {
             if (!body.text.startsWith('%', p.s)) c.raw += len;
           } else c.atoms += len;
         }

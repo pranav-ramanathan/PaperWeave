@@ -81,17 +81,22 @@ function replaceText(
 ): Edit[] | null {
   const del: [number, number][] = [];
   const gone = pieces.map(() => false);
+  let fixed = false;
   let d = 0;
   pieces.forEach((p, i) => {
     const w = width(p);
     const x = Math.max(off, d);
     const y = Math.min(offEnd, d + w);
     if (w && x < y) {
+      // A macro definition can break the whole build if it goes: only the source editor may.
+      if (p.type === 'def') fixed = true;
       gone[i] = x === d && y === d + w;
       del.push(p.k === 'text' ? [p.s + x - d, p.s + y - d] : [p.s, p.e]);
     }
     d += w;
   });
+
+  if (fixed) return null;
 
   let at = -1;
   let gap = -1;
@@ -299,6 +304,8 @@ export function emphEdit(text: string, pieces: Piece[], off: number, offEnd: num
     d += w;
   });
   if (first < 0) return null;
+  // Inside a group a definition would become local to it and vanish afterwards.
+  if (pieces.slice(first, last + 1).some((p) => p.type === 'def')) return null;
   let depth = 0;
   for (let i = first + 1; i < last; i++) {
     if (pieces[i].k === 'open') depth++;
