@@ -131,9 +131,13 @@ test('a chart is drawn from approved data and is out of date once the data chang
   );
   await page.getByRole('link', { name: 'Look at the data again' }).click();
   await page.getByRole('button', { name: 'Approve this description' }).click();
+  // Not before the approval has landed: leaving the page at once would cut it short.
+  await expect(page.getByRole('status')).toHaveText('Description approved.');
   await page.goto(chart);
   await page.getByRole('button', { name: 'Draw it again' }).click();
+  // Drawn again from the new version: the row that was added is among those drawn.
+  await expect(page.getByText('Out of date.')).toHaveCount(0, { timeout: 30_000 });
   await expect(page.getByText('Waiting to be drawn…')).toHaveCount(0, { timeout: 30_000 });
-  await expect(page.getByText('Out of date.')).toHaveCount(0);
+  await expect(page.locator('main [role=alert]')).toHaveCount(0);
   await expect(picture).toBeVisible();
 });
