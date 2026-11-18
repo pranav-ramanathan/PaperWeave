@@ -2,7 +2,13 @@
 import { afterAll, beforeAll, expect, test } from 'vitest';
 import { readZip, writeZip } from './archive.ts';
 import { blobStore } from './blobs.ts';
-import { createFile, deleteFile, setRootFile } from './files.ts';
+import {
+  createFile,
+  deleteFile,
+  proposeFileRename,
+  renameFileAndReferences,
+  setRootFile,
+} from './files.ts';
 import { exportZip, importZip, listFiles } from './import.ts';
 import { acceptInvitation, createProject, getProject, invite } from './projects.ts';
 import { listRevisions, renameFile, restoreRevision, saveRevision } from './revisions.ts';
@@ -175,4 +181,128 @@ test('restoring a revision can swap two files back to their old names', async ()
   const now = await content(p.id);
   expect(now['main.tex']).toBe(MAIN);
   expect(now['intro.tex']).toBe('Intro text.\n');
+});
+
+const NAMED = {
+  'main.tex': [
+    '\\documentclass{article}',
+    '\\begin{document}',
+    '\\input{sections/intro} % was \\input{sections/intro}',
+    '\\include{sections/method.tex}',
+    '\\includegraphics[width=1cm]{figures/plot} and \\includegraphics{figures/plot.png}',
+    '\\bibliography{refs, more}',
+    '\\end{document}',
+    '',
+  ].join('\r\n'),
+  'sections/intro.tex': 'Intro.\n',
+  'sections/method.tex': 'Method, see \\input{sections/intro}.\n',
+  'refs.bib': '',
+  'more.bib': '',
+  'notes.txt': 'Nobody includes this.\n',
+};
+async function named() {
+  const zip = await writeZip([
+    ...Object.entries(NAMED).map(([path, text]) => ({ path, bytes: Buffer.from(text) })),
+    { path: 'figures/plot.png', bytes: Buffer.from([0x89, 0x50, 0x4e, 0x47]) },
+  ]);
+  const [project] = await importZip(t.pool, store, owner.id, zip, 'Named');
+  const { token } = await invite(t.pool, owner.id, project.id, viewer.email, 'viewer');
+  await acceptInvitation(t.pool, viewer.id, token);
+  const ids = Object.fromEntries(
+    (await listFiles(t.pool, owner.id, project.id)).map((f) => [f.path, f.id]),
+  );
+  return { id: project.id, ids };
+}
+
+test('renaming a file shows the lines that name it, and changes them with it', async () => {
+  const p = await named();
+  const rename = async (from: string, to: string) => {
+    const proposal = await proposeFileRename(t.pool, store, owner.id, p.id, p.ids[from], to);
+    const done = await renameFileAndReferences(
+      t.pool,
+      store,
+      owner.id,
+      p.id,
+      p.ids[from],
+      to,
+      proposal.digest,
+    );
+    return { lines: proposal.changes.map((c) => `${c.path}:${c.line} ${c.after}`), ...done };
+  };
+  // Written without its extension, and still is. The commented-out line is left alone.
+  expect(await rename('sections/intro.tex', 'parts/introduction.tex')).toEqual({
+    lines: [
+      'main.tex:3 \\input{parts/introduction} % was \\input{sections/intro}',
+      'sections/method.tex:1 Method, see \\input{parts/introduction}.',
+    ],
+    places: 2,
+  });
+  // Written with its extension, and still is.
+  expect((await rename('sections/method.tex', 'sections/design.tex')).lines).toEqual([
+    'main.tex:4 \\include{sections/design.tex}',
+  ]);
+  // An image named twice on one line, once with and once without its extension.
+  expect(await rename('figures/plot.png', 'figures/latency.png')).toEqual({
+    lines: [
+      'main.tex:5 \\includegraphics[width=1cm]{figures/latency} and \\includegraphics{figures/latency.png}',
+    ],
+    places: 2,
+  });
+  // One of two names in a list.
+  expect((await rename('refs.bib', 'bib/refs.bib')).lines).toEqual([
+    'main.tex:6 \\bibliography{bib/refs, more}',
+  ]);
+  // A file nothing names is simply renamed.
+  expect(await rename('notes.txt', 'docs/notes.txt')).toEqual({ lines: [], places: 0 });
+
+  const files = await listFiles(t.pool, owner.id, p.id);
+  expect(files.map((f) => f.path)).toEqual([
+    ...['bib/refs.bib', 'docs/notes.txt', 'figures/latency.png', 'main.tex', 'more.bib'],
+    ...['parts/introduction.tex', 'sections/design.tex'],
+  ]);
+  // Each is the same file under a new name.
+  expect(files.find((f) => f.path === 'parts/introduction.tex')!.id).toBe(
+    p.ids['sections/intro.tex'],
+  );
+  // Only the names changed: every other byte of main.tex, its line ends included, is as it was.
+  expect((await content(p.id))['main.tex']).toBe(
+    NAMED['main.tex']
+      .replace('\\input{sections/intro} %', '\\input{parts/introduction} %')
+      .replace('sections/method.tex', 'sections/design.tex')
+      .replaceAll('figures/plot', 'figures/latency')
+      .replace('{refs, more}', '{bib/refs, more}'),
+  );
+});
+
+test('a file rename is refused whole when the lines have changed, and can leave them alone when asked', async () => {
+  const p = await named();
+  const intro = p.ids['sections/intro.tex'];
+  const proposal = await proposeFileRename(t.pool, store, owner.id, p.id, intro, 'intro.tex');
+  await editFile(t.pool, store, p.ids['main.tex'], owner.id, (text) =>
+    text.insert(text.toString().indexOf('\\bibliography'), '\\input{sections/intro}\n'),
+  );
+  const before = await content(p.id);
+  const go = (who: string, file: string, to: unknown, digest?: unknown) =>
+    code(renameFileAndReferences(t.pool, store, who, p.id, file, to, digest));
+  expect(await go(owner.id, intro, 'intro.tex', proposal.digest)).toBe('conflict');
+  expect(await go(owner.id, intro, 'main.tex', proposal.digest)).toBe('conflict');
+  expect(await go(owner.id, intro, '../intro.tex', proposal.digest)).toBe('invalid_input');
+  expect(await go(viewer.id, intro, 'intro.tex', proposal.digest)).toBe('permission_denied');
+  expect(await go(outsider.id, intro, 'intro.tex', proposal.digest)).toBe('not_found');
+  const other = await named();
+  expect(await go(owner.id, other.ids['main.tex'], 'x.tex', proposal.digest)).toBe('not_found');
+  expect(await code(proposeFileRename(t.pool, store, owner.id, p.id, intro, 'main.tex'))).toBe(
+    'conflict',
+  );
+  expect(await code(proposeFileRename(t.pool, store, viewer.id, p.id, intro, 'i.tex'))).toBe(
+    'permission_denied',
+  );
+  // Nothing happened: not the name, not a line.
+  expect(await content(p.id)).toEqual(before);
+
+  // Without a digest only the name changes, and the lines still say the old one.
+  expect(await go(owner.id, intro, 'intro.tex')).toBe('ok');
+  const after = await content(p.id);
+  expect(after['intro.tex']).toBe('Intro.\n');
+  expect(after['main.tex']).toBe(before['main.tex']);
 });
