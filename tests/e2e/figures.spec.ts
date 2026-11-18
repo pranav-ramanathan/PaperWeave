@@ -121,7 +121,8 @@ test('a figure shows its picture, and is given a description in place', async ({
   await expect(tableBox).toBeHidden();
   const table = page.locator(VISUAL).getByRole('group', { name: 'Table' });
   await expect(table.getByRole('columnheader')).toHaveText(['Column 1', 'Column 2']);
-  await expect(table.getByRole('row')).toHaveCount(2);
+  // Two rows of the table, and one of buttons under its columns.
+  await expect(table.getByRole('row')).toHaveCount(3);
   await table.getByRole('button', { name: /^Row 2, column 1:/ }).click();
   await table.getByLabel('Row 2, column 1', { exact: true }).fill('8 px');
   await page.keyboard.press('Enter');
