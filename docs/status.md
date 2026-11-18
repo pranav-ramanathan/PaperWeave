@@ -552,20 +552,30 @@ Read this first. Update it in every pull request.
 
 ## Next
 
-Every item in `docs/plan.md` from the scaffold to Phase F has been built. What is left is not
-code that can be written here:
+Every item in `docs/plan.md` from the scaffold to Phase F has been built. Since then the work
+has been the security review's open items, the marked shortcuts the plan said to come back to,
+and two faults in the editor that made browser tests fail once in a while (all below).
+
+What is left is not code that can be written here:
 
 1. **The owner's decisions**, listed below. Two of them change what should be built next:
    whether proposals stay stored beside the text, and whether model processing may be turned
    on (and with what retention at the provider).
-2. **What each document says was not checked.** A real screen reader, browsers other than
-   Chromium and real input methods (`docs/accessibility.md`); the open items of
-   `docs/security-review.md`, the first being limits on requests in general; losing the object store
+2. **Hosting.** Nothing has been deployed. `docs/settings.md` lists what each service reads
+   from its environment and what must reach what. `docs/security-review.md` ends with what only
+   a deployment can settle: TLS, the production sandbox, where the store and backups live, a
+   proxy that limits requests, who may read the metrics.
+3. **What each document says was not checked.** A real screen reader, browsers other than
+   Chromium and real input methods (`docs/accessibility.md`); losing the object store
    (`docs/restore-drill.md`); real manuscripts for the grammar benchmark and the claim
    challenge set, which are synthetic today.
-3. **The Phase A replays**, which need a person with accounts: `docs/rea/matrix.md`. The Prism
+4. **The Phase A replays**, which need a person with accounts: `docs/rea/matrix.md`. The Prism
    one is optional: its export was researched from public sources (`docs/rea/prism.md`) and is
    a plain LaTeX ZIP with no comments or history, so it imports like any other ZIP.
+
+If more is to be built before those are settled, the candidates are in the code as
+`shortcut:` comments (seven of them, each saying when it stops being good enough) and in the
+"Open" list of `docs/security-review.md`.
 
 ## An edit that is too large
 
