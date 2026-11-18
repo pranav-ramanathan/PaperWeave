@@ -13,14 +13,30 @@ import type { Node as PMNode } from '@tiptap/pm/model';
 import { Plugin } from '@tiptap/pm/state';
 import katex from 'katex';
 import * as Y from 'yjs';
+import { numbers, onNumbers } from './numbers';
 
 const ENV = /^\\begin\{(\w+)\*?\}([\s\S]*)\\end\{\1\*?\}$/;
 const MULTILINE = new Set(['align', 'gather', 'multline', 'eqnarray', 'flalign', 'alignat']);
 
-/** LaTeX maths source as KaTeX wants it: no delimiters, no labels. */
-function tex(src: string) {
+/** Environments the in-browser renderer can number row by row. */
+const NUMBERED = new Set(['equation', 'align', 'gather', 'alignat']);
+/** A number as LaTeX printed it, safe to put inside a `\\tag{}`. */
+const tagged = (number: string | undefined) => (number ?? '??').replace(/[#$%&_{}~^\\]/g, '');
+
+/**
+ * LaTeX maths source as KaTeX wants it: no delimiters, no labels. With `numberOf`, each labelled
+ * row carries the number LaTeX gave that label, the way the PDF shows it.
+ */
+function tex(src: string, numberOf?: (key: string) => string | undefined) {
   const env = ENV.exec(src);
   if (env) {
+    if (numberOf && NUMBERED.has(env[1]) && env[2].includes('\\label{')) {
+      const rows = env[2].replace(
+        /\\label\{([^}]*)\}/g,
+        (_, key: string) => `\\tag{${tagged(numberOf(key.trim()))}}`,
+      );
+      return `\\begin{${env[1]}*}${rows}\\end{${env[1]}*}`;
+    }
     const inner = env[2].replace(/\\label\{[^}]*\}/g, '');
     return MULTILINE.has(env[1]) ? `\\begin{aligned}${inner}\\end{aligned}` : inner;
   }
@@ -71,17 +87,65 @@ export function createVisual(opts: {
     return true;
   };
 
+  /** Mark an element whose number comes from a PDF that is behind the text. */
+  const age = (dom: HTMLElement, src: string) => {
+    const n = numbers();
+    dom.classList.toggle('pw-stale', n.known && n.stale);
+    dom.title = !n.known
+      ? src
+      : `${src}\nNumbered as in the PDF${n.stale ? ', which is behind the text' : ''}.`;
+  };
   const math = (display: boolean) => (node: PMNode) => {
+    const src: string = node.attrs.src;
     const dom = el(display ? 'div' : 'span', `pw-atom pw-math${display ? ' pw-block' : ''}`);
-    try {
-      katex.render(tex(node.attrs.src), dom, { displayMode: display, throwOnError: true });
-    } catch {
-      // Project macros are unknown to the in-browser renderer: show the source as it is.
-      dom.textContent = node.attrs.src;
-      dom.classList.add('pw-raw');
-    }
-    dom.title = node.attrs.src;
-    return { dom };
+    const labelled = display && src.includes('\\label{');
+    const draw = () => {
+      const n = numbers();
+      const attempt = (numbered: boolean) =>
+        katex.render(tex(src, numbered ? (key) => n.labels[key]?.number : undefined), dom, {
+          displayMode: display,
+          throwOnError: true,
+        });
+      dom.classList.remove('pw-raw');
+      try {
+        // With the numbers from the PDF if there are any; without, if that does not render.
+        try {
+          attempt(labelled && n.known);
+        } catch {
+          attempt(false);
+        }
+      } catch {
+        // Project macros are unknown to the in-browser renderer: show the source as it is.
+        dom.textContent = src;
+        dom.classList.add('pw-raw');
+      }
+      if (labelled) age(dom, src);
+      else dom.title = src;
+    };
+    draw();
+    return { dom, destroy: labelled ? onNumbers(draw) : undefined };
+  };
+  /** A reference shows the number its label has in the PDF, as the PDF prints it. */
+  const ref = (node: PMNode) => {
+    const src: string = node.attrs.src;
+    const dom = el('span', 'pw-atom pw-ref');
+    const m = /^\\(\w+)\*?(?:\[[^\]]*\])?\{([^}]*)\}/.exec(src);
+    const keys = (m?.[2] ?? '').split(',').map((k) => k.trim());
+    const draw = () => {
+      const n = numbers();
+      if (!n.known || !m) dom.textContent = `→${keys.join(', ')}`;
+      else {
+        // LaTeX prints ?? for a label it does not know. So do we.
+        const page = m[1].toLowerCase().includes('pageref');
+        const each = keys.map((k) => (page ? n.labels[k]?.page : n.labels[k]?.number) || '??');
+        dom.textContent = m[1] === 'eqref' ? `(${each.join(', ')})` : each.join(', ');
+        dom.classList.toggle('pw-unknown', each.includes('??'));
+      }
+      dom.setAttribute('aria-label', `reference to ${keys.join(', ')}: ${dom.textContent}`);
+      age(dom, src);
+    };
+    draw();
+    return { dom, destroy: onNumbers(draw) };
   };
   const chip = (label: (src: string) => string) => (node: PMNode) => {
     const dom = el('span', `pw-atom pw-${node.type.name}`, label(node.attrs.src));
@@ -109,13 +173,13 @@ export function createVisual(opts: {
 
   const views: Record<
     string,
-    (node: PMNode, getPos: () => number | undefined) => { dom: HTMLElement }
+    (node: PMNode, getPos: () => number | undefined) => { dom: HTMLElement; destroy?: () => void }
   > = {
     math_inline: math(false),
     math_block: math(true),
     raw_inline: chip((s) => (s.length > 28 ? s.slice(0, 27) + '…' : s)),
     cite: chip((s) => `[${s.slice(s.lastIndexOf('{') + 1, -1)}]`),
-    ref: chip((s) => `→${s.slice(s.lastIndexOf('{') + 1, -1)}`),
+    ref,
     raw_block: block,
     frozen: block,
   };

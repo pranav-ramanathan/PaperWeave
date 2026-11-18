@@ -15,6 +15,7 @@ import {
 } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
+import { auxLabels } from '@paperweave/latex';
 
 export const IMAGE = process.env.PAPERWEAVE_TEX_IMAGE ?? 'paperweave-tex';
 /** The image's unprivileged user. */
@@ -35,6 +36,8 @@ export type CompileResult = {
   /** Paths inside the output directory, when produced. */
   pdf?: string;
   synctex?: string;
+  /** The number and page LaTeX gave each label, when a PDF was produced. */
+  labels?: Record<string, { number: string; page: string }>;
 };
 
 /** Run a command in the sandbox with `work` mounted read-write at /work. */
@@ -135,6 +138,15 @@ export async function compile(
       return 'output' + ext;
     };
     const pdf = run.code === 0 ? keep('.pdf') : undefined;
+    // Every .aux file of the build: \include writes one per file.
+    let aux = '';
+    const gather = (dir: string) => {
+      for (const e of readdirSync(dir, { withFileTypes: true }))
+        if (e.isDirectory()) gather(join(dir, e.name));
+        else if (e.name.endsWith('.aux') && aux.length < 4_000_000)
+          aux += readFileSync(join(dir, e.name), 'latin1') + '\n';
+    };
+    if (pdf) gather(work);
     return {
       ok: !!pdf,
       // `timeout -s KILL` reports 137.
@@ -143,6 +155,7 @@ export async function compile(
       log,
       pdf,
       synctex: pdf && keep('.synctex.gz'),
+      labels: pdf ? auxLabels(aux) : undefined,
     };
   } finally {
     rmSync(work, { recursive: true, force: true });

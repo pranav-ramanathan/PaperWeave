@@ -2,6 +2,7 @@
 
 import type { Build } from '@paperweave/server';
 import { useCallback, useEffect, useRef, useState } from 'react';
+import { type Numbers, setNumbers } from '../../../../../lib/numbers';
 
 type Builds = { latest: Build | null; lastGood: Build | null; edits: number };
 
@@ -53,6 +54,24 @@ export default function BuildPane({
   }, [url, auto, canBuild, compile]);
 
   const { latest, lastGood } = builds ?? { latest: null, lastGood: null };
+  // The visual editor shows, beside each reference, the number its label has in this PDF.
+  const pdf = lastGood?.id;
+  const behind = !!lastGood && (lastGood.id !== latest?.id || lastGood.stale);
+  const [found, setFound] = useState<{ pdf: string; labels: Numbers['labels'] } | null>(null);
+  useEffect(() => {
+    if (!pdf) return;
+    let stop = false;
+    void fetch(`${url}/${pdf}/labels`)
+      .then((res) => (res.ok ? res.json() : {}))
+      .then((labels: Numbers['labels']) => !stop && setFound({ pdf, labels }))
+      .catch(() => {});
+    return () => void (stop = true);
+  }, [url, pdf]);
+  useEffect(() => {
+    if (found && found.pdf === pdf)
+      setNumbers({ labels: found.labels, known: true, stale: behind });
+  }, [found, pdf, behind]);
+  useEffect(() => () => setNumbers({ labels: {}, known: false, stale: false }), []);
   const building = latest?.status === 'queued';
   const state = !builds
     ? 'Checking for a PDF…'
@@ -112,7 +131,7 @@ export default function BuildPane({
         <>
           <p className="build-links">
             Showing the PDF built at {time(lastGood.createdAt)}
-            {lastGood.id !== latest?.id || lastGood.stale ? ', before the latest edits.' : '.'}
+            {behind ? ', before the latest edits.' : '.'}
           </p>
           <iframe title="Compiled PDF" src={`${url}/${lastGood.id}/pdf`} />
         </>
