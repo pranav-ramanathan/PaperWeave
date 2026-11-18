@@ -95,6 +95,7 @@ export async function startSync(opts: {
         key = c?.key;
         const bytes = (v: unknown) =>
           typeof v === 'string' ? Buffer.from(v, 'base64url') : undefined;
+        const began = Date.now();
         const done = await runCommand(
           pool,
           store,
@@ -103,6 +104,10 @@ export async function startSync(opts: {
           { ...c, from: bytes(c?.from), to: bytes(c?.to) },
           { notify: false, maxFileText: opts.maxFileText },
         );
+        // The editor waits eight seconds for an answer. One that took long was waiting for
+        // something, and which file and how long is worth knowing. Never the text.
+        if (Date.now() - began > 2000)
+          console.error(`command on ${documentName} took ${Date.now() - began} ms`);
         if (done.result !== 'applied') {
           counts.commandsNotApplied++;
           return answer({ result: done.result });

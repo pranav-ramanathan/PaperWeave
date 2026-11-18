@@ -30,14 +30,41 @@ type RevisionFile = { file_id: string; path: string; digest: string };
  * Freeze the paper as it is now. An automatic cut that finds nothing changed since the latest
  * revision returns that one. No permission check here: callers that act for a person check first.
  */
-export function cutRevision(
+export async function cutRevision(
   pool: pg.Pool,
   store: BlobStore,
   userId: string | null,
   projectId: string,
   opts: { name?: string; kind?: Revision['kind']; restoredFrom?: string } = {},
 ): Promise<{ id: string; number: number }> {
-  return transaction(pool, (db) => cut(db, store, userId, projectId, opts));
+  const ready = await putEdited(pool, store, projectId);
+  return transaction(pool, (db) => cut(db, store, userId, projectId, { ...opts, ready }));
+}
+
+/** What a file's text was stored as, and the place in its log that was the text of. */
+type Ready = Map<string, { seq: string; digest: string }>;
+
+/**
+ * Store every edited file's text as it is now, ahead of a cut and without holding anything.
+ * A cut holds back every edit to the paper while it reads the files. Sending their text to the
+ * store inside that hold would make everyone's editing wait on the store; done here first, the
+ * cut only has to send again what was edited in the moment between.
+ */
+async function putEdited(pool: pg.Pool, store: BlobStore, projectId: string): Promise<Ready> {
+  // Each file's place in its log is read before its log is. An edit landing between the two
+  // leaves a place that is already out of date, which the cut sees and does not trust.
+  const { rows } = await pool.query(
+    `select id, digest, eol, bom, head_seq from files
+     where project_id = $1 and eol is not null and head_seq > 1`,
+    [projectId],
+  );
+  const ready: Ready = new Map();
+  for (const f of rows)
+    ready.set(f.id, {
+      seq: String(f.head_seq),
+      digest: await store.put(await currentBytes(pool, store, f)),
+    });
+  return ready;
 }
 
 /** The same as one step of a larger transaction. */
@@ -46,7 +73,7 @@ async function cut(
   store: BlobStore,
   userId: string | null,
   projectId: string,
-  opts: { name?: string; kind?: Revision['kind']; restoredFrom?: string } = {},
+  opts: { name?: string; kind?: Revision['kind']; restoredFrom?: string; ready?: Ready } = {},
 ): Promise<{ id: string; number: number }> {
   const kind = opts.kind ?? 'auto';
   {
@@ -70,7 +97,13 @@ async function cut(
     const captured: { id: string; path: string; digest: string; seq: string }[] = [];
     for (const f of files) {
       const edited = f.eol && Number(f.head_seq) > 1;
-      const digest = edited ? await store.put(await currentBytes(db, store, f)) : f.digest;
+      // Stored already, unless it has been edited since.
+      const had = opts.ready?.get(f.id);
+      const digest = !edited
+        ? f.digest
+        : had?.seq === String(f.head_seq)
+          ? had.digest
+          : await store.put(await currentBytes(db, store, f));
       captured.push({ id: f.id, path: f.path, digest, seq: f.head_seq });
     }
     const key = createHash('sha256')
@@ -366,6 +399,7 @@ export async function restoreRevision(
 ): Promise<{ id: string; number: number }> {
   await authorize(pool, userId, id(projectId), 'revision.write');
   const { revision, files } = await load(pool, projectId, revisionId);
+  const ready = await putEdited(pool, store, projectId);
   // All or nothing, with every file held from here on, so no edit lands between keeping the paper
   // as it stands and replacing it. Typing waits for the moment this takes.
   return transaction(pool, async (db) => {
@@ -374,7 +408,7 @@ export async function restoreRevision(
     ]);
     // What is about to be replaced is kept as a revision first, so a restore erases nothing: not
     // even what someone typed a moment ago.
-    await cut(db, store, userId, projectId);
+    await cut(db, store, userId, projectId, { ready });
     // Files deleted since come back as the same files, edit history and all. They wait under a
     // placeholder name until the names they had are free.
     await db.query(

@@ -225,6 +225,35 @@ test('a restore first keeps the paper as it stood, unsaved edits included', asyn
   expect(kept['main.tex']).toContain('Typed a moment ago.');
 });
 
+test('saving a revision does not hold up editing while the store is slow', async () => {
+  const p = await paper();
+  await replace(p.main, 'Hello.', 'Edited once.');
+  // A store that does not answer a write until it is let.
+  let letGo!: () => void;
+  const held = new Promise<void>((r) => (letGo = r));
+  let asked = 0;
+  const slow = {
+    get: store.get,
+    async put(bytes: Uint8Array) {
+      asked++;
+      await held;
+      return store.put(bytes);
+    },
+  };
+  const saving = saveRevision(t.pool, slow, owner.id, p.id, 'While the store was slow');
+  await expect.poll(() => asked).toBe(1);
+  // The store has still not answered. If saving held the file while it waited, this edit
+  // would wait too, and never return; the editor gives a structural edit eight seconds.
+  await replace(p.main, 'Edited once.', 'Edited twice.');
+  letGo();
+  const made = await saving;
+  // The revision is the paper as it stood when it was cut, which is after that edit: what was
+  // stored ahead of time was out of date, and was not used.
+  const kept = await files((await exportRevision(t.pool, store, owner.id, p.id, made.id)).zip);
+  expect(kept['main.tex']).toContain('Edited twice.');
+  expect(asked).toBe(2);
+});
+
 test('a file can be renamed to a usable name and keeps its identity', async () => {
   const p = await paper();
   await renameFile(t.pool, owner.id, p.id, p.main, 'paper.tex');

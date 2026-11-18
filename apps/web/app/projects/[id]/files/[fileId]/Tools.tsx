@@ -245,7 +245,9 @@ export function FloatBox(props: {
       // On lines of its own, like any figure or table in the source.
       await request.apply(`\n${lines.join('\n')}\n`);
       onDone();
-    } catch {
+    } catch (err) {
+      // Why, for whoever is looking into it: no answer in time, or the server's own words.
+      console.warn('edit not made:', (err as Error).message);
       setProblem('That edit could not be made. Check the connection and try again.');
     }
   };

@@ -584,6 +584,22 @@ Built after the security review, which had it as its second open item.
 - **Not limited:** how many files a paper holds, and how often someone edits. A member can
   still grow the log by adding and deleting. Those are the review's "limits in general".
 
+## Saving a revision no longer holds up editing
+
+- **What was wrong.** Cutting a revision (every build does it, and every save, export and
+  restore) held every file of the paper while it read them, so that all are captured at one
+  moment. While holding them it also sent each edited file's text to the object store. So for
+  as long as the store took, nobody could edit the paper: typing was saved late, and a
+  structural edit that waited more than eight seconds was reported as failed.
+- **Now.** The text is sent to the store first, holding nothing. The cut then only has to
+  send again a file that was edited in the moment between (`putEdited` in
+  `packages/server/src/revisions.ts`).
+- **A test holds it**, with a store that does not answer until let: an edit made meanwhile
+  goes through, and the revision has that edit. With the old code the test never finishes.
+- **Still holds files while it talks to the store:** a file edited between the two steps;
+  the second half of a restore, which stores what it has just put back; and the first time a
+  file is opened for editing, which reads its upload. All short or rare, none removed.
+
 ## A paper's size, and what a sync ticket opens
 
 Two more of the security review's items.
@@ -636,6 +652,16 @@ Built after the security review, which had it as its first open item.
     window's own message if the edit is refused. If it happens again, the failure says which.
   - Found while reading the code: the window kept showing what was wrong with the last try
     while a new one was being made. It now clears that first.
+  - **Seen a second time**, in a full local run: with the longer wait, the window said the edit
+    could not be made. So the editor had an error from the server, or no answer in eight
+    seconds. Which of the two is not known. Alone, the test then passed five times of five.
+  - **A cause that would do this was found and removed** (see "Saving a revision no longer
+    holds up editing" below). **It is not shown that it was the cause of these two runs.** In
+    two later full runs with the old code, the database logged no wait for a lock of over a
+    second.
+  - If it happens again there is now more to go on. The sync server logs
+    `command on <file> took <n> ms` for a structural edit that takes over two seconds. The
+    browser says `edit not made: <why>` in its console, and the tests print it.
   - For a person this would be a refused redraw with a message, and pressing again works. It
     should still be understood.
 

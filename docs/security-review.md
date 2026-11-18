@@ -22,7 +22,7 @@ What it found is fixed in the same change, or listed under "Open" with what to d
 | Email                                                                     | Read what is sent                                                                                        | Sign-in links, invitations, mentions. A mention carries none of the comment or the text.                                   |
 | Logs and metrics                                                          | Searched for logging; read `metrics.ts`                                                                  | IDs, counts and error kinds. Tests seed a secret in a paper and hold that it is on no metrics page.                        |
 | Secrets                                                                   | Searched the tree for keys, and the history for environment files                                        | None. `.env*` is ignored; the credentials in `infra/compose.yaml` are for local use and say so.                            |
-| Dependencies                                                              | `pnpm audit --prod`                                                                                      | One advisory, see Open.                                                                                                    |
+| Dependencies                                                              | `pnpm audit --prod`, `pnpm audit`                                                                        | None in what the service runs. One in a development tool, see Open.                                                        |
 
 ## Found and fixed
 
@@ -84,9 +84,12 @@ In rough order of how much they matter.
 1. **Limits on requests in general.** Sign-in links, builds and model reviews are limited.
    Reading pages, checking grammar, drawing charts and importing archives are not, beyond
    needing to be signed in. A proxy in front should limit requests per person.
-2. **`picomatch`, one high-severity advisory with no fixed version.** It is in the tree
-   through the sign-in library's own development tooling, and is not reached with anything a
-   visitor sends. To be looked at again when a fixed version exists.
+2. **One advisory in a development tool.** `pnpm audit` on 18 November 2026 reports nothing in
+   what the service runs (`pnpm audit --prod`), and one moderate advisory overall: `minimatch`,
+   through the linter. It is not part of the running service and is given only this
+   repository's own file names. A fixed version exists (11.0.1) but the linter does not yet
+   take it. An earlier version of this review listed a high-severity advisory in `picomatch`;
+   the audit no longer reports it, and why it went was not looked into.
 3. **A PDF opened by itself is shown by the browser's own viewer from this site's address.**
    The PDFs are built here from the paper's LaTeX in the sandbox, so their content is the
    authors'. Serving them from a separate address would remove the question.

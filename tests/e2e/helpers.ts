@@ -38,6 +38,8 @@ export async function person(browser: Browser, who: string) {
   // A page that is refused something by its own content policy is broken or under attack, and
   // neither should pass quietly: thrown from here, it fails the test that was running.
   context.on('console', (said) => {
+    // Why an edit was not made is said in the console, and belongs in a failing test's output.
+    if (said.text().startsWith('edit not made:')) console.log(said.text());
     if (said.type() === 'error' && said.text().includes('Content Security Policy'))
       throw new Error(`${said.page()?.url()}: ${said.text()}`);
   });
