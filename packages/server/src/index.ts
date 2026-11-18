@@ -10,4 +10,5 @@ export * from './sync.ts';
 export * from './builds.ts';
 export * from './revisions.ts';
 export * from './textdiff.ts';
+export * from './commands.ts';
 export * from './files.ts';

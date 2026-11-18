@@ -5,6 +5,7 @@ import {
   AppError,
   appendUpdate,
   type BlobStore,
+  compactFile,
   loadUpdates,
   openFile,
   verifyTicket,
@@ -25,8 +26,10 @@ export async function startSync(opts: {
   secret: string;
   port: number;
   databaseUrl: string;
+  /** A file's log is rewritten as one entry each time it has grown by this many edits. */
+  compactEvery?: number;
 }) {
-  const { pool, store, secret } = opts;
+  const { pool, store, secret, compactEvery = 500 } = opts;
   const server = new Server<Context>({
     port: opts.port,
     quiet: true,
@@ -53,6 +56,11 @@ export async function startSync(opts: {
       // Write access was taken away since connecting. Hocuspocus now answers "not saved" and
       // does not apply the edit.
       if (seq === null) connection.readOnly = true;
+      else if (seq % compactEvery === 0)
+        // Not waited for: the edit is saved already, and this only tidies the log behind it.
+        compactFile(pool, documentName).catch((err) =>
+          console.error(`compacting ${documentName} failed:`, (err as Error).message),
+        );
     },
   });
 
@@ -69,10 +77,11 @@ export async function startSync(opts: {
       const document = server.hocuspocus.documents.get(fileId);
       if (!document) return;
       const { rows } = await pool.query(
-        'select update from file_updates where file_id = $1 and seq = $2',
+        // That entry and any after it: if the log was compacted since, the edit is in a later one.
+        'select update from file_updates where file_id = $1 and seq >= $2 order by seq',
         [fileId, seq],
       );
-      if (rows[0]) Y.applyUpdate(document, new Uint8Array(rows[0].update));
+      for (const r of rows) Y.applyUpdate(document, new Uint8Array(r.update));
       return;
     }
     const projectId = payload;

@@ -161,8 +161,8 @@ export class Bridge {
 
   /**
    * Apply a command against the text as it is now. Stands in for the server's command path.
-   * shortcut: compares the expected text itself and keeps keys in memory; the server version
-   * (plan C6) compares a SHA-256 and stores keys durably.
+   * shortcut: keeps keys in memory. The server's version (runCommand in packages/server) makes the
+   * same comparison and stores keys durably.
    */
   applyCommand(c: Command): CommandResult {
     if (this.seen.has(c.key)) return 'duplicate';

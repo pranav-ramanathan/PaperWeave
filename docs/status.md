@@ -63,6 +63,18 @@ Read this first. Update it in every pull request.
   - The first .tex file added to an empty paper becomes its root.
   - When the server stops serving a file (deleted, or access removed) it says so, and the open
     editor locks and shows why. Before this the editor went on saying "All edits saved".
+- **C6: commands and compaction.**
+  - `runCommand` (`packages/server/src/commands.ts`) replaces one stretch of a file if it still
+    reads as its author saw it. The stretch is given as Yjs relative positions, so edits elsewhere
+    do not make it stale; a change inside it does, and the answer carries the current text. The
+    check and the edit happen while the file's row is locked, so typing and other commands wait.
+  - A command carries a key chosen by the client. Sent again with the same key it is not applied
+    again. Keys are kept for a day (`file_commands`).
+  - Over HTTP: `POST /projects/<id>/files/<fileId>/commands`, 200 or 409. Nothing in the app
+    sends one yet; C7's visual editor will.
+  - `compactFile` rewrites a file's log as one entry holding the same document. The sync server
+    does it each time a file's log has grown by 500 edits. Who typed each edit is not kept past
+    a compaction.
 - **Phase B spike.** Gate report: `docs/phase-b-gate.md`. Recommendation: go.
   - `packages/latex`: lossless block parser, incremental reparse, include graph, encoding round
     trip, coverage.
@@ -72,15 +84,14 @@ Read this first. Update it in every pull request.
 
 ## Next
 
-C1 to C5 are done, which completes the first end-to-end slice: import a ZIP or start from
+C1 to C6 are done. C1 to C5 complete the first end-to-end slice: import a ZIP or start from
 nothing, edit it together, build it, and download a ZIP and a PDF that belong to the same revision.
 
 Next, in this order:
 
-1. **C6.** Commands for structural edits, built on `editFile` in `packages/server/src/sync.ts`,
-   and compaction of the edit log.
-2. **C7.** The visual editor in the app, using `packages/bridge`.
-3. **C8.** The fault suite and monitoring. It should include a restore while a client is offline:
+1. **C7.** The visual editor in the app, using `packages/bridge`. Structural edits go through
+   the command route; `Bridge.emphCommand` already builds a command of the right shape.
+2. **C8.** The fault suite and monitoring. It should include a restore while a client is offline:
    today those offline edits are merged on reconnect like any others, and the plan's
    "recover unsynced changes" step is not built.
 
@@ -122,7 +133,7 @@ See "What I need from you" in `docs/plan.md`. None blocks C1.
   browser warns first. Keeping them on the device (IndexedDB) would survive that, at the cost of
   leaving manuscript text on shared computers: an owner decision, not yet made.
 - Names shown for other people in a file come from each client and are not verified.
-- A resent edit can be stored twice. That is harmless to the text and is cleaned up by C6.
+- A resent edit can be stored twice. That is harmless to the text and goes at the next compaction.
 - Sign-in is rate-limited per client address, read from `X-Forwarded-For`. In production the app
   must sit behind a proxy that sets that header itself, or the limit can be dodged. Browser tests
   give each simulated person their own address the same way.
