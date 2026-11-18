@@ -18,6 +18,13 @@ export type Table = {
   /** Rows of cells. A cell's span is its own text, without the space around it. */
   rows: Span[][];
   /**
+   * Each row as a stretch of the source: from the end of the row (or rule) before it to the end
+   * of its own `\\`, if it has one. `indent` is the white space its line starts with.
+   */
+  lines: { at: number; end: number; terminated: boolean; indent: string }[];
+  /** The column specification, inside its braces: `lrr`, `@{}lp{2cm}@{}`. */
+  spec: Span;
+  /**
    * True if it is a plain grid. False if it has something a grid cannot show (a cell across
    * columns or rows, a table inside a table) or rows of different lengths.
    */
@@ -66,19 +73,25 @@ function tableOf(src: string, text: string): Table | null {
   if (!begin) return null;
   // The column specification, after a width for the kinds that take one.
   let at = begin.index + begin[0].length;
+  let spec = span(src, at, at);
   for (let groups = begin[1] === 'tabular' ? 1 : 2; groups > 0; groups--) {
     while (/\s/.test(text[at] ?? '')) at++;
     if (text[at] === '[') at = closeOf(text, at, '[', ']');
+    const open = at;
     at = text[at] === '{' ? closeOf(text, at) : -1;
     if (at < 0) return null;
+    spec = span(src, open + 1, at - 1);
   }
   const end = text.indexOf(`\\end{${begin[1]}}`, at);
   if (end < 0) return null;
   const body = text.slice(at, end);
   let simple = !/\\(multicolumn|multirow|begin)\b/.test(body);
   const rows: Span[][] = [];
+  const lines: Table['lines'] = [];
   let row: Span[] = [];
   let cell = at;
+  /** Where the row being read began: after the row or rule before it. */
+  let rowAt = at;
   const closeCell = (to: number) => {
     const found = trimmed(src, cell, to);
     // An empty cell's place is where its text would go: with a space left on either side of it
@@ -86,9 +99,14 @@ function tableOf(src: string, text: string): Table | null {
     if (!found.text && to - cell >= 2) found.at = found.end = to - 1;
     row.push(found);
   };
-  const closeRow = () => {
+  const closeRow = (to: number, terminated: boolean) => {
     // A last line with only rules on it, or nothing, is not a row.
-    if (row.length > 1 || row[0]?.text) rows.push(row);
+    if (row.length > 1 || row[0]?.text) {
+      rows.push(row);
+      const lead = src.slice(rowAt, row[0].at);
+      const indent = lead.includes('\n') ? lead.slice(lead.lastIndexOf('\n') + 1) : '';
+      lines.push({ at: rowAt, end: to, terminated, indent: /^\s*$/.test(indent) ? indent : '' });
+    }
     row = [];
   };
   for (let i = at; i < end; i++) {
@@ -105,7 +123,7 @@ function tableOf(src: string, text: string): Table | null {
           else break;
           if (i < 0) return null;
         }
-        cell = i;
+        cell = rowAt = i;
         i--;
         continue;
       }
@@ -117,13 +135,13 @@ function tableOf(src: string, text: string): Table | null {
       i = close - 1;
     } else if (c === '\\' && text[i + 1] === '\\') {
       closeCell(i);
-      closeRow();
       i += 2;
       // \\* and \\[2pt] are still just the end of a row.
       if (text[i] === '*') i++;
       if (text[i] === '[') i = closeOf(text, i, '[', ']');
       if (i < 0) return null;
-      cell = i;
+      closeRow(i, true);
+      cell = rowAt = i;
       i--;
     } else if (c === '\\') i++;
     else if (c === '&') {
@@ -132,9 +150,9 @@ function tableOf(src: string, text: string): Table | null {
     }
   }
   closeCell(end);
-  closeRow();
+  closeRow(row.at(-1)!.end, false);
   if (rows.some((r) => r.length !== rows[0].length)) simple = false;
-  return { rows, simple };
+  return { rows, lines, spec, simple };
 }
 
 /**
@@ -217,4 +235,77 @@ export function cellText(text: string): boolean {
     else if (c === '&' && depth === 0) return false;
   }
   return depth === 0;
+}
+
+export type TableOp =
+  | { kind: 'row-after' | 'row-delete'; row: number }
+  | { kind: 'column-after' | 'column-delete'; column: number };
+
+/** The column-making letters of a specification, in order, or null if it is not that simple. */
+function columnsOf(spec: Span): { at: number; end: number }[] | null {
+  const out: { at: number; end: number }[] = [];
+  const t = spec.text;
+  for (let i = 0; i < t.length;) {
+    const c = t[i];
+    if (/\s|\|/.test(c)) i++;
+    else if ('@!><'.includes(c)) {
+      // A decoration with one argument: not a column.
+      const close = t[i + 1] === '{' ? closeOf(t, i + 1) : -1;
+      if (close < 0) return null;
+      i = close;
+    } else if ('lcrX'.includes(c)) {
+      out.push({ at: spec.at + i, end: spec.at + i + 1 });
+      i++;
+    } else if ('pmb'.includes(c)) {
+      const close = t[i + 1] === '{' ? closeOf(t, i + 1) : -1;
+      if (close < 0) return null;
+      out.push({ at: spec.at + i, end: spec.at + close });
+      i = close;
+    } else return null;
+  }
+  return out;
+}
+
+/**
+ * The edit that adds or removes a row or a column of a simple table, or null if it cannot be
+ * done here: the table would be left with nothing, or its column specification is of a kind
+ * this does not take apart. The edit covers the stretch from the first change to the last.
+ */
+export function tableEdit(src: string, table: Table, op: TableOp): Edit | null {
+  if (!table.simple || !table.rows.length) return null;
+  const width = table.rows[0].length;
+  if ('row' in op) {
+    const line = table.lines[op.row];
+    if (!line) return null;
+    if (op.kind === 'row-delete')
+      return table.rows.length < 2 ? null : { at: line.at, length: line.end - line.at, insert: '' };
+    const indent = line.indent || table.lines.find((l) => l.indent)?.indent || '    ';
+    const cells = Array.from({ length: width }, () => '').join(' & ');
+    // A last row with no \\ of its own is given one before the new row follows it.
+    const insert = line.terminated ? `\n${indent}${cells} \\\\` : ` \\\\\n${indent}${cells}`;
+    return { at: line.end, length: 0, insert };
+  }
+  const columns = columnsOf(table.spec);
+  const j = op.column;
+  if (!columns || columns.length !== width || j < 0 || j >= width) return null;
+  const splices: Edit[] = [];
+  if (op.kind === 'column-after') {
+    splices.push({ at: columns[j].end, length: 0, insert: 'l' });
+    for (const row of table.rows) splices.push({ at: row[j].end, length: 0, insert: ' & ' });
+  } else {
+    if (width < 2) return null;
+    splices.push({ at: columns[j].at, length: columns[j].end - columns[j].at, insert: '' });
+    for (const row of table.rows) {
+      // With the separator that goes with it: the one before, or for the first column the one after.
+      const [from, to] = j ? [row[j - 1].end, row[j].end] : [row[0].at, row[1].at];
+      splices.push({ at: from, length: to - from, insert: '' });
+    }
+  }
+  splices.sort((a, b) => a.at - b.at);
+  const at = splices[0].at;
+  const end = Math.max(...splices.map((e) => e.at + e.length));
+  let insert = src.slice(at, end);
+  for (const e of [...splices].reverse())
+    insert = insert.slice(0, e.at - at) + e.insert + insert.slice(e.at - at + e.length);
+  return { at, length: end - at, insert };
 }

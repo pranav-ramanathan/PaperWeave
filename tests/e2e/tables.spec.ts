@@ -41,7 +41,8 @@ test('a table cell and a caption are edited in place, byte for byte', async ({ b
 
   // The table is a grid, with its caption above it.
   const table = page.locator(VISUAL).getByRole('group', { name: 'Table' });
-  await expect(table.getByRole('row')).toHaveCount(4);
+  // Four rows of the table, and one of buttons under its columns.
+  await expect(table.getByRole('row')).toHaveCount(5);
   await expect(table.getByRole('columnheader')).toHaveText([
     'Template',
     'Edits',
@@ -59,6 +60,8 @@ test('a table cell and a caption are edited in place, byte for byte', async ({ b
   await page.keyboard.press('Enter');
   await expect(cell(2, 2)).toHaveText('4500');
   await expect(source(other)).toContainText('article & 4500 & 0');
+  // Nothing to report: it went through.
+  await expect(note(page)).toHaveText('');
   // LaTeX in a cell is kept as LaTeX and shown as it reads.
   await cell(3, 3).click();
   await field(3, 3).fill('0\\%');
@@ -87,6 +90,26 @@ test('a table cell and a caption are edited in place, byte for byte', async ({ b
   );
   await expect(cell(4, 1)).toHaveText('amsproc');
   await expect(source(other)).not.toContainText('amsbook');
+
+  // Rows and columns. A new row below the last, with its first cell filled in.
+  await table.getByRole('button', { name: 'Add a row below row 4' }).click();
+  await expect(table.getByRole('row')).toHaveCount(6);
+  await cell(5, 1).click();
+  await field(5, 1).fill('beamer');
+  await page.keyboard.press('Enter');
+  await expect(source(other)).toContainText('beamer & & \\\\');
+  // A column added and taken away again leaves the table as it was.
+  await table.getByRole('button', { name: 'Add a column after column 3' }).click();
+  await expect(table.getByRole('columnheader')).toHaveCount(4);
+  await expect(source(other)).toContainText('\\begin{tabular}{@{}lrrl@{}}');
+  await table.getByRole('button', { name: 'Delete column 4' }).click();
+  await expect(table.getByRole('columnheader')).toHaveCount(3);
+  await expect(source(other)).toContainText('\\begin{tabular}{@{}lrr@{}}');
+  // A row taken away goes with its line, and the rule above it stays.
+  await table.getByRole('button', { name: 'Delete row 2' }).click();
+  await expect(table.getByRole('row')).toHaveCount(5);
+  await expect(source(other)).not.toContainText('article');
+  await expect(cell(2, 1)).toHaveText('IEEEtran');
 
   // The caption is edited the same way.
   await table.getByRole('button', { name: /^Caption:/ }).click();
@@ -120,9 +143,12 @@ test('a table cell and a caption are edited in place, byte for byte', async ({ b
   const original = (path: string) => files.find((f) => f.path === path)!.bytes.toString();
   expect(text('tables/ablation.tex')).toBe(
     original('tables/ablation.tex')
-      .replace('4000', '4500')
+      .replace('    article & 4000 & 0 \\\\\n', '')
       .replace('IEEEtran & 3000 & 0 ', 'IEEEtran & 3000 & 0\\% ')
-      .replace('amsart', 'amsproc')
+      .replace(
+        '    amsart & 3000 & 0 \\\\\n',
+        '    amsproc & 3000 & 0 \\\\\n    beamer &  &  \\\\\n',
+      )
       .replace('Edits checked per template', 'Edits checked, by template'),
   );
   expect(text('sections/results.tex')).toBe(

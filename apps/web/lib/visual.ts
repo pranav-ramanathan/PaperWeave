@@ -8,7 +8,14 @@ import {
   fromSrc,
   toSrc,
 } from '@paperweave/bridge';
-import { altEdit, cellText, floatParts, type Span } from '@paperweave/latex';
+import {
+  altEdit,
+  cellText,
+  floatParts,
+  type Span,
+  tableEdit,
+  type TableOp,
+} from '@paperweave/latex';
 import { Editor, Extension, type Node } from '@tiptap/core';
 import type { Node as PMNode } from '@tiptap/pm/model';
 import { Plugin } from '@tiptap/pm/state';
@@ -303,6 +310,9 @@ export function createVisual(opts: {
         const c = bridge.atomCommand(editor.state, pos, change.insert, change);
         if (!c) return say('That has moved. Edit it in the source.');
         over = true;
+        // From here the field is no longer something being typed in: when the figure or table
+        // is drawn again because this very edit went through, there is nothing to warn about.
+        opened(null);
         try {
           const result = await opts.run(c);
           if (result === 'conflict')
@@ -350,6 +360,37 @@ export function createVisual(opts: {
             part(getPos, float.caption, 'Caption', undefined, opened),
           ]
         : [];
+      /**
+       * A button that adds or removes a row or a column, or nothing if that cannot be done to
+       * this table. The change is made by the server, to the table as it is now.
+       */
+      const reshape = (op: TableOp, sign: string, name: string) => {
+        const e = opts.editable && grid ? tableEdit(node.attrs.src, grid, op) : null;
+        if (!e) return [];
+        const button = el('button', 'pw-op', sign);
+        button.type = 'button';
+        button.setAttribute('aria-label', name);
+        button.title = name;
+        button.onclick = async () => {
+          const pos = getPos() ?? 0;
+          const c = bridge.atomCommand(editor.state, pos, e.insert, {
+            at: e.at,
+            end: e.at + e.length,
+          });
+          if (!c) return say('That has moved. Edit it in the source.');
+          try {
+            if ((await opts.run(c)) === 'conflict')
+              say(
+                'Someone changed this table while you were changing it. Look again, then try again.',
+              );
+          } catch {
+            say('That edit could not be made. Check the connection and try again.');
+          }
+          editor.commands.setNodeSelection(Math.min(pos, editor.state.doc.content.size - 1));
+          editor.view.focus();
+        };
+        return [button];
+      };
       if (grid) {
         const table = el('table', '');
         if (caption.length) {
@@ -377,9 +418,34 @@ export function createVisual(opts: {
             );
             tr.append(td);
           });
+          const ops = el('td', 'pw-ops');
+          ops.append(
+            ...reshape({ kind: 'row-after', row: i }, '+', `Add a row below row ${i + 1}`),
+            ...reshape({ kind: 'row-delete', row: i }, '−', `Delete row ${i + 1}`),
+          );
+          if (ops.childElementCount) tr.append(ops);
           body.append(tr);
         });
         table.append(body);
+        // Under each column, the buttons that add a column after it or take it away.
+        const foot = el('tr', '');
+        grid.rows[0].forEach((_, j) => {
+          const ops = el('td', 'pw-ops');
+          ops.append(
+            ...reshape(
+              { kind: 'column-after', column: j },
+              '+',
+              `Add a column after column ${j + 1}`,
+            ),
+            ...reshape({ kind: 'column-delete', column: j }, '−', `Delete column ${j + 1}`),
+          );
+          foot.append(ops);
+        });
+        if (foot.querySelector('button')) {
+          const tfoot = el('tfoot', '');
+          tfoot.append(foot);
+          table.append(tfoot);
+        }
         dom.append(table);
       } else {
         for (const g of float.graphics) {

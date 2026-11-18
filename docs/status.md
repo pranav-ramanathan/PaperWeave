@@ -237,6 +237,16 @@ Read this first. Update it in every pull request.
     have no file and line and were dropped before.
   - The editor reads the selection in the text before acting even when a toolbar button has
     the keyboard.
+- **D3, third part: table rows and columns.** Beside each row of a table in the visual view
+  are buttons to add a row below it or delete it; under each column, to add a column after it
+  or delete it (`tableEdit` in `packages/latex/src/floats.ts`). With this D3 is done.
+  - A new row is empty and indented like its neighbours; rules such as `\midrule` stay where
+    they are. A new column adds a cell to every row and an `l` to the column specification.
+  - Adding and then removing restores every byte. A unit test checks that for rows and columns.
+  - Columns cannot be changed when the specification is of a kind this does not take apart
+    (`*{3}{c}`); the buttons are then not offered. A table is never left with no row or column.
+  - A column change rewrites the stretch from the specification to the last row, so it
+    conflicts with a cell someone else is changing at that moment. A row change does not.
 - **Phase B spike.** Gate report: `docs/phase-b-gate.md`. Recommendation: go.
   - `packages/latex`: lossless block parser, incremental reparse, include graph, encoding round
     trip, coverage.
@@ -251,8 +261,10 @@ nothing, edit it together, build it, and download a ZIP and a PDF that belong to
 
 Next, in this order:
 
-1. **D3, the rest.** Adding and removing table rows and columns.
-2. **D4** onward, as in the plan.
+1. **D4.** Data and charts: CSV with an approved schema and missing-value rules, Vega-Lite
+   scatter, line and bar charts rendered to PDF and PNG, staleness tracking, opt-in dataset
+   export.
+2. **D5** onward, as in the plan.
 
 The Phase A replays are waiting on a person with accounts: `docs/rea/matrix.md`. The Prism one is
 optional: its export was researched from public sources (`docs/rea/prism.md`) and is a plain LaTeX
