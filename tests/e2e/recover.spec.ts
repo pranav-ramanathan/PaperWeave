@@ -213,3 +213,31 @@ test('a file takes no typing until it has arrived', async ({ browser }) => {
   await expect(status(page)).toHaveText('All edits saved.');
   await expect(source(page)).toContainText('% typed in time');
 });
+
+test('a file is opened over one connection, which is kept', async ({ browser }) => {
+  const { page, email } = await person(browser, 'rec-once');
+  const zip = join(mkdtempSync(join(tmpdir(), 'paperweave-e2e-')), `Once ${run}.zip`);
+  writeFileSync(zip, await writeZip([{ path: 'main.tex', bytes: Buffer.from(MAIN) }]));
+  await page.goto('/sign-in');
+  await signIn(page, email);
+  await page.getByLabel('Or import a ZIP of a LaTeX project').setInputFiles(zip);
+  await page.getByRole('button', { name: 'Import ZIP' }).click();
+
+  // Every connection the page makes from here on, and whether it has closed.
+  const connections: { closed: boolean }[] = [];
+  page.on('websocket', (socket) => {
+    const made = { closed: false };
+    connections.push(made);
+    socket.on('close', () => void (made.closed = true));
+  });
+  await page.getByRole('link', { name: 'main.tex' }).first().click();
+  await showSource(page);
+  await expect(status(page)).toHaveText('All edits saved.');
+  // The editor once dropped its first connection a second after making it and made another:
+  // what the server answered in that moment was lost. Typed across that second, an edit's
+  // "saved" could fail to arrive.
+  await typeAtStart(page, '% typed in the first second\n');
+  await page.waitForTimeout(2000);
+  expect(connections).toEqual([{ closed: false }]);
+  await expect(status(page)).toHaveText('All edits saved.');
+});

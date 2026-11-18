@@ -4,7 +4,7 @@ import { defaultKeymap } from '@codemirror/commands';
 import { Compartment, EditorState, StateEffect, StateField } from '@codemirror/state';
 import { Decoration, type DecorationSet, EditorView, keymap, lineNumbers } from '@codemirror/view';
 import { HocuspocusProvider } from '@hocuspocus/provider';
-import { type Command, type CommandResult, localChanges } from '@paperweave/bridge';
+import { type Command, type CommandResult, watchSaved } from '@paperweave/bridge';
 import { useRouter } from 'next/navigation';
 import { useEffect, useRef, useState } from 'react';
 import { flushSync } from 'react-dom';
@@ -239,7 +239,7 @@ export default function FileEditor(props: {
         const { ticket, restored } = answer;
         // Coming back online to a paper that was restored meanwhile: this person's unsent edits
         // were made to text that is no longer there. They are held until the person decides.
-        if (restoreSeen !== null && restored !== restoreSeen && unsaved) {
+        if (restoreSeen !== null && restored !== restoreSeen && saving.unsaved) {
           restoreHeld = restored;
           update({ held: true });
           setLocked(true);
@@ -248,14 +248,6 @@ export default function FileEditor(props: {
         }
         restoreSeen = restored;
         return ticket ?? '';
-      },
-      onStatus: ({ status }) => {
-        update({ connected: status === 'connected' });
-        // The library ignores a request to connect made while a disconnect is still closing,
-        // and then stays down. So whenever the connection has closed and this tab should be
-        // connected, and the library is not going to try by itself, ask again.
-        const socket = provider.configuration.websocketProvider;
-        if (status === 'disconnected' && wantOpen && !socket.shouldConnect) void socket.connect();
       },
       onSynced: () => {
         update({ loaded: true });
@@ -267,7 +259,7 @@ export default function FileEditor(props: {
         if (!arrived) setLocked(false);
         arrived = true;
         // Back in touch: find out whether what was typed meanwhile has arrived.
-        if (unsaved) askSoon(50);
+        saving.reconnected();
       },
       onAuthenticationFailed: () => {
         if (restoreHeld !== null || oversized) return;
@@ -280,7 +272,7 @@ export default function FileEditor(props: {
       },
       onStateless: ({ payload }) => {
         const reply: (Reply & { key: string }) | Saved = JSON.parse(payload);
-        if ('saved' in reply) return answered(reply);
+        if ('saved' in reply) return saving.answered(reply);
         waiting.get(reply.key)?.(reply);
       },
       // The server closes a file it will no longer serve: access was taken away, or it was deleted.
@@ -294,34 +286,28 @@ export default function FileEditor(props: {
         setLocked(true);
       },
     });
+    // Listened for once the provider exists, not handed to it as it is made. The library says
+    // "connecting" while it is still being made; this handler then reached for a provider that
+    // was not there yet and failed, and the library took that for a failed attempt to connect.
+    // A second later it dropped the connection, which was working, and made another. Whatever
+    // the server answered in that moment went nowhere.
+    provider.on('status', ({ status }: { status: string }) => {
+      update({ connected: status === 'connected' });
+      // The library ignores a request to connect made while a disconnect is still closing,
+      // and then stays down. So whenever the connection has closed and this tab should be
+      // connected, and the library is not going to try by itself, ask again.
+      const socket = provider.configuration.websocketProvider;
+      if (status === 'disconnected' && wantOpen && !socket.shouldConnect) void socket.connect();
+    });
     let arrived = false;
     // Whether this person's changes are saved is asked of the server, not inferred: "do you hold
     // every insert and delete I have made?". The sync library's own count of confirmations
     // reaches zero too early after a reconnect.
-    let unsaved = false;
-    let asking: ReturnType<typeof setTimeout> | undefined;
-    let retry = 500;
-    const askSoon = (ms: number) => {
-      clearTimeout(asking);
-      asking = setTimeout(() => {
-        if (provider.synced) provider.sendStateless(JSON.stringify(changes.question()));
-      }, ms);
-    };
-    const changes = localChanges(doc, () => {
-      unsaved = true;
-      retry = 500;
-      update({ unsaved: true });
-      // Asked once typing pauses, not after every key.
-      askSoon(300);
+    const saving = watchSaved(doc, {
+      send: (question) => provider.sendStateless(question),
+      ready: () => provider.synced,
+      say: (unsaved) => update({ unsaved }),
     });
-    const answered = (reply: Saved) => {
-      if (reply.saved && changes.confirmed(reply.n)) {
-        unsaved = false;
-        return update({ unsaved: false });
-      }
-      // Not there yet (or more was typed since): ask again, less and less often.
-      if (!reply.saved) askSoon((retry = Math.min(retry * 2, 8000)));
-    };
     /** The paper's newest restore when this tab last connected, and one found since, if held. */
     let restoreSeen: number | null = null;
     let restoreHeld: number | null = null;
@@ -538,7 +524,7 @@ export default function FileEditor(props: {
     // Closing the tab with edits the server has not confirmed would lose them.
     let discarding = false;
     const warn = (e: BeforeUnloadEvent) => {
-      if (unsaved && !discarding) e.preventDefault();
+      if (saving.unsaved && !discarding) e.preventDefault();
     };
     window.addEventListener('beforeunload', warn);
     // An open socket can sit silent for a long time after the network goes. When the browser
@@ -561,10 +547,9 @@ export default function FileEditor(props: {
       window.removeEventListener('offline', offline);
       window.removeEventListener('online', online);
       window.removeEventListener('beforeunload', warn);
-      clearTimeout(asking);
       // A stretch still waiting to be marked has no view to be marked in.
       markThreads.current = () => {};
-      changes.destroy();
+      saving.destroy();
       visual?.destroy();
       view.destroy();
       undo.destroy();

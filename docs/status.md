@@ -667,74 +667,79 @@ Built after the security review, which had it as its first open item.
   policy in `next.config.ts`. `docs/security-review.md` says why.
 - In development the policy also allows `eval`, which React uses there to show server errors.
 
-## Browser tests that fail once in a while
+## Browser tests that failed once in a while
 
-Four browser tests have failed once or twice in a full run and passed when run again. One is
-explained and fixed. Three are not.
+Four browser tests failed once or twice in a full run and passed when run again. Two faults
+in the editor were behind them. Both are fixed, and each has a test that fails without its fix.
 
-### Explained: `charts.spec`
+### An editor dropped its first connection a second after making it
 
-- **What happened.** The test opened the data file and typed a row at once. The editor was
-  still empty, because the file had not arrived, so the caret was at the top. The row landed
-  above the heading row and became the heading row. No column was a number any more, and the
-  chart could not be redrawn: "Choose a column of the data file for the vertical axis".
-- **Seen in the test's own output**, the third time it failed: the columns read
-  "2024-03-05 (text), 44 (text), Field (text)".
-- **The test was wrong, and so was the editor.** A person on a slow connection could do the
-  same. The editors now take no typing until the file has arrived; a browser test holds the
+- **What happened, on every file opened.** The editor connected, loaded the file, and one
+  second later dropped that connection and made another. Whatever the server answered in
+  that moment went to the connection that was gone.
+- **Why.** The sync library says "connecting" while it is still being set up. The editor's
+  handler for that reached for the library's own object, which did not exist yet, and failed.
+  The library took the failure for a failed attempt to connect, and a second later tried
+  again, replacing the connection that was working.
+- **Now.** The handler is added once the object exists (`FileEditor.tsx`). A browser test
+  opens a file, types across the first second, and checks there was one connection and it is
+  still open. It fails with the old code.
+- **What it explains, and how surely.** Three of the failures were a step that needs an
+  answer from the sync server, made about a second after an editor opened:
+  - `figures.spec` (twice, once in CI): a figure was inserted and the window said the edit
+    could not be made. The editor waits eight seconds for the answer to a structural edit.
+  - `revisions.spec` and `editing.spec` (once each): the editor said "Saving your edits…"
+    for five seconds, though in one case the text was already on another person's screen.
+  - **Shown:** the drop happened on every open, and is gone. **Not shown:** that it was what
+    failed those runs. They were never reproduced on demand. If they stop, that is the evidence.
+- **For a person** it was a structural edit that now and then said it failed in the first
+  second after opening a file (and may have been made all the same), or a "Saving…" that
+  stayed until the next keystroke.
+
+Changed on the way, and worth keeping:
+
+- The editor asked the server once whether it had the latest edits, and asked again only if
+  told no. It now keeps asking, less and less often, until the answer is yes (`watchSaved` in
+  `packages/bridge/src/saved.ts`, unit-tested on a fake clock). A lost answer costs a second.
+- The sync server logs `the sync server did not run for <n> ms` when kept from running for
+  over a second, and `command on <file> took <n> ms` for a structural edit over two.
+- The browser says `edit not made: <why>` in its console, and the tests print it.
+
+### An editor took typing before its file had arrived
+
+- **What happened.** `charts.spec` opened the data file and typed a row at once. The editor
+  was still empty, so the caret was at the top: the row landed above the heading row and
+  became the heading row. No column was a number any more, and the chart could not be drawn.
+- **Seen in the test's own output:** the columns read "2024-03-05 (text), 44 (text), Field
+  (text)".
+- **Now.** Both editors take no typing until the file has arrived. A browser test holds the
   connection back and checks that nothing typed early gets in. `charts.spec` and `data.spec`
   wait for the file before they type.
 
-### Not explained: `figures.spec`, `revisions.spec`, `editing.spec`
+### Looked at and ruled out
 
-Each was a step that took longer than the test allowed, five to eight seconds for something
-that takes a moment:
+- The machine running short: 11 GB of 16 free, load under 2 on 4 cores; little CPU taken by
+  the host and no I/O stall of note in a sampled run.
+- The database: no lock wait of over a second and no slow statement in the runs that failed
+  after logging was turned on.
+- The object store and the grammar server: answered in milliseconds straight after the
+  service tests.
+- Pages left open by earlier tests. They were left open, about a dozen extra connections by
+  the fourteenth test, and are now closed when the next test starts. A test failed after that
+  change, so it was not the cause.
+- Saving a revision holding every file while it talked to the object store (below). Real, and
+  removed. The database logged no wait in the later failing runs; the earlier ones were
+  before the logging.
 
-- `figures.spec`, twice (once in CI on PR 37, once locally): after "Insert" in the figure
-  window, the edit was not made. The second time the window said so. Whether the server
-  answered with an error or did not answer in eight seconds is not known.
-- `revisions.spec`, once: a status did not read as expected within five seconds. Which one is
-  not known, because the output was not kept. Probably "All edits saved." on opening the editor.
-- `editing.spec`, once: the owner's editor said "Saving your edits…" for five seconds, though
-  what the owner had typed was already on the other person's screen. So the server had the
-  edit, and the editor's question "do you have it?" went unanswered or was answered no.
+### For next time
 
-What is known about them:
-
-- **None happened in a run of the test alone,** and none in eleven runs of the browser tests
-  alone. The four local failures of this kind were in three runs, each started straight after
-  the service tests, which is also what CI does. But two more runs in that order passed, so
-  it is a lean, not a rule. (Whether the two earlier `charts.spec` failures were in that order
-  was not noted.)
-- **Not the machine running short.** 11 GB of 16 free, load under 2 on 4 cores. In a sampled
-  run, at most a tenth of the CPU was taken by the host and I/O stalls were under 70 ms in any
-  two seconds. That run passed, so it says what is normal, not what a bad moment looks like.
-- **Not the database, where that could be checked.** Lock waits of over a second and
-  statements of over two seconds were being logged locally when `revisions.spec` and
-  `editing.spec` failed. Neither run logged one.
-- **Not the object store or the grammar server, as far as was measured.** Straight after the
-  service tests, for two and a half minutes, a write to the store never took over 60 ms and
-  a read from the database never over 27. The grammar server logged no slow request.
-- **Not the pages left open.** A test's windows used to stay open, connected and asking for
-  things, for the rest of the run: about a dozen extra connections to the sync server by the
-  fourteenth test. They are now closed when the next test starts. `editing.spec` failed after
-  that change, so it was not the cause, or not the only one.
-- **Removed on the way, without being shown to be the cause:** saving a revision held every
-  file while it talked to the object store (below).
-
-What will say more next time:
-
-- The sync server logs `the sync server did not run for <n> ms` when it is kept from running
-  for over a second, and `command on <file> took <n> ms` for a structural edit over two.
-- The browser says `edit not made: <why>` in its console, and the tests print it.
-- **Keep the whole output of a full run.** One failure was lost to a filter that kept only
-  the line saying it had failed.
-- Locally, the database logs lock waits and statements over 150 ms
-  (`alter system set log_lock_waits`, `log_min_duration_statement`). That is a setting of the
-  local container, not of the repository.
-
-For a person, each of these would be a moment's wait or a message and a second try. They
-should still be understood.
+- **Keep the whole output of a full run.** One failure was lost to a filter that kept only the
+  line saying it had failed. The explanation came from the first failure whose output was kept.
+- Failures only in full runs, never alone, were a matter of timing: a step landing in one
+  particular instant. More runs of the test alone would not have found it; tracing what the
+  page did on the wire did.
+- Locally, the database logs lock waits and statements over 150 ms. That is a setting of the
+  local container (`alter system`), not of the repository.
 
 ## Decisions waiting on the owner
 
