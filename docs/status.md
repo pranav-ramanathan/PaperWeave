@@ -701,6 +701,10 @@ Changed on the way, and worth keeping:
 - The editor asked the server once whether it had the latest edits, and asked again only if
   told no. It now keeps asking, less and less often, until the answer is yes (`watchSaved` in
   `packages/bridge/src/saved.ts`, unit-tested on a fake clock). A lost answer costs a second.
+- A structural edit whose answer has not come in three seconds is asked for once more, under
+  the same key. The server makes the edit if it has not and says so if it has, never twice.
+  Before, a lost answer was reported as a failed edit though the edit might have been made,
+  and trying again could make it a second time. A browser test loses the answer on purpose.
 - The sync server logs `the sync server did not run for <n> ms` when kept from running for
   over a second, and `command on <file> took <n> ms` for a structural edit over two.
 - The browser says `edit not made: <why>` in its console, and the tests print it.
