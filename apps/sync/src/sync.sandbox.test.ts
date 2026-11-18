@@ -153,13 +153,18 @@ test('someone not on the paper, or with a bad ticket, cannot connect', async () 
   expect(stranger.text.toString()).toBe('');
 
   const forged = client(users.owner, file, sync.port, () =>
-    syncTicket('not-the-secret-not-the-secret-00', users.owner.id),
+    syncTicket('not-the-secret-not-the-secret-00', users.owner.id, file),
   );
   const expired = client(users.owner, file, sync.port, () =>
-    syncTicket(SECRET, users.owner.id, -5),
+    syncTicket(SECRET, users.owner.id, file, -5),
   );
   const garbage = client(users.owner, file, sync.port, () => 'not.a.ticket');
-  for (const c of [forged, expired, garbage]) {
+  // A good ticket, for another file that is theirs too: it opens only the file it names.
+  const other = (await paper()).file;
+  const elsewhere = client(users.owner, file, sync.port, () =>
+    syncTicket(SECRET, users.owner.id, other),
+  );
+  for (const c of [forged, expired, garbage, elsewhere]) {
     await until('the bad ticket to be refused', () => c.state.refused);
     expect(c.text.toString()).toBe('');
   }

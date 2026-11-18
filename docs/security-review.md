@@ -65,8 +65,15 @@ What it found is fixed in the same change, or listed under "Open" with what to d
     edit. That is the size of the largest file that can be imported.
   - The editor is told why, stops, says so, and offers to discard the unsaved edits. It does
     not connect again to send the edit again. A service test and a browser test hold all of it.
-  - What this does not limit: how many files a paper has, or how often someone edits. See
-    "Limits on requests in general" below.
+  - What this does not limit: how often someone edits. See "Limits on requests in general"
+    below.
+- **A paper's files had no limit on what they added up to.** A paper could be given 2,000
+  files of 50 MB each, one upload at a time. Added files are now held to the limit an imported
+  paper already had: 300 MB in all. (An earlier version of this review said there was no limit
+  on the number of files either. There was: 2,000.)
+- **A sync ticket named a person, not a file.** It now names the file too, and the sync server
+  refuses it for any other. It granted nothing the person did not have, since their role on
+  the file was and is checked when it is used; this is tidiness.
 - **A lost connection could lock the editor as if access had been refused.** Not a hole, but
   it was found the same way: see "A failed ticket fetch is not a refusal" in `docs/status.md`.
 
@@ -77,21 +84,16 @@ In rough order of how much they matter.
 1. **Limits on requests in general.** Sign-in links, builds and model reviews are limited.
    Reading pages, checking grammar, drawing charts and importing archives are not, beyond
    needing to be signed in. A proxy in front should limit requests per person.
-   Nor is there a limit on how many files a paper holds or how much they add up to, beyond
-   50 MB a file.
 2. **`picomatch`, one high-severity advisory with no fixed version.** It is in the tree
    through the sign-in library's own development tooling, and is not reached with anything a
    visitor sends. To be looked at again when a fixed version exists.
 3. **A PDF opened by itself is shown by the browser's own viewer from this site's address.**
    The PDFs are built here from the paper's LaTeX in the sandbox, so their content is the
    authors'. Serving them from a separate address would remove the question.
-4. **The sync ticket names a person, not a file.** It lives for a minute and the sync server
-   checks the person's role on the file when it is used, so it grants nothing the person does
-   not have. Binding it to the file would be tidier.
-5. **Model reviews read text an author did not write.** A passage can contain text meant to
+4. **Model reviews read text an author did not write.** A passage can contain text meant to
    steer the model. What the model returns can only become a proposed change that quotes the
    passage exactly, or a question, and a person decides on each; it cannot act. Reviewers
    should still read a review's proposals as carefully as anyone else's.
-6. **What only a deployment can settle:** TLS and HSTS, the production sandbox (the tests use
+5. **What only a deployment can settle:** TLS and HSTS, the production sandbox (the tests use
    Docker on one machine), where the object store and its backups live, retention at the
    model provider, and who can read the metrics page. These wait on the hosting decision.

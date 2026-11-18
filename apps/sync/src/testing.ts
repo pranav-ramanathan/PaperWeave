@@ -13,7 +13,7 @@ export function connect(
   file: string,
   port: number,
   // A fresh ticket for every connection attempt, as the web app mints them.
-  token = () => syncTicket(secret, user.id),
+  token = () => syncTicket(secret, user.id, file),
 ) {
   const doc = new Y.Doc();
   /** Answers from the server, each with the text this client held when it arrived. */

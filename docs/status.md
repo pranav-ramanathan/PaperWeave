@@ -584,6 +584,16 @@ Built after the security review, which had it as its second open item.
 - **Not limited:** how many files a paper holds, and how often someone edits. A member can
   still grow the log by adding and deleting. Those are the review's "limits in general".
 
+## A paper's size, and what a sync ticket opens
+
+Two more of the security review's items.
+
+- **A paper's added files** are held to what an imported paper already was: 2,000 files and
+  300 MB in all (`LIMITS` in `packages/server/src/archive.ts`). The count was already checked
+  when a file was added; the total was not. Sizes are those of files as they were added.
+- **A sync ticket names its file.** `/api/sync-ticket` must be asked with `?file=`, and the
+  sync server refuses the ticket for any other file.
+
 ## Which scripts may run on a page
 
 Built after the security review, which had it as its first open item.

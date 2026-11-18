@@ -51,7 +51,7 @@ export async function startSync(opts: {
 
     async onAuthenticate({ token, documentName, connectionConfig }) {
       try {
-        const userId = verifyTicket(secret, token);
+        const userId = verifyTicket(secret, token, documentName);
         if (!userId) throw new Error('unauthorized');
         // Throws for anyone who is not on the paper: the connection is refused.
         const file = await openFile(pool, userId, documentName);
