@@ -46,6 +46,8 @@ test('sign in, create a paper, invite people, and keep outsiders out', async ({ 
   await outsider.page.goto('/sign-in');
   await signIn(outsider.page, outsider.email);
   expect((await outsider.page.goto(paper))?.status()).toBe(404);
+  // In the app's own words, and no different from an address that leads nowhere.
+  await expect(outsider.page.getByRole('heading', { name: 'Nothing here' })).toBeVisible();
   await outsider.page.goto(invitation);
   await expect(outsider.page.getByRole('heading', { name: 'not valid any more' })).toBeVisible();
 
@@ -108,6 +110,8 @@ test('every answer says how it may be used: not in a frame, not guessed at, not 
   expect(page).toContain("default-src 'self'");
   expect(page).toContain("object-src 'none'");
   expect(page).not.toContain('unsafe-eval');
+  // Style sheets are held to the same number.
+  expect(page).toContain(`style-src-elem 'self' 'nonce-${number}'`);
   // A new number each time, and the page's own scripts carry it: they are the ones that run.
   const answer = await request.get('/sign-in');
   const sent = /'nonce-([^']+)'/.exec(answer.headers()['content-security-policy'])![1];

@@ -60,3 +60,54 @@ test('a warning is placed in the file TeX was reading when it wrote it', () => {
     [undefined, undefined, 'There'],
   ]);
 });
+
+test('a warning that runs over several lines is one warning, with the line it ends on', () => {
+  // As a real log writes them, from a build of a section heading with maths in it and an
+  // over-large font.
+  const log = [
+    '(./main.tex',
+    '(./sections/one.tex',
+    'Package hyperref Warning: Token not allowed in a PDF string (Unicode):',
+    "(hyperref)                removing `math shift' on input line 1.",
+    '',
+    'Package hyperref Warning: Token not allowed in a PDF string (Unicode):',
+    "(hyperref)                removing `math shift' on input line 1.",
+    '',
+    "LaTeX Font Warning: Font shape `OT1/cmr/m/n' in size <100> not available",
+    '(Font)              size <24.88> substituted on input line 4.',
+    '',
+    "LaTeX Warning: Reference `nowhere' on page 1 undefined on input line 9.",
+    '',
+    ') [1',
+    ']',
+    'LaTeX Font Warning: Size substitutions with differences',
+    '(Font)              up to 75.12pt have occurred.',
+    '',
+    ')',
+  ].join('\n');
+  expect(diagnostics(log)).toEqual([
+    {
+      severity: 'warning',
+      message: "Token not allowed in a PDF string (Unicode): removing `math shift'",
+      file: 'sections/one.tex',
+      line: 1,
+    },
+    {
+      severity: 'warning',
+      message: "Font shape `OT1/cmr/m/n' in size <100> not available size <24.88> substituted",
+      file: 'sections/one.tex',
+      line: 4,
+    },
+    {
+      severity: 'warning',
+      message: "Reference `nowhere' on page 1 undefined",
+      file: 'sections/one.tex',
+      line: 9,
+    },
+    {
+      severity: 'warning',
+      message: 'Size substitutions with differences up to 75.12pt have occurred',
+      line: undefined,
+    },
+  ]);
+});

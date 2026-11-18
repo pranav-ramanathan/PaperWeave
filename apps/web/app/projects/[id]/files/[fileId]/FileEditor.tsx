@@ -11,6 +11,7 @@ import { flushSync } from 'react-dom';
 import { yCollab, yUndoManagerKeymap } from 'y-codemirror.next';
 import * as Y from 'yjs';
 import { setBibliography } from '../../../../../lib/bibliography';
+import { pageNonce } from '../../../../../lib/nonce';
 import { onShow, showInPdf } from '../../../../../lib/pdfsync';
 import { createVisual, type Visual } from '../../../../../lib/visual';
 import type { LanguageFinding, Proposal, Thread } from '@paperweave/server';
@@ -340,6 +341,7 @@ export default function FileEditor(props: {
       parent: host.current!,
       state: EditorState.create({
         extensions: [
+          EditorView.cspNonce.of(pageNonce()),
           lineNumbers(),
           EditorView.lineWrapping,
           EditorView.contentAttributes.of({ 'aria-label': `LaTeX source of ${props.path}` }),

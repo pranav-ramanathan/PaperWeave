@@ -51,9 +51,12 @@ What it found is fixed in the same change, or listed under "Open" with what to d
   - A browser test holds that the number is new each time and is on every script of the page.
   - Every browser test now fails if a page is refused anything by its policy. That was tried:
     with the sync server left out of the policy, the first test to open an editor failed.
-  - **Not covered:** styles. The editors and the maths renderer set styles on elements as
-    they draw, so inline styles are allowed. Injected styling can hide or imitate parts of a
-    page, but cannot run code or read what is typed.
+  - **Style sheets are held to the number too**, since a later change: an injected style sheet
+    could read what is on a page and send it away. The editors are handed the number for the
+    style sheets they add. The app has its own "nothing here" page, because the framework's
+    brings a style sheet the policy refuses.
+  - **Not covered:** styles set on a single element. The editors and the maths renderer set
+    them as they draw. They can restyle that element, and cannot select or send anything.
   - **Not covered:** a PDF or ZIP asked for by its address, which is not a page.
   - No way to inject a script was found before or after. This limits the damage if one is.
 - **An edit could be any size.** The sync server read a message of up to 100 MB from anyone

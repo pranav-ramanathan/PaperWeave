@@ -608,7 +608,9 @@ Built after the security review, which had it as its second open item.
   warning is placed in a file that exists, on a line it has. A log that breaks those
   assumptions could put a warning in the wrong file; it would never lose the warning.
 - A warning written while TeX reads one of its own files (a package's) gets no file.
-- Not changed: `LaTeX Font Warning` lines are still not reported at all.
+- A warning that runs over several lines of the log is read as one, with the line number it
+  ends on: before, a package's two-line warning lost its line, and font warnings were not
+  reported at all. The same warning written once per pass over the paper is shown once.
 
 ## How long a large import takes
 
@@ -671,10 +673,14 @@ Built after the security review, which had it as its first open item.
 - **A new page that loads something from elsewhere will be refused it.** The browser tests
   fail when that happens (`tests/e2e/helpers.ts`), and the message names what was refused.
   Add it to the policy only if the page needs it.
-- **Not checked by those tests:** the workbench at `/spike`, whose tests open pages their own
-  way. It runs under the same policy.
-- **Styles are not held to the number**, and PDFs and ZIPs asked for by address keep the plain
-  policy in `next.config.ts`. `docs/security-review.md` says why.
+- **Style sheets are held to the number as well.** The editors add style sheets as they
+  start, so each is given the number (`apps/web/lib/nonce.ts`, read from a `meta` element the
+  layout writes). A new library that adds a style sheet of its own will be refused until it is
+  given the number too; the browser tests fail when that happens, the workbench's included.
+- Styles set on a single element are still allowed, and PDFs and ZIPs asked for by address
+  keep the plain policy in `next.config.ts`. `docs/security-review.md` says why.
+- `apps/web/app/not-found.tsx` is the app's own page for an address that leads nowhere or a
+  paper that is not the person's to see. The framework's own page brings an inline style sheet.
 - In development the policy also allows `eval`, which React uses there to show server errors.
 
 ## Browser tests that failed once in a while
@@ -700,8 +706,24 @@ in the editor were behind them. Both are fixed, and each has a test that fails w
     could not be made. The editor waits eight seconds for the answer to a structural edit.
   - `revisions.spec` and `editing.spec` (once each): the editor said "Saving your edits…"
     for five seconds, though in one case the text was already on another person's screen.
-  - **Shown:** the drop happened on every open, and is gone. **Not shown:** that it was what
-    failed those runs. They were never reproduced on demand. If they stop, that is the evidence.
+- **Shown, by aiming at the moment.** With the old editor code put back and a throwaway test
+  that acts at a chosen time after the connection is made:
+
+  | Old code                                                                    | Result                                                    |
+  | --------------------------------------------------------------------------- | --------------------------------------------------------- |
+  | "Emphasise" pressed 970 to 990 ms after connecting                          | said "could not be made" 6 times in 12 (4 of 4 at 980 ms) |
+  | "Emphasise" pressed at any of eight other moments from 600 to 1400 ms       | 0 of 32                                                   |
+  | A key typed so that "is it saved?" is asked 978 to 1004 ms after connecting | "Saving" stuck 6 times in 60, all asked at 978 to 982 ms  |
+
+  | Current code, same moments                           | Result  |
+  | ---------------------------------------------------- | ------- |
+  | "Emphasise" pressed 960 to 1000 ms after connecting  | 0 of 20 |
+  | "Is it saved?" asked 978 to 1004 ms after connecting | 0 of 60 |
+
+  So both kinds of failure come from the dropped connection, and both are gone. What is still
+  an inference is that the particular runs that failed were hit by it: their output shows the
+  same symptoms at about the same moment, and nothing else was found.
+
 - **For a person** it was a structural edit that now and then said it failed in the first
   second after opening a file (and may have been made all the same), or a "Saving…" that
   stayed until the next keystroke.

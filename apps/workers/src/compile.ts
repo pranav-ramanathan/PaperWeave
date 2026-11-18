@@ -82,7 +82,11 @@ export function sandbox(
 }
 
 const ERROR = /^(?:\.\/)?([^:\n]+?\.\w+):(\d+): (.+)$/gm;
-const WARNING = /^(?:LaTeX|Package \S+|Class \S+) Warning: (.+?)(?: on input line (\d+))?\.?$/gm;
+// A warning can run over several lines. Each further line starts with a name in brackets
+// and spaces, "(hyperref)        removing ...", and the line number is often on the last.
+const WARNING =
+  /^(?:LaTeX(?: Font)?|Package \S+|Class \S+) Warning: (.+(?:\n\([A-Za-z0-9@-]+\)[ \t]+.*)*)$/gm;
+const CONTINUED = /\n\([A-Za-z0-9@-]+\)[ \t]+/g;
 
 export function diagnostics(log: string): Diagnostic[] {
   const out: Diagnostic[] = [];
@@ -96,9 +100,17 @@ export function diagnostics(log: string): Diagnostic[] {
   // files TeX was reading when it wrote the warning.
   const reading = readingAt(log);
   for (const m of log.matchAll(WARNING)) {
-    const line = m[2] ? Number(m[2]) : undefined;
+    const said = /^(.+?)(?: on input line (\d+))?\.?$/s.exec(m[1].replace(CONTINUED, ' '))!;
+    const line = said[2] ? Number(said[2]) : undefined;
     const file = line === undefined ? undefined : reading(m.index);
-    out.push({ severity: 'warning', message: m[1], ...(file ? { file } : {}), line });
+    const warning = {
+      severity: 'warning' as const,
+      message: said[1],
+      ...(file ? { file } : {}),
+      line,
+    };
+    // The same warning is written once for each pass over the paper.
+    if (!out.some((d) => JSON.stringify(d) === JSON.stringify(warning))) out.push(warning);
   }
   return out;
 }

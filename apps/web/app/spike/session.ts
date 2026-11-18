@@ -6,6 +6,7 @@ import { EditorState as CMState } from '@codemirror/state';
 import { EditorView, keymap, lineNumbers } from '@codemirror/view';
 import { yCollab, yUndoManagerKeymap } from 'y-codemirror.next';
 import * as Y from 'yjs';
+import { pageNonce } from '../../lib/nonce';
 import { createVisual, type Visual } from '../../lib/visual';
 
 export type Status = { pending: number; message: string };
@@ -25,6 +26,7 @@ function author(
     state: CMState.create({
       doc: ytext.toString(),
       extensions: [
+        EditorView.cspNonce.of(pageNonce()),
         lineNumbers(),
         EditorView.lineWrapping,
         EditorView.contentAttributes.of({ 'aria-label': `${name}: LaTeX source` }),
