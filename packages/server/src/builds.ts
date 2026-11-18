@@ -30,25 +30,35 @@ export type Build = {
 const COLUMNS = `b.id, b.status, b.created_at as "createdAt", b.finished_at as "finishedAt",
   coalesce(b.diagnostics, '[]'::jsonb) as diagnostics, coalesce(b.timed_out, false) as "timedOut",
   b.cached_from is not null as cached, b.pdf_digest is not null as "hasPdf",
-  b.heads is not null and exists (
-    select 1 from files f where f.project_id = b.project_id
-      and f.head_seq::text is distinct from coalesce(b.heads ->> f.id::text, '0')
+  b.revision_id is not null and exists (
+    select 1 from files f left join revision_files rf on rf.revision_id = b.revision_id and rf.file_id = f.id
+    where f.project_id = b.project_id and (rf.seq is distinct from f.head_seq or rf.path is distinct from f.path)
   ) as stale`;
 
 /**
- * Queue a build. Asking while one is already waiting returns that one, so a burst of requests
- * becomes a single build of the latest text.
+ * Queue a build of the paper as it will stand when the worker picks it up, or of one given
+ * revision. Asking while the same build is already waiting returns that one, so a burst of
+ * requests becomes a single build.
  */
 export async function requestBuild(
   db: Db,
   userId: string,
   projectId: string,
-  perHour = BUILDS_PER_HOUR,
+  opts: { perHour?: number; revisionId?: string } = {},
 ): Promise<string> {
+  const perHour = opts.perHour ?? BUILDS_PER_HOUR;
   await authorize(db, userId, id(projectId), 'build.run');
+  // Building a given revision: it must be one of this paper's.
+  if (opts.revisionId) {
+    const own = await db.query('select 1 from revisions where id = $1 and project_id = $2', [
+      id(opts.revisionId),
+      projectId,
+    ]);
+    if (!own.rows[0]) throw new AppError('not_found', 'No such revision.');
+  }
   const waiting = await db.query(
-    "select id from builds where project_id = $1 and status = 'queued'",
-    [projectId],
+    "select id from builds where project_id = $1 and status = 'queued' and revision_id is not distinct from $2",
+    [projectId, opts.revisionId ?? null],
   );
   if (waiting.rows[0]) return waiting.rows[0].id;
   const recent = await db.query(
@@ -61,17 +71,18 @@ export async function requestBuild(
       `This paper has been built ${perHour} times in the last hour. Try again in a little while.`,
     );
   const made = await db.query(
-    `insert into builds (project_id, requested_by) values ($1, $2)
-     on conflict (project_id) where status = 'queued' do nothing returning id`,
-    [projectId, userId],
+    `insert into builds (project_id, requested_by, revision_id) values ($1, $2, $3)
+     on conflict do nothing returning id`,
+    [projectId, userId, opts.revisionId ?? null],
   );
   // Lost a race with another request: theirs is the build.
   const buildId =
     made.rows[0]?.id ??
     (
-      await db.query("select id from builds where project_id = $1 and status = 'queued'", [
-        projectId,
-      ])
+      await db.query(
+        "select id from builds where project_id = $1 and status = 'queued' and revision_id is not distinct from $2",
+        [projectId, opts.revisionId ?? null],
+      )
     ).rows[0].id;
   await db.query("select pg_notify('builds', '')");
   return buildId;

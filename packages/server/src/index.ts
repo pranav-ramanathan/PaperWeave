@@ -8,3 +8,5 @@ export * from './archive.ts';
 export * from './import.ts';
 export * from './sync.ts';
 export * from './builds.ts';
+export * from './revisions.ts';
+export * from './textdiff.ts';

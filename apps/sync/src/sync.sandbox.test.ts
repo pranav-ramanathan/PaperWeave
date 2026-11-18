@@ -11,6 +11,8 @@ import {
   listFiles,
   readZip,
   removeMember,
+  restoreRevision,
+  saveRevision,
   setRole,
   syncTicket,
   TEXT,
@@ -224,6 +226,29 @@ test('taking away write access stops writes at once; removal ends the connection
   await saved(owner);
   await new Promise((r) => setTimeout(r, 300));
   expect(editor.text.toString()).not.toContain('SECRET');
+});
+
+test('restoring a revision reaches people who have the file open, without a reload', async () => {
+  const { project, file } = await paper();
+  const good = await saveRevision(t.pool, store, users.owner.id, project, 'Good');
+  const owner = client(users.owner, file);
+  const editor = client(users.editor, file);
+  await saved(owner, editor);
+  editor.text.insert(editor.text.toString().indexOf('Hello.'), 'REGRET ');
+  await saved(editor);
+  await until('the owner to see the edit', () => owner.text.toString().includes('REGRET'));
+
+  await restoreRevision(t.pool, store, users.owner.id, project, good.id);
+  const original = MAIN.replaceAll('\r\n', '\n');
+  await until(
+    'both to see the restored text',
+    () => owner.text.toString() === original && editor.text.toString() === original,
+  );
+  expect(await stored(project)).toBe(MAIN);
+  // They can keep working from there.
+  editor.text.insert(0, '% after restore\n');
+  await saved(editor);
+  expect(await stored(project)).toBe('% after restore\r\n' + MAIN);
 });
 
 test('killing the server mid-save loses nothing it acknowledged, and nothing at all after reconnect', async () => {

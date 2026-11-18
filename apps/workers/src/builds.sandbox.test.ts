@@ -128,9 +128,9 @@ test('a burst of requests is one build, and a paper cannot build without limit',
   expect(await buildNext(t.pool, store, image)).toBe(true);
   expect(await buildNext(t.pool, store, image)).toBe(false);
 
-  await requestBuild(t.pool, owner.id, project, 2);
+  await requestBuild(t.pool, owner.id, project, { perHour: 2 });
   expect(await buildNext(t.pool, store, image)).toBe(true);
-  expect(await code(requestBuild(t.pool, owner.id, project, 2))).toBe('conflict');
+  expect(await code(requestBuild(t.pool, owner.id, project, { perHour: 2 }))).toBe('conflict');
 });
 
 test('a broken paper reports where, and the last good PDF is still there', async () => {

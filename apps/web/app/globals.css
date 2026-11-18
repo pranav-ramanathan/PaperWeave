@@ -450,3 +450,36 @@ div.pw-frozen strong {
   border-radius: 6px;
   background: var(--warn-wash);
 }
+
+.diff {
+  margin: 0.3rem 0 1.5rem;
+  padding: 0.5rem 0;
+  border: 1px solid var(--line);
+  border-radius: 6px;
+  background: var(--paper);
+  overflow-x: auto;
+  font-size: 0.85rem;
+}
+.diff span {
+  display: block;
+  padding: 0 0.75rem;
+  white-space: pre;
+}
+.diff .added {
+  background: #e3f6e8;
+  font-weight: 600;
+}
+.diff .removed {
+  background: var(--warn-wash);
+  text-decoration: line-through;
+}
+.page details {
+  display: inline-block;
+}
+.page summary {
+  cursor: pointer;
+  color: var(--accent);
+}
+.page td form.inline {
+  display: inline-flex;
+}

@@ -5,11 +5,20 @@ import {
   importReport,
   listFiles,
   listMembers,
+  listRevisions,
 } from '@paperweave/server';
 import Link from 'next/link';
 import { notFound } from 'next/navigation';
 import { db, requireUser } from '../../../lib/server';
-import { inviteAction, removeAction, roleAction } from '../actions';
+import {
+  buildRevisionAction,
+  inviteAction,
+  removeAction,
+  renameAction,
+  restoreAction,
+  roleAction,
+  saveRevisionAction,
+} from '../actions';
 
 export const dynamic = 'force-dynamic';
 const INVITABLE = ['editor', 'reviewer', 'viewer'] as const;
@@ -19,7 +28,14 @@ export default async function Project({
   searchParams,
 }: {
   params: Promise<{ id: string }>;
-  searchParams: Promise<{ error?: string; invited?: string; saved?: string }>;
+  searchParams: Promise<{
+    error?: string;
+    invited?: string;
+    saved?: string;
+    revision?: string;
+    restored?: string;
+    building?: string;
+  }>;
 }) {
   const { id } = await params;
   const user = await requireUser(`/projects/${id}`);
@@ -28,12 +44,14 @@ export default async function Project({
     listMembers(db(), user.id, id),
     listFiles(db(), user.id, id),
     importReport(db(), user.id, id),
+    listRevisions(db(), user.id, id),
   ]).catch((err) => {
     // Not a member, or no such paper: the two look the same from outside.
     if (err instanceof AppError && err.code === 'not_found') notFound();
     throw err;
   });
-  const [project, members, files, report] = loaded;
+  const [project, members, files, report, revisions] = loaded;
+  const writer = can(project.role, 'revision.write');
   const about = new Map(report?.files.map((f) => [f.path, f]));
   /** What the visual editor can do with a file, in a few words. */
   const note = (path: string, readonly: string | null) => {
@@ -49,7 +67,7 @@ export default async function Project({
     }
     return '';
   };
-  const { error, invited, saved } = await searchParams;
+  const { error, invited, saved, revision, restored, building } = await searchParams;
   const owner = project.role === 'owner';
   return (
     <main className="page">
@@ -69,6 +87,9 @@ export default async function Project({
       {error && <p role="alert">{error}</p>}
       {invited && <p role="status">Invitation sent to {invited}.</p>}
       {saved && <p role="status">Role changed.</p>}
+      {revision && <p role="status">Saved as revision {revision}.</p>}
+      {restored && <p role="status">Restored. The paper is now revision {restored}.</p>}
+      {building && <p role="status">Building the PDF for that revision. Reload in a moment.</p>}
 
       {files.length > 0 && (
         <>
@@ -86,6 +107,9 @@ export default async function Project({
                 <th scope="col">File</th>
                 <th scope="col">Size</th>
                 <th scope="col">In the visual editor</th>
+                <th scope="col">
+                  <span className="sr-only">Actions</span>
+                </th>
               </tr>
             </thead>
             <tbody>
@@ -102,6 +126,22 @@ export default async function Project({
                   </th>
                   <td>{f.size < 1024 ? `${f.size} B` : `${Math.round(f.size / 1024)} KB`}</td>
                   <td>{note(f.path, f.readonly)}</td>
+                  <td>
+                    {can(project.role, 'file.write') && (
+                      <details>
+                        <summary>Rename</summary>
+                        <form action={renameAction.bind(null, id, f.id)} className="inline">
+                          <input
+                            name="path"
+                            defaultValue={f.path}
+                            aria-label={`New name for ${f.path}`}
+                            required
+                          />
+                          <button type="submit">Rename</button>
+                        </form>
+                      </details>
+                    )}
+                  </td>
                 </tr>
               ))}
             </tbody>
@@ -144,6 +184,84 @@ export default async function Project({
             ))}
           </ul>
         </>
+      )}
+
+      <h2 id="revisions">Revisions</h2>
+      <p>
+        A revision is the whole paper at one moment. Its ZIP and its PDF always belong together.
+      </p>
+      {writer && (
+        <form action={saveRevisionAction.bind(null, id)}>
+          <label>
+            Name for the paper as it is now
+            <input name="name" required maxLength={200} placeholder="Submitted to the workshop" />
+          </label>
+          <button type="submit">Save revision</button>
+        </form>
+      )}
+      {revisions.length > 0 && (
+        <table>
+          <thead>
+            <tr>
+              <th scope="col">Revision</th>
+              <th scope="col">Made</th>
+              <th scope="col">Download</th>
+              <th scope="col">
+                <span className="sr-only">Actions</span>
+              </th>
+            </tr>
+          </thead>
+          <tbody>
+            {revisions.map((r, i) => (
+              <tr key={r.id}>
+                <th scope="row">
+                  {r.number}.{' '}
+                  {r.name ??
+                    (r.kind === 'restore' ? `Restore of revision ${r.restoredFrom}` : 'Unnamed')}
+                </th>
+                <td>
+                  {new Date(r.createdAt).toISOString().slice(0, 16).replace('T', ' ')} UTC
+                  {r.createdBy ? ` by ${r.createdBy}` : ''}
+                </td>
+                <td>
+                  {can(project.role, 'project.export') && (
+                    <>
+                      <a href={`/projects/${id}/revisions/${r.id}/zip`}>ZIP</a>{' '}
+                      <a href={`/projects/${id}/revisions/${r.id}/zip?manifest`}>
+                        ZIP with build details
+                      </a>{' '}
+                    </>
+                  )}
+                  {r.hasPdf ? (
+                    <a href={`/projects/${id}/revisions/${r.id}/pdf`}>PDF</a>
+                  ) : (
+                    can(project.role, 'build.run') && (
+                      <form action={buildRevisionAction.bind(null, id, r.id)} className="inline">
+                        <button type="submit" aria-label={`Build the PDF for revision ${r.number}`}>
+                          Build PDF
+                        </button>
+                      </form>
+                    )
+                  )}
+                </td>
+                <td>
+                  {revisions[i + 1] && (
+                    <Link href={`/projects/${id}/revisions/${r.id}/diff/${revisions[i + 1].id}`}>
+                      Changes since {revisions[i + 1].number}
+                    </Link>
+                  )}{' '}
+                  {writer && i > 0 && (
+                    <form action={restoreAction.bind(null, id, r.id)} className="inline">
+                      <button type="submit" aria-label={`Restore revision ${r.number}`}>
+                        Restore
+                      </button>
+                    </form>
+                  )}
+                </td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
       )}
 
       <h2>People</h2>

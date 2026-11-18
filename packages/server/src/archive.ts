@@ -25,6 +25,22 @@ const BUILD =
 const bad = (message: string) =>
   new AppError('invalid_input', `This ZIP cannot be imported: ${message}.`);
 
+/** Why a path cannot be a file in a paper, or '' if it can. */
+export function checkPath(path: unknown, limits: Limits = LIMITS): string {
+  if (typeof path !== 'string' || !path || path.length > limits.pathLength)
+    return 'it is empty or too long';
+  // eslint-disable-next-line no-control-regex -- control characters are exactly what is being refused
+  if (/[\u0000-\u001f\u007f\\]/.test(path)) return 'it has characters that cannot be used';
+  if (
+    path.startsWith('/') ||
+    path.split('/').some((part) => !part || part === '.' || part === '..')
+  )
+    return 'it must be a plain path inside the paper';
+  if (SYSTEM.test(path) || BUILD.test(path) || !WANTED.test(path))
+    return 'it is not a file type a paper uses';
+  return '';
+}
+
 /** Unpack an archive, or refuse it. Refusal is all-or-nothing: a hostile archive imports nothing. */
 export function readZip(
   zip: Uint8Array,

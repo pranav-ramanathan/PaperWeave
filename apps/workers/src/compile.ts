@@ -38,7 +38,12 @@ export type CompileResult = {
 };
 
 /** Run a command in the sandbox with `work` mounted read-write at /work. */
-export function sandbox(work: string, argv: string[], seconds = 60) {
+export function sandbox(
+  work: string,
+  argv: string[],
+  seconds = 60,
+  env: Record<string, string> = {},
+) {
   // The container user must own the work directory. As root, hand it to the image's user;
   // otherwise run as ourselves.
   let user = `${process.getuid!()}:${process.getgid!()}`;
@@ -58,6 +63,7 @@ export function sandbox(work: string, argv: string[], seconds = 60) {
     ...['--memory', '1g', '--cpus', '1', '--user', user, '-v', `${work}:/work`, '-w', '/work'],
     // No line wrapping in the log, so one message is one line.
     ...['-e', 'HOME=/tmp', '-e', 'TEXMFVAR=/tmp/texmf-var', '-e', 'max_print_line=10000'],
+    ...Object.entries(env).flatMap(([k, v]) => ['-e', `${k}=${v}`]),
     ...[IMAGE, 'timeout', '-s', 'KILL', String(seconds), ...argv],
   ];
   return new Promise<{ code: number; output: string }>((done) => {
@@ -99,6 +105,8 @@ export async function compile(
   out: string,
   seconds = 60,
   compiler: Compiler = 'pdflatex',
+  /** Seconds since 1970 to stamp into the PDF, so the same inputs give the same bytes. */
+  epoch?: number,
 ): Promise<CompileResult> {
   if (!(compiler in ENGINE)) throw new Error(`unknown compiler: ${compiler}`);
   if (!/^[\w./-]+\.tex$/.test(root) || root.split('/').includes('..'))
@@ -115,6 +123,7 @@ export async function compile(
         ...['-file-line-error', '-synctex=1', root],
       ],
       seconds,
+      Number.isInteger(epoch) ? { SOURCE_DATE_EPOCH: String(epoch) } : {},
     );
     const base = root.replace(/\.tex$/, '');
     const logPath = join(work, base + '.log');

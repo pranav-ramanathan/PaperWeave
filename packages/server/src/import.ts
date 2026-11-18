@@ -10,13 +10,13 @@ import {
   theoremEnvs,
 } from '@paperweave/latex';
 import type pg from 'pg';
-import { type Entry, type Limits, LIMITS, readZip, type Skipped, writeZip } from './archive.ts';
+import { type Entry, type Limits, LIMITS, readZip, type Skipped } from './archive.ts';
 import { authorize } from './authz.ts';
 import type { BlobStore } from './blobs.ts';
 import { type Db, transaction } from './db.ts';
 import { AppError } from './errors.ts';
 import { id, type Project } from './projects.ts';
-import { currentBytes } from './sync.ts';
+import { cutRevision, exportRevision } from './revisions.ts';
 
 const TEXT = /\.(tex|ltx|bib|bst|cls|sty|bbx|cbx|def|cfg|clo|csv|tsv|txt|md)$/i;
 const MAX_PROJECTS = 50;
@@ -259,22 +259,17 @@ export async function importReport(
 }
 
 /**
- * The paper's files as a ZIP. A file nobody has edited comes out with the bytes it came in with;
- * an edited one comes out as its current text in its original encoding and newline style.
+ * The paper as it is now, as a ZIP. It is cut as a revision first, so what is downloaded is one
+ * consistent moment. A file nobody has edited comes out with the bytes it came in with; an edited
+ * one comes out as its text in its original encoding and newline style.
  */
 export async function exportZip(
-  db: Db,
+  pool: pg.Pool,
   store: BlobStore,
   userId: string,
   projectId: string,
 ): Promise<Uint8Array> {
-  await authorize(db, userId, id(projectId), 'project.export');
-  const files = await db.query(
-    'select id, path, digest, eol, bom, head_seq from files where project_id = $1 order by path',
-    [projectId],
-  );
-  const entries: Entry[] = [];
-  for (const f of files.rows)
-    entries.push({ path: f.path, bytes: await currentBytes(db, store, f) });
-  return writeZip(entries);
+  await authorize(pool, userId, id(projectId), 'project.export');
+  const revision = await cutRevision(pool, store, userId, projectId);
+  return (await exportRevision(pool, store, userId, projectId, revision.id)).zip;
 }

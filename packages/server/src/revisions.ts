@@ -1,0 +1,361 @@
+// Revisions: the paper frozen at a moment. Cutting, naming, comparing, restoring and exporting.
+import { createHash } from 'node:crypto';
+import { decodeFile } from '@paperweave/latex';
+import type pg from 'pg';
+import { checkPath, type Entry, writeZip } from './archive.ts';
+import { authorize } from './authz.ts';
+import type { BlobStore } from './blobs.ts';
+import { type Db, transaction } from './db.ts';
+import { AppError } from './errors.ts';
+import { id } from './projects.ts';
+import { currentBytes, editFile } from './sync.ts';
+import { type DiffLine, diffLines } from './textdiff.ts';
+
+export type Revision = {
+  id: string;
+  number: number;
+  name: string | null;
+  kind: 'auto' | 'named' | 'restore';
+  createdAt: string;
+  createdBy: string | null;
+  /** The number of the revision this one restored, if it is a restore. */
+  restoredFrom: number | null;
+  hasPdf: boolean;
+};
+type RevisionFile = { file_id: string; path: string; digest: string };
+
+/**
+ * Freeze the paper as it is now. An automatic cut that finds nothing changed since the latest
+ * revision returns that one. No permission check here: callers that act for a person check first.
+ */
+export function cutRevision(
+  pool: pg.Pool,
+  store: BlobStore,
+  userId: string | null,
+  projectId: string,
+  opts: { name?: string; kind?: Revision['kind']; restoredFrom?: string } = {},
+): Promise<{ id: string; number: number }> {
+  const kind = opts.kind ?? 'auto';
+  return transaction(pool, async (db) => {
+    // Locking the file rows holds back new edits for the moment it takes to read them, so every
+    // file is captured at the same point. It also keeps two cuts from running at once.
+    const files = (
+      await db.query(
+        `select id, path, digest, eol, bom, head_seq from files where project_id = $1
+         order by path for update`,
+        [projectId],
+      )
+    ).rows;
+    const project = (
+      await db.query(
+        `select p.compiler, r.path as root from projects p
+         left join files r on r.id = p.root_file_id where p.id = $1`,
+        [projectId],
+      )
+    ).rows[0];
+    if (!project) throw new AppError('not_found', 'No such project.');
+    const captured: { id: string; path: string; digest: string; seq: string }[] = [];
+    for (const f of files) {
+      const edited = f.eol && Number(f.head_seq) > 1;
+      const digest = edited ? await store.put(await currentBytes(db, store, f)) : f.digest;
+      captured.push({ id: f.id, path: f.path, digest, seq: f.head_seq });
+    }
+    const key = createHash('sha256')
+      .update(
+        JSON.stringify({
+          files: captured.map((c) => [c.path, c.digest]),
+          root: project.root,
+          compiler: project.compiler,
+        }),
+      )
+      .digest('hex');
+    const last = (
+      await db.query(
+        'select id, number, content_key from revisions where project_id = $1 order by number desc limit 1',
+        [projectId],
+      )
+    ).rows[0];
+    if (kind === 'auto' && last?.content_key === key) return { id: last.id, number: last.number };
+    const made = (
+      await db.query(
+        `insert into revisions (project_id, number, name, kind, restored_from, root, compiler, content_key, created_by)
+         values ($1, $2, $3, $4, $5, $6, $7, $8, $9) returning id, number`,
+        [
+          projectId,
+          (last?.number ?? 0) + 1,
+          opts.name ?? null,
+          kind,
+          opts.restoredFrom ?? null,
+          project.root,
+          project.compiler,
+          key,
+          userId,
+        ],
+      )
+    ).rows[0];
+    await db.query(
+      `insert into revision_files (revision_id, file_id, path, digest, seq)
+       select $1, * from unnest($2::uuid[], $3::text[], $4::text[], $5::bigint[])`,
+      [
+        made.id,
+        captured.map((c) => c.id),
+        captured.map((c) => c.path),
+        captured.map((c) => c.digest),
+        captured.map((c) => c.seq),
+      ],
+    );
+    return made;
+  });
+}
+
+/** Save the paper as it is now under a name. */
+export async function saveRevision(
+  pool: pg.Pool,
+  store: BlobStore,
+  userId: string,
+  projectId: string,
+  name: unknown,
+) {
+  await authorize(pool, userId, id(projectId), 'revision.write');
+  if (typeof name !== 'string' || !name.trim() || name.length > 200)
+    throw new AppError('invalid_input', 'A revision needs a name of at most 200 characters.');
+  return cutRevision(pool, store, userId, projectId, { name: name.trim(), kind: 'named' });
+}
+
+export async function listRevisions(
+  db: Db,
+  userId: string,
+  projectId: string,
+): Promise<Revision[]> {
+  await authorize(db, userId, id(projectId), 'project.read');
+  const { rows } = await db.query(
+    `select r.id, r.number, r.name, r.kind, r.created_at as "createdAt", u.email as "createdBy",
+            f.number as "restoredFrom",
+            exists (select 1 from builds b where b.revision_id = r.id and b.pdf_digest is not null) as "hasPdf"
+     from revisions r left join "user" u on u.id = r.created_by
+     left join revisions f on f.id = r.restored_from
+     where r.project_id = $1 order by r.number desc`,
+    [projectId],
+  );
+  return rows;
+}
+
+/** A revision of this paper and its files, or `not_found`. */
+async function load(db: Db, projectId: string, revisionId: string) {
+  const revision = (
+    await db.query(
+      `select r.id, r.number, r.root, r.compiler, r.created_at, p.name as paper
+       from revisions r join projects p on p.id = r.project_id where r.id = $1 and r.project_id = $2`,
+      [id(revisionId), projectId],
+    )
+  ).rows[0];
+  if (!revision) throw new AppError('not_found', 'No such revision.');
+  const files: RevisionFile[] = (
+    await db.query(
+      'select file_id, path, digest from revision_files where revision_id = $1 order by path',
+      [revisionId],
+    )
+  ).rows;
+  return { revision, files };
+}
+
+const blob = async (store: BlobStore, digest: string) => {
+  const bytes = await store.get(digest);
+  if (!bytes) throw new Error(`blob ${digest} is missing`);
+  return bytes;
+};
+
+/**
+ * A revision's files as a ZIP. With `manifest`, the archive also says how it was built, so the
+ * same PDF can be made again outside PaperWeave.
+ */
+export async function exportRevision(
+  db: Db,
+  store: BlobStore,
+  userId: string,
+  projectId: string,
+  revisionId: string,
+  manifest = false,
+): Promise<{ zip: Uint8Array; paper: string; number: number }> {
+  await authorize(db, userId, id(projectId), 'project.export');
+  const { revision, files } = await load(db, projectId, revisionId);
+  const entries: Entry[] = [];
+  for (const f of files) entries.push({ path: f.path, bytes: await blob(store, f.digest) });
+  if (manifest) {
+    const built = (
+      await db.query(
+        `select image from builds where revision_id = $1 and pdf_digest is not null
+         order by created_at desc limit 1`,
+        [revisionId],
+      )
+    ).rows[0];
+    const epoch = Math.floor(new Date(revision.created_at).getTime() / 1000);
+    const engine = { pdflatex: '-pdf', xelatex: '-xelatex', lualatex: '-lualatex' }[
+      revision.compiler as string
+    ];
+    const text = JSON.stringify(
+      {
+        paper: revision.paper,
+        revision: revision.number,
+        root: revision.root,
+        compiler: revision.compiler,
+        // The toolchain image the PDF was built with, if this revision has been built.
+        image: built?.image ?? null,
+        // PDF timestamps are set from this, so a rebuild gives the same bytes.
+        sourceDateEpoch: epoch,
+        command: `SOURCE_DATE_EPOCH=${epoch} latexmk -norc ${engine} -no-shell-escape -interaction=nonstopmode ${revision.root}`,
+        files: Object.fromEntries(files.map((f) => [f.path, `sha256:${f.digest}`])),
+      },
+      null,
+      2,
+    );
+    entries.push({ path: 'paperweave-toolchain.json', bytes: Buffer.from(text + '\n') });
+  }
+  return { zip: await writeZip(entries), paper: revision.paper, number: revision.number };
+}
+
+/** The PDF built from exactly this revision, or `not_found` if it has not been built. */
+export async function revisionPdf(
+  db: Db,
+  store: BlobStore,
+  userId: string,
+  projectId: string,
+  revisionId: string,
+): Promise<Uint8Array> {
+  await authorize(db, userId, id(projectId), 'project.read');
+  const { rows } = await db.query(
+    `select b.pdf_digest from builds b where b.revision_id = $1 and b.project_id = $2
+       and b.pdf_digest is not null order by b.created_at desc limit 1`,
+    [id(revisionId), projectId],
+  );
+  if (!rows[0]) throw new AppError('not_found', 'This revision has not been built.');
+  return blob(store, rows[0].pdf_digest);
+}
+
+export type FileDiff = {
+  path: string;
+  /** The earlier path, if the file was renamed. */
+  was?: string;
+  status: 'added' | 'removed' | 'changed' | 'renamed';
+  /** Line by line, for text that changed. Null for other files and for files too large. */
+  lines: DiffLine[] | null;
+};
+
+/** What changed between two revisions of a paper. Files that did not change are left out. */
+export async function diffRevisions(
+  db: Db,
+  store: BlobStore,
+  userId: string,
+  projectId: string,
+  fromId: string,
+  toId: string,
+): Promise<{ from: number; to: number; files: FileDiff[] }> {
+  await authorize(db, userId, id(projectId), 'project.read');
+  const a = await load(db, projectId, fromId);
+  const b = await load(db, projectId, toId);
+  const text = async (digest: string) => {
+    const d = decodeFile(await blob(store, digest));
+    return d.editable ? d.text : null;
+  };
+  const files: FileDiff[] = [];
+  for (const f of b.files) {
+    const old = a.files.find((o) => o.file_id === f.file_id);
+    if (!old) files.push({ path: f.path, status: 'added', lines: null });
+    else if (old.digest !== f.digest) {
+      const [x, y] = [await text(old.digest), await text(f.digest)];
+      const was = old.path !== f.path ? old.path : undefined;
+      files.push({
+        path: f.path,
+        was,
+        status: 'changed',
+        lines: x != null && y != null ? diffLines(x, y) : null,
+      });
+    } else if (old.path !== f.path)
+      files.push({ path: f.path, was: old.path, status: 'renamed', lines: null });
+  }
+  for (const o of a.files)
+    if (!b.files.some((f) => f.file_id === o.file_id))
+      files.push({ path: o.path, status: 'removed', lines: null });
+  files.sort((p, q) => p.path.localeCompare(q.path));
+  return { from: a.revision.number, to: b.revision.number, files };
+}
+
+/** Give a file a new path. Its ID, history and open editors stay as they are. */
+export async function renameFile(
+  db: Db,
+  userId: string,
+  projectId: string,
+  fileId: string,
+  path: unknown,
+) {
+  await authorize(db, userId, id(projectId), 'file.write');
+  const problem = checkPath(path);
+  if (problem) throw new AppError('invalid_input', `That name cannot be used: ${problem}.`);
+  const taken = await db.query(
+    'select 1 from files where project_id = $1 and path = $2 and id <> $3',
+    [projectId, path, id(fileId)],
+  );
+  if (taken.rows[0]) throw new AppError('conflict', 'Another file already has that name.');
+  const { rowCount } = await db.query(
+    'update files set path = $3 where id = $1 and project_id = $2',
+    [fileId, projectId, path],
+  );
+  if (!rowCount) throw new AppError('not_found', 'No such file.');
+  await db.query('update projects set manifest_version = manifest_version + 1 where id = $1', [
+    projectId,
+  ]);
+}
+
+/**
+ * Put the paper back to how it was in a revision, as new edits on top of what is there now.
+ * Nothing is erased: the restore is itself a new revision, and the ones in between remain.
+ */
+export async function restoreRevision(
+  pool: pg.Pool,
+  store: BlobStore,
+  userId: string,
+  projectId: string,
+  revisionId: string,
+): Promise<{ id: string; number: number }> {
+  await authorize(pool, userId, id(projectId), 'revision.write');
+  const { revision, files } = await load(pool, projectId, revisionId);
+  const live = (
+    await pool.query('select id, path, digest, eol from files where project_id = $1', [projectId])
+  ).rows;
+  for (const target of files) {
+    // shortcut: files cannot be created or deleted yet, so every file in a revision still exists.
+    // Recreate missing files here when deleting files arrives.
+    const file = live.find((f) => f.id === target.file_id);
+    if (!file) continue;
+    if (file.path !== target.path)
+      await pool.query('update files set path = $2 where id = $1', [file.id, target.path]);
+    const bytes = await blob(store, target.digest);
+    const decoded = file.eol ? decodeFile(bytes) : null;
+    if (decoded?.editable) {
+      const want = decoded.text;
+      await editFile(pool, store, file.id, userId, (text) => {
+        const have = text.toString();
+        // Replace only the part that differs, so people editing elsewhere are not disturbed.
+        let p = 0;
+        while (p < have.length && p < want.length && have[p] === want[p]) p++;
+        let s = 0;
+        while (s < have.length - p && s < want.length - p && have.at(-1 - s) === want.at(-1 - s))
+          s++;
+        text.delete(p, have.length - p - s);
+        text.insert(p, want.slice(p, want.length - s));
+      });
+    } else if (file.digest !== target.digest)
+      await pool.query('update files set digest = $2, size = $3 where id = $1', [
+        file.id,
+        target.digest,
+        bytes.length,
+      ]);
+  }
+  await pool.query(
+    `update projects set compiler = $2, manifest_version = manifest_version + 1,
+       root_file_id = (select id from files where project_id = $1 and path = $3)
+     where id = $1`,
+    [projectId, revision.compiler, revision.root],
+  );
+  return cutRevision(pool, store, userId, projectId, { kind: 'restore', restoredFrom: revisionId });
+}
