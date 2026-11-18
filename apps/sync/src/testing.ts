@@ -73,19 +73,38 @@ export async function until(what: string, ok: () => boolean | Promise<boolean>, 
  * Wait until the server holds everything these clients have changed. Each asks, the way the
  * editor does, and asks again until the answer is yes to all of it.
  */
-export const saved = (...cs: Client[]) =>
-  until('edits to be saved', async () => {
-    for (const c of cs) {
-      if (!c.provider.synced) return false;
+export const saved = (...cs: Client[]) => {
+  /** Where the last look at each client got to, for when the wait runs out. */
+  const state = cs.map(() => 'not looked at');
+  return until('edits to be saved', async () => {
+    for (const [i, c] of cs.entries()) {
+      if (!c.provider.synced) {
+        state[i] =
+          `not in step with the server (socket ${c.socket.status}, closed ${c.state.closed} times, refused ${c.state.refused})`;
+        return false;
+      }
       const q = c.changes.question();
       c.provider.sendStateless(JSON.stringify(q));
       const end = Date.now() + 2000;
       while (!c.state.replies.some((r) => r.n === q.n && 'saved' in r)) {
-        if (Date.now() > end) return false;
+        if (Date.now() > end) {
+          state[i] = `asked and got no answer in two seconds (socket ${c.socket.status})`;
+          return false;
+        }
         await new Promise((r) => setTimeout(r, 5));
       }
       const yes = c.state.replies.some((r) => r.n === q.n && r.saved === true);
-      if (!yes || !c.changes.confirmed(q.n)) return false;
+      if (!yes || !c.changes.confirmed(q.n)) {
+        state[i] = yes
+          ? 'told yes, but had changed since asking'
+          : 'told the server does not have it';
+        return false;
+      }
+      state[i] = 'saved';
     }
     return true;
+  }).catch((err: Error) => {
+    err.message += `: ${state.map((s, i) => `client ${i + 1} ${s}`).join('; ')}`;
+    throw err;
   });
+};
