@@ -4,8 +4,10 @@ export type Include = {
   kind: 'input' | 'bib' | 'graphics';
   target: string;
   dynamic: boolean;
-  /** Offset of the command in the text with comments removed. */
+  /** Where the command starts in the source. */
   at: number;
+  /** Where the target itself starts in the source: the text between the braces, trimmed. */
+  targetAt: number;
 };
 
 const CMD =
@@ -17,18 +19,27 @@ const KIND: Record<string, Include['kind']> = {
 };
 const GRAPHICS = ['', '.pdf', '.png', '.jpg', '.jpeg', '.eps'];
 
-const uncomment = (src: string) => src.replace(/(^|[^\\])%.*$/gm, '$1');
+// Comments are blanked, not removed, so that every offset is still an offset into the source.
+const uncomment = (src: string) =>
+  src.replace(
+    /(^|[^\\])%.*$/gm,
+    (all, before: string) => before + ' '.repeat(all.length - before.length),
+  );
 
 export function includes(src: string): Include[] {
   const live = uncomment(src);
   const out: Include[] = [];
   for (const m of live.matchAll(CMD)) {
     const kind = KIND[m[1]] ?? 'input';
+    // The target is the last group, and has no braces inside it.
+    let partAt = m.index + m[0].lastIndexOf('{') + 1;
     // \bibliography takes a comma-separated list.
     for (const t of m[1] === 'bibliography' ? m[2].split(',') : [m[2]]) {
       const target = t.trim();
+      const targetAt = partAt + t.indexOf(target);
+      partAt += t.length + 1;
       // A macro or parameter in the path can only be resolved by TeX: such files are source-only.
-      if (target) out.push({ kind, target, dynamic: /[\\#]/.test(target), at: m.index });
+      if (target) out.push({ kind, target, dynamic: /[\\#]/.test(target), at: m.index, targetAt });
     }
   }
   return out;
@@ -53,6 +64,24 @@ const norm = (path: string) => {
   return out.join('/');
 };
 
+/** The directory TeX resolves paths against: the root file's, with its trailing slash, or ''. */
+export const rootDir = (root: string) =>
+  root.includes('/') ? root.slice(0, root.lastIndexOf('/') + 1) : '';
+
+/**
+ * The project file an include names, if there is one: the path as written, or with the
+ * extension TeX would add for that kind of include. `all` is every path in the project.
+ */
+export function resolveInclude(inc: Include, dir: string, all: ReadonlySet<string>) {
+  if (inc.dynamic) return undefined;
+  const base = norm(dir + inc.target);
+  const tries =
+    inc.kind === 'graphics'
+      ? GRAPHICS.map((x) => base + x)
+      : [base, base + (inc.kind === 'bib' ? '.bib' : '.tex')];
+  return tries.find((p) => all.has(p));
+}
+
 export type Graph = {
   /** Text files reachable from the root, root first. */
   order: string[];
@@ -74,7 +103,7 @@ export function includeGraph(
   paths: string[] = Object.keys(files),
 ): Graph {
   const all = new Set(paths);
-  const dir = root.includes('/') ? root.slice(0, root.lastIndexOf('/') + 1) : '';
+  const dir = rootDir(root);
   const g: Graph = { order: [], preamble: [], edges: [], missing: [], dynamic: [], cycles: [] };
   const body = uncomment(files[root] ?? '').indexOf('\\begin{document}');
   const stack: string[] = [];
@@ -93,12 +122,7 @@ export function includeGraph(
         continue;
       }
       // TeX resolves every path against the directory it was started in: the root's.
-      const base = norm(dir + inc.target);
-      const tries =
-        inc.kind === 'graphics'
-          ? GRAPHICS.map((x) => base + x)
-          : [base, base + (inc.kind === 'bib' ? '.bib' : '.tex')];
-      const to = tries.find((p) => all.has(p));
+      const to = resolveInclude(inc, dir, all);
       if (!to) {
         g.missing.push({ from, target: inc.target });
         continue;

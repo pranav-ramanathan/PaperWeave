@@ -51,7 +51,7 @@ Read this first. Update it in every pull request.
   - Restore applies the difference as new edits through `editFile`, so people with the file open
     see it at once, and records a new revision. Nothing is erased.
   - Comparing two revisions shows changed lines, renames, additions and removals.
-  - Renaming a file keeps its ID and history. It does not yet update `\input` lines that name it.
+  - Renaming a file keeps its ID and history.
 - **Files.** Add a blank text file or an upload, delete a file, choose the root file
   (`packages/server/src/files.ts`, controls on the paper's page).
   - Deleting hides the file: `files` is now a view of the live rows of `all_files`. The row and
@@ -140,6 +140,16 @@ Read this first. Update it in every pull request.
     is refused and the list is shown again (`proposeLabelRename`, `renameLabel`).
   - A name already used by another label is refused, as is one LaTeX could not use.
   - Open editors get the new name without a reload.
+- **D1, third part: renaming a file updates the lines that name it.** Renaming a file that an
+  `\input`, `\include`, `\bibliography`, `\addbibresource` or `\includegraphics` line names
+  first shows those lines as they would become. The rename and the lines change together, or
+  not at all (`proposeFileRename`, `renameFileAndReferences`). A file nothing names is renamed
+  at once, as before.
+  - A name written without its extension stays without it; one of several names in a
+    `\bibliography` list changes alone; a line in a comment is left as it is.
+  - "Rename only" is offered too, and says the paper will not build until the lines are fixed.
+  - Not handled: moving the root file to another folder, which changes what every relative
+    path in the paper means.
 - **Phase B spike.** Gate report: `docs/phase-b-gate.md`. Recommendation: go.
   - `packages/latex`: lossless block parser, incremental reparse, include graph, encoding round
     trip, coverage.
@@ -154,10 +164,9 @@ nothing, edit it together, build it, and download a ZIP and a PDF that belong to
 
 Next, in this order:
 
-1. **D1, the rest.** The same "show the changes first" for a renamed file and the `\input`
-   lines that name it; insert a reference or an equation from the toolbar, the keyboard and
-   the context menu; edit an equation's LaTeX in place with a live preview; teach the
-   in-browser renderer the paper's own macros.
+1. **D1, the rest.** Insert a reference or an equation from the toolbar, the keyboard and the
+   context menu; edit an equation's LaTeX in place with a live preview; teach the in-browser
+   renderer the paper's own macros.
 2. **D2** onward, as in the plan.
 
 The Phase A replays are waiting on a person with accounts: `docs/rea/matrix.md`. The Prism one is

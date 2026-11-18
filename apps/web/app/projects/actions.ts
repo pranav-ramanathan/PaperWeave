@@ -5,8 +5,9 @@ import {
   createProject,
   deleteFile,
   invite,
+  proposeFileRename,
   removeMember,
-  renameFile,
+  renameFileAndReferences,
   renameLabel,
   requestBuild,
   restoreRevision,
@@ -101,7 +102,35 @@ export async function restoreAction(projectId: string, revisionId: string) {
 export async function renameAction(projectId: string, fileId: string, form: FormData) {
   const back = `/projects/${projectId}`;
   const user = await requireUser(back);
-  await act(back, () => renameFile(db(), user.id, projectId, fileId, text(form, 'path')));
+  await act(back, async () => {
+    const path = text(form, 'path');
+    const proposal = await proposeFileRename(db(), blobs(), user.id, projectId, fileId, path);
+    // Lines in other files name this one: show what would change before anything does.
+    if (proposal.changes.length)
+      return `${back}/files/${fileId}/rename?to=${encodeURIComponent(path)}`;
+    await renameFileAndReferences(db(), blobs(), user.id, projectId, fileId, path, proposal.digest);
+  });
+}
+
+/** Carry out a file rename from the page that showed its changes. */
+export async function renameFileAction(projectId: string, fileId: string, form: FormData) {
+  const to = text(form, 'to');
+  const back = `/projects/${projectId}/files/${fileId}/rename?to=${encodeURIComponent(to)}`;
+  const user = await requireUser(back);
+  await act(back, async () => {
+    // "Rename only" sends no digest: the lines that name the file are left as they are.
+    const digest = form.get('how') === 'only' ? undefined : text(form, 'digest');
+    const { places } = await renameFileAndReferences(
+      db(),
+      blobs(),
+      user.id,
+      projectId,
+      fileId,
+      to,
+      digest,
+    );
+    return `/projects/${projectId}?moved=${encodeURIComponent(to)}&places=${places}`;
+  });
 }
 
 export async function deleteFileAction(projectId: string, fileId: string) {

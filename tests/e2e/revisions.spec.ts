@@ -102,5 +102,21 @@ test('save a revision, build and download it, compare, restore and rename', asyn
   await again.locator('summary').click();
   await again.getByLabel('New name for refs.bib').fill('bibliography/refs.bib');
   await again.getByRole('button', { name: 'Rename' }).click();
+  // The root file names this one, so the line that would change is shown before anything does.
+  await expect(page.getByText('1 line names this file.')).toBeVisible();
+  const change = page.getByRole('region', { name: 'main.tex' });
+  await expect(change).toContainText('\\bibliography{refs}');
+  await expect(change).toContainText('\\bibliography{bibliography/refs}');
+  await page.getByRole('button', { name: 'Rename and update that line' }).click();
+  await expect(page.getByRole('status')).toHaveText(
+    'Renamed to bibliography/refs.bib, and updated 1 place that names it.',
+  );
   await expect(page.getByRole('row', { name: /bibliography\/refs\.bib/ })).toBeVisible();
+  // The paper still builds: the line that named the file names it still.
+  await page.getByRole('link', { name: 'main.tex' }).click();
+  await showSource(page);
+  await expect(source(page)).toContainText('\\bibliography{bibliography/refs}');
+  await expect(page.locator('.build').getByRole('status')).toHaveText('The PDF is up to date.', {
+    timeout: 60_000,
+  });
 });

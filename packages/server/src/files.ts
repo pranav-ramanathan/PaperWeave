@@ -1,13 +1,22 @@
 // Adding and removing a paper's files, and choosing its root.
-import { decodeFile } from '@paperweave/latex';
+import { decodeFile, includes, resolveInclude, rootDir } from '@paperweave/latex';
 import type pg from 'pg';
 import { checkPath, LIMITS } from './archive.ts';
 import { authorize } from './authz.ts';
 import type { BlobStore } from './blobs.ts';
-import type { Db } from './db.ts';
+import { type Db, transaction } from './db.ts';
 import { AppError } from './errors.ts';
 import { id } from './projects.ts';
-import { cutRevision } from './revisions.ts';
+import {
+  applySplices,
+  changesDigest,
+  listChanges,
+  type RenameProposal,
+  type Splice,
+  texFiles,
+} from './labels.ts';
+import { cutRevision, renameFile } from './revisions.ts';
+import { loadUpdates } from './sync.ts';
 
 /** Extensions that hold text the editors can open. Everything else is kept as bytes. */
 export const TEXT_FILE = /\.(tex|ltx|bib|bst|cls|sty|bbx|cbx|def|cfg|clo|csv|tsv|txt|md)$/i;
@@ -120,4 +129,108 @@ export async function setRootFile(db: Db, userId: string, projectId: string, fil
   );
   if (!rowCount)
     throw new AppError('invalid_input', 'Only a .tex file of this paper can be the root.');
+}
+
+/** `path` as written from the directory `dir` (which ends in a slash, or is empty). */
+function relativeTo(dir: string, path: string) {
+  const from = dir.split('/').filter(Boolean);
+  const to = path.split('/');
+  let same = 0;
+  while (same < from.length && same < to.length - 1 && from[same] === to[same]) same++;
+  return [...from.slice(same).map(() => '..'), ...to.slice(same)].join('/');
+}
+
+/** The lines that name a file (`\input`, `\bibliography`, `\includegraphics`...) and what they would say after it is renamed. */
+async function renamePlan(
+  db: Db,
+  store: BlobStore,
+  projectId: string,
+  fileId: string,
+  to: string,
+  lock = false,
+) {
+  const files = await texFiles(db, store, projectId, lock);
+  const all = (await db.query('select id, path from files where project_id = $1', [projectId]))
+    .rows;
+  const from: string | undefined = all.find((f) => f.id === fileId)?.path;
+  if (!from) throw new AppError('not_found', 'No such file.');
+  const paths = new Set<string>(all.map((f) => f.path));
+  // TeX resolves every path against the root file's directory.
+  const dir = rootDir(files.find((f) => f.root)?.path ?? '');
+  const ext = (path: string) => /\.[^./]+$/.exec(path)?.[0] ?? '';
+  const splices = new Map<string, Splice[]>();
+  for (const file of files) {
+    const hits: Splice[] = [];
+    for (const inc of includes(file.text)) {
+      if (resolveInclude(inc, dir, paths) !== from) continue;
+      // Written without its extension before, and the extension has not changed: leave it off.
+      const bare = !inc.target.endsWith(ext(from)) && ext(from) === ext(to);
+      const insert = relativeTo(dir, bare ? to.slice(0, to.length - ext(to).length) : to);
+      hits.push({ at: inc.targetAt, length: inc.target.length, insert });
+    }
+    if (hits.length) splices.set(file.id, hits);
+  }
+  const changes = listChanges(files, splices);
+  const proposal: RenameProposal = {
+    from,
+    to,
+    changes,
+    digest: changesDigest([from, to], changes),
+  };
+  return { proposal, splices, files };
+}
+
+/**
+ * What renaming a file would change in the files that name it. Nothing is changed. The new name
+ * must be usable and free, as for the rename itself.
+ */
+export async function proposeFileRename(
+  pool: pg.Pool,
+  store: BlobStore,
+  userId: string,
+  projectId: string,
+  fileId: string,
+  to: unknown,
+): Promise<RenameProposal> {
+  await authorize(pool, userId, id(projectId), 'file.write');
+  const problem = checkPath(to);
+  if (problem) throw new AppError('invalid_input', `That name cannot be used: ${problem}.`);
+  const plan = await renamePlan(pool, store, projectId, id(fileId), to as string);
+  const taken = await pool.query(
+    'select 1 from files where project_id = $1 and path = $2 and id <> $3',
+    [projectId, to, fileId],
+  );
+  if (taken.rows[0]) throw new AppError('conflict', 'Another file already has that name.');
+  return plan.proposal;
+}
+
+/**
+ * Rename a file and, in the same transaction, the lines that name it. `digest` is the
+ * proposal's: if the lines would now differ, nothing is done. With no digest only the file is
+ * renamed, and the lines that name it are left as they are.
+ */
+export async function renameFileAndReferences(
+  pool: pg.Pool,
+  store: BlobStore,
+  userId: string,
+  projectId: string,
+  fileId: string,
+  to: unknown,
+  digest?: unknown,
+): Promise<{ places: number }> {
+  await authorize(pool, userId, id(projectId), 'file.write');
+  if (digest === undefined) {
+    await renameFile(pool, userId, projectId, fileId, to);
+    return { places: 0 };
+  }
+  // Makes sure each file's uploaded bytes are in its log as the first entry.
+  for (const f of await texFiles(pool, store, projectId)) await loadUpdates(pool, store, f.id);
+  return transaction(pool, async (db) => {
+    // The plan is made from the old name, with the files held, and then the name changes.
+    const plan = await renamePlan(db, store, projectId, id(fileId), String(to), true);
+    await renameFile(db, userId, projectId, fileId, to);
+    if (plan.proposal.digest !== digest)
+      throw new AppError('conflict', 'The paper has changed since. Look at the changes again.');
+    return { places: await applySplices(db, userId, plan.splices) };
+  });
 }

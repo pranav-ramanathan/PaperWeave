@@ -44,6 +44,7 @@ export default async function Project({
     in?: string;
     root?: string;
     relabelled?: string;
+    moved?: string;
     places?: string;
   }>;
 }) {
@@ -115,6 +116,14 @@ export default async function Project({
         </p>
       )}
       {root && <p role="status">Root file changed.</p>}
+      {query.moved && (
+        <p role="status">
+          Renamed to <code>{query.moved}</code>
+          {query.places && query.places !== '0'
+            ? `, and updated ${query.places} ${query.places === '1' ? 'place that names' : 'places that name'} it.`
+            : '.'}
+        </p>
+      )}
       {query.relabelled && (
         <p role="status">
           Renamed to <code>{query.relabelled}</code> in {query.places}{' '}

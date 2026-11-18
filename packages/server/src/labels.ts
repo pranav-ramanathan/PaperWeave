@@ -94,14 +94,73 @@ export type RenameProposal = {
   digest: string;
 };
 
+/** Replace `length` characters at `at` with `insert`. */
+export type Splice = { at: number; length: number; insert: string };
+type TexFile = { id: string; path: string; text: string };
+
+/** The lines a set of splices would change, before and after, file by file. */
+export function listChanges(files: TexFile[], splices: Map<string, Splice[]>): RenameChange[] {
+  const changes: RenameChange[] = [];
+  for (const file of files) {
+    const hits = splices.get(file.id);
+    if (!hits) continue;
+    // Line by line, so that two changes on one line are shown as one.
+    let start = 0;
+    file.text.split('\n').forEach((before, i) => {
+      const here = hits.filter((h) => h.at >= start && h.at < start + before.length + 1);
+      let after = before;
+      for (const h of [...here].sort((x, y) => y.at - x.at))
+        after = after.slice(0, h.at - start) + h.insert + after.slice(h.at - start + h.length);
+      if (here.length)
+        changes.push({ fileId: file.id, path: file.path, line: i + 1, before, after });
+      start += before.length + 1;
+    });
+  }
+  return changes;
+}
+
+/**
+ * Make the splices, as the user, in a transaction that already holds the files. Each file's edit
+ * goes through its log like any other, and reaches open editors when the transaction commits.
+ */
+export async function applySplices(db: Db, userId: string, splices: Map<string, Splice[]>) {
+  let places = 0;
+  for (const [fileId, hits] of splices) {
+    const doc = new Y.Doc();
+    const { rows } = await db.query(
+      'select update from file_updates where file_id = $1 order by seq',
+      [fileId],
+    );
+    for (const r of rows) Y.applyUpdate(doc, new Uint8Array(r.update));
+    const text = doc.getText(TEXT);
+    const before = Y.encodeStateVector(doc);
+    doc.transact(() => {
+      for (const h of [...hits].sort((x, y) => y.at - x.at)) {
+        text.delete(h.at, h.length);
+        text.insert(h.at, h.insert);
+      }
+    });
+    const seq = await appendUpdate(db, fileId, userId, Y.encodeStateAsUpdate(doc, before));
+    if (seq === null) throw new AppError('permission_denied', 'You cannot edit this paper.');
+    await db.query("select pg_notify('file_edits', $1)", [`${fileId}:${seq}`]);
+    places += hits.length;
+  }
+  return places;
+}
+
+/** What stands for exactly one set of changes: sent with a proposal, and back to carry it out. */
+export const changesDigest = (what: unknown[], changes: RenameChange[]) =>
+  createHash('sha256')
+    .update(JSON.stringify([...what, changes]))
+    .digest('hex');
+
 /** Where a label's name appears in the paper's files, and what each line would become. */
 function plan(
-  files: { id: string; path: string; text: string }[],
+  files: TexFile[],
   from: string,
   to: string,
-): { proposal: RenameProposal; splices: Map<string, { at: number; length: number }[]> } {
-  const changes: RenameChange[] = [];
-  const splices = new Map<string, { at: number; length: number }[]>();
+): { proposal: RenameProposal; splices: Map<string, Splice[]> } {
+  const splices = new Map<string, Splice[]>();
   let defined = false;
   let taken = false;
   for (const file of files) {
@@ -110,30 +169,14 @@ function plan(
     taken ||= found.labels.some((l) => l.key === to);
     const hits = [...found.labels, ...found.refs]
       .filter((x) => x.key === from)
-      .map((x) => ({ at: x.keyAt, length: from.length }))
-      .sort((a, b) => a.at - b.at);
-    if (!hits.length) continue;
-    splices.set(file.id, hits);
-    // Line by line, so that two names on one line are shown as one change.
-    const lines = file.text.split('\n');
-    let start = 0;
-    lines.forEach((before, i) => {
-      const here = hits.filter((h) => h.at >= start && h.at < start + before.length + 1);
-      let after = before;
-      for (const h of [...here].reverse())
-        after = after.slice(0, h.at - start) + to + after.slice(h.at - start + h.length);
-      if (here.length)
-        changes.push({ fileId: file.id, path: file.path, line: i + 1, before, after });
-      start += before.length + 1;
-    });
+      .map((x) => ({ at: x.keyAt, length: from.length, insert: to }));
+    if (hits.length) splices.set(file.id, hits);
   }
   // Not `not_found`: that code is kept for papers and files a person may not see.
   if (!defined) throw new AppError('invalid_input', `There is no label called ${from}.`);
   if (taken) throw new AppError('conflict', `There is already a label called ${to}.`);
-  const digest = createHash('sha256')
-    .update(JSON.stringify([from, to, changes]))
-    .digest('hex');
-  return { proposal: { from, to, changes, digest }, splices };
+  const changes = listChanges(files, splices);
+  return { proposal: { from, to, changes, digest: changesDigest([from, to], changes) }, splices };
 }
 
 function names(from: unknown, to: unknown): [string, string] {
@@ -183,28 +226,7 @@ export async function renameLabel(
     const { proposal, splices } = plan(await texFiles(db, store, projectId, true), a, b);
     if (proposal.digest !== digest)
       throw new AppError('conflict', 'The paper has changed since. Look at the changes again.');
-    let places = 0;
-    for (const [fileId, hits] of splices) {
-      const doc = new Y.Doc();
-      const { rows } = await db.query(
-        'select update from file_updates where file_id = $1 order by seq',
-        [fileId],
-      );
-      for (const r of rows) Y.applyUpdate(doc, new Uint8Array(r.update));
-      const text = doc.getText(TEXT);
-      const before = Y.encodeStateVector(doc);
-      doc.transact(() => {
-        for (const h of [...hits].reverse()) {
-          text.delete(h.at, h.length);
-          text.insert(h.at, b);
-        }
-      });
-      const seq = await appendUpdate(db, fileId, userId, Y.encodeStateAsUpdate(doc, before));
-      if (seq === null) throw new AppError('permission_denied', 'You cannot edit this paper.');
-      // Delivered when the transaction commits: open editors see every file change together.
-      await db.query("select pg_notify('file_edits', $1)", [`${fileId}:${seq}`]);
-      places += hits.length;
-    }
-    return { places };
+    // Delivered when the transaction commits: open editors see every file change together.
+    return { places: await applySplices(db, userId, splices) };
   });
 }
