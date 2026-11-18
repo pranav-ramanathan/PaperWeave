@@ -31,7 +31,7 @@ jobs:
           cache: pnpm
       - run: pnpm install --frozen-lockfile
       - run: docker build -t paperweave-tex infra/tex
-      - run: docker compose -f infra/compose.yaml up -d --wait
+      - run: docker compose -f infra/compose.yaml up -d --wait || (docker compose -f infra/compose.yaml logs --tail 60; exit 1)
       - run: pnpm test:sandbox
       - run: pnpm exec playwright install --with-deps chromium
       - run: pnpm e2e
