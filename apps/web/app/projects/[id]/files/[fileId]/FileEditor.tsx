@@ -13,7 +13,8 @@ import * as Y from 'yjs';
 import { setBibliography } from '../../../../../lib/bibliography';
 import { onShow, showInPdf } from '../../../../../lib/pdfsync';
 import { createVisual, type Visual } from '../../../../../lib/visual';
-import type { Proposal, Thread } from '@paperweave/server';
+import type { LanguageFinding, Proposal, Thread } from '@paperweave/server';
+import Language from './Language';
 import Proposals from './Proposals';
 import Threads, { type Member, type Stretch } from './Threads';
 import {
@@ -27,11 +28,12 @@ import {
 } from './Tools';
 
 // The stretches of text with a thread of comments or a proposed change, marked in the source view.
-type Range = { from: number; to: number; kind: 'thread' | 'proposal' };
+type Range = { from: number; to: number; kind: 'thread' | 'proposal' | 'finding' };
 const setMarks = StateEffect.define<Range[]>();
 const MARK = {
   thread: Decoration.mark({ class: 'thread-mark' }),
   proposal: Decoration.mark({ class: 'proposal-mark' }),
+  finding: Decoration.mark({ class: 'finding-mark' }),
 };
 const marks = StateField.define<DecorationSet>({
   create: () => Decoration.none,
@@ -121,6 +123,11 @@ export default function FileEditor(props: {
   /** The file's threads as last read, and how to mark their stretches where they now stand. */
   const threadsNow = useRef<Thread[]>([]);
   const proposalsNow = useRef<Proposal[]>([]);
+  const findingsNow = useRef<LanguageFinding[]>([]);
+  /** Replace a stretch with other words through the server, if it still says what it said. */
+  const changeText = useRef<
+    (from: string, to: string, expected: string, replacement: string) => Promise<boolean>
+  >(async () => false);
   const markThreads = useRef(() => {});
   const router = useRouter();
   // A double-click in the PDF asks for a line: of this file, or of another one of the paper.
@@ -414,6 +421,7 @@ export default function FileEditor(props: {
       const open = [
         ...threadsNow.current.map((t) => ({ ...t, kind: 'thread' as const })),
         ...proposalsNow.current.map((p) => ({ ...p, kind: 'proposal' as const })),
+        ...findingsNow.current.map((f) => ({ ...f, kind: 'finding' as const, status: 'open' })),
       ];
       const ranges = open.flatMap((x) => {
         const [from, to] = [whereIs(x.from), whereIs(x.to)];
@@ -421,6 +429,17 @@ export default function FileEditor(props: {
       });
       view.dispatch({ effects: setMarks.of(ranges) });
       visual?.setMarks(ranges);
+    };
+    changeText.current = async (a, b, expected, replacement) => {
+      const place = (encoded: string) => Y.decodeRelativePosition(fromBase64(encoded));
+      const done = await run({
+        key: crypto.randomUUID(),
+        from: place(a),
+        to: place(b),
+        expected,
+        replacement,
+      }).catch(() => 'conflict' as const);
+      return done !== 'conflict';
     };
     // The stretches move as the text does. Marked again once every view has caught up with it.
     const remark = () => queueMicrotask(() => markThreads.current());
@@ -618,6 +637,23 @@ export default function FileEditor(props: {
         onTable={askTable}
       />
       <div className="source" ref={host} hidden={mode !== 'source'} />
+      {props.visual && (
+        <Language
+          projectId={projectId}
+          fileId={fileId}
+          canWrite={canWrite && !sync.refused}
+          canPropose={props.canComment}
+          unsaved={!sync.loaded || sync.unsaved}
+          change={(from, to, expected, replacement) =>
+            changeText.current(from, to, expected, replacement)
+          }
+          show={(from, to) => showStretch.current(from, to)}
+          onFindings={(list) => {
+            findingsNow.current = list;
+            markThreads.current();
+          }}
+        />
+      )}
       <Proposals
         projectId={projectId}
         fileId={fileId}

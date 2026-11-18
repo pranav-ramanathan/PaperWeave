@@ -6,6 +6,7 @@ A collaborative academic writing workspace: a visual editor over LaTeX source, a
 - Plan: `docs/plan.md`
 - Where things stand and what is next: `docs/status.md`
 - What happens to each kind of paper on import: `docs/import-matrix.md`
+- How the spelling and grammar checker does on labelled sentences: `docs/grammar-benchmark.md`
 
 ## Develop
 

@@ -7,3 +7,4 @@ docs/plan.md
 **/next-env.d.ts
 # Written by packages/server/src/matrix.test.ts, which also checks it.
 docs/import-matrix.md
+docs/grammar-benchmark.md

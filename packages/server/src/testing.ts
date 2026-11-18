@@ -13,6 +13,7 @@ export const TEST_ENV = {
   S3_SECRET_KEY: 'dev',
   BETTER_AUTH_SECRET: 'local-tests-only-3kq9Zr7mVx2Lp8Tn5Wc1Yd4Hb6Jf0Gs',
   BETTER_AUTH_URL: 'http://localhost:3000',
+  GRAMMAR_URL: 'http://localhost:8010',
   ...process.env,
 } as Record<string, string>;
 

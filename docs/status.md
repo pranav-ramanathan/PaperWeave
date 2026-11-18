@@ -389,6 +389,33 @@ Read this first. Update it in every pull request.
     before submitting mention unfinished review without letting it stand in the way.
   - Not yet: accepting several at once; a word-by-word diff inside a proposal (it shows the old
     and the new text whole).
+- **E3: spelling and grammar.** A "Spelling and grammar" panel under the editor of a LaTeX
+  file, and a wavy line under each finding in both views. Checked when the file opens and again
+  once what was typed is saved and has been left alone for a moment.
+  - The engine is LanguageTool 6.8, run by us (`grammar` in `infra/compose.yaml`, `GRAMMAR_URL`).
+    No text goes to anyone else's service. Without `GRAMMAR_URL` the panel says checking is not
+    set up, and everything else works.
+  - `packages/latex/src/prose.ts` turns a file into prose plus markup: running text is sent as
+    text; formulas, references, citations, commands, code (`\texttt`, listings), comments and
+    the preamble are sent as markup with a stand-in ("Dummy", "[1]") so that the sentence still
+    reads. The checker answers in source positions.
+  - A finding is shown only if all of it lies in prose (`inProse`). So none is ever in a
+    formula, a unit, code, a path or a citation; a service test seeds the same misspelling in
+    each of those and holds that.
+  - A suggestion is one click: someone who may edit makes the change through the command path
+    (so it is refused if the text has moved, and is theirs to undo); a reviewer's click makes a
+    proposed change instead.
+  - Per paper (migration 0016, "Language" on the paper's page): British or American spelling,
+    the paper's own words (not reported as misspelt), and rules switched off. A finding offers
+    "It is a word of this paper" or "Do not check this in this paper".
+  - `docs/grammar-benchmark.md`: on 25 sentences with a seeded mistake, 23 are pointed at; of
+    20 correct sentences with LaTeX in them, 18 are left alone. Written by
+    `packages/server/src/grammar-benchmark.sandbox.test.ts`, which fails if the checker stops
+    answering that way. The sentences are synthetic: a corpus of real manuscripts reviewed by
+    people is still the owner's to supply.
+  - Five rules are always off because they do not fit LaTeX source (its quotation marks, the
+    spacing around stand-ins, Oxford -ize as an error): `NEVER` in
+    `packages/server/src/grammar.ts`.
 - **A restore keeps what it replaces.** Found by the fault suite on a seed it had not run before.
   A restore put back the chosen revision but kept no copy of the paper as it stood, so text typed
   since the last revision (an edit that reached the server a moment before, say) was erased with
@@ -413,12 +440,14 @@ nothing, edit it together, build it, and download a ZIP and a PDF that belong to
 
 Next, in this order:
 
-1. **E3.** Grammar: inline spelling and grammar findings in prose, never inside an equation,
-   unit, code, path or citation; UK and US spelling; a glossary of the paper's own words; rules
-   that can be switched off. The engine is to be chosen by benchmark (self-hosted LanguageTool
-   is the spec's candidate). Findings become proposals, so accepting one is the same step.
-2. **E4** onward, as in the plan. Model processing stays off until the owner confirms
-   retention defaults.
+1. **E4.** Scientific critique: a Review action that returns suggestions with a diff, the
+   reasoning, the evidence, and flags for changed claims (quantities, causation, negation,
+   attribution); a question for the author where evidence is thin; a per-paper off switch; the
+   smallest relevant text sent; model and rule versions recorded. This sends text to a model
+   provider, so it stays off until the owner confirms retention defaults (`docs/plan.md`). What
+   can be built first without sending anything: the off switch, the record of versions, the
+   claim-change flags (they are rules over a diff), and the challenge set they are tested on.
+2. **E5** onward, as in the plan.
 
 The Phase A replays are waiting on a person with accounts: `docs/rea/matrix.md`. The Prism one is
 optional: its export was researched from public sources (`docs/rea/prism.md`) and is a plain LaTeX
