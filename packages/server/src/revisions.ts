@@ -8,6 +8,7 @@ import type { BlobStore } from './blobs.ts';
 import { type Db, transaction } from './db.ts';
 import { AppError } from './errors.ts';
 import { removeFile } from './files.ts';
+import { recordDownload } from './metrics.ts';
 import { id } from './projects.ts';
 import { currentBytes, editLocked, openFile } from './sync.ts';
 import { type DiffLine, diffLines } from './textdiff.ts';
@@ -251,6 +252,7 @@ export async function exportRevision(
     );
     entries.push({ path: 'paperweave-toolchain.json', bytes: Buffer.from(text + '\n') });
   }
+  await recordDownload(db, projectId, 'zip');
   return {
     zip: await writeZip([...entries, ...extra]),
     paper: revision.paper,
@@ -273,6 +275,7 @@ export async function revisionPdf(
     [id(revisionId), projectId],
   );
   if (!rows[0]) throw new AppError('not_found', 'This revision has not been built.');
+  await recordDownload(db, projectId, 'pdf');
   return blob(store, rows[0].pdf_digest);
 }
 

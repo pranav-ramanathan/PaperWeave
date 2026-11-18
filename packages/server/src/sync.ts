@@ -182,6 +182,14 @@ export async function compactFile(pool: pg.Pool, fileId: string): Promise<number
     if (rows.length < 2) return 0;
     const doc = new Y.Doc();
     for (const r of rows) Y.applyUpdate(doc, new Uint8Array(r.update));
+    // Who wrote the edits is not kept past this point; that they wrote to this paper is.
+    await db.query(
+      `insert into project_authors (project_id, user_id)
+       select distinct f.project_id, u.user_id from file_updates u
+       join all_files f on f.id = u.file_id where u.file_id = $1 and u.user_id is not null
+       on conflict do nothing`,
+      [fileId],
+    );
     await db.query('delete from file_updates where file_id = $1', [fileId]);
     // It takes the place of the newest entry, so the file's place in its history does not move.
     await db.query('insert into file_updates (file_id, seq, update) values ($1, $2, $3)', [

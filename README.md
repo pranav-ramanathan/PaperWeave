@@ -8,6 +8,8 @@ A collaborative academic writing workspace: a visual editor over LaTeX source, a
 - What happens to each kind of paper on import: `docs/import-matrix.md`
 - How the spelling and grammar checker does on labelled sentences: `docs/grammar-benchmark.md`
 - Accessibility, and what has not been checked: `docs/accessibility.md`
+- Backing up and restoring, and what a drill showed: `docs/restore-drill.md`
+- How long things take: `docs/benchmarks.md`
 
 ## Develop
 

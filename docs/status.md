@@ -446,6 +446,34 @@ Read this first. Update it in every pull request.
     confirms retention defaults. The tests supply the model's answer themselves.
   - Not yet: approved figure captions and selected evidence from a chosen revision as context
     for the model; a setting for the provider's retention; deleting what was sent.
+- **F3: a restore drill and benchmarks.**
+  - `infra/backup.sh` and `infra/restore.sh` dump and restore the database.
+    `pnpm --filter @paperweave/server check-blobs` then checks that the object store holds
+    every object the database refers to, each matching its digest (`checkBlobs`).
+  - The drill is a sandbox test (`apps/workers/src/restore-drill.sandbox.test.ts`): a paper with
+    a history is backed up and restored with those scripts into an empty database, and comes
+    back equal in files, revisions, a saved ZIP byte for byte, its PDF, its review, and the
+    text typed since the last revision. The restored copy takes new edits. `docs/restore-drill.md`
+    has the procedure and what the drill does not show (losing the object store, how much is
+    lost between dumps, people connected at the time).
+  - `docs/benchmarks.md`: twelve measurements of what people wait for, from parsing to building
+    to drawing a chart, written by `apps/workers/src/bench.sandbox.test.ts`
+    (`WRITE_BENCH=1`). In CI the same test holds each under a ceiling set far above it.
+- **F2: product metrics.** How papers fare, as counts on the metrics page the sync server
+  already serves to whoever holds `METRICS_TOKEN` (`productMetrics` in
+  `packages/server/src/metrics.ts`).
+  - Papers by how they began (a template's name, `imported`, `empty`), and how many of each
+    have been downloaded as a ZIP and as a PDF (table `downloads`, migration 0020; a download
+    of a revision's ZIP or PDF is counted, the PDF beside the editor is not).
+  - Papers someone has edited, and papers at least two people have. The edit log says who
+    wrote, but compaction forgets it, so compaction first notes the authors
+    (`project_authors`).
+  - Proposed changes by where they came from (a person, a model review) and what became of
+    them. Accepted over decided is the useful-suggestion rate.
+  - Labels are template names and statuses. Nothing of any paper is on the page; a test seeds
+    a secret and holds that.
+  - Not counted: spelling suggestions taken with one click by someone who may edit (they are
+    edits, not proposals). Dashboards and alerts are still the owner's to choose.
 - **F1: accessibility.** `docs/accessibility.md` says what is held by tests, what was found and
   fixed, and what nobody has checked (a real screen reader is the largest gap).
   - `tests/e2e/a11y.spec.ts`: an automated audit (axe, WCAG 2.1 A and AA) of seven pages
@@ -502,9 +530,7 @@ nothing, edit it together, build it, and download a ZIP and a PDF that belong to
 
 Next, in this order:
 
-1. **Phase F, the rest.** In this order: performance benchmarks; a real restore drill; product
-   metrics (imports and exports per template, two-author activation, useful-suggestion rate);
-   a security review; the Tectonic comparison.
+1. **Phase F, the rest.** A security review, then the Tectonic comparison.
 
 The Phase A replays are waiting on a person with accounts: `docs/rea/matrix.md`. The Prism one is
 optional: its export was researched from public sources (`docs/rea/prism.md`) and is a plain LaTeX

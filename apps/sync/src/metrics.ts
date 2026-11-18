@@ -3,7 +3,7 @@
 // /metrics, in the Prometheus text format, to whoever holds METRICS_TOKEN.
 import { timingSafeEqual } from 'node:crypto';
 import type { IncomingMessage, ServerResponse } from 'node:http';
-import { buildHealth } from '@paperweave/server';
+import { buildHealth, productMetrics } from '@paperweave/server';
 import type pg from 'pg';
 
 /** What the sync server counts since it started. */
@@ -59,6 +59,30 @@ export async function metricsText(pool: pg.Pool, counts: Counts, open: number) {
   put('paperweave_builds_last_hour', 'gauge', hour, builds.succeeded, '{result="succeeded"}');
   put('paperweave_builds_last_hour', 'gauge', hour, builds.failed, '{result="failed"}');
   put('paperweave_builds_last_hour', 'gauge', hour, builds.timedOut, '{result="timed_out"}');
+  // How papers fare. Labels are a template's name or a status, never anything from a paper.
+  const product = await productMetrics(pool);
+  for (const p of product.papers) {
+    const origin = `origin="${p.origin}"`;
+    put('paperweave_papers', 'gauge', 'Papers, by how they began.', p.papers, `{${origin}}`);
+    const got = 'Papers downloaded at least once, by how they began and as what.';
+    put('paperweave_papers_downloaded', 'gauge', got, p.downloadedZip, `{${origin},kind="zip"}`);
+    put('paperweave_papers_downloaded', 'gauge', got, p.downloadedPdf, `{${origin},kind="pdf"}`);
+  }
+  put('paperweave_papers_edited', 'gauge', 'Papers someone has edited.', product.edited);
+  put(
+    'paperweave_papers_two_authors',
+    'gauge',
+    'Papers at least two people have edited.',
+    product.twoAuthors,
+  );
+  for (const p of product.proposals)
+    put(
+      'paperweave_proposals',
+      'gauge',
+      'Proposed changes, by where they came from and what became of them.',
+      p.count,
+      `{origin="${p.origin}",status="${p.status}"}`,
+    );
   return lines.join('\n') + '\n';
 }
 
