@@ -25,11 +25,14 @@ export type Build = {
   hasPdf: boolean;
   /** True if any file has been edited since this build read it. */
   stale: boolean;
+  /** The revision it is of. Null until the worker has taken it. */
+  revisionId: string | null;
 };
 
 const COLUMNS = `b.id, b.status, b.created_at as "createdAt", b.finished_at as "finishedAt",
   coalesce(b.diagnostics, '[]'::jsonb) as diagnostics, coalesce(b.timed_out, false) as "timedOut",
   b.cached_from is not null as cached, b.pdf_digest is not null as "hasPdf",
+  b.revision_id as "revisionId",
   b.revision_id is not null and exists (
     select 1 from files f left join revision_files rf on rf.revision_id = b.revision_id and rf.file_id = f.id
     where f.project_id = b.project_id and (rf.seq is distinct from f.head_seq or rf.path is distinct from f.path)

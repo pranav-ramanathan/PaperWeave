@@ -1,0 +1,133 @@
+// What stands between the paper as it is and a paper that can be sent: everything the service
+// already knows is wrong with it, gathered in one place.
+import { includeGraph } from '@paperweave/latex';
+import type pg from 'pg';
+import { authorize } from './authz.ts';
+import type { BlobStore } from './blobs.ts';
+import { latestBuilds } from './builds.ts';
+import { chartPath, listCharts } from './charts.ts';
+import { citationReport } from './citations.ts';
+import { labelReport, texFiles } from './labels.ts';
+import { id } from './projects.ts';
+
+export type Finding = {
+  /** A problem must be put right before the paper is sent. A warning is worth a look. */
+  level: 'problem' | 'warning';
+  kind: 'root' | 'file' | 'label' | 'citation' | 'build' | 'compiler' | 'chart';
+  message: string;
+  /** Where to put it right: a place in a file, or a chart. */
+  fileId?: string;
+  path?: string;
+  line?: number;
+  chartId?: string;
+};
+export type Submission = {
+  findings: Finding[];
+  /** No problem was found: the paper can be sent as built. */
+  ready: boolean;
+  /** The revision whose ZIP and PDF belong together, once the paper is ready. */
+  revisionId: string | null;
+  /** A build is waiting or running: look again in a moment. */
+  building: boolean;
+};
+
+export async function submissionChecks(
+  pool: pg.Pool,
+  store: BlobStore,
+  userId: string,
+  projectId: string,
+): Promise<Submission> {
+  await authorize(pool, userId, id(projectId), 'project.read');
+  const findings: Finding[] = [];
+  const problem = (kind: Finding['kind'], message: string, where: Partial<Finding> = {}) =>
+    findings.push({ level: 'problem', kind, message, ...where });
+  const warning = (kind: Finding['kind'], message: string, where: Partial<Finding> = {}) =>
+    findings.push({ level: 'warning', kind, message, ...where });
+
+  const files = await texFiles(pool, store, projectId);
+  const root = files.find((f) => f.root);
+  const paths: string[] = (
+    await pool.query('select path from files where project_id = $1', [projectId])
+  ).rows.map((r) => r.path);
+  const used = new Set<string>();
+  if (!root) problem('root', 'The paper has no root file to build.');
+  else {
+    const texts = Object.fromEntries(files.map((f) => [f.path, f.text]));
+    const graph = includeGraph(texts, root.path, paths);
+    for (const edge of graph.edges) used.add(edge.to);
+    const place = (from: string, at?: number) => {
+      const file = files.find((f) => f.path === from)!;
+      return {
+        fileId: file.id,
+        path: from,
+        ...(at === undefined ? {} : { line: file.text.slice(0, at).split('\n').length }),
+      };
+    };
+    for (const m of graph.missing)
+      problem('file', `The paper has no file "${m.target}".`, place(m.from, m.at));
+    for (const d of graph.dynamic)
+      warning(
+        'file',
+        `"${d.target}" is put together by a macro, so it could not be checked.`,
+        place(d.from),
+      );
+  }
+
+  const at = (p: { fileId: string; path: string; line: number }) => ({
+    fileId: p.fileId,
+    path: p.path,
+    line: p.line,
+  });
+  const labels = await labelReport(pool, store, userId, projectId);
+  for (const r of labels.undefined)
+    problem('label', `\\${r.command}{${r.key}} refers to a label the paper does not have.`, at(r));
+  for (const d of labels.duplicates)
+    problem('label', `The label "${d.key}" is given ${d.places.length} times.`, at(d.places[1]));
+  const cited = await citationReport(pool, store, userId, projectId);
+  for (const m of cited.missing)
+    problem('citation', `\\${m.command}{${m.key}} cites a key no bibliography entry has.`, at(m));
+  for (const d of cited.duplicates)
+    warning(
+      'citation',
+      `${d.places.length} bibliography entries have the key "${d.key}".`,
+      at(d.places[1]),
+    );
+
+  // A chart the paper shows must be drawn from the data as it is now.
+  for (const c of await listCharts(pool, store, userId, projectId)) {
+    if (!used.has(chartPath(c.name, 'pdf')) && !used.has(chartPath(c.name, 'png'))) continue;
+    if (c.stale)
+      problem('chart', `The chart "${c.name}" is out of date: its data has changed.`, {
+        chartId: c.id,
+      });
+    else if (c.status !== 'drawn')
+      problem(
+        'chart',
+        c.status === 'failed'
+          ? `The chart "${c.name}" could not be drawn.`
+          : `The chart "${c.name}" is waiting to be drawn.`,
+        { chartId: c.id },
+      );
+  }
+
+  const { latest } = await latestBuilds(pool, userId, projectId);
+  const building = latest?.status === 'queued';
+  if (!latest) problem('build', 'The paper has not been built yet.');
+  else if (building) problem('build', 'The paper is being built. Look again in a moment.');
+  else if (latest.stale) problem('build', 'The paper has changed since it was last built.');
+  if (latest && !building) {
+    const fileOf = (path?: string) => files.find((f) => f.path === path)?.id;
+    for (const d of latest.diagnostics) {
+      const where = { path: d.file, line: d.line, fileId: fileOf(d.file) };
+      if (d.severity === 'error') problem('compiler', d.message, where);
+      else warning('compiler', d.message, where);
+    }
+    if (latest.status === 'failed' && !latest.diagnostics.some((d) => d.severity === 'error'))
+      problem(
+        'build',
+        latest.timedOut ? 'The last build ran out of time.' : 'The last build failed.',
+      );
+  }
+  const ready = !findings.some((f) => f.level === 'problem');
+  return { findings, ready, revisionId: ready ? latest!.revisionId : null, building };
+}

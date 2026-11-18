@@ -159,8 +159,9 @@ test('the include graph finds the root, nested inputs, missing files, cycles and
     'a.tex',
   );
   expect(bad.missing).toEqual([
-    { from: 'a.tex', target: 'gone' },
-    { from: 'a.tex', target: 'fig' },
+    // With where the name stands in the file, so that a check can point at it.
+    { from: 'a.tex', target: 'gone', at: 16 },
+    { from: 'a.tex', target: 'fig', at: 52 },
   ]);
   expect(bad.dynamic).toEqual([{ from: 'a.tex', target: '\\dir/x' }]);
   expect(bad.cycles).toEqual([['a.tex', 'b.tex', 'a.tex']]);

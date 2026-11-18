@@ -92,7 +92,8 @@ export type Graph = {
    */
   preamble: string[];
   edges: { from: string; to: string; kind: Include['kind'] }[];
-  missing: { from: string; target: string }[];
+  /** `at` is where in `from` the target is named. */
+  missing: { from: string; target: string; at: number }[];
   dynamic: { from: string; target: string }[];
   cycles: string[][];
 };
@@ -125,7 +126,7 @@ export function includeGraph(
       // TeX resolves every path against the directory it was started in: the root's.
       const to = resolveInclude(inc, dir, all);
       if (!to) {
-        g.missing.push({ from, target: inc.target });
+        g.missing.push({ from, target: inc.target, at: inc.targetAt });
         continue;
       }
       g.edges.push({ from, to, kind: inc.kind });
