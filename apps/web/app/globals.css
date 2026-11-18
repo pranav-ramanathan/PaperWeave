@@ -355,3 +355,60 @@ div.pw-frozen strong {
 .report li {
   margin: 0.3rem 0;
 }
+
+/* The paper editor */
+.editor {
+  padding: 0.75rem 1rem;
+}
+.editor .bar {
+  margin-bottom: 0.75rem;
+}
+.editor h1 {
+  font-size: 1.1rem;
+  margin: 0;
+}
+.editor a {
+  color: var(--accent);
+}
+.workspace {
+  display: grid;
+  grid-template-columns: 14rem 1fr;
+  gap: 1rem;
+  align-items: start;
+}
+.workspace nav ul {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  font-family: ui-monospace, monospace;
+  font-size: 0.85rem;
+}
+.workspace nav li {
+  padding: 0.2rem 0;
+  overflow-wrap: anywhere;
+}
+.workspace nav span {
+  color: var(--muted);
+}
+.workspace nav [aria-current='page'] {
+  font-weight: 700;
+  text-decoration: none;
+  color: var(--ink);
+}
+.editor-bar {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.25rem 1.25rem;
+  align-items: baseline;
+  margin-bottom: 0.4rem;
+  color: var(--muted);
+}
+.editor-bar [role='status'] {
+  color: var(--ink);
+}
+.editor-bar [data-state='offline']::before {
+  content: '⚠ ';
+}
+.editor .source {
+  height: 78vh;
+}

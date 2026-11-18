@@ -35,6 +35,7 @@ Engineering only. Every spec feature, security boundary and accessibility item i
    - Hosting, which fixes the production build sandbox.
    - Who builds the human-reviewed corpus and the challenge set.
    - Whether replaying competitor products is cleared against their terms.
+   - Whether unsynced edits may be kept on the device, so they survive a closed tab while offline, given that this leaves manuscript text on shared computers.
    - Whether PaperWeave should have agents that work across a project on their own, as Prism does. The plan has an explicit Review action only (E4).
 
 ## Design in brief

@@ -1,0 +1,19 @@
+{
+  "name": "@paperweave/sync",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "start": "node --env-file-if-exists=../web/.env.local src/main.ts"
+  },
+  "dependencies": {
+    "@hocuspocus/provider": "^4.8.0",
+    "@hocuspocus/server": "^4.8.0",
+    "@paperweave/latex": "workspace:*",
+    "@paperweave/server": "workspace:*",
+    "pg": "^8.23.1",
+    "yjs": "^13.6.33"
+  },
+  "devDependencies": {
+    "@types/pg": "^8.23.1"
+  }
+}

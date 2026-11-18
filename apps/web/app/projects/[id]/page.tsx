@@ -92,7 +92,13 @@ export default async function Project({
               {files.map((f) => (
                 <tr key={f.id}>
                   <th scope="row">
-                    <code>{f.path}</code>
+                    {f.readonly ? (
+                      <code>{f.path}</code>
+                    ) : (
+                      <Link href={`/projects/${id}/files/${f.id}`}>
+                        <code>{f.path}</code>
+                      </Link>
+                    )}
                   </th>
                   <td>{f.size < 1024 ? `${f.size} B` : `${Math.round(f.size / 1024)} KB`}</td>
                   <td>{note(f.path, f.readonly)}</td>
