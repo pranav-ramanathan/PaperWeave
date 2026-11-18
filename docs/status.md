@@ -89,6 +89,15 @@ Read this first. Update it in every pull request.
     edits other than emphasis, and remembering which view a person last used.
   - Whether a file is "definitions, source only" comes from the import report, so a file added
     later is never marked that way.
+- **C8, first part: edits made offline across a restore.** Someone who comes back online to a
+  paper that was restored while they were away, with edits they had not sent, is told so. Their
+  edits are held, the editor is locked, and they choose: apply the edits to the restored paper, or
+  discard them. With nothing unsent they simply see the restored text.
+  - How: the sync ticket's answer says when the paper was last restored. The editor compares
+    that with what it saw when it last connected, before it sends anything.
+  - This is the editor's own check. The server would still accept the edits from a client that
+    did not ask; anyone who can send them may edit the file anyway.
+  - It is per paper, not per file: a restore that did not touch the open file still asks.
 - **Phase B spike.** Gate report: `docs/phase-b-gate.md`. Recommendation: go.
   - `packages/latex`: lossless block parser, incremental reparse, include graph, encoding round
     trip, coverage.
@@ -103,9 +112,9 @@ nothing, edit it together, build it, and download a ZIP and a PDF that belong to
 
 Next, in this order:
 
-1. **C8.** The fault suite and monitoring. It should include a restore while a client is offline:
-   today those offline edits are merged on reconnect like any others, and the plan's
-   "recover unsynced changes" step is not built.
+1. **C8, the rest.** The fault suite (zero acknowledged edits lost across disconnect, duplicate
+   delivery, restart, revocation and restore) and monitoring (queue age, build failures, rejected
+   writes, reconnects).
 
 The Phase A replays are waiting on a person with accounts: `docs/rea/matrix.md`. The Prism one is
 optional: its export was researched from public sources (`docs/rea/prism.md`) and is a plain LaTeX
