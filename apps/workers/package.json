@@ -4,10 +4,17 @@
   "type": "module",
   "exports": "./src/compile.ts",
   "scripts": {
-    "compile": "node src/cli.ts"
+    "compile": "node src/cli.ts",
+    "start": "node --env-file-if-exists=../web/.env.local src/main.ts"
   },
   "devDependencies": {
     "@paperweave/bridge": "workspace:*",
-    "@paperweave/latex": "workspace:*"
+    "@paperweave/latex": "workspace:*",
+    "@types/pg": "^8.23.1",
+    "yjs": "^13.6.33"
+  },
+  "dependencies": {
+    "@paperweave/server": "workspace:*",
+    "pg": "^8.23.1"
   }
 }

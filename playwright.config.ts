@@ -32,6 +32,14 @@ export default defineConfig({
       env: services,
     },
     {
+      // Needs Docker and the TeX image.
+      command: 'pnpm --filter @paperweave/workers start',
+      wait: { stdout: /build worker ready/ },
+      reuseExistingServer: !process.env.CI,
+      timeout: 60_000,
+      env: services,
+    },
+    {
       command: 'pnpm --filter @paperweave/sync start',
       url: 'http://localhost:4100',
       reuseExistingServer: !process.env.CI,

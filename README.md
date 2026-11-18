@@ -38,6 +38,16 @@ Live editing needs the sync server too, in a second terminal:
 pnpm --filter @paperweave/sync start
 ```
 
+The PDF beside the editor needs the build worker, in a third. It uses Docker and the TeX image:
+
+```bash
+docker build -t paperweave-tex infra/tex
+```
+
+```bash
+pnpm --filter @paperweave/workers start
+```
+
 Sign-in links are emailed; locally they arrive at http://localhost:8025. The editor spike is at
 `/spike` and needs none of this.
 

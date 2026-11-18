@@ -86,12 +86,21 @@ export function diagnostics(log: string): Diagnostic[] {
   return out;
 }
 
+export type Compiler = 'pdflatex' | 'xelatex' | 'lualatex';
+const ENGINE: Record<Compiler, string> = {
+  pdflatex: '-pdf',
+  xelatex: '-xelatex',
+  lualatex: '-lualatex',
+};
+
 export async function compile(
   project: string,
   root: string,
   out: string,
   seconds = 60,
+  compiler: Compiler = 'pdflatex',
 ): Promise<CompileResult> {
+  if (!(compiler in ENGINE)) throw new Error(`unknown compiler: ${compiler}`);
   if (!/^[\w./-]+\.tex$/.test(root) || root.split('/').includes('..'))
     throw new Error(`not a .tex path inside the project: ${root}`);
   // A clean copy: the build never writes into the project, and starts from nothing else.
@@ -102,7 +111,7 @@ export async function compile(
       work,
       // -norc: a project's latexmkrc is arbitrary Perl and is never read.
       [
-        ...['latexmk', '-norc', '-pdf', '-no-shell-escape', '-interaction=nonstopmode'],
+        ...['latexmk', '-norc', ENGINE[compiler], '-no-shell-escape', '-interaction=nonstopmode'],
         ...['-file-line-error', '-synctex=1', root],
       ],
       seconds,

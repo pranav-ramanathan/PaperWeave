@@ -126,6 +126,13 @@ importers:
         version: 19.3.0(@types/react@19.3.0)
 
   apps/workers:
+    dependencies:
+      '@paperweave/server':
+        specifier: workspace:*
+        version: link:../../packages/server
+      pg:
+        specifier: ^8.23.1
+        version: 8.23.1
     devDependencies:
       '@paperweave/bridge':
         specifier: workspace:*
@@ -133,6 +140,12 @@ importers:
       '@paperweave/latex':
         specifier: workspace:*
         version: link:../../packages/latex
+      '@types/pg':
+        specifier: ^8.23.1
+        version: 8.23.1
+      yjs:
+        specifier: ^13.6.33
+        version: 13.6.33
 
   packages/bridge:
     dependencies:

@@ -372,7 +372,7 @@ div.pw-frozen strong {
 }
 .workspace {
   display: grid;
-  grid-template-columns: 14rem 1fr;
+  grid-template-columns: 13rem minmax(0, 1fr) minmax(0, 1fr);
   gap: 1rem;
   align-items: start;
 }
@@ -411,4 +411,42 @@ div.pw-frozen strong {
 }
 .editor .source {
   height: 78vh;
+}
+
+.build iframe {
+  width: 100%;
+  height: 70vh;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: var(--paper);
+}
+.build button,
+.build input {
+  font: inherit;
+}
+.build button {
+  padding: 0.15rem 0.55rem;
+  border: 1px solid var(--line);
+  border-radius: 6px;
+  background: var(--paper);
+  cursor: pointer;
+}
+.build-links {
+  margin: 0.2rem 0 0.4rem;
+  color: var(--muted);
+  font-size: 0.9rem;
+}
+.diagnostics {
+  margin: 0.3rem 0;
+  padding: 0.5rem 0.75rem 0.5rem 1.75rem;
+  border: 1px solid var(--warn);
+  border-radius: 6px;
+  background: var(--warn-wash);
+  font-size: 0.9rem;
+}
+.build [role='alert'] {
+  padding: 0.4rem 0.6rem;
+  border: 1px solid var(--warn);
+  border-radius: 6px;
+  background: var(--warn-wash);
 }
