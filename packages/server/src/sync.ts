@@ -38,16 +38,22 @@ export function tooLarge(document: Y.Doc, update: Uint8Array, max = MAX_FILE_TEX
 const sign = (secret: string, body: string) =>
   createHmac('sha256', `sync-ticket:${secret}`).update(body).digest('base64url');
 
-/** A short-lived proof of who is connecting, handed to the sync server instead of a cookie. */
-export function syncTicket(secret: string, userId: string, seconds = 60) {
+/**
+ * A short-lived proof of who is connecting and to which file, handed to the sync server instead
+ * of a cookie. It opens nothing else: taken from one file's page, it is no use on another.
+ */
+export function syncTicket(secret: string, userId: string, fileId: string, seconds = 60) {
   const body = Buffer.from(
-    JSON.stringify({ u: userId, e: Math.floor(Date.now() / 1000) + seconds }),
+    JSON.stringify({ u: userId, f: fileId, e: Math.floor(Date.now() / 1000) + seconds }),
   ).toString('base64url');
   return `${body}.${sign(secret, body)}`;
 }
 
-/** The user a ticket was issued to, or null if it is forged, malformed or expired. */
-export function verifyTicket(secret: string, ticket: unknown): string | null {
+/**
+ * The user a ticket was issued to, or null if it is forged, malformed, expired or for another
+ * file.
+ */
+export function verifyTicket(secret: string, ticket: unknown, fileId: string): string | null {
   if (typeof ticket !== 'string') return null;
   const [body, mac] = ticket.split('.');
   if (!body || !mac) return null;
@@ -55,8 +61,10 @@ export function verifyTicket(secret: string, ticket: unknown): string | null {
   const got = Buffer.from(mac);
   if (want.length !== got.length || !timingSafeEqual(want, got)) return null;
   try {
-    const { u, e } = JSON.parse(Buffer.from(body, 'base64url').toString());
-    return typeof u === 'string' && typeof e === 'number' && e >= Date.now() / 1000 ? u : null;
+    const { u, f, e } = JSON.parse(Buffer.from(body, 'base64url').toString());
+    return typeof u === 'string' && f === fileId && typeof e === 'number' && e >= Date.now() / 1000
+      ? u
+      : null;
   } catch {
     return null;
   }

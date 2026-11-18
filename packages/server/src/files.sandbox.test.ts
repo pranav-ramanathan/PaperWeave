@@ -1,6 +1,6 @@
 // Needs the services in infra/compose.yaml. Run: pnpm test:sandbox
 import { afterAll, beforeAll, expect, test } from 'vitest';
-import { readZip, writeZip } from './archive.ts';
+import { LIMITS, readZip, writeZip } from './archive.ts';
 import { blobStore } from './blobs.ts';
 import {
   createFile,
@@ -118,6 +118,21 @@ test('bad names, duplicates and people without write access are refused', async 
   expect(await code(deleteFile(t.pool, store, owner.id, p.id, other.intro))).toBe('not_found');
   expect(await code(setRootFile(t.pool, owner.id, p.id, other.main))).toBe('invalid_input');
   expect(await paths(p.id)).toEqual(['intro.tex', 'main.tex']);
+});
+
+test('a paper takes only so many files, and only so much in all', async () => {
+  const p = await paper();
+  // The paper has two files already. The limits here are small ones: room for 27 bytes more.
+  const have = MAIN.length + 'Intro text.\n'.length;
+  const limits = { ...LIMITS, files: 4, totalBytes: have + 27, fileBytes: 40 };
+  const add = (path: string, size: number) =>
+    createFile(t.pool, store, owner.id, p.id, path, Buffer.alloc(size, 'x'), limits);
+  await expect(add('one-file-too-large.txt', 41)).rejects.toThrow('That file is too large.');
+  await expect(add('too-much-in-all.txt', 28)).rejects.toThrow('This paper is full');
+  await add('fits.txt', 27);
+  await add('empty.txt', 0);
+  await expect(add('a-fifth.txt', 0)).rejects.toThrow('This paper has too many files.');
+  expect(await paths(p.id)).toEqual(['empty.txt', 'fits.txt', 'intro.tex', 'main.tex']);
 });
 
 test('the root file is protected, and another .tex file can take its place', async () => {

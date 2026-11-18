@@ -1,7 +1,7 @@
 // Adding and removing a paper's files, and choosing its root.
 import { decodeFile, includes, resolveInclude, rootDir } from '@paperweave/latex';
 import type pg from 'pg';
-import { checkPath, LIMITS } from './archive.ts';
+import { checkPath, type Limits, LIMITS } from './archive.ts';
 import { authorize } from './authz.ts';
 import type { BlobStore } from './blobs.ts';
 import { type Db, transaction } from './db.ts';
@@ -40,17 +40,27 @@ export async function createFile(
   projectId: string,
   path: unknown,
   bytes: Uint8Array = new Uint8Array(),
+  limits: Limits = LIMITS,
 ): Promise<string> {
   await authorize(db, userId, id(projectId), 'file.write');
   const problem = checkPath(path);
   if (problem) throw new AppError('invalid_input', `That name cannot be used: ${problem}.`);
-  if (bytes.length > LIMITS.fileBytes)
+  if (bytes.length > limits.fileBytes)
     throw new AppError('invalid_input', 'That file is too large.');
-  const count = await db.query('select count(*)::int as n from files where project_id = $1', [
-    projectId,
-  ]);
-  if (count.rows[0].n >= LIMITS.files)
-    throw new AppError('invalid_input', 'This paper has too many files.');
+  // The same limits as an imported paper: how many files, and what they add up to. Sizes are
+  // those of the files as they were added; text typed since is held to its own limit.
+  const held = (
+    await db.query(
+      'select count(*)::int as n, coalesce(sum(size), 0)::float8 as bytes from files where project_id = $1',
+      [projectId],
+    )
+  ).rows[0];
+  if (held.n >= limits.files) throw new AppError('invalid_input', 'This paper has too many files.');
+  if (held.bytes + bytes.length > limits.totalBytes)
+    throw new AppError(
+      'invalid_input',
+      `This paper is full: its files can add up to ${Math.round(limits.totalBytes / 1e6)} MB.`,
+    );
   const meta = fileMeta(path as string, bytes);
   const digest = await store.put(bytes);
   const made = await db
