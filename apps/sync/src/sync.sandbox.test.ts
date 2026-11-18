@@ -5,6 +5,7 @@ import { HocuspocusProvider, HocuspocusProviderWebsocket } from '@hocuspocus/pro
 import {
   acceptInvitation,
   blobStore,
+  deleteFile,
   exportZip,
   importZip,
   invite,
@@ -14,6 +15,8 @@ import {
   restoreRevision,
   saveRevision,
   setRole,
+  createFile,
+  listRevisions,
   syncTicket,
   TEXT,
   writeZip,
@@ -249,6 +252,46 @@ test('restoring a revision reaches people who have the file open, without a relo
   editor.text.insert(0, '% after restore\n');
   await saved(editor);
   expect(await stored(project)).toBe('% after restore\r\n' + MAIN);
+});
+
+test('deleting a file closes it for everyone; restoring brings back the same file without doubling text', async () => {
+  const { project, file: main } = await paper();
+  const notes = await createFile(
+    t.pool,
+    store,
+    users.owner.id,
+    project,
+    'notes.tex',
+    Buffer.from('One.\nTwo.\n'),
+  );
+  const owner = client(users.owner, notes);
+  const editor = client(users.editor, notes);
+  await saved(owner, editor);
+  editor.text.insert(0, 'Zero.\n');
+  await saved(editor);
+  await until('the owner to see the edit', () => owner.text.toString().startsWith('Zero.'));
+  expect(main).not.toBe(notes);
+
+  // The editor's connection drops just before the delete, with an edit not yet sent.
+  editor.provider.configuration.websocketProvider.disconnect();
+  editor.text.insert(editor.text.length, 'Offline.\n');
+  const closedBefore = owner.state.closed;
+  await deleteFile(t.pool, store, users.owner.id, project, notes);
+  await until('the open file to be closed', () => owner.state.closed > closedBefore);
+  const refused = client(users.owner, notes);
+  await until('opening the deleted file to be refused', () => refused.state.refused);
+
+  // Deleting saved a revision. Restoring it brings the file back with its history, so a copy
+  // that was open all along merges into it instead of adding its text a second time.
+  const [before] = await listRevisions(t.pool, users.owner.id, project);
+  await restoreRevision(t.pool, store, users.owner.id, project, before.id);
+  await editor.provider.configuration.websocketProvider.connect();
+  await saved(editor);
+  const fresh = client(users.second, notes);
+  await saved(fresh);
+  const want = 'Zero.\nOne.\nTwo.\nOffline.\n';
+  await until('both copies to agree', () => editor.text.toString() === want);
+  expect(fresh.text.toString()).toBe(want);
 });
 
 test('killing the server mid-save loses nothing it acknowledged, and nothing at all after reconnect', async () => {

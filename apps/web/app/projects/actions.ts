@@ -3,6 +3,7 @@
 import {
   acceptInvitation,
   createProject,
+  deleteFile,
   invite,
   removeMember,
   renameFile,
@@ -10,6 +11,7 @@ import {
   restoreRevision,
   saveRevision,
   setRole,
+  setRootFile,
 } from '@paperweave/server';
 import { act, baseUrl, blobs, db, requireUser, sendEmail } from '../../lib/server';
 
@@ -99,4 +101,22 @@ export async function renameAction(projectId: string, fileId: string, form: Form
   const back = `/projects/${projectId}`;
   const user = await requireUser(back);
   await act(back, () => renameFile(db(), user.id, projectId, fileId, text(form, 'path')));
+}
+
+export async function deleteFileAction(projectId: string, fileId: string) {
+  const back = `/projects/${projectId}`;
+  const user = await requireUser(back);
+  await act(back, async () => {
+    const gone = await deleteFile(db(), blobs(), user.id, projectId, fileId);
+    return `${back}?deleted=${encodeURIComponent(gone.path)}&in=${gone.revision}`;
+  });
+}
+
+export async function rootAction(projectId: string, fileId: string) {
+  const back = `/projects/${projectId}`;
+  const user = await requireUser(back);
+  await act(back, async () => {
+    await setRootFile(db(), user.id, projectId, fileId);
+    return `${back}?root=1`;
+  });
 }

@@ -7,6 +7,7 @@ import { authorize } from './authz.ts';
 import type { BlobStore } from './blobs.ts';
 import { type Db, transaction } from './db.ts';
 import { AppError } from './errors.ts';
+import { removeFile } from './files.ts';
 import { id } from './projects.ts';
 import { currentBytes, editFile } from './sync.ts';
 import { type DiffLine, diffLines } from './textdiff.ts';
@@ -319,14 +320,27 @@ export async function restoreRevision(
 ): Promise<{ id: string; number: number }> {
   await authorize(pool, userId, id(projectId), 'revision.write');
   const { revision, files } = await load(pool, projectId, revisionId);
+  // Files deleted since come back as the same files, edit history and all. They wait under a
+  // placeholder name until the names they had are free.
+  await pool.query(
+    `update all_files set deleted_at = null, path = id::text || '.renaming'
+     where project_id = $1 and deleted_at is not null and id = any($2::uuid[])`,
+    [projectId, files.map((t) => t.file_id)],
+  );
   const live = (
     await pool.query('select id, path, digest, eol from files where project_id = $1', [projectId])
   ).rows;
+  // Files added since the revision go.
+  for (const extra of live)
+    if (!files.some((t) => t.file_id === extra.id)) await removeFile(pool, projectId, extra.id);
+  // Files whose name must change step aside first, so that two files can swap names.
+  const moving = live.filter((f) => files.some((t) => t.file_id === f.id && t.path !== f.path));
+  await pool.query("update files set path = id::text || '.renaming' where id = any($1::uuid[])", [
+    moving.map((f) => f.id),
+  ]);
   for (const target of files) {
-    // shortcut: files cannot be created or deleted yet, so every file in a revision still exists.
-    // Recreate missing files here when deleting files arrives.
     const file = live.find((f) => f.id === target.file_id);
-    if (!file) continue;
+    if (!file) throw new Error(`file ${target.file_id} of revision ${revisionId} is gone`);
     if (file.path !== target.path)
       await pool.query('update files set path = $2 where id = $1', [file.id, target.path]);
     const bytes = await blob(store, target.digest);

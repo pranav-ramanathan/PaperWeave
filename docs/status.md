@@ -52,6 +52,17 @@ Read this first. Update it in every pull request.
     see it at once, and records a new revision. Nothing is erased.
   - Comparing two revisions shows changed lines, renames, additions and removals.
   - Renaming a file keeps its ID and history. It does not yet update `\input` lines that name it.
+- **Files.** Add a blank text file or an upload, delete a file, choose the root file
+  (`packages/server/src/files.ts`, controls on the paper's page).
+  - Deleting hides the file: `files` is now a view of the live rows of `all_files`. The row and
+    its edit log stay, so restoring a revision brings back the same file with its history, and
+    someone who had it open merges into it instead of adding their text twice.
+  - A delete cuts a revision first, so the file can always be brought back. The root file cannot
+    be deleted. Restoring a revision removes files added since and brings back files deleted
+    since, and can swap two files' names.
+  - The first .tex file added to an empty paper becomes its root.
+  - When the server stops serving a file (deleted, or access removed) it says so, and the open
+    editor locks and shows why. Before this the editor went on saying "All edits saved".
 - **Phase B spike.** Gate report: `docs/phase-b-gate.md`. Recommendation: go.
   - `packages/latex`: lossless block parser, incremental reparse, include graph, encoding round
     trip, coverage.
@@ -61,17 +72,15 @@ Read this first. Update it in every pull request.
 
 ## Next
 
-C1 to C5 are done, which completes the first end-to-end slice: import a ZIP, edit it together,
-build it, and download a ZIP and a PDF that belong to the same revision.
+C1 to C5 are done, which completes the first end-to-end slice: import a ZIP or start from
+nothing, edit it together, build it, and download a ZIP and a PDF that belong to the same revision.
 
 Next, in this order:
 
-1. **Files.** A paper's files can be renamed but not created or deleted. Add both (and make
-   restore recreate a deleted file) before anything else: it is the largest gap in the slice.
-2. **C6.** Commands for structural edits, built on `editFile` in `packages/server/src/sync.ts`,
+1. **C6.** Commands for structural edits, built on `editFile` in `packages/server/src/sync.ts`,
    and compaction of the edit log.
-3. **C7.** The visual editor in the app, using `packages/bridge`.
-4. **C8.** The fault suite and monitoring. It should include a restore while a client is offline:
+2. **C7.** The visual editor in the app, using `packages/bridge`.
+3. **C8.** The fault suite and monitoring. It should include a restore while a client is offline:
    today those offline edits are merged on reconnect like any others, and the plan's
    "recover unsynced changes" step is not built.
 
@@ -105,6 +114,9 @@ See "What I need from you" in `docs/plan.md`. None blocks C1.
   A non-member gets `not_found`, never `permission_denied`.
 - Browser tests run against a production build on port 3100. The dev server reloads the page when
   any file in the repo changes, test output included.
+- Query `files` for a paper's files. `all_files` also holds deleted ones; only restore reads it.
+- Deleted files are never purged. Deleting a paper removes them. A purge needs a retention rule
+  first: an owner decision.
 - Never log manuscript text. Log IDs and counts.
 - Unsynced edits live in the browser tab's memory. Closing the tab while offline loses them; the
   browser warns first. Keeping them on the device (IndexedDB) would survive that, at the cost of

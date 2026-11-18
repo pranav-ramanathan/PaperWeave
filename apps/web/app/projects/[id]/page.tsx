@@ -12,16 +12,19 @@ import { notFound } from 'next/navigation';
 import { db, requireUser } from '../../../lib/server';
 import {
   buildRevisionAction,
+  deleteFileAction,
   inviteAction,
   removeAction,
   renameAction,
   restoreAction,
   roleAction,
+  rootAction,
   saveRevisionAction,
 } from '../actions';
 
 export const dynamic = 'force-dynamic';
 const INVITABLE = ['editor', 'reviewer', 'viewer'] as const;
+const TEX = /\.(tex|ltx)$/i;
 
 export default async function Project({
   params,
@@ -35,6 +38,10 @@ export default async function Project({
     revision?: string;
     restored?: string;
     building?: string;
+    added?: string;
+    deleted?: string;
+    in?: string;
+    root?: string;
   }>;
 }) {
   const { id } = await params;
@@ -67,7 +74,9 @@ export default async function Project({
     }
     return '';
   };
-  const { error, invited, saved, revision, restored, building } = await searchParams;
+  const query = await searchParams;
+  const { error, invited, saved, revision, restored, building, added, deleted, root } = query;
+  const canWrite = can(project.role, 'file.write');
   const owner = project.role === 'owner';
   return (
     <main className="page">
@@ -90,10 +99,22 @@ export default async function Project({
       {revision && <p role="status">Saved as revision {revision}.</p>}
       {restored && <p role="status">Restored. The paper is now revision {restored}.</p>}
       {building && <p role="status">Building the PDF for that revision. Reload in a moment.</p>}
+      {added && (
+        <p role="status">
+          Added <code>{added}</code>.
+        </p>
+      )}
+      {deleted && (
+        <p role="status">
+          Deleted <code>{deleted}</code>. Revision {query.in} still has it: restore that revision to
+          bring it back.
+        </p>
+      )}
+      {root && <p role="status">Root file changed.</p>}
 
+      <h2>Files</h2>
       {files.length > 0 && (
         <>
-          <h2>Files</h2>
           <p>
             Root file: <code>{project.root ?? 'none'}</code>. Compiler:{' '}
             <code>{project.compiler}</code>.{' '}
@@ -127,7 +148,22 @@ export default async function Project({
                   <td>{f.size < 1024 ? `${f.size} B` : `${Math.round(f.size / 1024)} KB`}</td>
                   <td>{note(f.path, f.readonly)}</td>
                   <td>
-                    {can(project.role, 'file.write') && (
+                    {f.path === project.root && 'Root file '}
+                    {canWrite && f.path !== project.root && !f.readonly && TEX.test(f.path) && (
+                      <form action={rootAction.bind(null, id, f.id)} className="inline">
+                        <button type="submit" aria-label={`Make ${f.path} the root file`}>
+                          Make root
+                        </button>
+                      </form>
+                    )}{' '}
+                    {canWrite && f.path !== project.root && (
+                      <form action={deleteFileAction.bind(null, id, f.id)} className="inline">
+                        <button type="submit" aria-label={`Delete ${f.path}`}>
+                          Delete
+                        </button>
+                      </form>
+                    )}
+                    {canWrite && (
                       <details>
                         <summary>Rename</summary>
                         <form action={renameAction.bind(null, id, f.id)} className="inline">
@@ -147,6 +183,20 @@ export default async function Project({
             </tbody>
           </table>
         </>
+      )}
+      {canWrite && (
+        <form method="post" action={`/projects/${id}/files`} encType="multipart/form-data">
+          <h3>Add a file</h3>
+          <label>
+            Name, with folders if you like
+            <input name="path" maxLength={255} placeholder="sections/methods.tex" />
+          </label>
+          <label>
+            A file to upload. Leave empty to start a blank text file.
+            <input type="file" name="file" />
+          </label>
+          <button type="submit">Add file</button>
+        </form>
       )}
       {report && (
         <>
@@ -250,7 +300,7 @@ export default async function Project({
                       Changes since {revisions[i + 1].number}
                     </Link>
                   )}{' '}
-                  {writer && i > 0 && (
+                  {writer && (
                     <form action={restoreAction.bind(null, id, r.id)} className="inline">
                       <button type="submit" aria-label={`Restore revision ${r.number}`}>
                         Restore

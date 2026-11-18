@@ -15,10 +15,10 @@ import { authorize } from './authz.ts';
 import type { BlobStore } from './blobs.ts';
 import { type Db, transaction } from './db.ts';
 import { AppError } from './errors.ts';
+import { TEXT_FILE } from './files.ts';
 import { id, type Project } from './projects.ts';
 import { cutRevision, exportRevision } from './revisions.ts';
 
-const TEXT = /\.(tex|ltx|bib|bst|cls|sty|bbx|cbx|def|cfg|clo|csv|tsv|txt|md)$/i;
 const MAX_PROJECTS = 50;
 
 export type Compiler = 'pdflatex' | 'xelatex' | 'lualatex';
@@ -72,7 +72,7 @@ function compilerFor(root: string): Compiler {
 function papers(entries: Entry[], skipped: Skipped[]) {
   const text = new Map<string, string>();
   for (const e of entries) {
-    if (!TEXT.test(e.path)) continue;
+    if (!TEXT_FILE.test(e.path)) continue;
     const d = decodeFile(e.bytes);
     if (d.editable) text.set(e.path, d.text);
   }
@@ -112,7 +112,7 @@ function report(
   const meta = new Map<string, ReturnType<typeof decodeFile>>();
   const texts: Record<string, string> = {};
   for (const e of entries) {
-    if (!TEXT.test(e.path)) continue;
+    if (!TEXT_FILE.test(e.path)) continue;
     const d = decodeFile(e.bytes);
     meta.set(e.path, d);
     if (d.editable) texts[e.path] = d.text;
