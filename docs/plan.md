@@ -27,7 +27,7 @@ Engineering only. Every spec feature, security boundary and accessibility item i
 
 ## What I need from you
 
-1. **Capture a Prism export before 1 January 2027.** The spec says Prism retires then. I cannot operate accounts on Prism, Overleaf or Grammarly, so the Phase A replays are yours; I supply the synthetic files, a checklist and the results matrix.
+1. **Run the Phase A replays.** I cannot operate accounts on Overleaf or Grammarly, so the live replays are yours; I supply the synthetic files, a checklist and the results matrix. The Prism replay is no longer needed: public sources say its export is a plain LaTeX ZIP with no comments or history (`docs/rea/prism.md`). A real Prism export is welcome if you have one before it shuts down on 1 January 2027, and nothing waits on it.
 2. **A base branch.** The remote has none and I may only push `claude/blissful-mendel-unz9kz`. Unless you object, I push one bootstrap commit (README, `.gitignore`) to `main` so a draft PR has a target.
 3. **Decisions, none blocking this session:**
    - Tracked changes are stored beside the source, not inside it, so the PDF never shows pending proposals. Confirm before Phase E.
@@ -35,6 +35,7 @@ Engineering only. Every spec feature, security boundary and accessibility item i
    - Hosting, which fixes the production build sandbox.
    - Who builds the human-reviewed corpus and the challenge set.
    - Whether replaying competitor products is cleared against their terms.
+   - Whether PaperWeave should have agents that work across a project on their own, as Prism does. The plan has an explicit Review action only (E4).
 
 ## Design in brief
 
@@ -94,7 +95,7 @@ Each item is one or two PRs with the exit test shown.
 
 ### Phase A: reference behaviour (yours, in parallel)
 
-The six replays from spec §9, recorded in `docs/rea/matrix.md` as observation, design decision and acceptance test, marked observed or docs-derived. Prism first.
+The six replays from spec §9, recorded in `docs/rea/matrix.md` as observation, design decision and acceptance test, marked observed or docs-derived. The Prism replay is optional (`docs/rea/prism.md`).
 
 ### Phase C: collaboration foundation
 

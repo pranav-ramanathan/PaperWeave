@@ -20,8 +20,9 @@ Read this first. Update it in every pull request.
 Plan items C1 to C5 at single-user depth give the first end-to-end slice (import, edit, build,
 export). Start with C1: database, blob store, sign-in, roles and one `authorize()`.
 
-The Phase A replays are waiting on a person with accounts: `docs/rea/matrix.md`. The Prism export
-has to be captured before 1 January 2027.
+The Phase A replays are waiting on a person with accounts: `docs/rea/matrix.md`. The Prism one is
+optional: its export was researched from public sources (`docs/rea/prism.md`) and is a plain LaTeX
+ZIP with no comments or history, so C2 imports it like any other ZIP.
 
 ## Decisions waiting on the owner
 
