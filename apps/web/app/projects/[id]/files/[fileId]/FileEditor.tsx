@@ -359,11 +359,16 @@ export default function FileEditor(props: {
     const run = (c: Command) =>
       new Promise<CommandResult>((resolve, reject) => {
         const place = (p: Y.RelativePosition) => toBase64(Y.encodeRelativePosition(p));
+        const asked = JSON.stringify({ ...c, from: place(c.from), to: place(c.to) });
+        // An answer can be lost with a connection. Asked once more, under the same key, the
+        // server makes the edit if it has not, and says so if it has: never twice.
+        const again = setTimeout(() => provider.sendStateless(asked), 3000);
         const timer = setTimeout(() => {
           waiting.delete(c.key);
           reject(new Error('no answer'));
         }, 8000);
         waiting.set(c.key, (reply) => {
+          clearTimeout(again);
           clearTimeout(timer);
           waiting.delete(c.key);
           if (!reply.result) return reject(new Error(reply.error));
@@ -376,7 +381,7 @@ export default function FileEditor(props: {
           }
           resolve(reply.result);
         });
-        provider.sendStateless(JSON.stringify({ ...c, from: place(c.from), to: place(c.to) }));
+        provider.sendStateless(asked);
       });
     const visual: Visual | null = props.visual
       ? createVisual({

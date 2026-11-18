@@ -5,7 +5,7 @@ import { mkdtempSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { writeZip } from '../../packages/server/src/archive';
-import { emailedLink, person, run, showSource, signIn } from './helpers';
+import { clickAfter, emailedLink, person, run, showSource, signIn } from './helpers';
 
 const MAIN = '\\documentclass{article}\n\\begin{document}\nHello.\n\\end{document}\n';
 const source = (page: Page) => page.locator('.editor .cm-content');
@@ -240,4 +240,47 @@ test('a file is opened over one connection, which is kept', async ({ browser }) 
   await page.waitForTimeout(2000);
   expect(connections).toEqual([{ closed: false }]);
   await expect(status(page)).toHaveText('All edits saved.');
+});
+
+test('a structural edit whose answer is lost is made once, and not said to have failed', async ({
+  browser,
+}) => {
+  const { page, email } = await person(browser, 'rec-lost');
+  const zip = join(mkdtempSync(join(tmpdir(), 'paperweave-e2e-')), `Lost ${run}.zip`);
+  writeFileSync(zip, await writeZip([{ path: 'main.tex', bytes: Buffer.from(MAIN) }]));
+  // The server's first answer to a structural edit never reaches the page, as when a
+  // connection drops between the edit and its answer. (Set up before any page is loaded:
+  // it takes hold of the connections of pages loaded after it.)
+  let lost = 0;
+  await page.routeWebSocket(/:4100/, (socket) => {
+    const server = socket.connectToServer();
+    socket.onMessage((message) => server.send(message));
+    server.onMessage((message) => {
+      if (!lost && Buffer.from(message as Buffer).includes('"result":"applied"'))
+        return void lost++;
+      socket.send(message);
+    });
+  });
+  await page.goto('/sign-in');
+  await signIn(page, email);
+  await page.getByLabel('Or import a ZIP of a LaTeX project').setInputFiles(zip);
+  await page.getByRole('button', { name: 'Import ZIP' }).click();
+
+  await page.getByRole('link', { name: 'main.tex' }).first().click();
+  await expect(status(page)).toHaveText('All edits saved.');
+  await clickAfter(page, '.editor .visual .ProseMirror', 'Hello');
+  await page.getByRole('group', { name: 'Edit' }).getByRole('button', { name: 'Table' }).click();
+  const box = page.getByRole('dialog', { name: 'Insert a table' });
+  await box.getByLabel('Caption').fill('Lost and found');
+  await box.getByRole('button', { name: 'Insert' }).click();
+
+  // The editor asks again under the same key. The server has made the edit and says so, and
+  // the window closes without a word of failure.
+  await expect(box).toBeHidden({ timeout: 7000 });
+  expect(lost).toBe(1);
+  await expect(page.locator('main [role=alert]')).toHaveCount(0);
+  // Made once, not once for each time it was asked.
+  await showSource(page);
+  await expect(source(page)).toContainText('\\caption{Lost and found}');
+  expect((await source(page).innerText()).split('\\begin{table}').length - 1).toBe(1);
 });
