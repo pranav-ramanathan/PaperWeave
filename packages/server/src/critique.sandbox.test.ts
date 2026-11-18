@@ -199,4 +199,10 @@ test('a review is asked for by people who may propose, of a passage of a sensibl
   expect(sent).toEqual([]);
   expect(await review('editor')).toBe('ok');
   expect(sent).toHaveLength(1);
+  // A paper may ask only so often in an hour. Past that, nothing more is sent.
+  const limited = () =>
+    code(reviewPassage(t.pool, store, users.owner.id, p.id, p.file, at, { ask, perHour: 2 }));
+  expect(await limited()).toBe('ok');
+  expect(await limited()).toBe('conflict');
+  expect(sent).toHaveLength(2);
 });

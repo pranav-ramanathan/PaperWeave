@@ -1,6 +1,7 @@
 import { readdirSync, readFileSync, statSync } from 'node:fs';
 import { join, relative } from 'node:path';
 import { decodeFile, findRoot, includeGraph } from '@paperweave/latex';
+import { notFound } from 'next/navigation';
 import Spike from './Spike';
 
 const FIXTURES = join(process.cwd(), '../../fixtures');
@@ -38,6 +39,8 @@ function big() {
 export const dynamic = 'force-dynamic';
 
 export default async function Page({ searchParams }: { searchParams: Promise<{ big?: string }> }) {
+  // A workbench for developers: see the compile route beside it.
+  if (process.env.SPIKE !== '1') notFound();
   const projects = Object.fromEntries(PROJECTS.map((p) => [p, load(p)]));
   if ((await searchParams).big) projects['big'] = { 'main.tex': big() };
   // Files read before \\begin{document} hold definitions: shown, but edited in source only.

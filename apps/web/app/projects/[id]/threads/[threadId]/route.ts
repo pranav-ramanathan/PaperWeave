@@ -1,7 +1,7 @@
 // Answer a thread ({body, mentions}), resolve it or open it again ({status}), or attach it to
 // its words again ({attach}).
 import { AppError, getProject, reattachThread, reply, setThreadStatus } from '@paperweave/server';
-import { blobs, currentUser, db, sameOrigin } from '../../../../../lib/server';
+import { blobs, currentUser, db, readJson, sameOrigin } from '../../../../../lib/server';
 import { failed, tellMentioned } from '../mentions';
 
 export async function POST(
@@ -13,7 +13,7 @@ export async function POST(
   if (!user) return Response.json({ error: 'Sign in first.' }, { status: 401 });
   const { id, threadId } = await params;
   try {
-    const input = await request.json().catch(() => null);
+    const input = await readJson(request);
     if (!input || typeof input !== 'object')
       throw new AppError('invalid_input', 'That is not a comment.');
     if ('attach' in input) await reattachThread(db(), blobs(), user.id, id, threadId);

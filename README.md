@@ -10,6 +10,8 @@ A collaborative academic writing workspace: a visual editor over LaTeX source, a
 - Accessibility, and what has not been checked: `docs/accessibility.md`
 - Backing up and restoring, and what a drill showed: `docs/restore-drill.md`
 - How long things take: `docs/benchmarks.md`
+- Security: what was reviewed, fixed and left open: `docs/security-review.md`
+- Tectonic compared with the TeX Live toolchain: `docs/tectonic-comparison.md`
 
 ## Develop
 
@@ -53,8 +55,9 @@ docker build -t paperweave-tex infra/tex
 pnpm --filter @paperweave/workers start
 ```
 
-Sign-in links are emailed; locally they arrive at http://localhost:8025. The editor spike is at
-`/spike` and needs none of this.
+Sign-in links are emailed; locally they arrive at http://localhost:8025. The editor workbench from
+Phase B is at `/spike` when the server is started with `SPIKE=1`; it needs none of this, and
+is switched off otherwise because it compiles LaTeX for anyone without signing in.
 
 Compiling, the database and the object store need Docker:
 

@@ -86,3 +86,16 @@ test('sign-in never sends people to another site', async ({ browser }) => {
   await signIn(visitor.page, visitor.email);
   await expect(visitor.page).toHaveURL(/^http:\/\/localhost:3100\/projects$/);
 });
+
+test('every answer says how it may be used: not in a frame, not guessed at, not posted elsewhere', async ({
+  request,
+}) => {
+  for (const path of ['/sign-in', '/projects', '/api/sync-ticket']) {
+    const headers = (await request.get(path, { maxRedirects: 0 })).headers();
+    expect(headers['x-frame-options'], path).toBe('DENY');
+    expect(headers['x-content-type-options'], path).toBe('nosniff');
+    expect(headers['referrer-policy'], path).toBe('same-origin');
+    expect(headers['content-security-policy'], path).toContain("frame-ancestors 'none'");
+    expect(headers['content-security-policy'], path).toContain("form-action 'self'");
+  }
+});

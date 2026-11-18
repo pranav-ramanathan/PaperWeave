@@ -1,7 +1,7 @@
 // The spelling and grammar findings of a file (GET ?file=<id>), and two quick changes to how
 // the paper is checked (POST): {word} makes a word the paper's own, {rule} switches a rule off.
 import { AppError, checkGrammar, languageSettings, setLanguageSettings } from '@paperweave/server';
-import { blobs, currentUser, db, sameOrigin } from '../../../../lib/server';
+import { blobs, currentUser, db, readJson, sameOrigin } from '../../../../lib/server';
 
 type Params = { params: Promise<{ id: string }> };
 const failed = (err: unknown) => {
@@ -27,7 +27,7 @@ export async function POST(request: Request, { params }: Params) {
   if (!user) return Response.json({ error: 'Sign in first.' }, { status: 401 });
   const { id } = await params;
   try {
-    const input = await request.json().catch(() => null);
+    const input = await readJson(request);
     const now = await languageSettings(db(), user.id, id);
     if (typeof input?.word === 'string')
       await setLanguageSettings(db(), user.id, id, { glossary: [...now.glossary, input.word] });
