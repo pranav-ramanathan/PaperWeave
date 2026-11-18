@@ -40,6 +40,18 @@ Read this first. Update it in every pull request.
     lists errors with file and line, and keeps showing the last good PDF, marked when it is behind
     the text. The PDF is shown in the browser's own viewer; PDF.js comes with SyncTeX (D5).
   - Import still runs inside the upload request.
+- **C5: revisions.** A revision freezes every file's path and bytes with the root and compiler.
+  - Cutting one locks the paper's file rows for the moment it takes to read them, so all files
+    are captured at the same point. A cut that finds nothing changed returns the latest revision.
+  - Every build is of a revision; a download of the live paper cuts one first. Named revisions
+    can be built on request.
+  - The PDF is stamped with the time its revision was cut, so the exported ZIP rebuilt elsewhere
+    with the command in `paperweave-toolchain.json` gives the same bytes. A test does exactly
+    that for all three templates.
+  - Restore applies the difference as new edits through `editFile`, so people with the file open
+    see it at once, and records a new revision. Nothing is erased.
+  - Comparing two revisions shows changed lines, renames, additions and removals.
+  - Renaming a file keeps its ID and history. It does not yet update `\input` lines that name it.
 - **Phase B spike.** Gate report: `docs/phase-b-gate.md`. Recommendation: go.
   - `packages/latex`: lossless block parser, incremental reparse, include graph, encoding round
     trip, coverage.
@@ -49,13 +61,19 @@ Read this first. Update it in every pull request.
 
 ## Next
 
-C1 to C4 are done. Next is C5: revisions. Cut a revision (a consistent set of file contents),
-name it, compare two, restore one as a new revision, rename a file keeping its ID, and export the
-ZIP and PDF from one revision with an optional toolchain manifest. Builds should then belong to a
-revision.
+C1 to C5 are done, which completes the first end-to-end slice: import a ZIP, edit it together,
+build it, and download a ZIP and a PDF that belong to the same revision.
 
-After C5: C6 (commands for structural edits, log compaction), C7 (the visual editor in the app),
-C8 (fault suite and monitoring).
+Next, in this order:
+
+1. **Files.** A paper's files can be renamed but not created or deleted. Add both (and make
+   restore recreate a deleted file) before anything else: it is the largest gap in the slice.
+2. **C6.** Commands for structural edits, built on `editFile` in `packages/server/src/sync.ts`,
+   and compaction of the edit log.
+3. **C7.** The visual editor in the app, using `packages/bridge`.
+4. **C8.** The fault suite and monitoring. It should include a restore while a client is offline:
+   today those offline edits are merged on reconnect like any others, and the plan's
+   "recover unsynced changes" step is not built.
 
 The Phase A replays are waiting on a person with accounts: `docs/rea/matrix.md`. The Prism one is
 optional: its export was researched from public sources (`docs/rea/prism.md`) and is a plain LaTeX

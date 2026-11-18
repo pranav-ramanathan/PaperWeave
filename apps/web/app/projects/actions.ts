@@ -1,7 +1,17 @@
 'use server';
 
-import { acceptInvitation, createProject, invite, removeMember, setRole } from '@paperweave/server';
-import { act, baseUrl, db, requireUser, sendEmail } from '../../lib/server';
+import {
+  acceptInvitation,
+  createProject,
+  invite,
+  removeMember,
+  renameFile,
+  requestBuild,
+  restoreRevision,
+  saveRevision,
+  setRole,
+} from '@paperweave/server';
+import { act, baseUrl, blobs, db, requireUser, sendEmail } from '../../lib/server';
 
 const text = (form: FormData, name: string) => String(form.get(name) ?? '');
 
@@ -56,4 +66,37 @@ export async function joinAction(token: string) {
   const back = `/invitations/${token}`;
   const user = await requireUser(back);
   await act(back, async () => `/projects/${(await acceptInvitation(db(), user.id, token)).id}`);
+}
+
+export async function saveRevisionAction(projectId: string, form: FormData) {
+  const back = `/projects/${projectId}`;
+  const user = await requireUser(back);
+  await act(back, async () => {
+    const { number } = await saveRevision(db(), blobs(), user.id, projectId, text(form, 'name'));
+    return `${back}?revision=${number}#revisions`;
+  });
+}
+
+export async function buildRevisionAction(projectId: string, revisionId: string) {
+  const back = `/projects/${projectId}`;
+  const user = await requireUser(back);
+  await act(back, async () => {
+    await requestBuild(db(), user.id, projectId, { revisionId });
+    return `${back}?building=1#revisions`;
+  });
+}
+
+export async function restoreAction(projectId: string, revisionId: string) {
+  const back = `/projects/${projectId}`;
+  const user = await requireUser(back);
+  await act(back, async () => {
+    const { number } = await restoreRevision(db(), blobs(), user.id, projectId, revisionId);
+    return `${back}?restored=${number}#revisions`;
+  });
+}
+
+export async function renameAction(projectId: string, fileId: string, form: FormData) {
+  const back = `/projects/${projectId}`;
+  const user = await requireUser(back);
+  await act(back, () => renameFile(db(), user.id, projectId, fileId, text(form, 'path')));
 }

@@ -4,7 +4,7 @@ import { createHash } from 'node:crypto';
 import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { dirname, join } from 'node:path';
-import { type BlobStore, currentBytes, sha256, transaction } from '@paperweave/server';
+import { type BlobStore, cutRevision, transaction } from '@paperweave/server';
 import type pg from 'pg';
 import { compile, type Compiler, IMAGE } from './compile.ts';
 
@@ -27,9 +27,8 @@ export function buildNext(
   return transaction(pool, async (db) => {
     const job = (
       await db.query(
-        `select b.id, b.project_id, p.compiler, r.path as root from builds b
-         join projects p on p.id = b.project_id left join files r on r.id = p.root_file_id
-         where b.status = 'queued' order by b.created_at for update of b skip locked limit 1`,
+        `select id, project_id, requested_by, revision_id from builds
+         where status = 'queued' order by created_at for update skip locked limit 1`,
       )
     ).rows[0];
     if (!job) return false;
@@ -41,34 +40,24 @@ export function buildNext(
       );
     };
 
-    // The text as it stands now, not as it stood when the build was asked for.
-    const files = (
+    // A build is always of one revision. Unless a particular one was asked for, that is the paper
+    // as it stands now, not as it stood when the build was requested.
+    const revisionId: string =
+      job.revision_id ?? (await cutRevision(pool, store, job.requested_by, job.project_id)).id;
+    const revision = (
       await db.query(
-        'select id, path, digest, eol, bom, head_seq from files where project_id = $1 order by path',
-        [job.project_id],
+        'select root, compiler, content_key, created_at from revisions where id = $1',
+        [revisionId],
       )
+    ).rows[0];
+    const files = (
+      await db.query('select path, digest from revision_files where revision_id = $1', [revisionId])
     ).rows;
-    const inputs: Record<string, string> = {};
-    const heads: Record<string, string> = {};
-    const content = new Map<string, Uint8Array>();
-    for (const f of files) {
-      const bytes = await currentBytes(db, store, f);
-      content.set(f.path, bytes);
-      inputs[f.path] = sha256(bytes);
-      heads[f.id] = String(f.head_seq);
-    }
-    const key = createHash('sha256')
-      .update(JSON.stringify({ inputs, root: job.root, compiler: job.compiler, image }))
-      .digest('hex');
-    const common = {
-      cache_key: key,
-      inputs: JSON.stringify(inputs),
-      heads: JSON.stringify(heads),
-      compiler: job.compiler,
-      image,
-    };
+    // Everything that can change the output: the revision's content and the toolchain.
+    const key = createHash('sha256').update(`${revision.content_key}:${image}`).digest('hex');
+    const common = { revision_id: revisionId, cache_key: key, compiler: revision.compiler, image };
 
-    if (!job.root) {
+    if (!revision.root) {
       const diagnostics = [{ severity: 'error', message: 'This paper has no root file to build.' }];
       await finish({ ...common, status: 'failed', diagnostics: JSON.stringify(diagnostics) });
       return true;
@@ -100,17 +89,22 @@ export function buildNext(
 
     const work = mkdtempSync(join(tmpdir(), 'paperweave-job-'));
     try {
-      for (const [path, bytes] of content) {
-        // Paths were checked at import; they are relative and stay inside the project.
-        mkdirSync(dirname(join(work, 'src', path)), { recursive: true });
-        writeFileSync(join(work, 'src', path), bytes);
+      for (const f of files) {
+        const bytes = await store.get(f.digest);
+        if (!bytes) throw new Error(`blob ${f.digest} for ${f.path} is missing`);
+        // Paths were checked at import and on rename; they are relative and stay inside the project.
+        mkdirSync(dirname(join(work, 'src', f.path)), { recursive: true });
+        writeFileSync(join(work, 'src', f.path), bytes);
       }
       const result = await compile(
         join(work, 'src'),
-        job.root,
+        revision.root,
         join(work, 'out'),
         seconds,
-        job.compiler as Compiler,
+        revision.compiler as Compiler,
+        // The PDF is stamped with the moment its revision was cut, so rebuilding it elsewhere
+        // from the exported files gives the same bytes.
+        Math.floor(new Date(revision.created_at).getTime() / 1000),
       );
       const put = async (name?: string) =>
         name && existsSync(join(work, 'out', name))

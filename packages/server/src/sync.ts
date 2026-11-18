@@ -124,6 +124,30 @@ export async function loadUpdates(
   });
 }
 
+/**
+ * Edit a file from the server, as the user: what a restore does, and what commands will do. The
+ * edit goes through the same log and the same permission check as typing, and the sync server is
+ * told so that people with the file open see it at once.
+ */
+export async function editFile(
+  pool: pg.Pool,
+  store: BlobStore,
+  fileId: string,
+  userId: string,
+  change: (text: Y.Text) => void,
+): Promise<void> {
+  const doc = new Y.Doc();
+  for (const update of await loadUpdates(pool, store, fileId)) Y.applyUpdate(doc, update);
+  const before = Y.encodeStateVector(doc);
+  change(doc.getText(TEXT));
+  const update = Y.encodeStateAsUpdate(doc, before);
+  // Two zero bytes: nothing was inserted or deleted.
+  if (update.length <= 2) return;
+  const seq = await appendUpdate(pool, fileId, userId, update);
+  if (seq === null) throw new AppError('permission_denied', 'You cannot edit this file.');
+  await pool.query("select pg_notify('file_edits', $1)", [`${fileId}:${seq}`]);
+}
+
 /** A file's bytes as they stand now: the uploaded bytes if nobody has edited it, else its text. */
 export async function currentBytes(
   db: Db,

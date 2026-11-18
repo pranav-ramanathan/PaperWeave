@@ -60,7 +60,22 @@ export async function startSync(opts: {
   const listener = new pg.Client({ connectionString: opts.databaseUrl });
   await listener.connect();
   await listener.query('listen acl');
-  listener.on('notification', async ({ payload: projectId }) => {
+  await listener.query('listen file_edits');
+  listener.on('notification', async ({ channel, payload }) => {
+    if (channel === 'file_edits') {
+      // An edit made on the server (a restore, say): it is already in the log, so it only needs
+      // to reach the people who have the file open.
+      const [fileId, seq] = (payload ?? '').split(':');
+      const document = server.hocuspocus.documents.get(fileId);
+      if (!document) return;
+      const { rows } = await pool.query(
+        'select update from file_updates where file_id = $1 and seq = $2',
+        [fileId, seq],
+      );
+      if (rows[0]) Y.applyUpdate(document, new Uint8Array(rows[0].update));
+      return;
+    }
+    const projectId = payload;
     for (const [name, document] of server.hocuspocus.documents) {
       for (const connection of document.getConnections() as Connection<Context>[]) {
         if (connection.context.projectId !== projectId) continue;
