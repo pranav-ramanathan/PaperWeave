@@ -88,6 +88,10 @@ export function diagnostics(log: string): Diagnostic[] {
   const out: Diagnostic[] = [];
   for (const m of log.matchAll(ERROR))
     out.push({ severity: 'error', file: m[1], line: Number(m[2]), message: m[3] });
+  // An error that stops the engine outright (a picture it cannot read, say) has no file and
+  // line in front of it, only an exclamation mark.
+  for (const m of log.matchAll(/^!\s?(?:pdfTeX error: |LuaTeX error |)(.+)$/gm))
+    out.push({ severity: 'error', message: m[1].trim() });
   // shortcut: warnings carry a line but no file; follow the log's file stack when the build
   // service needs to link them (plan C4).
   for (const m of log.matchAll(WARNING))

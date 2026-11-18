@@ -14,6 +14,8 @@ import { createVisual, type Visual } from '../../../../../lib/visual';
 import {
   CitationPicker,
   EditorMenu,
+  FloatBox,
+  type FloatRequest,
   FormulaBox,
   type FormulaRequest,
   ReferencePicker,
@@ -81,6 +83,7 @@ export default function FileEditor(props: {
   const [formula, setFormula] = useState<FormulaRequest | null>(null);
   const [picker, setPicker] = useState<{ apply: FormulaRequest['apply'] } | null>(null);
   const [citing, setCiting] = useState<{ apply: FormulaRequest['apply'] } | null>(null);
+  const [float, setFloat] = useState<FloatRequest | null>(null);
   const [menu, setMenu] = useState<{ x: number; y: number; formula?: () => void } | null>(null);
   /** Start inserting something where the caret is. The place is fixed now, not when it is done. */
   const insertHere = (then: (apply: FormulaRequest['apply']) => void) => {
@@ -91,12 +94,21 @@ export default function FileEditor(props: {
   const askEquation = () => insertHere((apply) => setFormula({ src: '', place: 'inline', apply }));
   const askReference = () => insertHere((apply) => setPicker({ apply }));
   const askCitation = () => insertHere((apply) => setCiting({ apply }));
+  const askFigure = () => insertHere((apply) => setFloat({ kind: 'figure', apply }));
+  const askTable = () => insertHere((apply) => setFloat({ kind: 'table', apply }));
   // The editors are made once; what they call must be what this render means.
-  const asks = useRef({ equation: askEquation, reference: askReference, citation: askCitation });
-  asks.current = { equation: askEquation, reference: askReference, citation: askCitation };
+  const all = {
+    equation: askEquation,
+    reference: askReference,
+    citation: askCitation,
+    figure: askFigure,
+    table: askTable,
+  };
+  const asks = useRef(all);
+  asks.current = all;
   // When a window closes, the keyboard goes back to the text. This runs after the window's own
   // effect has closed it, which is when the browser has handed focus back.
-  const windowOpen = !!formula || !!picker || !!citing;
+  const windowOpen = !!formula || !!picker || !!citing || !!float;
   const hadWindow = useRef(false);
   useEffect(() => {
     if (hadWindow.current && !windowOpen && mode === 'visual') live.current?.visual?.focus();
@@ -278,6 +290,8 @@ export default function FileEditor(props: {
           showInSource: (from, to) => show('source', from, to),
           run,
           macros: macros.current,
+          picture: (target) =>
+            `/projects/${projectId}/picture?target=${encodeURIComponent(target)}`,
           editMath: (src, apply) => setFormula({ src, place: null, apply }),
           ask: (what) => asks.current[what](),
           menu: setMenu,
@@ -435,6 +449,12 @@ export default function FileEditor(props: {
               <button type="button" onClick={askEquation} aria-keyshortcuts="Alt+=" title="Alt+=">
                 Equation
               </button>
+              <button type="button" onClick={askFigure} aria-keyshortcuts="Alt+G" title="Alt+G">
+                Figure
+              </button>
+              <button type="button" onClick={askTable} aria-keyshortcuts="Alt+T" title="Alt+T">
+                Table
+              </button>
             </span>
           )}
           <span className="note" aria-live="polite">
@@ -446,6 +466,7 @@ export default function FileEditor(props: {
       <FormulaBox request={formula} macros={macros.current} onDone={() => setFormula(null)} />
       <ReferencePicker request={picker} projectId={projectId} onDone={() => setPicker(null)} />
       <CitationPicker request={citing} projectId={projectId} onDone={() => setCiting(null)} />
+      <FloatBox request={float} projectId={projectId} onDone={() => setFloat(null)} />
       <EditorMenu
         at={menu}
         onClose={() => {
@@ -455,6 +476,8 @@ export default function FileEditor(props: {
         onReference={askReference}
         onCitation={askCitation}
         onEquation={askEquation}
+        onFigure={askFigure}
+        onTable={askTable}
       />
       <div className="source" ref={host} hidden={mode !== 'source'} />
     </section>

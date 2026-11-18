@@ -3,6 +3,7 @@
 // The small windows the visual editor opens: a formula's LaTeX with its preview, the list of
 // labels to refer to, and the menu of things to do at a place in the text.
 import type { CommandResult } from '@paperweave/bridge';
+import { cellText } from '@paperweave/latex';
 import { type RefObject, useEffect, useRef, useState } from 'react';
 import { numbers } from '../../../../../lib/numbers';
 import { renderMath } from '../../../../../lib/visual';
@@ -129,6 +130,168 @@ export function FormulaBox(props: {
           <button type="submit" disabled={!draft.trim()}>
             {request?.place ? 'Insert' : 'Apply'}
           </button>{' '}
+          <button type="button" onClick={onDone}>
+            Cancel
+          </button>
+        </p>
+      </form>
+    </dialog>
+  );
+}
+
+/** A figure or a table to insert where the caret is. */
+export type FloatRequest = { kind: 'figure' | 'table'; apply: Apply };
+
+/** A label made from a caption: "Merge latency by writers" gives fig:merge-latency-by-writers. */
+function labelFor(prefix: string, caption: string, taken: Set<string>) {
+  const words =
+    caption
+      .toLowerCase()
+      .match(/[a-z0-9]+/g)
+      ?.slice(0, 4) ?? [];
+  const base = `${prefix}:${words.join('-') || (prefix === 'fig' ? 'figure' : 'table')}`;
+  for (let n = 1; ; n++) {
+    const label = n === 1 ? base : `${base}-${n}`;
+    if (!taken.has(label)) return label;
+  }
+}
+
+/** The window that asks what a new figure or table should hold, and inserts it. */
+export function FloatBox(props: {
+  request: FloatRequest | null;
+  projectId: string;
+  onDone(): void;
+}) {
+  const { request, projectId, onDone } = props;
+  const box = useDialog(!!request);
+  const [pictures, setPictures] = useState<{ path: string; target: string }[]>([]);
+  const [labels, setLabels] = useState<Set<string>>(new Set());
+  const [target, setTarget] = useState('');
+  const [alt, setAlt] = useState('');
+  const [caption, setCaption] = useState('');
+  const [rows, setRows] = useState(3);
+  const [columns, setColumns] = useState(3);
+  const [problem, setProblem] = useState('');
+  useEffect(() => {
+    if (!request) return;
+    let stop = false;
+    setAlt('');
+    setCaption('');
+    setProblem('');
+    const read = <T,>(url: string, then: (found: T) => void) =>
+      void fetch(url)
+        .then((res) => (res.ok ? res.json() : []))
+        .then((found: T) => !stop && then(found))
+        .catch(() => {});
+    read<{ path: string; target: string }[]>(`/projects/${projectId}/pictures`, (found) => {
+      setPictures(found);
+      setTarget(found[0]?.target ?? '');
+    });
+    // So that the new label is not one the paper already has.
+    read<{ key: string }[]>(`/projects/${projectId}/labels`, (found) =>
+      setLabels(new Set(found.map((l) => l.key))),
+    );
+    return () => void (stop = true);
+  }, [request, projectId]);
+  const figure = request?.kind === 'figure';
+  const insert = async () => {
+    if (!request) return;
+    const said = alt.replace(/\s+/g, ' ').trim();
+    const cap = caption.replace(/\s+/g, ' ').trim();
+    if (/[{}%#\\\]]/.test(said))
+      return setProblem(
+        'A description cannot hold { } % # ] or a backslash. Say it in plain words.',
+      );
+    if (!cellText(cap))
+      return setProblem('A caption cannot hold an unescaped & or %, and its braces must match.');
+    const label = `  \\label{${labelFor(figure ? 'fig' : 'tab', cap, labels)}}`;
+    const lines = figure
+      ? [
+          '\\begin{figure}[t]',
+          '  \\centering',
+          ...(target
+            ? [`  \\includegraphics[width=\\linewidth${said ? `,alt={${said}}` : ''}]{${target}}`]
+            : []),
+          `  \\caption{${cap}}`,
+          label,
+          '\\end{figure}',
+        ]
+      : [
+          '\\begin{table}[t]',
+          '  \\centering',
+          `  \\caption{${cap}}`,
+          label,
+          `  \\begin{tabular}{${'l'.repeat(columns)}}`,
+          '    \\hline',
+          `    ${Array.from({ length: columns }, (_, i) => `Column ${i + 1}`).join(' & ')} \\\\`,
+          '    \\hline',
+          ...Array.from({ length: rows - 1 }, () => `    ${' & '.repeat(columns - 1)} \\\\`),
+          '    \\hline',
+          '  \\end{tabular}',
+          '\\end{table}',
+        ];
+    try {
+      // On lines of its own, like any figure or table in the source.
+      await request.apply(`\n${lines.join('\n')}\n`);
+      onDone();
+    } catch {
+      setProblem('That edit could not be made. Check the connection and try again.');
+    }
+  };
+  const count = (value: number, set: (n: number) => void, max: number, min: number) => (
+    <input
+      type="number"
+      min={min}
+      max={max}
+      value={value}
+      onChange={(e) => set(Math.max(min, Math.min(max, Number(e.target.value) || min)))}
+    />
+  );
+  return (
+    <dialog ref={box} className="tool" aria-labelledby="float-title" onClose={onDone}>
+      <form
+        onSubmit={(e) => {
+          e.preventDefault();
+          void insert();
+        }}
+      >
+        <h2 id="float-title">{figure ? 'Insert a figure' : 'Insert a table'}</h2>
+        {figure ? (
+          <>
+            <label>
+              Picture
+              <select value={target} onChange={(e) => setTarget(e.target.value)}>
+                {pictures.map((p) => (
+                  <option key={p.path} value={p.target}>
+                    {p.path}
+                  </option>
+                ))}
+                <option value="">None yet</option>
+              </select>
+            </label>
+            {pictures.length === 0 && (
+              <p className="note">
+                This paper has no pictures yet. Add them on the paper&apos;s page, under Files.
+              </p>
+            )}
+            <label>
+              Description, for people who cannot see the picture
+              <input value={alt} onChange={(e) => setAlt(e.target.value)} disabled={!target} />
+            </label>
+          </>
+        ) : (
+          <>
+            <label>Rows, the heading row included {count(rows, setRows, 30, 2)}</label>
+            <label>Columns {count(columns, setColumns, 12, 1)}</label>
+          </>
+        )}
+        <label>
+          Caption
+          <input value={caption} onChange={(e) => setCaption(e.target.value)} required />
+        </label>
+        {problem && <p role="alert">{problem}</p>}
+        <p>
+          <button type="submit">Insert</button>{' '}
           <button type="button" onClick={onDone}>
             Cancel
           </button>
@@ -322,6 +485,8 @@ export function EditorMenu(props: {
   onReference(): void;
   onCitation(): void;
   onEquation(): void;
+  onFigure(): void;
+  onTable(): void;
 }) {
   const { at, onClose } = props;
   const menu = useRef<HTMLUListElement>(null);
@@ -339,6 +504,8 @@ export function EditorMenu(props: {
     ['Insert a reference…', props.onReference],
     ['Insert a citation…', props.onCitation],
     ['Insert an equation…', props.onEquation],
+    ['Insert a figure…', props.onFigure],
+    ['Insert a table…', props.onTable],
   ];
   const move = (by: number) => {
     const buttons = [...(menu.current?.querySelectorAll('button') ?? [])];

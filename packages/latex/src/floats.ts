@@ -79,7 +79,13 @@ function tableOf(src: string, text: string): Table | null {
   const rows: Span[][] = [];
   let row: Span[] = [];
   let cell = at;
-  const closeCell = (to: number) => row.push(trimmed(src, cell, to));
+  const closeCell = (to: number) => {
+    const found = trimmed(src, cell, to);
+    // An empty cell's place is where its text would go: with a space left on either side of it
+    // when there is room, so that filling the cell does not run it into the next `&`.
+    if (!found.text && to - cell >= 2) found.at = found.end = to - 1;
+    row.push(found);
+  };
   const closeRow = () => {
     // A last line with only rules on it, or nothing, is not a row.
     if (row.length > 1 || row[0]?.text) rows.push(row);

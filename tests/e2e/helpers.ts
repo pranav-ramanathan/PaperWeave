@@ -78,3 +78,27 @@ export async function selectWord(page: Page, within: string, word: string) {
   await page.mouse.dblclick(at.x, at.y);
   await expect.poll(() => page.evaluate(() => getSelection()!.toString())).toBe(word);
 }
+
+/** Put the caret just after a word in an editor, with one click at the word's end. */
+export async function clickAfter(page: Page, within: string, word: string) {
+  await expect(page.locator(within)).toContainText(word);
+  const at = await page.evaluate(
+    ([sel, w]) => {
+      const walker = document.createTreeWalker(document.querySelector(sel)!, NodeFilter.SHOW_TEXT);
+      for (let n = walker.nextNode(); n; n = walker.nextNode()) {
+        const i = n.textContent!.indexOf(w);
+        if (i < 0) continue;
+        n.parentElement!.scrollIntoView({ block: 'center' });
+        const range = document.createRange();
+        range.setStart(n, i);
+        range.setEnd(n, i + w.length);
+        const r = range.getBoundingClientRect();
+        return { x: r.right - 1, y: r.y + r.height / 2 };
+      }
+      return null;
+    },
+    [within, word] as const,
+  );
+  if (!at) throw new Error(`"${word}" is not shown in ${within}`);
+  await page.mouse.click(at.x, at.y);
+}

@@ -124,6 +124,8 @@ test('references and equations are inserted from the toolbar, the keyboard and t
     'Insert a reference…',
     'Insert a citation…',
     'Insert an equation…',
+    'Insert a figure…',
+    'Insert a table…',
   ]);
   // It can be worked from the keyboard, and put away with Escape.
   await expect(menu.getByRole('menuitem').first()).toBeFocused();

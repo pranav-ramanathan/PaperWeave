@@ -8,7 +8,7 @@ import {
   fromSrc,
   toSrc,
 } from '@paperweave/bridge';
-import { cellText, floatParts, type Span } from '@paperweave/latex';
+import { altEdit, cellText, floatParts, type Span } from '@paperweave/latex';
 import { Editor, Extension, type Node } from '@tiptap/core';
 import type { Node as PMNode } from '@tiptap/pm/model';
 import { Plugin } from '@tiptap/pm/state';
@@ -95,6 +95,8 @@ export function createVisual(opts: {
   run(command: Command): CommandResult | Promise<CommandResult>;
   /** The paper's own macros, for drawing formulas that use them. */
   macros?: Record<string, string>;
+  /** The address of a picture, given the name an \\includegraphics uses for it. */
+  picture?(target: string): string;
   /**
    * The person asked to edit a formula. `apply` replaces it with new LaTeX, by way of the
    * server, but only if it still says `src`: what someone else changed meanwhile is not
@@ -102,7 +104,7 @@ export function createVisual(opts: {
    */
   editMath?(src: string, apply: (replacement: string) => Promise<CommandResult>): void;
   /** The person asked, from the keyboard, to insert a reference, a citation or an equation. */
-  ask?(what: 'reference' | 'citation' | 'equation'): void;
+  ask?(what: 'reference' | 'citation' | 'equation' | 'figure' | 'table'): void;
   /**
    * The person asked for the menu of things to do here: a right click, or the menu key. `x`
    * and `y` are where on the page; `formula` is set when it was asked for on a formula.
@@ -120,7 +122,9 @@ export function createVisual(opts: {
   const catchUp = () => {
     const { view } = editor;
     const sel = view.dom.ownerDocument.getSelection();
-    if (!view.hasFocus() || !sel?.anchorNode || !sel.focusNode) return;
+    // Not only while the editor has the keyboard: pressing a toolbar button takes the keyboard
+    // away, and the selection it should act on is still the one in the text.
+    if (!sel?.anchorNode || !sel.focusNode) return;
     if (!view.dom.contains(sel.anchorNode) || !view.dom.contains(sel.focusNode)) return;
     try {
       const a = view.posAtDOM(sel.anchorNode, sel.anchorOffset);
@@ -261,11 +265,21 @@ export function createVisual(opts: {
     allowed: (text: string) => string | null = () => null,
     /** Told which field is open, or null when none is, so that its owner can speak for it. */
     opened: (field: HTMLInputElement | null) => void = () => {},
+    /**
+     * For a part that may not be there yet (a picture's description): what to show in its
+     * place, and how typed text becomes a change to the source, or a reason it cannot.
+     */
+    absent?: {
+      prompt: string;
+      edit(text: string): { at: number; end: number; insert: string } | string;
+    },
   ) => {
-    if (!opts.editable) return el('span', 'pw-part', shown(span.text));
-    const button = el('button', 'pw-part', shown(span.text) || '\u00a0');
+    const empty = absent?.prompt ?? '\u00a0';
+    if (!opts.editable) return el('span', 'pw-part', shown(span.text) || (absent ? 'None.' : ''));
+    const button = el('button', 'pw-part', shown(span.text) || empty);
     button.type = 'button';
-    button.setAttribute('aria-label', `${name}: ${shown(span.text) || 'empty'}. Edit`);
+    button.classList.toggle('pw-missing', !!absent && !span.text);
+    button.setAttribute('aria-label', `${name}: ${shown(span.text) || 'none'}. Edit`);
     button.onclick = () => {
       const pos = getPos() ?? 0;
       const input = el('input', 'pw-part');
@@ -284,7 +298,9 @@ export function createVisual(opts: {
         if (text === span.text) return leave();
         const problem = allowed(text);
         if (problem) return say(problem);
-        const c = bridge.atomCommand(editor.state, pos, text, span);
+        const change = absent ? absent.edit(text) : { ...span, insert: text };
+        if (typeof change === 'string') return say(change);
+        const c = bridge.atomCommand(editor.state, pos, change.insert, change);
         if (!c) return say('That has moved. Edit it in the source.');
         over = true;
         try {
@@ -321,7 +337,7 @@ export function createVisual(opts: {
     // A simple table is drawn as a grid, and its cells and caption are edited in place. So is
     // a figure's caption. Anything else of theirs is edited in the source.
     const grid = float?.table?.simple ? float.table : null;
-    if (float && (grid || float.caption)) {
+    if (float && (grid || float.caption || float.graphics.length)) {
       /** The field open in this figure or table, if one is. */
       let field: HTMLInputElement | null = null;
       const opened = (f: HTMLInputElement | null) => void (field = f);
@@ -366,8 +382,43 @@ export function createVisual(opts: {
         table.append(body);
         dom.append(table);
       } else {
-        const what = float.graphics.map((g) => g.target.text).join(', ');
-        dom.append(el('p', 'pw-label', what ? `Picture: ${what}` : `LaTeX: ${node.attrs.label}`));
+        for (const g of float.graphics) {
+          const file = g.target.text;
+          const unseen = () =>
+            el('p', 'pw-label', `${file} cannot be shown here. It is in the PDF.`);
+          if (opts.picture) {
+            const img = el('img', '');
+            img.src = opts.picture(file);
+            img.alt = g.alt?.text ?? '';
+            // A PDF or EPS figure, or a file that is not there.
+            img.onerror = () => img.replaceWith(unseen());
+            dom.append(img);
+          } else dom.append(unseen());
+          // What a screen reader says in place of the picture. Missing, it is shown as missing.
+          const said = el('p', 'pw-describe');
+          said.append(
+            el('span', 'pw-label', 'Description, for people who cannot see it: '),
+            part(
+              getPos,
+              g.alt ?? { text: '', at: 0, end: 0 },
+              `Description of ${file}`,
+              undefined,
+              opened,
+              {
+                prompt: 'None yet. Add one.',
+                edit(text) {
+                  const e = altEdit(g, text);
+                  if (!text.trim()) return 'Type a description, or press Escape.';
+                  return e
+                    ? { at: e.at, end: e.at + e.length, insert: e.insert }
+                    : 'A description cannot hold { } % # ] or a backslash. Say it in plain words.';
+                },
+              },
+            ),
+          );
+          dom.append(said);
+        }
+        if (!float.graphics.length) dom.append(el('p', 'pw-label', `LaTeX: ${node.attrs.label}`));
         const c = el('p', 'pw-caption');
         c.append(...caption);
         dom.append(c);
@@ -456,6 +507,8 @@ export function createVisual(opts: {
           'Alt-=': () => (opts.ask && opts.editable ? (opts.ask('equation'), true) : false),
           'Alt-r': () => (opts.ask && opts.editable ? (opts.ask('reference'), true) : false),
           'Alt-c': () => (opts.ask && opts.editable ? (opts.ask('citation'), true) : false),
+          'Alt-g': () => (opts.ask && opts.editable ? (opts.ask('figure'), true) : false),
+          'Alt-t': () => (opts.ask && opts.editable ? (opts.ask('table'), true) : false),
           // Enter on a selected formula opens it for editing.
           Enter: ({ editor: e }) => {
             const { selection } = e.state;

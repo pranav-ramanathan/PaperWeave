@@ -17,7 +17,8 @@ const KIND: Record<string, Include['kind']> = {
   addbibresource: 'bib',
   includegraphics: 'graphics',
 };
-const GRAPHICS = ['', '.pdf', '.png', '.jpg', '.jpeg', '.eps'];
+// The extensions pdfTeX tries for a picture named without one, in its order, then EPS.
+const GRAPHICS = ['', '.pdf', '.png', '.jpg', '.jpeg', '.PDF', '.PNG', '.JPG', '.JPEG', '.eps'];
 
 // Comments are blanked, not removed, so that every offset is still an offset into the source.
 const uncomment = (src: string) =>
