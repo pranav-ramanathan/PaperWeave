@@ -5,7 +5,9 @@ import { mkdtempSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { writeZip } from '../../packages/server/src/archive';
-import { person, run, signIn, typingSaved } from './helpers';
+import { clickAfter, person, run, showSource, signIn, typingSaved } from './helpers';
+
+const VISUAL = '.editor .visual .ProseMirror';
 
 const CSV =
   'day,latency (ms),site\n2024-03-01,9,Lab\n2024-03-02,NA,Lab\n2024-03-03,38,Field\n2024-03-04,41,Field\n';
@@ -68,6 +70,47 @@ test('a chart is drawn from approved data and is out of date once the data chang
   await expect(page.getByText('charts/latency.png')).toBeVisible();
   const listed = page.getByRole('listitem').filter({ hasText: 'Line chart of latency' });
   await expect(listed).toContainText('Drawn 20');
+
+  // Its author gives it a caption. The record of how it was made is on its page.
+  await page.goto(chart);
+  await page.getByLabel(/^Caption/).fill('Latency over four days.');
+  await page.getByRole('button', { name: 'Draw it again' }).click();
+  await expect(page.getByText('Waiting to be drawn…')).toHaveCount(0, { timeout: 30_000 });
+  const made = page.getByRole('listitem').filter({ hasText: 'from data/latency.csv version' });
+  await expect(made).toHaveCount(1);
+  await expect(made).toContainText('1 row with no value left out (no value: NA)');
+
+  // Put into the paper as a figure: the chart is offered once, and brings its caption and its
+  // description with it.
+  await page.goto(paper);
+  await page.getByRole('link', { name: 'main.tex' }).first().click();
+  await expect(page.getByRole('region', { name: 'Editor for main.tex' })).toBeVisible();
+  await clickAfter(page, VISUAL, 'Hello');
+  await page.getByRole('group', { name: 'Edit' }).getByRole('button', { name: 'Figure' }).click();
+  const box = page.getByRole('dialog', { name: 'Insert a figure' });
+  await expect(box.getByLabel('Picture').getByRole('option')).toHaveText([
+    'charts/latency.pdf',
+    'None yet',
+  ]);
+  await expect(box.getByLabel('Caption')).toHaveValue('Latency over four days.');
+  await expect(box.getByLabel(/^Description/)).toHaveValue(
+    'Line chart of latency (ms) against day.',
+  );
+  await box.getByRole('button', { name: 'Insert' }).click();
+  await expect(box).toBeHidden();
+  // The editor shows the chart, though what the paper includes is the PDF.
+  const figure = page.locator(VISUAL).getByRole('group', { name: 'Figure' });
+  await expect(figure.locator('img')).toHaveAttribute(
+    'alt',
+    'Line chart of latency (ms) against day.',
+  );
+  await expect
+    .poll(() => figure.locator('img').evaluate((img: HTMLImageElement) => img.naturalWidth))
+    .toBeGreaterThan(300);
+  await showSource(page);
+  await expect(page.locator('.editor .cm-content')).toContainText(
+    '\\includegraphics[width=\\linewidth,alt={Line chart of latency (ms) against day.}]{charts/latency.pdf}',
+  );
 
   // The data is edited: the chart is of an older version, and the paper says so.
   await page.getByRole('link', { name: 'data/latency.csv' }).first().click();

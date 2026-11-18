@@ -9,12 +9,13 @@ import {
   chartPath,
   datasetTable,
   putFile,
+  recordDraw,
   transaction,
   vegaLite,
 } from '@paperweave/server';
 import type pg from 'pg';
 import * as vega from 'vega';
-import { compile } from 'vega-lite';
+import { compile, version as vegaLiteVersion } from 'vega-lite';
 import { sandbox } from './compile.ts';
 
 /** Draw a Vega-Lite specification as a PDF and a PNG. */
@@ -49,7 +50,7 @@ export async function render(vl: object): Promise<{ pdf: Uint8Array; png: Uint8A
  * Draw the oldest queued chart, if there is one. Returns whether there was. The row stays locked
  * while it is drawn: if this process dies, the lock goes and another worker takes it.
  */
-export function drawNext(pool: pg.Pool, store: BlobStore): Promise<boolean> {
+export function drawNext(pool: pg.Pool, store: BlobStore, image: string): Promise<boolean> {
   return transaction(pool, async (db) => {
     const job = (
       await db.query(
@@ -63,8 +64,24 @@ export function drawNext(pool: pg.Pool, store: BlobStore): Promise<boolean> {
       const table = await datasetTable(db, store, job.project_id, job.dataset_file_id);
       const { vl, leftOut } = vegaLite(job.spec, table);
       const { pdf, png } = await render(vl);
-      await putFile(db, store, job.project_id, chartPath(job.name, 'pdf'), pdf);
-      await putFile(db, store, job.project_id, chartPath(job.name, 'png'), png);
+      await recordDraw(db, job.project_id, job.name, {
+        pdf: await putFile(db, store, job.project_id, chartPath(job.name, 'pdf'), pdf),
+        png: await putFile(db, store, job.project_id, chartPath(job.name, 'png'), png),
+        record: {
+          data: {
+            path: table.path,
+            sha256: table.version,
+            // Only what the chart uses of the description: its columns, and what means no value.
+            columns: table.columns.filter((c) =>
+              [job.spec.x, job.spec.y, job.spec.series].includes(c.name),
+            ),
+            missing: table.missing,
+          },
+          chart: job.spec,
+          rowsLeftOut: leftOut,
+          generator: { vega: vega.version, 'vega-lite': vegaLiteVersion, image },
+        },
+      });
       await db.query(
         `update charts set status = 'drawn', problem = null, drawn_digest = $2, left_out = $3,
            drawn_at = now() where id = $1`,

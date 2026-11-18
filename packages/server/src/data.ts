@@ -216,5 +216,5 @@ export async function datasetTable(db: Db, store: BlobStore, projectId: string, 
           : v;
     }),
   );
-  return { path, columns, rows, version };
+  return { path, columns, missing, rows, version };
 }

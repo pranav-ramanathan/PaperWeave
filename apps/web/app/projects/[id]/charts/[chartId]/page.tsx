@@ -1,4 +1,11 @@
-import { AppError, can, getProject, listCharts, listDatasets } from '@paperweave/server';
+import {
+  AppError,
+  can,
+  chartDraws,
+  getProject,
+  listCharts,
+  listDatasets,
+} from '@paperweave/server';
 import Link from 'next/link';
 import { notFound } from 'next/navigation';
 import { blobs, db, requireUser } from '../../../../../lib/server';
@@ -27,6 +34,7 @@ export default async function ChartPage({
   });
   const chart = chartId === 'new' ? null : charts.find((c) => c.id === chartId);
   if (chartId !== 'new' && !chart) notFound();
+  const draws = chart ? await chartDraws(db(), user.id, id, chart.name) : [];
   const dataset = datasets.find((d) => d.fileId === (chart?.dataFileId ?? data));
   const writer = can(project.role, 'file.write');
   const back = <Link href={`/projects/${id}#data`}>Back to the paper</Link>;
@@ -69,6 +77,11 @@ export default async function ChartPage({
           then draw the chart again.
         </p>
       )}
+      {dataset && (
+        <p>
+          The data: <code>{dataset.path}</code>, as approved on {dataset.approvedAt.slice(0, 10)}.
+        </p>
+      )}
       {!dataset ? (
         <p role="alert">
           {chart
@@ -78,9 +91,6 @@ export default async function ChartPage({
       ) : (
         writer && (
           <form action={saveChartAction.bind(null, id, chart?.id ?? null, dataset.fileId)}>
-            <p>
-              From <code>{dataset.path}</code>, as approved on {dataset.approvedAt.slice(0, 10)}.
-            </p>
             {!chart && (
               <>
                 <label>
@@ -161,9 +171,59 @@ export default async function ChartPage({
               Title (optional)
               <input name="title" maxLength={120} defaultValue={spec?.title ?? ''} />
             </label>
+            <label>
+              Caption, for when the chart is put into the paper
+              <input name="caption" maxLength={500} defaultValue={chart?.caption ?? ''} />
+            </label>
+            <label>
+              Description, for people who cannot see the chart
+              <input
+                name="alt"
+                maxLength={300}
+                defaultValue={chart?.alt ?? ''}
+                aria-describedby="alt-help"
+              />
+            </label>
+            <small id="alt-help">Left empty, it says what kind of chart this is and of what.</small>
             <button type="submit">{chart ? 'Draw it again' : 'Draw the chart'}</button>
           </form>
         )
+      )}
+      {chart?.drawnAt && (
+        <p>
+          To put it into the paper, open a file in the visual editor, choose Figure, and pick{' '}
+          <code>charts/{chart.name}.pdf</code>. Its caption and description are filled in for you.
+        </p>
+      )}
+      {draws.length > 0 && (
+        <>
+          <h2>How it was made</h2>
+          <ol className="report" reversed>
+            {draws.map((d) => {
+              const { data, chart: drawn, rowsLeftOut, generator } = d.record;
+              return (
+                <li key={d.pdf + d.drawnAt}>
+                  {d.drawnAt.slice(0, 16).replace('T', ' ')} UTC: {drawn.kind} of{' '}
+                  {drawn.combine ? `the ${drawn.combine} of ` : ''}
+                  <code>{drawn.y}</code> against <code>{drawn.x}</code>
+                  {drawn.series && (
+                    <>
+                      , by <code>{drawn.series}</code>
+                    </>
+                  )}
+                  , from <code>{data.path}</code> version{' '}
+                  <code title={data.sha256}>{data.sha256.slice(0, 12)}</code>.{' '}
+                  {rowsLeftOut
+                    ? `${rowsLeftOut} ${rowsLeftOut === 1 ? 'row' : 'rows'} with no value left out`
+                    : 'No row left out'}
+                  {data.missing.length > 0 &&
+                    ` (no value: ${data.missing.map((m) => (m === '' ? 'an empty field' : m)).join(', ')})`}
+                  . Drawn with Vega-Lite {generator['vega-lite']} and Vega {generator.vega}.
+                </li>
+              );
+            })}
+          </ol>
+        </>
       )}
       {chart && writer && (
         <form action={removeChartAction.bind(null, id, chart.id)}>

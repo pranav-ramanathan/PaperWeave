@@ -233,10 +233,9 @@ export async function saveChartAction(
   const user = await requireUser(back);
   await act(back, async () => {
     const fields = Object.fromEntries(
-      ['name', 'kind', 'x', 'y', 'series', 'combine', 'gaps', 'title'].map((n) => [
-        n,
-        text(form, n),
-      ]),
+      ['name', 'kind', 'x', 'y', 'series', 'combine', 'gaps', 'title', 'caption', 'alt'].map(
+        (n) => [n, text(form, n)],
+      ),
     );
     const id = await saveChart(db(), blobs(), user.id, projectId, {
       ...fields,
