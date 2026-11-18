@@ -1,5 +1,5 @@
 import { fragment, rng } from '../../latex/src/testutil.ts';
-import { TextSelection } from '@tiptap/pm/state';
+import { NodeSelection, TextSelection } from '@tiptap/pm/state';
 import { expect, test } from 'vitest';
 import * as Y from 'yjs';
 import { fixtures, replica, shown, textblocks, visualOp } from './harness.ts';
@@ -378,4 +378,45 @@ test('every atom can be replaced by a command that touches only its own source',
   expect(r.bridge.applyCommand(stale!)).toBe('conflict');
   // Not an atom: no command.
   expect(r.bridge.atomCommand(r.state, 1, 'x')).toBeNull();
+});
+
+test('LaTeX is inserted at the caret, wherever the text has moved to meanwhile', () => {
+  const r = replica(fixtures['ieee-multifile/sections/intro.tex']);
+  const before = r.src;
+  // The place just after "follows. Section", in the last paragraph.
+  const afterSection = () => {
+    let at = -1;
+    r.state.doc.descendants((node, pos) => {
+      const i = node.isText ? node.text!.indexOf('follows. Section') : -1;
+      if (i >= 0) at = pos + i + 'follows. Section'.length;
+    });
+    return at;
+  };
+  let caret = afterSection();
+  r.select(caret);
+  const c = r.bridge.insertCommand(r.state, '~\\ref{sec:intro} and Section')!;
+  // Someone types at the top of the file before the insertion is made.
+  r.ytext.insert(0, '% a new first line\n');
+  expect(r.bridge.applyCommand(c)).toBe('applied');
+  expect(r.src).toBe(
+    '% a new first line\n' +
+      before.replace('follows. Section~', 'follows. Section~\\ref{sec:intro} and Section~'),
+  );
+  r.check();
+
+  // With a selection, the insertion goes after it and replaces nothing.
+  caret = afterSection();
+  r.select(caret - 7, caret);
+  const after = r.bridge.insertCommand(r.state, '!')!;
+  expect(r.bridge.applyCommand(after)).toBe('applied');
+  expect(r.src).toContain('follows. Section!~\\ref{sec:intro}');
+  r.check();
+
+  // Not in running text: nothing to build.
+  let atom = -1;
+  r.state.doc.forEach((node, pos) => {
+    if (atom < 0 && node.isAtom) atom = pos;
+  });
+  const tr = r.state.tr.setSelection(NodeSelection.create(r.state.doc, atom));
+  expect(r.bridge.insertCommand(r.state.apply(tr), 'x')).toBeNull();
 });

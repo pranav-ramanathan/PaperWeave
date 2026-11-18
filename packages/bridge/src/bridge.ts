@@ -165,6 +165,22 @@ export class Bridge {
   }
 
   /**
+   * Build the command that inserts LaTeX where the caret is (at the end of the selection, if
+   * there is one), or null if the caret is not in running text. The place is fixed now: text
+   * typed elsewhere before the command runs does not move it.
+   */
+  insertCommand(state: EditorState, replacement: string): Command | null {
+    const spot = locate(this.model, state.doc, state.selection.to);
+    // A paragraph just opened with Enter is not in the source yet: there is no place to name.
+    if (!spot || spot.block < 0) return null;
+    const at = Y.createRelativePositionFromTypeIndex(
+      this.ytext,
+      toSrc(this.model, state.doc, state.selection.to, -1),
+    );
+    return { key: crypto.randomUUID(), from: at, to: at, expected: '', replacement };
+  }
+
+  /**
    * Build the command that replaces the source of the atom at `pos` (a formula, a reference, a
    * block of raw LaTeX), or null if there is no atom there.
    */
