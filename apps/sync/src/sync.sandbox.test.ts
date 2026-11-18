@@ -5,6 +5,7 @@ import { HocuspocusProvider, HocuspocusProviderWebsocket } from '@hocuspocus/pro
 import {
   acceptInvitation,
   blobStore,
+  compactFile,
   deleteFile,
   exportZip,
   importZip,
@@ -13,6 +14,7 @@ import {
   readZip,
   removeMember,
   restoreRevision,
+  runCommand,
   saveRevision,
   setRole,
   createFile,
@@ -118,6 +120,8 @@ beforeAll(async () => {
     secret: SECRET,
     port: 4200 + Math.floor(Math.random() * 500),
     databaseUrl: t.url,
+    // Small, so that a test can type its way past it.
+    compactEvery: 20,
   });
 });
 afterAll(async () => {
@@ -292,6 +296,94 @@ test('deleting a file closes it for everyone; restoring brings back the same fil
   const want = 'Zero.\nOne.\nTwo.\nOffline.\n';
   await until('both copies to agree', () => editor.text.toString() === want);
   expect(fresh.text.toString()).toBe(want);
+});
+
+const logRows = async (file: string) =>
+  (await t.pool.query('select count(*)::int as n from file_updates where file_id = $1', [file]))
+    .rows[0].n;
+
+test('a command reaches people who have the file open, and a stale one tells its author', async () => {
+  const { project, file } = await paper();
+  const owner = client(users.owner, file);
+  const editor = client(users.editor, file);
+  await saved(owner, editor);
+  const command = (c: Client, expected: string, replacement: string) => {
+    const from = c.text.toString().indexOf(expected);
+    const at = (i: number) =>
+      Y.encodeRelativePosition(Y.createRelativePositionFromTypeIndex(c.text, i));
+    return {
+      key: crypto.randomUUID(),
+      from: at(from),
+      to: at(from + expected.length),
+      expected,
+      replacement,
+    };
+  };
+  // The editor makes "Hello." bold. The owner types inside it before the command arrives.
+  const bold = command(editor, 'Hello.', '\\textbf{Hello.}');
+  owner.text.insert(owner.text.toString().indexOf('Hello.') + 5, ' there');
+  await saved(owner);
+  const refused = await runCommand(t.pool, store, users.editor.id, file, bold);
+  expect(refused).toMatchObject({ result: 'conflict' });
+  expect((refused as { text: string }).text).toContain('Hello there.');
+  // Once the owner's typing has reached the editor, the same action applies and both see it.
+  await until('the typing to arrive', () => editor.text.toString().includes('Hello there.'));
+  const again = command(editor, 'Hello there.', '\\textbf{Hello there.}');
+  expect(await runCommand(t.pool, store, users.editor.id, file, again)).toEqual({
+    result: 'applied',
+  });
+  await until('both to see the command', () =>
+    [owner, editor].every((c) => c.text.toString().includes('\\textbf{Hello there.}')),
+  );
+  expect(await stored(project)).toBe(MAIN.replace('Hello.', '\\textbf{Hello there.}'));
+});
+
+test('the log is compacted as it grows, and someone who was offline through it still merges', async () => {
+  const { project, file } = await paper();
+  const owner = client(users.owner, file);
+  const editor = client(users.editor, file);
+  await saved(owner, editor);
+  // The editor goes offline and keeps typing.
+  editor.provider.configuration.websocketProvider.disconnect();
+  editor.text.insert(editor.text.toString().indexOf('Hello.'), 'OFFLINE ');
+  // Meanwhile the owner types enough to compact the log more than once.
+  for (let i = 0; i < 50; i++) {
+    owner.text.insert(owner.text.length, `line ${i}\n`);
+    await saved(owner);
+  }
+  await until('the log to be compacted', async () => (await logRows(file)) < 20);
+  // A server edit made straight after a compaction still reaches the open file.
+  await compactFile(t.pool, file);
+  const at = (i: number) =>
+    Y.encodeRelativePosition(Y.createRelativePositionFromTypeIndex(owner.text, i));
+  const first = owner.text.toString().indexOf('line 0\n');
+  const done = await runCommand(t.pool, store, users.owner.id, file, {
+    key: crypto.randomUUID(),
+    from: at(first),
+    to: at(first + 7),
+    expected: 'line 0\n',
+    replacement: '% first\n',
+  });
+  expect(done).toEqual({ result: 'applied' });
+  await until('the command to arrive', () => owner.text.toString().includes('% first\n'));
+  owner.text.insert(0, '% top\n');
+  await saved(owner);
+  await compactFile(t.pool, file);
+  expect(await logRows(file)).toBe(1);
+
+  await editor.provider.configuration.websocketProvider.connect();
+  await saved(editor);
+  const fresh = client(users.second, file);
+  await saved(fresh);
+  await until('everyone to agree', () =>
+    [owner, editor].every((c) => c.text.toString() === fresh.text.toString()),
+  );
+  const text = fresh.text.toString();
+  expect(text.startsWith('% top\n')).toBe(true);
+  expect(text).toContain('OFFLINE Hello.');
+  expect(text).toContain('% first\n');
+  expect(text.match(/line \d+\n/g)).toHaveLength(49);
+  expect(await stored(project)).toBe(text.replaceAll('\n', '\r\n'));
 });
 
 test('killing the server mid-save loses nothing it acknowledged, and nothing at all after reconnect', async () => {

@@ -148,6 +148,41 @@ export async function editFile(
   await pool.query("select pg_notify('file_edits', $1)", [`${fileId}:${seq}`]);
 }
 
+/**
+ * Rewrite a file's log as one entry that holds the same document. Returns how many entries went.
+ * Typing waits for the moment this takes. Anyone who reconnects with older state still merges:
+ * the one entry keeps every edit's identity, only not the text that was deleted.
+ * Who made each edit is not kept past this point.
+ */
+export async function compactFile(pool: pg.Pool, fileId: string): Promise<number> {
+  return transaction(pool, async (db) => {
+    const file = (await db.query('select head_seq from files where id = $1 for update', [fileId]))
+      .rows[0];
+    if (!file) return 0;
+    const { rows } = await db.query(
+      'select update from file_updates where file_id = $1 order by seq',
+      [fileId],
+    );
+    if (rows.length < 2) return 0;
+    const doc = new Y.Doc();
+    for (const r of rows) Y.applyUpdate(doc, new Uint8Array(r.update));
+    await db.query('delete from file_updates where file_id = $1', [fileId]);
+    // It takes the place of the newest entry, so the file's place in its history does not move.
+    await db.query('insert into file_updates (file_id, seq, update) values ($1, $2, $3)', [
+      fileId,
+      file.head_seq,
+      Buffer.from(Y.encodeStateAsUpdate(doc)),
+    ]);
+    // shortcut: a command's key is remembered for a day, so a retry later than that could apply
+    // twice if the text still matched. Keep keys longer if clients ever retry across days.
+    await db.query(
+      "delete from file_commands where file_id = $1 and created_at < now() - interval '1 day'",
+      [fileId],
+    );
+    return rows.length - 1;
+  });
+}
+
 /** A file's bytes as they stand now: the uploaded bytes if nobody has edited it, else its text. */
 export async function currentBytes(
   db: Db,
