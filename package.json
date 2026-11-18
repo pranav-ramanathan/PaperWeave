@@ -11,7 +11,7 @@
     "format": "prettier --write .",
     "typecheck": "tsc --noEmit",
     "test": "vitest run",
-    "test:sandbox": "SANDBOX=1 vitest run apps/workers",
+    "test:sandbox": "SANDBOX=1 vitest run sandbox",
     "e2e": "playwright test",
     "dev": "pnpm --filter @paperweave/web dev"
   },

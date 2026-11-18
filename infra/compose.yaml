@@ -1,0 +1,24 @@
+# Local services for development and for the tests that need them: docker compose -f infra/compose.yaml up -d --wait
+# The credentials are for local use only.
+services:
+  postgres:
+    image: postgres:17-alpine@sha256:a77aa70e641402a21411b92b721c58d10f23b50ae5fdd2333efd22d166e1e5f7
+    environment:
+      POSTGRES_USER: paperweave
+      POSTGRES_PASSWORD: paperweave
+      POSTGRES_DB: paperweave
+    ports: ['5432:5432']
+    healthcheck:
+      test: ['CMD-SHELL', 'pg_isready -U paperweave']
+      interval: 2s
+      retries: 30
+
+  # An S3-compatible object store. Production uses a real bucket through the same client.
+  s3:
+    image: chrislusf/seaweedfs@sha256:4b42c212543a0acd4c0e675215ecdcaf62a186ef98def76c7e12701871222d15
+    command: server -s3 -dir=/data
+    ports: ['8333:8333']
+    healthcheck:
+      test: ['CMD-SHELL', 'wget -q -O /dev/null http://localhost:8333/ || exit 1']
+      interval: 2s
+      retries: 30
