@@ -4,7 +4,7 @@
   "type": "module",
   "exports": "./src/index.ts",
   "scripts": {
-    "migrate": "node src/migrate-cli.ts"
+    "migrate": "node --env-file-if-exists=../../apps/web/.env.local src/migrate-cli.ts"
   },
   "dependencies": {
     "aws4fetch": "^1.0.20",

@@ -1,4 +1,5 @@
-import { connect, migrate } from './db.ts';
+import { connect } from './db.ts';
+import { migrate } from './migrate.ts';
 
 const pool = connect();
 const applied = await migrate(pool);

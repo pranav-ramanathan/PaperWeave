@@ -22,3 +22,8 @@ services:
       test: ['CMD-SHELL', 'wget -q -O /dev/null http://127.0.0.1:8333/ || exit 1']
       interval: 2s
       retries: 30
+
+  # Catches every email the app sends. Read them at http://localhost:8025.
+  mail:
+    image: axllent/mailpit@sha256:23a2ef85bc50853ab3093645d1d64679afd8887e89da5e48a88940c172591a4e
+    ports: ['1025:1025', '8025:8025']

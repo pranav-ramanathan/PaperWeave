@@ -1,7 +1,7 @@
 // Needs the services in infra/compose.yaml. Run: pnpm test:sandbox
 import { afterAll, beforeAll, expect, test } from 'vitest';
 import { type Action, ACTIONS, authorize, type Role, ROLES } from './authz.ts';
-import { migrate } from './db.ts';
+import { migrate } from './migrate.ts';
 import {
   acceptInvitation,
   createProject,

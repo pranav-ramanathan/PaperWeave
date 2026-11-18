@@ -2,7 +2,7 @@
 import { randomBytes } from 'node:crypto';
 import pg from 'pg';
 import { createAuth } from './auth.ts';
-import { migrate } from './db.ts';
+import { migrate } from './migrate.ts';
 
 /** Defaults match infra/compose.yaml; the environment overrides them. */
 export const TEST_ENV = {
