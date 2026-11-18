@@ -409,8 +409,16 @@ div.pw-frozen strong {
 .editor-bar [data-state='offline']::before {
   content: '⚠ ';
 }
-.editor .source {
-  height: 78vh;
+.editor .source,
+.editor .visual {
+  height: 74vh;
+}
+.editor .toolbar {
+  align-items: baseline;
+  gap: 0.4rem 1rem;
+}
+.editor .toolbar .note {
+  color: var(--muted);
 }
 
 .build iframe {
@@ -421,10 +429,12 @@ div.pw-frozen strong {
   background: var(--paper);
 }
 .build button,
+.editor .toolbar button,
 .build input {
   font: inherit;
 }
-.build button {
+.build button,
+.editor .toolbar button {
   padding: 0.15rem 0.55rem;
   border: 1px solid var(--line);
   border-radius: 6px;
@@ -482,4 +492,10 @@ div.pw-frozen strong {
 }
 .page td form.inline {
   display: inline-flex;
+}
+
+.editor .toolbar button[aria-pressed='true'] {
+  background: var(--accent);
+  border-color: var(--accent);
+  color: #fff;
 }

@@ -6,7 +6,7 @@ import { mkdtempSync, readdirSync, readFileSync, statSync, writeFileSync } from 
 import { tmpdir } from 'node:os';
 import { join, relative } from 'node:path';
 import { writeZip } from '../../packages/server/src/archive';
-import { person, run, signIn } from './helpers';
+import { person, run, showSource, signIn } from './helpers';
 
 const FIXTURE = join(import.meta.dirname, '../../fixtures/article-basic');
 const source = (page: Page) => page.locator('.editor .cm-content');
@@ -67,6 +67,7 @@ test('save a revision, build and download it, compare, restore and rename', asyn
 
   // Edit, save again, and see exactly what changed.
   await page.getByRole('link', { name: 'main.tex' }).click();
+  await showSource(page);
   await expect(editorStatus(page)).toHaveText('All edits saved.');
   await source(page).click();
   await page.keyboard.press('ControlOrMeta+Home');
@@ -86,6 +87,7 @@ test('save a revision, build and download it, compare, restore and rename', asyn
   await expect(page.getByRole('status')).toHaveText('Restored. The paper is now revision 3.');
   await expect(page.getByRole('row', { name: /3\. Restore of revision 1/ })).toBeVisible();
   await page.getByRole('link', { name: 'main.tex' }).click();
+  await showSource(page);
   await expect(source(page)).toContainText('Synthetic fixture');
   await expect(source(page)).not.toContainText('regrettable');
 

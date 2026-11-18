@@ -78,7 +78,7 @@ const rows = async (file: string) =>
 test('a command replaces its stretch and nothing else', async () => {
   const p = await paper();
   const c = replace(await open(p.main), 'beta', '\\emph{beta}');
-  expect(await runCommand(t.pool, store, owner.id, p.main, c)).toEqual({ result: 'applied' });
+  expect(await runCommand(t.pool, store, owner.id, p.main, c)).toMatchObject({ result: 'applied' });
   expect(await stored(p.id)).toBe(MAIN.replace('beta', '\\emph{beta}'));
 });
 
@@ -90,7 +90,7 @@ test('a command follows its text when others edit elsewhere', async () => {
     text.insert(0, '% a new first line\n');
     text.insert(text.length, 'Third line.\n');
   });
-  expect(await runCommand(t.pool, store, owner.id, p.main, c)).toEqual({ result: 'applied' });
+  expect(await runCommand(t.pool, store, owner.id, p.main, c)).toMatchObject({ result: 'applied' });
   expect(await stored(p.id)).toBe(
     '% a new first line\r\n' + MAIN.replace('gamma', 'delta') + 'Third line.\r\n',
   );
@@ -108,7 +108,9 @@ test('a stale command is refused with the text as it stands, and changes nothing
   expect(await stored(p.id)).toBe(MAIN.replace('Alpha', 'Alphabet'));
   // Made again against that text, it applies.
   const again = replace(await open(p.main), 'Alphabet beta', '\\textbf{Alphabet beta}');
-  expect(await runCommand(t.pool, store, owner.id, p.main, again)).toEqual({ result: 'applied' });
+  expect(await runCommand(t.pool, store, owner.id, p.main, again)).toMatchObject({
+    result: 'applied',
+  });
   expect(await stored(p.id)).toBe(MAIN.replace('Alpha beta', '\\textbf{Alphabet beta}'));
   // A stretch that has been deleted altogether is stale too.
   const gone = replace(await open(p.main), 'Second', 'Next');
@@ -122,7 +124,7 @@ test('a command sent twice is applied once', async () => {
   const p = await paper();
   // Replacing "a" with "aa": applied twice it would show.
   const c = replace(await open(p.main), 'gamma', 'gamma gamma');
-  expect(await runCommand(t.pool, store, owner.id, p.main, c)).toEqual({ result: 'applied' });
+  expect(await runCommand(t.pool, store, owner.id, p.main, c)).toMatchObject({ result: 'applied' });
   expect(await runCommand(t.pool, store, owner.id, p.main, c)).toEqual({ result: 'duplicate' });
   expect(await stored(p.id)).toBe(MAIN.replace('gamma', 'gamma gamma'));
   // Both copies arriving at the same moment.
@@ -203,6 +205,6 @@ test('compacting leaves one log entry, the same text, and old copies still merge
   expect(late.toString()).toBe(before.replaceAll('\r\n', '\n').replace('Second', 'OFFLINE Second'));
   // Editing and commands carry on from the compacted log.
   const c = replace(await open(p.main), 'gamma', 'GAMMA');
-  expect(await runCommand(t.pool, store, owner.id, p.main, c)).toEqual({ result: 'applied' });
+  expect(await runCommand(t.pool, store, owner.id, p.main, c)).toMatchObject({ result: 'applied' });
   expect(await stored(p.id)).toBe(before.replace('gamma', 'GAMMA'));
 });

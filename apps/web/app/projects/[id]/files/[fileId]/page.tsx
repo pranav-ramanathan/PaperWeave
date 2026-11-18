@@ -1,9 +1,9 @@
-import { AppError, can, getProject, listFiles, openFile } from '@paperweave/server';
+import { AppError, can, getProject, importReport, listFiles, openFile } from '@paperweave/server';
 import Link from 'next/link';
 import { notFound } from 'next/navigation';
 import { db, requireUser } from '../../../../../lib/server';
 import BuildPane from './BuildPane';
-import SourceEditor from './SourceEditor';
+import FileEditor from './FileEditor';
 
 export const dynamic = 'force-dynamic';
 
@@ -18,11 +18,12 @@ export default async function FilePage({
     getProject(db(), user.id, id),
     listFiles(db(), user.id, id),
     openFile(db(), user.id, fileId),
+    importReport(db(), user.id, id),
   ]).catch((err) => {
     if (err instanceof AppError && err.code !== 'permission_denied') notFound();
     throw err;
   });
-  const [project, files, file] = loaded;
+  const [project, files, file, report] = loaded;
   // A file ID from another paper must not open under this paper's address.
   if (file.projectId !== project.id) notFound();
   return (
@@ -50,9 +51,12 @@ export default async function FilePage({
             ))}
           </ul>
         </nav>
-        <SourceEditor
+        <FileEditor
           key={fileId}
+          projectId={id}
           fileId={fileId}
+          visual={/\.(tex|ltx)$/i.test(file.path)}
+          sourceOnly={!!report?.files.find((f) => f.path === file.path)?.sourceOnly}
           path={file.path}
           canWrite={file.canWrite}
           user={user.email}

@@ -8,6 +8,7 @@ import {
   compactFile,
   loadUpdates,
   openFile,
+  runCommand,
   verifyTicket,
 } from '@paperweave/server';
 import pg from 'pg';
@@ -46,6 +47,36 @@ export async function startSync(opts: {
     async onLoadDocument({ document, documentName }) {
       for (const update of await loadUpdates(pool, store, documentName))
         Y.applyUpdate(document, update);
+    },
+
+    // A structural edit, asked for by an editor. Messages on one connection are handled in order,
+    // so every edit this person typed before asking is already in.
+    async onStateless({ connection, document, documentName, payload }) {
+      let key: unknown;
+      const answer = (reply: object) => connection.sendStateless(JSON.stringify({ key, ...reply }));
+      try {
+        const c = JSON.parse(payload);
+        key = c?.key;
+        const bytes = (v: unknown) =>
+          typeof v === 'string' ? Buffer.from(v, 'base64url') : undefined;
+        const done = await runCommand(
+          pool,
+          store,
+          (connection.context as Context).userId,
+          documentName,
+          { ...c, from: bytes(c?.from), to: bytes(c?.to) },
+          { notify: false },
+        );
+        if (done.result !== 'applied') return answer({ result: done.result });
+        // The author is answered first, with the edit, so that it is theirs to undo. Then it goes
+        // to everyone with the file open, the author included, for whom it changes nothing more.
+        answer({ result: 'applied', update: Buffer.from(done.update).toString('base64url') });
+        Y.applyUpdate(document, done.update);
+      } catch (err) {
+        if (!(err instanceof AppError) && !(err instanceof SyntaxError))
+          console.error(`command on ${documentName} failed:`, (err as Error).message);
+        answer({ error: err instanceof AppError ? err.message : 'That edit could not be made.' });
+      }
     },
 
     // Runs, and is awaited, before an incoming edit is applied and before it is acknowledged.
