@@ -5,6 +5,8 @@ import type { BlobStore } from './blobs.ts';
 import type { Db } from './db.ts';
 import { AppError } from './errors.ts';
 import { id } from './projects.ts';
+import { gunzipSync } from 'node:zlib';
+import { parseSyncTeX, type SyncTeX, toPdf, toSource } from '@paperweave/latex';
 
 export const BUILDS_PER_HOUR = 120;
 
@@ -181,4 +183,81 @@ export async function buildHealth(db: Db) {
     failed: number;
     timedOut: number;
   };
+}
+
+/** Read SyncTeX files, kept for the next few questions about the same build. */
+const read = new Map<string, SyncTeX>();
+async function syncOf(
+  db: Db,
+  store: BlobStore,
+  userId: string,
+  projectId: string,
+  buildId: string,
+) {
+  await authorize(db, userId, id(projectId), 'project.read');
+  const build = (
+    await db.query(
+      'select synctex_digest, revision_id from builds where id = $1 and project_id = $2',
+      [id(buildId), projectId],
+    )
+  ).rows[0];
+  const digest: string | undefined = build?.synctex_digest;
+  if (!digest) throw new AppError('not_found', 'That build has nothing to go by.');
+  let sync = read.get(digest);
+  if (!sync) {
+    const bytes = await store.get(digest);
+    if (!bytes) throw new AppError('not_found', 'That build has nothing to go by.');
+    sync = parseSyncTeX(gunzipSync(bytes).toString('latin1'));
+    // shortcut: a handful of builds kept per process, the oldest dropped; share them between
+    // processes if reading them ever shows up in timings.
+    if (read.size >= 8) read.delete(read.keys().next().value!);
+    read.set(digest, sync);
+  }
+  // The files as they were named in the revision that was built.
+  const files: { file_id: string; path: string }[] = (
+    await db.query('select file_id, path from revision_files where revision_id = $1', [
+      build.revision_id,
+    ])
+  ).rows;
+  return { sync, files };
+}
+const nowhere = () => new AppError('not_found', 'The PDF does not say where that is.');
+
+/** Where a line of a file is in a build's PDF: the page, and a place on it in PDF points. */
+export async function sourceToPdf(
+  db: Db,
+  store: BlobStore,
+  userId: string,
+  projectId: string,
+  buildId: string,
+  fileId: string,
+  line: number,
+) {
+  if (!Number.isInteger(line) || line < 1) throw new AppError('invalid_input', 'No such line.');
+  const { sync, files } = await syncOf(db, store, userId, projectId, buildId);
+  const path = files.find((f) => f.file_id === fileId)?.path;
+  const place = path === undefined ? null : toPdf(sync, path, line);
+  if (!place) throw nowhere();
+  return place;
+}
+
+/** The file and line that made what is at a point of a page of a build's PDF. */
+export async function pdfToSource(
+  db: Db,
+  store: BlobStore,
+  userId: string,
+  projectId: string,
+  buildId: string,
+  page: number,
+  x: number,
+  y: number,
+) {
+  if (!Number.isInteger(page) || page < 1 || !Number.isFinite(x) || !Number.isFinite(y))
+    throw new AppError('invalid_input', 'No such place.');
+  const { sync, files } = await syncOf(db, store, userId, projectId, buildId);
+  const found = toSource(sync, page, x, y);
+  const file = found && files.find((f) => f.path === found.path);
+  // A line of a file the build made for itself (the bibliography's .bbl) is nobody's to edit.
+  if (!found || !file) throw nowhere();
+  return { fileId: file.file_id, path: file.path, line: found.line };
 }

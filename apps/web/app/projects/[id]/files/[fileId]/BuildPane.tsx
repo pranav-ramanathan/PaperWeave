@@ -3,6 +3,8 @@
 import type { Build } from '@paperweave/server';
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { type Numbers, setNumbers } from '../../../../../lib/numbers';
+import { onShow, showInEditor } from '../../../../../lib/pdfsync';
+import PdfView, { type Mark } from './PdfView';
 
 type Builds = { latest: Build | null; lastGood: Build | null; edits: number };
 
@@ -72,6 +74,32 @@ export default function BuildPane({
       setNumbers({ labels: found.labels, known: true, stale: behind });
   }, [found, pdf, behind]);
   useEffect(() => () => setNumbers({ labels: {}, known: false, stale: false }), []);
+  // The editor asks for a line to be shown in this PDF; a double-click on a page asks the
+  // editor for the line that made what is there.
+  const [mark, setMark] = useState<(Mark & { pdf: string }) | null>(null);
+  const [said, setSaid] = useState('');
+  const ask = useCallback(
+    async (query: string) => {
+      const res = await fetch(`${url}/${pdf}/sync?${query}`).catch(() => null);
+      return res?.ok ? res.json() : null;
+    },
+    [url, pdf],
+  );
+  useEffect(() => {
+    if (!pdf) return;
+    return onShow('pdf', async ({ fileId, line }) => {
+      const place: Mark | null = await ask(`file=${fileId}&line=${line}`);
+      if (!place) return setSaid('The PDF does not say where that line is.');
+      setMark({ ...place, pdf });
+      setSaid(`Shown on page ${place.page} of the PDF.`);
+    });
+  }, [pdf, ask]);
+  const pick = async (page: number, x: number, y: number) => {
+    const place = await ask(`page=${page}&x=${x.toFixed(2)}&y=${y.toFixed(2)}`);
+    if (!place) return setSaid('The PDF does not say where that came from.');
+    setSaid(`That is line ${place.line} of ${place.path}.`);
+    showInEditor(place);
+  };
   const building = latest?.status === 'queued';
   const state = !builds
     ? 'Checking for a PDF…'
@@ -133,7 +161,20 @@ export default function BuildPane({
             Showing the PDF built at {time(lastGood.createdAt)}
             {behind ? ', before the latest edits.' : '.'}
           </p>
-          <iframe title="Compiled PDF" src={`${url}/${lastGood.id}/pdf`} />
+          <p className="build-links">
+            <a href={`${url}/${lastGood.id}/pdf`} target="_blank" rel="noreferrer">
+              Open the PDF by itself
+            </a>
+            . Double-click a place on a page to go to its line in the text.{' '}
+            <span aria-live="polite" className="pdf-said">
+              {said}
+            </span>
+          </p>
+          <PdfView
+            src={`${url}/${lastGood.id}/pdf`}
+            mark={mark && mark.pdf === lastGood.id ? mark : null}
+            onPick={pick}
+          />
         </>
       ) : (
         builds && !building && <p className="build-links">There is no PDF to show yet.</p>

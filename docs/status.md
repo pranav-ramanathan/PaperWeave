@@ -324,6 +324,24 @@ Read this first. Update it in every pull request.
     `packages/server/src/matrix.test.ts` from the papers themselves
     (`WRITE_MATRIX=1 pnpm vitest run packages/server/src/matrix.test.ts`), and that test fails
     when the file no longer matches them.
+- **D5, third part: between the text and the PDF.** With this D5 and Phase D are done.
+  - "Show in PDF" in the editor's toolbar (either view) brings the caret's line into view in
+    the PDF beside it, with a band across the line. A double-click on a place in the PDF puts
+    the caret on the line that made it, opening another file of the paper if it is there.
+  - `packages/latex/src/synctex.ts` reads the SyncTeX file the build already kept and answers
+    both questions. On the two-column IEEE fixture, more than 9 in 10 lines of prose lead to a
+    place that leads back to them; a sandbox test holds that. Lines that put nothing of their
+    own into the PDF (`\begin{tabular}`) give the next line that did. TeX does not record
+    characters, so a place in a paragraph is known to the nearest space.
+  - `sourceToPdf` and `pdfToSource` in `packages/server/src/builds.ts`, served at
+    `/projects/<id>/builds/<buildId>/sync`. Files are matched by ID as they were named in the
+    revision that was built, so a later rename does not matter.
+  - The PDF is now drawn page by page with PDF.js (`PdfView.tsx`) instead of the browser's own
+    viewer, which could neither be pointed at a place nor say where a click was. A rebuilt PDF
+    appears where the old one was scrolled to. Pages are pictures: to select or search text,
+    "Open the PDF by itself" opens the browser's viewer. A text layer is left for Phase F.
+  - When the PDF is behind the text, lines are those of the text that was built, so a place can
+    be a few lines off until the next build.
 - **A restore keeps what it replaces.** Found by the fault suite on a seed it had not run before.
   A restore put back the chosen revision but kept no copy of the paper as it stood, so text typed
   since the last revision (an edit that reached the server a moment before, say) was erased with
@@ -348,10 +366,10 @@ nothing, edit it together, build it, and download a ZIP and a PDF that belong to
 
 Next, in this order:
 
-1. **D5, the rest.** SyncTeX navigation both ways between the source and the PDF. The PDF is
-   shown in the browser's own viewer today, so this needs PDF.js; the build already keeps the
-   SyncTeX file of every revision it builds.
-2. **Phase E** onward, as in the plan.
+1. **E1.** Threads: comments anchored to a stretch of text, replies, mentions, resolving. A
+   thread whose text is deleted is kept, detached, with the text it was about.
+2. **E2** onward, as in the plan. The owner's decision on where tracked changes are stored
+   (beside the source, not in it) is wanted before E2.
 
 The Phase A replays are waiting on a person with accounts: `docs/rea/matrix.md`. The Prism one is
 optional: its export was researched from public sources (`docs/rea/prism.md`) and is a plain LaTeX

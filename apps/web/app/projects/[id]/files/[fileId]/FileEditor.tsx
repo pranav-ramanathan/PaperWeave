@@ -5,11 +5,13 @@ import { Compartment, EditorState } from '@codemirror/state';
 import { EditorView, keymap, lineNumbers } from '@codemirror/view';
 import { HocuspocusProvider } from '@hocuspocus/provider';
 import { type Command, type CommandResult, localChanges } from '@paperweave/bridge';
+import { useRouter } from 'next/navigation';
 import { useEffect, useRef, useState } from 'react';
 import { flushSync } from 'react-dom';
 import { yCollab, yUndoManagerKeymap } from 'y-codemirror.next';
 import * as Y from 'yjs';
 import { setBibliography } from '../../../../../lib/bibliography';
+import { onShow, showInPdf } from '../../../../../lib/pdfsync';
 import { createVisual, type Visual } from '../../../../../lib/visual';
 import {
   CitationPicker,
@@ -77,6 +79,23 @@ export default function FileEditor(props: {
   const live = useRef<{ view: EditorView; visual: Visual | null; undo: Y.UndoManager }>(null);
   const [mode, setMode] = useState<Mode>(props.visual && !sourceOnly ? 'visual' : 'source');
   const [note, setNote] = useState('');
+  // The editors are made once; they read which view is showing from here.
+  const modeNow = useRef(mode);
+  modeNow.current = mode;
+  /** Put the caret on a line of this file, and the line it is on now. Set once the editors exist. */
+  const jump = useRef<(line: number) => void>(() => {});
+  const lineNow = useRef<() => number>(() => 1);
+  const router = useRouter();
+  // A double-click in the PDF asks for a line: of this file, or of another one of the paper.
+  useEffect(
+    () =>
+      onShow('source', (place) =>
+        place.fileId === fileId
+          ? jump.current(place.line)
+          : router.push(`/projects/${projectId}/files/${place.fileId}?line=${place.line}`),
+      ),
+    [fileId, projectId, router],
+  );
   // The paper's macros as they were when the page was made. Not a reason to rebuild the editors.
   const macros = useRef(props.macros);
   /** A formula being edited or inserted, a reference being chosen, and the menu, when open. */
@@ -176,6 +195,10 @@ export default function FileEditor(props: {
       },
       onSynced: () => {
         update({ loaded: true });
+        // Arrived from a place in the PDF: go to the line it named, once, now that there is text.
+        const line = Number(new URLSearchParams(location.search).get('line'));
+        if (line && !arrived) setTimeout(() => jump.current(line), 0);
+        arrived = true;
         // Back in touch: find out whether what was typed meanwhile has arrived.
         if (unsaved) askSoon(50);
       },
@@ -188,6 +211,7 @@ export default function FileEditor(props: {
       // The server closes a file it will no longer serve: access was taken away, or it was deleted.
       onClose: ({ event }) => event.reason === NO_ACCESS && refuse(),
     });
+    let arrived = false;
     // Whether this person's changes are saved is asked of the server, not inferred: "do you hold
     // every insert and delete I have made?". The sync library's own count of confirmations
     // reaches zero too early after a reconnect.
@@ -319,6 +343,20 @@ export default function FileEditor(props: {
       }
     };
     switchTo.current = show;
+    jump.current = (line) => {
+      const at = view.state.doc.line(Math.max(1, Math.min(Math.floor(line), view.state.doc.lines)));
+      // The first thing written on the line, past its indentation.
+      const from = at.from + (at.text.length - at.text.trimStart().length);
+      if (visual && modeNow.current === 'visual') return visual.select(from, from);
+      view.dispatch({ selection: { anchor: from }, scrollIntoView: true });
+      view.focus();
+    };
+    lineNow.current = () =>
+      view.state.doc.lineAt(
+        visual && modeNow.current === 'visual'
+          ? visual.toSource(visual.editor.state.selection.head, -1)
+          : view.state.selection.main.head,
+      ).number;
 
     const setLocked = (on: boolean) => {
       view.dispatch({ effects: writable.reconfigure(lock(on || !canWrite)) });
@@ -457,6 +495,20 @@ export default function FileEditor(props: {
               </button>
             </span>
           )}
+          <span role="group" aria-label="Go to">
+            <button
+              type="button"
+              onClick={() =>
+                setNote(
+                  showInPdf({ fileId, line: lineNow.current() })
+                    ? ''
+                    : 'There is no PDF to show it in yet.',
+                )
+              }
+            >
+              Show in PDF
+            </button>
+          </span>
           <span className="note" aria-live="polite">
             {note}
           </span>

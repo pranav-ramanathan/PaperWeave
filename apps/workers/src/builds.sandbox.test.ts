@@ -16,6 +16,8 @@ import {
   requestBuild,
   TEXT,
   writeZip,
+  pdfToSource,
+  sourceToPdf,
 } from '@paperweave/server';
 import pg from 'pg';
 import { afterAll, beforeAll, expect, test } from 'vitest';
@@ -289,3 +291,61 @@ test('builds and their outputs are only for people on the paper', async () => {
   // And one paper's cache never serves another: the same files in a new paper are built afresh.
   expect((await build(other.project)).cached).toBe(false);
 });
+
+test('a build says where each line is in its PDF, and which line made each place', async () => {
+  const { project } = await paper('ieee-multifile');
+  const first = await build(project);
+  const files = await listFiles(t.pool, owner.id, project);
+  const to = (file: string, line: number) =>
+    sourceToPdf(t.pool, store, owner.id, project, first.id, file, line);
+  const from = (page: number, x: number, y: number) =>
+    pdfToSource(t.pool, store, owner.id, project, first.id, page, x, y);
+
+  // Every line of the paper's prose that put something in the PDF is found again from where
+  // it was put. (A handful of lines put nothing of their own there: \begin{tabular} and such.)
+  let asked = 0;
+  let back = 0;
+  for (const f of files.filter((x) => /^(sections|tables)\//.test(x.path))) {
+    const lines = readFileSync(join(FIXTURES, 'ieee-multifile', f.path), 'utf8').split('\n');
+    for (let n = 1; n <= lines.length; n++) {
+      const place = await to(f.id, n);
+      if (place.line !== n) continue;
+      asked++;
+      expect(place.page).toBe(1);
+      const found = await from(place.page, place.x + 1, place.y + place.height * 0.7).catch(
+        () => null,
+      );
+      if (found?.fileId === f.id && Math.abs(found.line - n) <= 1) back++;
+    }
+  }
+  expect(asked).toBeGreaterThan(40);
+  expect(back / asked).toBeGreaterThan(0.9);
+
+  // The second column is told from the first: the results are there, the introduction is not.
+  const intro = files.find((f) => f.path === 'sections/intro.tex')!;
+  const results = files.find((f) => f.path === 'sections/results.tex')!;
+  const left = await to(intro.id, 4);
+  const right = await to(results.id, 4);
+  expect(right.x - left.x).toBeGreaterThan(200);
+  expect(await from(1, right.x + 20, right.y + 6)).toMatchObject({
+    fileId: results.id,
+    path: 'sections/results.tex',
+  });
+
+  // What cannot be answered is refused, and nobody outside the paper is answered at all.
+  expect(await code(to(intro.id, 0))).toBe('invalid_input');
+  expect(await code(to(outsider.id, 3))).toBe('not_found');
+  expect(await code(from(9, 100, 100))).toBe('not_found');
+  expect(await code(from(1, Number.NaN, 100))).toBe('invalid_input');
+  expect(await code(sourceToPdf(t.pool, store, outsider.id, project, first.id, intro.id, 4))).toBe(
+    'not_found',
+  );
+  expect(await code(pdfToSource(t.pool, store, outsider.id, project, first.id, 1, 100, 100))).toBe(
+    'not_found',
+  );
+  // Not through another paper either.
+  const other = await paper();
+  expect(
+    await code(sourceToPdf(t.pool, store, owner.id, other.project, first.id, intro.id, 4)),
+  ).toBe('not_found');
+}, 180_000);

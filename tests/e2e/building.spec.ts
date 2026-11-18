@@ -43,8 +43,10 @@ test('the PDF builds by itself, a broken edit says where, and the last good PDF 
   await owner.page.getByRole('link', { name: 'sections/intro.tex' }).click();
   await showSource(owner.page);
   await expect(buildStatus(owner.page)).toHaveText('The PDF is up to date.', { timeout: 60_000 });
-  const frame = build(owner.page).locator('iframe');
-  const first = (await frame.getAttribute('src'))!;
+  const frame = build(owner.page).getByRole('link', { name: 'Open the PDF by itself' });
+  const first = (await frame.getAttribute('href'))!;
+  // The pages themselves are drawn in the pane.
+  await expect(build(owner.page).getByRole('img', { name: /^Page 1 of/ })).toBeVisible();
   const pdf = await owner.page.request.get(first);
   expect(pdf.headers()['content-type']).toBe('application/pdf');
   expect((await pdf.body()).subarray(0, 5).toString()).toBe('%PDF-');
@@ -58,7 +60,7 @@ test('the PDF builds by itself, a broken edit says where, and the last good PDF 
     /sections\/intro\.tex:\d+ Undefined control sequence\./,
   );
   await expect(build(owner.page)).toContainText('before the latest edits');
-  expect(await frame.getAttribute('src')).toBe(first);
+  expect(await frame.getAttribute('href')).toBe(first);
   const log = await owner.page.request.get(
     (await build(owner.page).getByRole('link', { name: 'Build log' }).getAttribute('href'))!,
   );
@@ -68,7 +70,7 @@ test('the PDF builds by itself, a broken edit says where, and the last good PDF 
   for (let i = 0; i < '\\nosuchmacro'.length; i++) await owner.page.keyboard.press('Backspace');
   await owner.page.keyboard.type('% fixed');
   await expect(buildStatus(owner.page)).toHaveText('The PDF is up to date.', { timeout: 60_000 });
-  expect(await frame.getAttribute('src')).not.toBe(first);
+  expect(await frame.getAttribute('href')).not.toBe(first);
 
   // A viewer sees the PDF but cannot start a build, by button or by request.
   await viewer.page.goto(await emailedLink(viewer.email, '/invitations/'));
@@ -76,7 +78,7 @@ test('the PDF builds by itself, a broken edit says where, and the last good PDF 
   await viewer.page.getByRole('button', { name: 'Join this paper' }).click();
   await viewer.page.getByRole('link', { name: 'sections/intro.tex' }).click();
   await expect(buildStatus(viewer.page)).toHaveText('The PDF is up to date.');
-  await expect(build(viewer.page).locator('iframe')).toBeVisible();
+  await expect(build(viewer.page).getByRole('img', { name: /^Page 1 of/ })).toBeVisible();
   await expect(build(viewer.page).getByRole('button', { name: 'Compile now' })).toHaveCount(0);
   const paper = viewer.page.url().split('/files/')[0];
   expect(
