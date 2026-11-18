@@ -8,6 +8,8 @@ const config: NextConfig = {
     '@paperweave/workers',
     '@paperweave/server',
   ],
+  // One copy of Yjs on the server, shared by pages and route handlers.
+  serverExternalPackages: ['yjs'],
   agentRules: false,
 };
 

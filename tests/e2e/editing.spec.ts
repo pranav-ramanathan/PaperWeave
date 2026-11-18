@@ -22,7 +22,8 @@ function fixtureZip() {
   return files;
 }
 
-const status = (page: Page) => page.locator('.editor-bar [role=status]');
+const status = (page: Page) =>
+  page.getByRole('region', { name: /^Editor for/ }).getByRole('status');
 const source = (page: Page) => page.locator('.editor .cm-content');
 /** Type at the very start of the file, as a person would. */
 async function typeAtStart(page: Page, text: string) {

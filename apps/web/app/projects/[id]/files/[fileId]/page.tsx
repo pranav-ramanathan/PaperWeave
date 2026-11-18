@@ -1,7 +1,8 @@
-import { AppError, getProject, listFiles, openFile } from '@paperweave/server';
+import { AppError, can, getProject, listFiles, openFile } from '@paperweave/server';
 import Link from 'next/link';
 import { notFound } from 'next/navigation';
 import { db, requireUser } from '../../../../../lib/server';
+import BuildPane from './BuildPane';
 import SourceEditor from './SourceEditor';
 
 export const dynamic = 'force-dynamic';
@@ -57,6 +58,7 @@ export default async function FilePage({
           user={user.email}
           syncUrl={process.env.SYNC_URL ?? 'ws://localhost:4100'}
         />
+        <BuildPane projectId={id} canBuild={can(project.role, 'build.run')} />
       </div>
     </main>
   );

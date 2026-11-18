@@ -27,6 +27,19 @@ Read this first. Update it in every pull request.
     removal also notifies the sync server, which re-checks open connections at once.
   - Reviewers and viewers connect read-only: what they type is neither saved nor shared.
   - Export builds an edited file from its log and restores its newline style and BOM.
+- **C4: builds.** The `builds` table is the job queue: `apps/workers/src/main.ts` takes the oldest
+  queued row with `for update skip locked` and holds it while it builds, so a worker that dies
+  gives the build back. The plan named pg-boss; a table already needed for results does the same
+  job with no extra dependency. Revisit if retries or scheduling grow.
+  - A build reads the text as it stands when the worker starts, so a burst of requests is one
+    build. Asking while one is queued returns that one. A paper may build 120 times an hour.
+  - The cache key covers every file's bytes, the root, the compiler and the toolchain image ID.
+    Results are reused only within the same paper.
+  - The TeX image has pdfLaTeX, XeLaTeX and LuaLaTeX.
+  - The editor page shows the PDF beside the source. It compiles by itself once typing has paused,
+    lists errors with file and line, and keeps showing the last good PDF, marked when it is behind
+    the text. The PDF is shown in the browser's own viewer; PDF.js comes with SyncTeX (D5).
+  - Import still runs inside the upload request.
 - **Phase B spike.** Gate report: `docs/phase-b-gate.md`. Recommendation: go.
   - `packages/latex`: lossless block parser, incremental reparse, include graph, encoding round
     trip, coverage.
@@ -36,11 +49,13 @@ Read this first. Update it in every pull request.
 
 ## Next
 
-C1, C2 and C3 are done. Next is C4, the build service: a job queue (pg-boss), the compile worker
-on it, XeLaTeX and LuaLaTeX in the TeX image, build cache, auto-build coalescing, quotas,
-diagnostics and a PDF view beside the editor. The import step should move onto the same queue.
+C1 to C4 are done. Next is C5: revisions. Cut a revision (a consistent set of file contents),
+name it, compare two, restore one as a new revision, rename a file keeping its ID, and export the
+ZIP and PDF from one revision with an optional toolchain manifest. Builds should then belong to a
+revision.
 
-Then C5 (revisions and export from a revision) completes the first end-to-end slice.
+After C5: C6 (commands for structural edits, log compaction), C7 (the visual editor in the app),
+C8 (fault suite and monitoring).
 
 The Phase A replays are waiting on a person with accounts: `docs/rea/matrix.md`. The Prism one is
 optional: its export was researched from public sources (`docs/rea/prism.md`) and is a plain LaTeX
