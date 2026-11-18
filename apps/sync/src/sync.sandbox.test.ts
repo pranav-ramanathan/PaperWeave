@@ -445,6 +445,10 @@ test('the metrics page gives counts to whoever holds the token, and nothing to a
   expect(more('paperweave_builds_queued')).toBe(1);
   expect(after('paperweave_build_queue_age_seconds')).toBeGreaterThan(0);
   expect(after('paperweave_builds_last_hour{result="failed"}')).toBe(0);
+  // How papers fare is there too: this paper was imported, and its owner has edited it.
+  expect(after('paperweave_papers{origin="imported"}')).toBeGreaterThanOrEqual(1);
+  expect(after('paperweave_papers_edited')).toBeGreaterThanOrEqual(1);
+  expect(after.text).toMatch(/^# TYPE paperweave_papers_two_authors gauge$/m);
   // Counts only: nothing anyone typed is on the page.
   expect(after.text).not.toContain('COUNTED');
   expect(after.text).toMatch(/^# TYPE paperweave_sync_edits_saved_total counter$/m);
