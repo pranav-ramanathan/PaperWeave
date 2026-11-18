@@ -709,3 +709,11 @@ button.pw-op:focus-visible {
   color: var(--ink);
   outline: 2px solid var(--accent);
 }
+
+/* A drawn chart on its own page. */
+img.chart {
+  display: block;
+  max-width: min(100%, 36rem);
+  height: auto;
+  border: 1px solid var(--line);
+}

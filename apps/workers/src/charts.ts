@@ -1,0 +1,85 @@
+// Takes queued charts from the charts table and draws them: Vega-Lite to SVG here, then SVG to
+// PDF and PNG in the sandbox.
+import { mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
+import {
+  AppError,
+  type BlobStore,
+  chartPath,
+  datasetTable,
+  putFile,
+  transaction,
+  vegaLite,
+} from '@paperweave/server';
+import type pg from 'pg';
+import * as vega from 'vega';
+import { compile } from 'vega-lite';
+import { sandbox } from './compile.ts';
+
+/** Draw a Vega-Lite specification as a PDF and a PNG. */
+export async function render(vl: object): Promise<{ pdf: Uint8Array; png: Uint8Array }> {
+  const view = new vega.View(vega.parse(compile(vl as never).spec), { renderer: 'none' });
+  const svg = await view.toSVG();
+  view.finalize();
+  const work = mkdtempSync(join(tmpdir(), 'paperweave-chart-'));
+  try {
+    writeFileSync(join(work, 'chart.svg'), svg);
+    // Twice the size for the PNG, which is for screens. The PDF is what a paper should include.
+    for (const args of [
+      ['-f', 'pdf', '-o', 'chart.pdf'],
+      ['-f', 'png', '-z', '2', '-o', 'chart.png'],
+    ]) {
+      // A fixed date, so that the same chart of the same data is the same file.
+      const { code } = await sandbox(work, ['rsvg-convert', ...args, 'chart.svg'], 30, {
+        SOURCE_DATE_EPOCH: '0',
+      });
+      if (code) throw new Error(`rsvg-convert ${args[1]} ended with ${code}`);
+    }
+    return {
+      pdf: readFileSync(join(work, 'chart.pdf')),
+      png: readFileSync(join(work, 'chart.png')),
+    };
+  } finally {
+    rmSync(work, { recursive: true, force: true });
+  }
+}
+
+/**
+ * Draw the oldest queued chart, if there is one. Returns whether there was. The row stays locked
+ * while it is drawn: if this process dies, the lock goes and another worker takes it.
+ */
+export function drawNext(pool: pg.Pool, store: BlobStore): Promise<boolean> {
+  return transaction(pool, async (db) => {
+    const job = (
+      await db.query(
+        `select id, project_id, name, dataset_file_id, spec from charts
+         where status = 'queued' order by created_at for update skip locked limit 1`,
+      )
+    ).rows[0];
+    if (!job) return false;
+    try {
+      // Read with the approved description, and only if the file is still the approved version.
+      const table = await datasetTable(db, store, job.project_id, job.dataset_file_id);
+      const { vl, leftOut } = vegaLite(job.spec, table);
+      const { pdf, png } = await render(vl);
+      await putFile(db, store, job.project_id, chartPath(job.name, 'pdf'), pdf);
+      await putFile(db, store, job.project_id, chartPath(job.name, 'png'), png);
+      await db.query(
+        `update charts set status = 'drawn', problem = null, drawn_digest = $2, left_out = $3,
+           drawn_at = now() where id = $1`,
+        [job.id, table.version, leftOut],
+      );
+    } catch (err) {
+      // Something the author can put right is said in full. Anything else is ours: its text may
+      // quote the data, so only its kind is logged.
+      const ours = !(err instanceof AppError);
+      if (ours) console.error(`chart ${job.id} could not be drawn:`, (err as Error).name);
+      await db.query("update charts set status = 'failed', problem = $2 where id = $1", [
+        job.id,
+        ours ? 'The chart service could not draw this chart. Try again.' : (err as Error).message,
+      ]);
+    }
+    return true;
+  });
+}

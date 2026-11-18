@@ -15,6 +15,8 @@
   },
   "dependencies": {
     "@paperweave/server": "workspace:*",
-    "pg": "^8.23.1"
+    "pg": "^8.23.1",
+    "vega": "^6.4.0",
+    "vega-lite": "^6.5.0"
   }
 }

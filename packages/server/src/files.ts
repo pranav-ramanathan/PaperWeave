@@ -77,6 +77,32 @@ export async function createFile(
 }
 
 /**
+ * Write a file the service itself makes, such as a drawn chart: the file at that path gets these
+ * bytes, or is added. No permission check: the caller acts for the service.
+ */
+export async function putFile(
+  db: Db,
+  store: BlobStore,
+  projectId: string,
+  path: string,
+  bytes: Uint8Array,
+) {
+  const digest = await store.put(bytes);
+  const replaced = await db.query(
+    'update files set digest = $3, size = $4 where project_id = $1 and path = $2 and eol is null',
+    [projectId, path, digest, bytes.length],
+  );
+  if (!replaced.rowCount)
+    await db.query(
+      `insert into files (project_id, path, digest, size, readonly_reason) values ($1, $2, $3, $4, $5)`,
+      [projectId, path, digest, bytes.length, fileMeta(path, bytes).readonly],
+    );
+  await db.query('update projects set manifest_version = manifest_version + 1 where id = $1', [
+    projectId,
+  ]);
+}
+
+/**
  * Remove a file from a paper. The paper is saved as a revision first, so the file can always be
  * brought back by restoring. Anyone who has it open is disconnected from it. Returns the file's
  * name and the number of the revision that still has it.

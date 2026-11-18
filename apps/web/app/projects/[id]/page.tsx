@@ -6,6 +6,7 @@ import {
   getProject,
   importReport,
   labelReport,
+  listCharts,
   listDatasets,
   listFiles,
   listMembers,
@@ -69,12 +70,14 @@ export default async function Project({
     citationReport(db(), blobs(), user.id, id),
     citationChecks(db(), blobs(), user.id, id),
     listDatasets(db(), blobs(), user.id, id),
+    listCharts(db(), blobs(), user.id, id),
   ]).catch((err) => {
     // Not a member, or no such paper: the two look the same from outside.
     if (err instanceof AppError && err.code === 'not_found') notFound();
     throw err;
   });
-  const [project, members, files, report, revisions, labels, cited, checks, datasets] = loaded;
+  const [project, members, files, report, revisions, labels, cited, checks, datasets, charts] =
+    loaded;
   const dataFiles = files.filter((f) => /\.(csv|tsv)$/i.test(f.path) && !f.readonly);
   const reviewer = can(project.role, 'comment.write');
   const day = (iso: string) => iso.slice(0, 10);
@@ -572,10 +575,38 @@ export default async function Project({
                         : 'See or change its description'
                       : 'Describe it'}
                   </Link>
+                  {d && !d.changed && canWrite && (
+                    <>
+                      {' '}
+                      <Link href={`/projects/${id}/charts/new?data=${f.id}`}>
+                        New chart from {f.path}
+                      </Link>
+                    </>
+                  )}
                 </li>
               );
             })}
           </ul>
+          {charts.length > 0 && (
+            <>
+              <h3>Charts</h3>
+              <ul className="report">
+                {charts.map((c) => (
+                  <li key={c.id}>
+                    <Link href={`/projects/${id}/charts/${c.id}`}>{c.name}</Link>: {c.alt}{' '}
+                    {c.status === 'queued' && 'Waiting to be drawn.'}
+                    {c.status === 'failed' && <strong>Could not be drawn.</strong>}
+                    {c.status === 'drawn' &&
+                      (c.stale ? (
+                        <strong>Out of date: its data has changed since it was drawn.</strong>
+                      ) : (
+                        `Drawn ${c.drawnAt!.slice(0, 10)}.`
+                      ))}
+                  </li>
+                ))}
+              </ul>
+            </>
+          )}
         </>
       )}
 

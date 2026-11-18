@@ -262,6 +262,25 @@ Read this first. Update it in every pull request.
   - Data files stay out of downloaded ZIPs unless their description says to include them
     (`exportRevision`). A CSV that was never described is exported like any other file.
   - Table `datasets` (migration 0010).
+- **D4, second part: charts.** A scatter, line or bar chart of two columns of a described data
+  file, optionally split into groups by a text column. The paper's page lists charts under
+  "Data"; `/projects/<id>/charts/<chartId>` shows one and holds the form that makes or changes it.
+  - The worker draws it (`apps/workers/src/charts.ts`): Vega-Lite to SVG in Node, then SVG to
+    PDF and PNG with `rsvg-convert` in the sandbox image, which now also has that tool and the
+    DejaVu fonts. The two files are kept in the paper as `charts/<name>.pdf` and
+    `charts/<name>.png`, so `\includegraphics{charts/<name>}` works in builds and downloads.
+    The same chart of the same data gives the same bytes.
+  - `vegaLite` in `packages/server/src/charts.ts` builds the specification. Units go into the
+    axis titles. Rows with no value are left out and counted on the chart's page; a line can
+    show them as gaps instead. Dates are drawn in UTC, as written. Groups differ by shape or
+    dash as well as colour, and the colours are a colour-blind-safe set.
+  - Refused with the reason: bars where several rows share a value and nothing says how to
+    combine them (mean or sum), more than 8 groups, text along the bottom of a scatter or line.
+  - A chart records the version of the data file it was drawn from. `listCharts` reports
+    `stale` when the file is no longer that version. It is not redrawn until someone has looked
+    at the new version and approved its description; the worker checks again when it draws.
+  - Queue: rows of table `charts` with status `queued` (migration 0011), taken by the same
+    worker process as builds.
 - **A restore keeps what it replaces.** Found by the fault suite on a seed it had not run before.
   A restore put back the chosen revision but kept no copy of the paper as it stood, so text typed
   since the last revision (an edit that reached the server a moment before, say) was erased with
@@ -286,10 +305,10 @@ nothing, edit it together, build it, and download a ZIP and a PDF that belong to
 
 Next, in this order:
 
-1. **D4, the rest.** Charts from an approved data file: Vega-Lite scatter, line and bar
-   charts with units in the axis titles, rendered to PDF and PNG by a worker and kept as files of
-   the paper; a chart is out of date when its data file is no longer the version it was drawn
-   from; caption and alt text.
+1. **D4, the rest.** A caption and alt text for each chart, written by its author; putting a
+   chart into the paper as a figure from the visual editor (today: insert a figure and choose
+   `charts/<name>.png`, or write `\includegraphics` by hand); a record of how each chart was
+   made (data version, columns, how rows were combined) that travels with the paper.
 2. **D5** onward, as in the plan.
 
 The Phase A replays are waiting on a person with accounts: `docs/rea/matrix.md`. The Prism one is
