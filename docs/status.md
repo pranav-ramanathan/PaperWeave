@@ -207,6 +207,21 @@ Read this first. Update it in every pull request.
     registry that does not answer is reported and nothing is recorded.
   - A claim is matched by its words, not by its place in the text. Anchoring a check to a
     place comes with review threads (E1).
+- **D3, first part: tables and captions edited in place.**
+  - `floatParts` (`packages/latex/src/floats.ts`) reads a figure or table environment into its
+    caption, its pictures (file, and description if it has one) and, for a table, its rows of
+    cells, each with where it is in the source. Rules such as `\toprule` are not cells.
+  - In the visual view a simple table is drawn as a grid with its caption. Pressing a cell or a
+    caption turns it into a field holding its LaTeX; Enter puts the new text in its place,
+    Escape leaves it. A figure's caption works the same way.
+  - The change goes through the server and names only that cell (`Bridge.atomCommand` with a
+    part). Two people can edit two cells of one table at once; the same cell twice is a
+    conflict. A test edits every cell of a fixture in turn and checks the file differs in those
+    cells and nowhere else.
+  - Text that would break the grid (an unescaped `&`, a row break, a `%`) is refused.
+  - If the table changes under an open field, the person is told, with the text they had typed.
+  - A table that is not a plain grid (`\multicolumn`, `\multirow`, a nested table, rows of
+    different lengths) is shown as source, with "Edit in source".
 - **Phase B spike.** Gate report: `docs/phase-b-gate.md`. Recommendation: go.
   - `packages/latex`: lossless block parser, incremental reparse, include graph, encoding round
     trip, coverage.
@@ -221,8 +236,8 @@ nothing, edit it together, build it, and download a ZIP and a PDF that belong to
 
 Next, in this order:
 
-1. **D3.** Figures and tables: assets, captions, alt text, simple table editing. Exit test: a
-   cell edit changes only that cell's bytes.
+1. **D3, the rest.** Figures: show the picture, give it a description (alt text), and insert
+   a figure or a table from the toolbar. Adding and removing table rows and columns.
 2. **D4** onward, as in the plan.
 
 The Phase A replays are waiting on a person with accounts: `docs/rea/matrix.md`. The Prism one is

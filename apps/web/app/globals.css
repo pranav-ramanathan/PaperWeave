@@ -605,3 +605,60 @@ dialog.tool legend {
   color: var(--muted);
   font-size: 0.8rem;
 }
+
+/* A figure or table in the visual view: its caption and cells are edited where they stand. */
+.pw-float {
+  border: 1px dashed var(--line);
+  border-radius: 6px;
+  padding: 0.5rem 0.6rem;
+  font-family: system-ui, sans-serif;
+  font-size: 0.9rem;
+}
+.pw-float table {
+  border-collapse: collapse;
+  margin: 0 auto 0.4rem;
+}
+.pw-float caption {
+  caption-side: top;
+  padding-bottom: 0.3rem;
+  text-align: left;
+}
+.pw-float th,
+.pw-float td {
+  border: 1px solid var(--line);
+  padding: 0;
+  text-align: left;
+}
+button.pw-part {
+  display: block;
+  width: 100%;
+  min-height: 1.6em;
+  padding: 0.15rem 0.5rem;
+  border: 0;
+  background: none;
+  font: inherit;
+  text-align: inherit;
+  cursor: text;
+}
+caption button.pw-part,
+.pw-caption button.pw-part {
+  display: inline;
+  width: auto;
+  padding: 0 0.2rem;
+}
+span.pw-part {
+  display: inline-block;
+  padding: 0.15rem 0.5rem;
+}
+button.pw-part:hover,
+button.pw-part:focus-visible {
+  background: var(--wash);
+  outline: 2px solid var(--accent);
+}
+input.pw-part {
+  font:
+    0.85rem ui-monospace,
+    monospace;
+  padding: 0.15rem 0.4rem;
+  max-width: 100%;
+}

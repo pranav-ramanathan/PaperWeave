@@ -5,3 +5,4 @@ export * from './coverage.ts';
 export * from './labels.ts';
 export * from './macros.ts';
 export * from './bib.ts';
+export * from './floats.ts';
