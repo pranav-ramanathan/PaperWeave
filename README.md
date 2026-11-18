@@ -12,6 +12,7 @@ A collaborative academic writing workspace: a visual editor over LaTeX source, a
 - How long things take: `docs/benchmarks.md`
 - Security: what was reviewed, fixed and left open: `docs/security-review.md`
 - Tectonic compared with the TeX Live toolchain: `docs/tectonic-comparison.md`
+- What each service reads from its environment: `docs/settings.md`
 
 ## Develop
 
