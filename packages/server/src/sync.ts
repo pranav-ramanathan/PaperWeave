@@ -95,33 +95,38 @@ export async function loadUpdates(
   store: BlobStore,
   fileId: string,
 ): Promise<Uint8Array[]> {
-  const read = async (db: Db) =>
-    (
-      await db.query('select update from file_updates where file_id = $1 order by seq', [fileId])
-    ).rows.map((r) => new Uint8Array(r.update));
-  const existing = await read(pool);
+  const existing = await readLog(pool, fileId);
   if (existing.length) return existing;
-  return transaction(pool, async (db) => {
-    const file = (
-      await db.query('select digest, eol, head_seq from files where id = $1 for update', [
-        id(fileId),
-      ])
-    ).rows[0];
-    if (!file?.eol) throw new AppError('not_found', 'No such file.');
-    if (Number(file.head_seq) > 0) return read(db);
-    const bytes = await store.get(file.digest);
-    const decoded = bytes && decodeFile(bytes);
-    if (!decoded?.editable) throw new Error(`file ${fileId} has no readable text`);
-    const doc = new Y.Doc();
-    doc.getText(TEXT).insert(0, decoded.text);
-    const update = Y.encodeStateAsUpdate(doc);
-    await db.query('update files set head_seq = 1 where id = $1', [fileId]);
-    await db.query('insert into file_updates (file_id, seq, update) values ($1, 1, $2)', [
-      fileId,
-      Buffer.from(update),
-    ]);
-    return [update];
-  });
+  return transaction(pool, (db) => lockedUpdates(db, store, fileId));
+}
+const readLog = async (db: Db, fileId: string) =>
+  (
+    await db.query('select update from file_updates where file_id = $1 order by seq', [fileId])
+  ).rows.map((r) => new Uint8Array(r.update));
+
+/** The same inside a transaction, which then holds the file: no edit lands until it ends. */
+export async function lockedUpdates(
+  db: Db,
+  store: BlobStore,
+  fileId: string,
+): Promise<Uint8Array[]> {
+  const file = (
+    await db.query('select digest, eol, head_seq from files where id = $1 for update', [id(fileId)])
+  ).rows[0];
+  if (!file?.eol) throw new AppError('not_found', 'No such file.');
+  if (Number(file.head_seq) > 0) return readLog(db, fileId);
+  const bytes = await store.get(file.digest);
+  const decoded = bytes && decodeFile(bytes);
+  if (!decoded?.editable) throw new Error(`file ${fileId} has no readable text`);
+  const doc = new Y.Doc();
+  doc.getText(TEXT).insert(0, decoded.text);
+  const update = Y.encodeStateAsUpdate(doc);
+  await db.query('update files set head_seq = 1 where id = $1', [fileId]);
+  await db.query('insert into file_updates (file_id, seq, update) values ($1, 1, $2)', [
+    fileId,
+    Buffer.from(update),
+  ]);
+  return [update];
 }
 
 /**
@@ -129,23 +134,34 @@ export async function loadUpdates(
  * edit goes through the same log and the same permission check as typing, and the sync server is
  * told so that people with the file open see it at once.
  */
-export async function editFile(
+export function editFile(
   pool: pg.Pool,
   store: BlobStore,
   fileId: string,
   userId: string,
   change: (text: Y.Text) => void,
 ): Promise<void> {
+  return transaction(pool, (db) => editLocked(db, store, fileId, userId, change));
+}
+
+/** The same as one step of a larger transaction. People see the edit when it commits. */
+export async function editLocked(
+  db: Db,
+  store: BlobStore,
+  fileId: string,
+  userId: string,
+  change: (text: Y.Text) => void,
+): Promise<void> {
   const doc = new Y.Doc();
-  for (const update of await loadUpdates(pool, store, fileId)) Y.applyUpdate(doc, update);
+  for (const update of await lockedUpdates(db, store, fileId)) Y.applyUpdate(doc, update);
   const before = Y.encodeStateVector(doc);
   change(doc.getText(TEXT));
   const update = Y.encodeStateAsUpdate(doc, before);
   // Two zero bytes: nothing was inserted or deleted.
   if (update.length <= 2) return;
-  const seq = await appendUpdate(pool, fileId, userId, update);
+  const seq = await appendUpdate(db, fileId, userId, update);
   if (seq === null) throw new AppError('permission_denied', 'You cannot edit this file.');
-  await pool.query("select pg_notify('file_edits', $1)", [`${fileId}:${seq}`]);
+  await db.query("select pg_notify('file_edits', $1)", [`${fileId}:${seq}`]);
 }
 
 /**

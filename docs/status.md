@@ -247,6 +247,31 @@ Read this first. Update it in every pull request.
     (`*{3}{c}`); the buttons are then not offered. A table is never left with no row or column.
   - A column change rewrites the stretch from the specification to the last row, so it
     conflicts with a cell someone else is changing at that moment. A row change does not.
+- **D4, first part: data files.** A CSV file of a paper can be described: what each column
+  holds (numbers, dates or text), its unit, which spellings mean "no value", where the data comes
+  from, and whether the file goes into downloads. The paper's page lists data files under
+  "Data"; `/projects/<id>/data/<fileId>` is where one is described.
+  - `packages/server/src/csv.ts` reads CSV (quoted fields with delimiters, quotes and line
+    breaks in them; comma, semicolon or tab, found by looking; a BOM) and guesses a description.
+    A person approves it; nothing is used on a guess.
+  - A description is of one exact version of the file (its sha256). Approving checks that the
+    version on the form is still the current one, and that every value fits its column's type or
+    is one of the "no value" spellings; otherwise it says which row and column does not.
+  - `listDatasets` reports `changed` when the file is no longer the approved version.
+    `datasetTable` gives the typed rows and refuses a changed file. Charts will read through it.
+  - Data files stay out of downloaded ZIPs unless their description says to include them
+    (`exportRevision`). A CSV that was never described is exported like any other file.
+  - Table `datasets` (migration 0010).
+- **A restore keeps what it replaces.** Found by the fault suite on a seed it had not run before.
+  A restore put back the chosen revision but kept no copy of the paper as it stood, so text typed
+  since the last revision (an edit that reached the server a moment before, say) was erased with
+  no way back. Now `restoreRevision` first cuts a revision of the paper as it is, and does the
+  whole restore as one transaction with every file of the paper held: no edit lands in between,
+  and a restore that fails half way changes nothing.
+  - `editFile` is now one transaction under the file's lock; `editLocked`, `lockedUpdates` and
+    `cut` are the same steps for use inside a larger transaction.
+  - The fault suite reads what a restore took away from that kept revision, and checks that the
+    kept revision holds everything that was stored.
 - **Phase B spike.** Gate report: `docs/phase-b-gate.md`. Recommendation: go.
   - `packages/latex`: lossless block parser, incremental reparse, include graph, encoding round
     trip, coverage.
@@ -261,9 +286,10 @@ nothing, edit it together, build it, and download a ZIP and a PDF that belong to
 
 Next, in this order:
 
-1. **D4.** Data and charts: CSV with an approved schema and missing-value rules, Vega-Lite
-   scatter, line and bar charts rendered to PDF and PNG, staleness tracking, opt-in dataset
-   export.
+1. **D4, the rest.** Charts from an approved data file: Vega-Lite scatter, line and bar
+   charts with units in the axis titles, rendered to PDF and PNG by a worker and kept as files of
+   the paper; a chart is out of date when its data file is no longer the version it was drawn
+   from; caption and alt text.
 2. **D5** onward, as in the plan.
 
 The Phase A replays are waiting on a person with accounts: `docs/rea/matrix.md`. The Prism one is

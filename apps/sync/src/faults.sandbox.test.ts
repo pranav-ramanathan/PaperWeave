@@ -8,10 +8,12 @@ import { join } from 'node:path';
 import {
   acceptInvitation,
   blobStore,
+  exportRevision,
   exportZip,
   importZip,
   invite,
   listFiles,
+  listRevisions,
   readZip,
   restoreRevision,
   saveRevision,
@@ -233,13 +235,22 @@ test(`${STEPS} steps of typing through faults lose nothing (seed ${SEED})`, asyn
         const to = pick(saves);
         if (!to) return;
         const before = await settle();
-        await restoreRevision(t.pool, store, users.owner.id, project.id, to.id);
+        const restored = await restoreRevision(t.pool, store, users.owner.id, project.id, to.id);
         // The restore itself: the stored text is the saved text, mark for mark.
         const after = marks(await stored());
         if ([...to.marks].some((m) => !after.includes(m)) || after.length !== new Set(after).size)
           throw new Error('right after a restore, the stored text is not the restored revision');
+        // The paper as it stood is the revision before the restore. It holds everything stored
+        // until then, including an edit that arrived a moment before from someone now offline.
+        const kept = (await listRevisions(t.pool, users.owner.id, project.id)).find(
+          (r) => r.number === restored.number - 1,
+        )!;
+        const { zip } = await exportRevision(t.pool, store, users.owner.id, project.id, kept.id);
+        const was = marks(Buffer.from((await readZip(zip)).entries[0].bytes).toString());
+        if ([...before].some((m) => !was.includes(m)))
+          throw new Error('the revision kept before a restore lacks text that was stored');
         // What the restore took away is gone on purpose; what it brought back is back.
-        gone = new Set([...gone, ...before].filter((m) => !to.marks.has(m)));
+        gone = new Set([...gone, ...was].filter((m) => !to.marks.has(m)));
         acknowledged = new Set([...acknowledged].filter((m) => to.marks.has(m)));
       },
     ],

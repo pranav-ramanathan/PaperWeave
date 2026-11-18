@@ -2,6 +2,7 @@
 
 import {
   acceptInvitation,
+  approveDataset,
   createProject,
   deleteFile,
   invite,
@@ -194,5 +195,26 @@ export async function removeEvidenceAction(projectId: string, checkId: string) {
   await act(back, async () => {
     await removeEvidence(db(), user.id, projectId, checkId);
     return `${back}#bibliography`;
+  });
+}
+
+export async function approveDatasetAction(projectId: string, fileId: string, form: FormData) {
+  const back = `/projects/${projectId}/data/${fileId}`;
+  const user = await requireUser(back);
+  await act(back, async () => {
+    const all = (name: string) => form.getAll(name).map(String);
+    const [names, types, units] = [all('name'), all('type'), all('unit')];
+    const others = text(form, 'otherMissing')
+      .split(',')
+      .map((m) => m.trim())
+      .filter(Boolean);
+    await approveDataset(db(), blobs(), user.id, projectId, fileId, {
+      version: text(form, 'version'),
+      columns: names.map((name, i) => ({ name, type: types[i], unit: units[i] ?? '' })),
+      missing: [...all('missing'), ...others],
+      attribution: text(form, 'attribution'),
+      exported: form.get('exported') === 'on',
+    });
+    return `/projects/${projectId}?described=${encodeURIComponent(fileId)}#data`;
   });
 }
