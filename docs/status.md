@@ -675,8 +675,10 @@ Two things about tests, found on the way and not about the product:
 
 - **The fault suite once timed out at its first step in CI**, before any fault: three clients
   connect to a server just started, and one was not confirmed in fifteen seconds. Not
-  explained, and not reproduced in 28 runs on a busy machine. That wait now says which client
-  was stuck and how.
+  reproduced in 28 runs on a busy machine. A possible cause, not shown to be the cause: the
+  suite's server could be given a port that the other file of sync tests, which runs at the
+  same time, was also using for the extra servers added to it lately. The two now use ports
+  that cannot meet. That wait also now says which client was stuck and how.
 - **`recover.spec`, "a file takes no typing until it has arrived", failed about once in 25
   runs.** It held the connection back by holding the request for a ticket, and now and then
   the editor connected without that request being seen at all. Why is not known. The test now
