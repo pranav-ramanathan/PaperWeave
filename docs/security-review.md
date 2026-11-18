@@ -42,6 +42,20 @@ What it found is fixed in the same change, or listed under "Open" with what to d
 - **Nothing limited how often a paper asked for a model review.** Each request costs money and
   sends text out. A paper may now ask 30 times an hour; a test holds that nothing is sent past
   the limit. (The feature is off unless a deployment and the paper's owner both turn it on.)
+- **Pages did not say which scripts may run on them.** Fixed after the first version of this
+  review. Every page is now sent with a policy that allows only the scripts this server put
+  on it for that request, each marked with a number made up for the request, and what those
+  scripts load (`apps/web/proxy.ts`). A script that reached a page some other way would not
+  have the number and would not run. The policy also limits where a page may connect (the app
+  and the sync server), and allows no plug-ins.
+  - A browser test holds that the number is new each time and is on every script of the page.
+  - Every browser test now fails if a page is refused anything by its policy. That was tried:
+    with the sync server left out of the policy, the first test to open an editor failed.
+  - **Not covered:** styles. The editors and the maths renderer set styles on elements as
+    they draw, so inline styles are allowed. Injected styling can hide or imitate parts of a
+    page, but cannot run code or read what is typed.
+  - **Not covered:** a PDF or ZIP asked for by its address, which is not a page.
+  - No way to inject a script was found before or after. This limits the damage if one is.
 - **An edit could be any size.** The sync server read a message of up to 100 MB from anyone
   who could connect, and took an edit of that size from anyone who could write. Fixed after the
   first version of this review:
@@ -60,28 +74,24 @@ What it found is fixed in the same change, or listed under "Open" with what to d
 
 In rough order of how much they matter.
 
-1. **A script policy.** The content policy does not yet restrict scripts, so it does not limit
-   what injected script could do if a way to inject one were found. None was found. A strict
-   policy needs a nonce on every script the framework emits; that is a change to how pages are
-   served and wants its own testing.
-2. **Limits on requests in general.** Sign-in links, builds and model reviews are limited.
+1. **Limits on requests in general.** Sign-in links, builds and model reviews are limited.
    Reading pages, checking grammar, drawing charts and importing archives are not, beyond
    needing to be signed in. A proxy in front should limit requests per person.
    Nor is there a limit on how many files a paper holds or how much they add up to, beyond
    50 MB a file.
-3. **`picomatch`, one high-severity advisory with no fixed version.** It is in the tree
+2. **`picomatch`, one high-severity advisory with no fixed version.** It is in the tree
    through the sign-in library's own development tooling, and is not reached with anything a
    visitor sends. To be looked at again when a fixed version exists.
-4. **A PDF opened by itself is shown by the browser's own viewer from this site's address.**
+3. **A PDF opened by itself is shown by the browser's own viewer from this site's address.**
    The PDFs are built here from the paper's LaTeX in the sandbox, so their content is the
    authors'. Serving them from a separate address would remove the question.
-5. **The sync ticket names a person, not a file.** It lives for a minute and the sync server
+4. **The sync ticket names a person, not a file.** It lives for a minute and the sync server
    checks the person's role on the file when it is used, so it grants nothing the person does
    not have. Binding it to the file would be tidier.
-6. **Model reviews read text an author did not write.** A passage can contain text meant to
+5. **Model reviews read text an author did not write.** A passage can contain text meant to
    steer the model. What the model returns can only become a proposed change that quotes the
    passage exactly, or a question, and a person decides on each; it cannot act. Reviewers
    should still read a review's proposals as carefully as anyone else's.
-7. **What only a deployment can settle:** TLS and HSTS, the production sandbox (the tests use
+6. **What only a deployment can settle:** TLS and HSTS, the production sandbox (the tests use
    Docker on one machine), where the object store and its backups live, retention at the
    model provider, and who can read the metrics page. These wait on the hosting decision.

@@ -12,6 +12,7 @@ const config: NextConfig = {
   serverExternalPackages: ['yjs'],
   agentRules: false,
   // Sent with every answer. HSTS is for whatever terminates TLS in front of this.
+  // Pages get a fuller policy, saying which scripts may run on them: see proxy.ts.
   headers: async () => [
     {
       source: '/:path*',
