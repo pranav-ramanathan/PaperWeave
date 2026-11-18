@@ -14,7 +14,9 @@ import {
   renameFileAndReferences,
   renameLabel,
   requestBuild,
+  removeChart,
   restoreRevision,
+  saveChart,
   saveRevision,
   setRole,
   setRootFile,
@@ -216,5 +218,40 @@ export async function approveDatasetAction(projectId: string, fileId: string, fo
       exported: form.get('exported') === 'on',
     });
     return `/projects/${projectId}?described=${encodeURIComponent(fileId)}#data`;
+  });
+}
+
+export async function saveChartAction(
+  projectId: string,
+  chartId: string | null,
+  dataset: string,
+  form: FormData,
+) {
+  const back = chartId
+    ? `/projects/${projectId}/charts/${chartId}`
+    : `/projects/${projectId}/charts/new?data=${encodeURIComponent(dataset)}`;
+  const user = await requireUser(back);
+  await act(back, async () => {
+    const fields = Object.fromEntries(
+      ['name', 'kind', 'x', 'y', 'series', 'combine', 'gaps', 'title'].map((n) => [
+        n,
+        text(form, n),
+      ]),
+    );
+    const id = await saveChart(db(), blobs(), user.id, projectId, {
+      ...fields,
+      dataset,
+      ...(chartId ? { id: chartId } : {}),
+    });
+    return `/projects/${projectId}/charts/${id}`;
+  });
+}
+
+export async function removeChartAction(projectId: string, chartId: string) {
+  const back = `/projects/${projectId}/charts/${chartId}`;
+  const user = await requireUser(back);
+  await act(back, async () => {
+    await removeChart(db(), user.id, projectId, chartId);
+    return `/projects/${projectId}#data`;
   });
 }
