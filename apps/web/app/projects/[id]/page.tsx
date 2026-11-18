@@ -1,4 +1,11 @@
-import { AppError, getProject, listMembers } from '@paperweave/server';
+import {
+  AppError,
+  can,
+  getProject,
+  importReport,
+  listFiles,
+  listMembers,
+} from '@paperweave/server';
 import Link from 'next/link';
 import { notFound } from 'next/navigation';
 import { db, requireUser } from '../../../lib/server';
@@ -19,12 +26,29 @@ export default async function Project({
   const loaded = await Promise.all([
     getProject(db(), user.id, id),
     listMembers(db(), user.id, id),
+    listFiles(db(), user.id, id),
+    importReport(db(), user.id, id),
   ]).catch((err) => {
     // Not a member, or no such paper: the two look the same from outside.
     if (err instanceof AppError && err.code === 'not_found') notFound();
     throw err;
   });
-  const [project, members] = loaded;
+  const [project, members, files, report] = loaded;
+  const about = new Map(report?.files.map((f) => [f.path, f]));
+  /** What the visual editor can do with a file, in a few words. */
+  const note = (path: string, readonly: string | null) => {
+    const f = about.get(path);
+    if (readonly === 'binary') return '';
+    if (readonly === 'not-utf8') return 'Not UTF-8: kept as it is, cannot be edited here';
+    if (readonly === 'mixed-newlines')
+      return 'Mixed line endings: kept as it is, cannot be edited here';
+    if (f?.sourceOnly) return 'Definitions: edited in source only';
+    if (f?.visual) {
+      const all = f.visual.editable + f.visual.raw;
+      return all ? `${Math.round((100 * f.visual.editable) / all)}% editable visually` : '';
+    }
+    return '';
+  };
   const { error, invited, saved } = await searchParams;
   const owner = project.role === 'owner';
   return (
@@ -45,6 +69,76 @@ export default async function Project({
       {error && <p role="alert">{error}</p>}
       {invited && <p role="status">Invitation sent to {invited}.</p>}
       {saved && <p role="status">Role changed.</p>}
+
+      {files.length > 0 && (
+        <>
+          <h2>Files</h2>
+          <p>
+            Root file: <code>{project.root ?? 'none'}</code>. Compiler:{' '}
+            <code>{project.compiler}</code>.{' '}
+            {can(project.role, 'project.export') && (
+              <a href={`/projects/${id}/export`}>Download ZIP</a>
+            )}
+          </p>
+          <table>
+            <thead>
+              <tr>
+                <th scope="col">File</th>
+                <th scope="col">Size</th>
+                <th scope="col">In the visual editor</th>
+              </tr>
+            </thead>
+            <tbody>
+              {files.map((f) => (
+                <tr key={f.id}>
+                  <th scope="row">
+                    <code>{f.path}</code>
+                  </th>
+                  <td>{f.size < 1024 ? `${f.size} B` : `${Math.round(f.size / 1024)} KB`}</td>
+                  <td>{note(f.path, f.readonly)}</td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </>
+      )}
+      {report && (
+        <>
+          <h2>Import report</h2>
+          <ul className="report">
+            {report.notes.map((n) => (
+              <li key={n}>{n}</li>
+            ))}
+            {report.otherRoots.length > 0 && (
+              <li>
+                Other files that could be the root: <code>{report.otherRoots.join(', ')}</code>
+              </li>
+            )}
+            {report.missing.map((m) => (
+              <li key={m.from + m.target}>
+                <code>{m.from}</code> refers to <code>{m.target}</code>, which is not in the
+                project.
+              </li>
+            ))}
+            {report.dynamic.map((m) => (
+              <li key={m.from + m.target}>
+                <code>{m.from}</code> includes <code>{m.target}</code>, a path only LaTeX can work
+                out.
+              </li>
+            ))}
+            {report.cycles.map((c) => (
+              <li key={c.join()}>
+                These files include each other in a loop: <code>{c.join(' → ')}</code>
+              </li>
+            ))}
+            {report.skipped.map((k) => (
+              <li key={k.path}>
+                Left out: <code>{k.path}</code> ({k.reason}).
+              </li>
+            ))}
+          </ul>
+        </>
+      )}
 
       <h2>People</h2>
       <table>

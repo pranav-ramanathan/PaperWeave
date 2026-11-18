@@ -344,3 +344,14 @@ div.pw-frozen strong {
   clip-path: inset(50%);
   white-space: nowrap;
 }
+
+.page code {
+  font-family: ui-monospace, monospace;
+  font-size: 0.9em;
+}
+.report {
+  padding-left: 1.2rem;
+}
+.report li {
+  margin: 0.3rem 0;
+}
