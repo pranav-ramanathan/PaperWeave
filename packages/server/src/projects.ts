@@ -158,6 +158,8 @@ export async function setRole(
   );
   if (!rowCount)
     throw new AppError('invalid_input', 'That person is the owner or is not in the project.');
+  // Live connections are re-checked at once rather than at their next edit.
+  await db.query("select pg_notify('acl', $1)", [projectId]);
 }
 
 /** The owner may remove anyone else; anyone else may remove themselves. The owner cannot leave. */
@@ -171,4 +173,6 @@ export async function removeMember(db: Db, userId: string, projectId: string, me
   );
   if (!rowCount)
     throw new AppError('invalid_input', 'That person is the owner or is not in the project.');
+  // Live connections are re-checked at once rather than at their next edit.
+  await db.query("select pg_notify('acl', $1)", [projectId]);
 }

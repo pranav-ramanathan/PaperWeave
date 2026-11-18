@@ -32,6 +32,12 @@ pnpm --filter @paperweave/server migrate
 pnpm dev
 ```
 
+Live editing needs the sync server too, in a second terminal:
+
+```bash
+pnpm --filter @paperweave/sync start
+```
+
 Sign-in links are emailed; locally they arrive at http://localhost:8025. The editor spike is at
 `/spike` and needs none of this.
 

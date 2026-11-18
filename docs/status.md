@@ -16,6 +16,17 @@ Read this first. Update it in every pull request.
   projects" archive becomes several), finds the root file and compiler, stores every file as a blob
   and writes the import report shown on the paper's page. Download gives the same bytes back.
   The import runs inside the upload request for now; it moves onto the job queue with C4.
+- **C3: live editing.** `apps/sync` is a Hocuspocus server; `packages/server/src/sync.ts` holds
+  everything durable. The app has a source editor at `/projects/<id>/files/<fileId>` with a file
+  list, presence, and a status line that says whether edits are saved, waiting or offline.
+  - **The Hocuspocus check from the plan: kept.** Its `beforeSync` hook is awaited before an edit
+    is applied or acknowledged, so each edit is appended to `file_updates` first. Measured: 100
+    hard kills of the server while a client typed, zero acknowledged edits missing from the log,
+    and every unacknowledged edit saved after reconnect.
+  - Write access is checked in the same SQL statement that appends the edit. A role change or
+    removal also notifies the sync server, which re-checks open connections at once.
+  - Reviewers and viewers connect read-only: what they type is neither saved nor shared.
+  - Export builds an edited file from its log and restores its newline style and BOM.
 - **Phase B spike.** Gate report: `docs/phase-b-gate.md`. Recommendation: go.
   - `packages/latex`: lossless block parser, incremental reparse, include graph, encoding round
     trip, coverage.
@@ -25,12 +36,11 @@ Read this first. Update it in every pull request.
 
 ## Next
 
-C1 and C2 are done. Next is C3: the sync server, presence, an offline queue with an unsynced-edits
-indicator, and the source editor and file tree in the app. It starts with the Hocuspocus check
-described in `docs/plan.md`.
+C1, C2 and C3 are done. Next is C4, the build service: a job queue (pg-boss), the compile worker
+on it, XeLaTeX and LuaLaTeX in the TeX image, build cache, auto-build coalescing, quotas,
+diagnostics and a PDF view beside the editor. The import step should move onto the same queue.
 
-Then C4 (build service) and C5 (revisions and export from a revision) complete the first
-end-to-end slice.
+Then C5 (revisions and export from a revision) completes the first end-to-end slice.
 
 The Phase A replays are waiting on a person with accounts: `docs/rea/matrix.md`. The Prism one is
 optional: its export was researched from public sources (`docs/rea/prism.md`) and is a plain LaTeX
@@ -63,6 +73,11 @@ See "What I need from you" in `docs/plan.md`. None blocks C1.
 - Browser tests run against a production build on port 3100. The dev server reloads the page when
   any file in the repo changes, test output included.
 - Never log manuscript text. Log IDs and counts.
+- Unsynced edits live in the browser tab's memory. Closing the tab while offline loses them; the
+  browser warns first. Keeping them on the device (IndexedDB) would survive that, at the cost of
+  leaving manuscript text on shared computers: an owner decision, not yet made.
+- Names shown for other people in a file come from each client and are not verified.
+- A resent edit can be stored twice. That is harmless to the text and is cleaned up by C6.
 - Sign-in is rate-limited per client address, read from `X-Forwarded-For`. In production the app
   must sit behind a proxy that sets that header itself, or the limit can be dodged. Browser tests
   give each simulated person their own address the same way.

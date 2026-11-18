@@ -6,3 +6,4 @@ export * from './projects.ts';
 export * from './blobs.ts';
 export * from './archive.ts';
 export * from './import.ts';
+export * from './sync.ts';

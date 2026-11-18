@@ -11,6 +11,7 @@
     "@codemirror/commands": "^6.11.1",
     "@codemirror/state": "^6.7.6",
     "@codemirror/view": "^6.43.15",
+    "@hocuspocus/provider": "^4.8.0",
     "@paperweave/bridge": "workspace:*",
     "@paperweave/latex": "workspace:*",
     "@paperweave/server": "workspace:*",
