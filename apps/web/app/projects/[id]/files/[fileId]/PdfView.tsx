@@ -7,10 +7,8 @@ export type Mark = { page: number; x: number; y: number; height: number };
 
 /**
  * A PDF drawn page by page, so that a place on a page can be pointed at and a double-click on a
- * page says where it was. A page is drawn when it comes near the window.
- * shortcut: the pages are pictures, with no text to select or search; the link to the PDF itself
- * (in the pane above) opens the browser's own viewer. Add PDF.js's text layer when that is not
- * enough.
+ * page says where it was. A page is drawn when it comes near the window, with its words laid
+ * over the picture of it: they can be selected, and a screen reader reads them.
  */
 export default function PdfView(props: {
   src: string;
@@ -63,6 +61,19 @@ export default function PdfView(props: {
         canvas.width = viewport.width;
         canvas.height = viewport.height;
         await page.render({ canvas, viewport }).promise.catch(() => {});
+        // The page's words, invisible, each where the picture shows it.
+        const size = holder.clientWidth / page.getViewport({ scale: 1 }).width;
+        const words = document.createElement('div');
+        words.className = 'textLayer';
+        words.style.setProperty('--total-scale-factor', String(size));
+        holder.append(words);
+        await new pdfjs.TextLayer({
+          textContentSource: page.streamTextContent(),
+          container: words,
+          viewport: page.getViewport({ scale: size }),
+        })
+          .render()
+          .catch(() => {});
         holder.dataset.drawn = 'yes';
       };
       for (let n = 1; n <= doc.numPages; n++) {
@@ -73,7 +84,7 @@ export default function PdfView(props: {
         holder.dataset.width = String(size.width);
         holder.dataset.height = String(size.height);
         holder.style.aspectRatio = `${size.width} / ${size.height}`;
-        holder.setAttribute('role', 'img');
+        holder.setAttribute('role', 'group');
         holder.setAttribute('aria-label', `Page ${n} of ${doc.numPages}`);
         holder.append(document.createElement('canvas'));
         holder.addEventListener('dblclick', (e) => {
@@ -123,7 +134,8 @@ export default function PdfView(props: {
   return (
     <>
       {problem && <p role="alert">The PDF could not be shown here. Open it with the link above.</p>}
-      <div className="pdf" ref={host} />
+      {/* Reachable from the keyboard, so that it can be scrolled and read without a pointer. */}
+      <div className="pdf" ref={host} tabIndex={0} role="region" aria-label="Pages of the PDF" />
     </>
   );
 }

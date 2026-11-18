@@ -451,6 +451,47 @@ div.pw-frozen strong {
   width: 100%;
   height: 100%;
 }
+/* The words of a page, laid invisibly over its picture so that they can be selected and read
+   aloud. The rules are those of the PDF library's own viewer, cut down to what is used here. */
+.build .pdf:focus-visible {
+  outline: 3px solid var(--accent);
+  outline-offset: 2px;
+}
+.build .textLayer {
+  position: absolute;
+  inset: 0;
+  overflow: clip;
+  line-height: 1;
+  text-align: initial;
+  text-size-adjust: none;
+  forced-color-adjust: none;
+  transform-origin: 0 0;
+  --min-font-size: 1;
+  --text-scale-factor: calc(var(--total-scale-factor) * var(--min-font-size));
+  --min-font-size-inv: calc(1 / var(--min-font-size));
+}
+.build .textLayer :is(span, br) {
+  color: transparent;
+  position: absolute;
+  white-space: pre;
+  cursor: text;
+  transform-origin: 0% 0%;
+}
+.build .textLayer > :not(.markedContent),
+.build .textLayer .markedContent span:not(.markedContent) {
+  --font-height: 0;
+  font-size: calc(var(--text-scale-factor) * var(--font-height));
+  --scale-x: 1;
+  --rotate: 0deg;
+  transform: rotate(var(--rotate)) scaleX(var(--scale-x)) scale(var(--min-font-size-inv));
+}
+.build .textLayer .markedContent {
+  display: contents;
+}
+.build .textLayer ::selection {
+  background: rgb(31 95 191 / 30%);
+}
+
 /* The line the editor asked to be shown: a band across the page, with an edge that does not
    depend on telling colours apart. */
 .build .pdf-mark {

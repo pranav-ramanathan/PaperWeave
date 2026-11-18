@@ -46,7 +46,7 @@ test('the PDF builds by itself, a broken edit says where, and the last good PDF 
   const frame = build(owner.page).getByRole('link', { name: 'Open the PDF by itself' });
   const first = (await frame.getAttribute('href'))!;
   // The pages themselves are drawn in the pane.
-  await expect(build(owner.page).getByRole('img', { name: /^Page 1 of/ })).toBeVisible();
+  await expect(build(owner.page).getByRole('group', { name: /^Page 1 of/ })).toBeVisible();
   const pdf = await owner.page.request.get(first);
   expect(pdf.headers()['content-type']).toBe('application/pdf');
   expect((await pdf.body()).subarray(0, 5).toString()).toBe('%PDF-');
@@ -78,7 +78,7 @@ test('the PDF builds by itself, a broken edit says where, and the last good PDF 
   await viewer.page.getByRole('button', { name: 'Join this paper' }).click();
   await viewer.page.getByRole('link', { name: 'sections/intro.tex' }).click();
   await expect(buildStatus(viewer.page)).toHaveText('The PDF is up to date.');
-  await expect(build(viewer.page).getByRole('img', { name: /^Page 1 of/ })).toBeVisible();
+  await expect(build(viewer.page).getByRole('group', { name: /^Page 1 of/ })).toBeVisible();
   await expect(build(viewer.page).getByRole('button', { name: 'Compile now' })).toHaveCount(0);
   const paper = viewer.page.url().split('/files/')[0];
   expect(

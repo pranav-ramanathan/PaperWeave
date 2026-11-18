@@ -58,7 +58,11 @@ test('a line is shown in the PDF, and a place in the PDF leads back to its line'
   await expect(build(page).getByRole('status')).toHaveText('The PDF is up to date.', {
     timeout: 90_000,
   });
-  await expect(build(page).getByRole('img', { name: 'Page 2 of 2' })).toBeAttached();
+  await expect(build(page).getByRole('group', { name: 'Page 2 of 2' })).toBeAttached();
+  // The pages are not only pictures: their words are there to be read and selected.
+  await expect(build(page).getByRole('group', { name: 'Page 1 of 2' })).toContainText(
+    'The opening paragraph of the paper.',
+  );
 
   // From the visual view: the caret's line is on the second page, and the pane goes there.
   await clickAfter(page, '.editor .visual .ProseMirror', 'last paragraph');
@@ -86,7 +90,7 @@ test('a line is shown in the PDF, and a place in the PDF leads back to its line'
   expect(at.page).toBe(1);
   /** Double-click that paragraph on the first page, wherever the page now is on the screen. */
   const pickIt = async () => {
-    const shown = build(page).getByRole('img', { name: 'Page 1 of 2' });
+    const shown = build(page).getByRole('group', { name: 'Page 1 of 2' });
     await build(page)
       .locator('.pdf')
       .evaluate((el) => {

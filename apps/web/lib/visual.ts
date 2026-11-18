@@ -649,6 +649,28 @@ export function createVisual(opts: {
   };
   editor.view.dom.addEventListener('contextmenu', onMenu);
 
+  // Tabbed into, the editor has the keyboard, but the browser may have nowhere to put a caret:
+  // a file begins with its preamble, which is not text. The editor then assumes there is
+  // nothing to do, and the arrow keys do nothing either. So the caret is put where the
+  // editor's own selection is. Only when the keyboard brought the focus: a click puts the
+  // caret where the click was, and must be left alone.
+  let byPointer = false;
+  const onPointer = () => {
+    byPointer = true;
+    setTimeout(() => (byPointer = false), 500);
+  };
+  editor.view.dom.addEventListener('pointerdown', onPointer, true);
+  const onFocus = () => {
+    if (byPointer) return;
+    requestAnimationFrame(() => {
+      if (byPointer || editor.isDestroyed || !editor.view.hasFocus()) return;
+      const sel = editor.view.dom.ownerDocument.getSelection();
+      if (sel?.anchorNode && editor.view.dom.contains(sel.anchorNode)) return;
+      editor.view.focus();
+    });
+  };
+  editor.view.dom.addEventListener('focus', onFocus);
+
   return {
     editor,
     bridge,
@@ -684,6 +706,11 @@ export function createVisual(opts: {
       const size = editor.state.doc.content.size;
       editor.commands.setTextSelection({ from: Math.min(from, size), to: Math.min(to, size) });
     },
+    /**
+     * Take the selection as it is on the screen. The editor's own record of it can be a few
+     * keys behind, and stops following once the keyboard has gone elsewhere.
+     */
+    catchUp,
     /** Mark these stretches of the source in the text. */
     setMarks(ranges: typeof marked) {
       marked = ranges;
@@ -704,6 +731,8 @@ export function createVisual(opts: {
     },
     destroy() {
       editor.view.dom.removeEventListener('contextmenu', onMenu);
+      editor.view.dom.removeEventListener('focus', onFocus);
+      editor.view.dom.removeEventListener('pointerdown', onPointer, true);
       bridge.destroy();
       editor.destroy();
     },
