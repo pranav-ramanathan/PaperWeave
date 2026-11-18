@@ -1,0 +1,182 @@
+// Spelling and grammar. The prose of a file is sent to a LanguageTool server we run ourselves
+// (GRAMMAR_URL); nothing goes to anyone else. Formulas, references, citations, commands and
+// code are sent as markup the checker skips, and a finding that touches any of them is dropped.
+import { inProse, prose } from '@paperweave/latex';
+import type pg from 'pg';
+import * as Y from 'yjs';
+import { authorize } from './authz.ts';
+import { type BlobStore, sha256 } from './blobs.ts';
+import type { Db } from './db.ts';
+import { AppError } from './errors.ts';
+import { id } from './projects.ts';
+import { loadUpdates, TEXT } from './sync.ts';
+
+export const LANGUAGES = ['en-GB', 'en-US'] as const;
+export type Language = (typeof LANGUAGES)[number];
+export type LanguageSettings = {
+  language: Language;
+  /** The paper's own words: never reported as misspelt. */
+  glossary: string[];
+  /** Rules switched off for this paper, by the checker's name for them. */
+  off: string[];
+};
+export type LanguageFinding = {
+  /** The stretch as two encoded Yjs positions, base64, as for threads and proposals. */
+  from: string;
+  to: string;
+  /** What the stretch says. */
+  words: string;
+  message: string;
+  /** What it could say instead, best first. May be empty. */
+  replacements: string[];
+  /** The checker's name for the rule, to switch it off by. */
+  rule: string;
+  kind: 'spelling' | 'grammar' | 'style';
+};
+
+/**
+ * Rules that do not fit LaTeX source: its quotation marks are `` and '', and the stand-ins for
+ * formulas leave spaces a checker would count. Oxford -ize is a house style, not an error.
+ */
+export const NEVER = [
+  ...['EN_QUOTES', 'EN_UNPAIRED_QUOTES', 'WHITESPACE_RULE', 'CONSECUTIVE_SPACES'],
+  'OXFORD_SPELLING_Z_NOT_S',
+];
+const RULE = /^[A-Z0-9_]{1,80}$/;
+const bad = (why: string) => new AppError('invalid_input', why);
+
+export async function languageSettings(
+  db: Db,
+  userId: string,
+  projectId: string,
+): Promise<LanguageSettings> {
+  await authorize(db, userId, id(projectId), 'project.read');
+  const { rows } = await db.query(
+    'select language, glossary, grammar_off as off from projects where id = $1',
+    [projectId],
+  );
+  return rows[0];
+}
+
+/** Change how a paper's prose is checked. Only what is given is changed. */
+export async function setLanguageSettings(
+  db: Db,
+  userId: string,
+  projectId: string,
+  input: { language?: unknown; glossary?: unknown; off?: unknown },
+): Promise<void> {
+  await authorize(db, userId, id(projectId), 'file.write');
+  const now = await languageSettings(db, userId, projectId);
+  const list = (v: unknown, what: string, ok: (s: string) => boolean) => {
+    if (!Array.isArray(v) || v.length > 2000) throw bad(`Give ${what} as a list.`);
+    const items = [...new Set(v.map((s) => (typeof s === 'string' ? s.trim() : '')))].filter(
+      Boolean,
+    );
+    if (!items.every(ok)) throw bad(`One of ${what} cannot be used.`);
+    return items.sort((a, b) => a.localeCompare(b));
+  };
+  if (input.language !== undefined && !LANGUAGES.includes(input.language as Language))
+    throw bad('Choose British or American English.');
+  const glossary =
+    input.glossary === undefined
+      ? now.glossary
+      : // A word: letters, digits, and the marks that join them. No spaces.
+        list(input.glossary, 'the words', (s) => s.length <= 60 && /^[\p{L}\p{N}'’.-]+$/u.test(s));
+  const off = input.off === undefined ? now.off : list(input.off, 'the rules', (s) => RULE.test(s));
+  await db.query(
+    'update projects set language = $2, glossary = $3, grammar_off = $4 where id = $1',
+    [projectId, input.language ?? now.language, JSON.stringify(glossary), JSON.stringify(off)],
+  );
+}
+
+type Match = {
+  offset: number;
+  length: number;
+  message: string;
+  replacements: { value: string }[];
+  rule: { id: string; category: { id: string } };
+};
+/** Answers kept for a while: several people with a file open ask about the same text. */
+const answers = new Map<string, Match[]>();
+
+/**
+ * The spelling and grammar findings in a file's saved text. `unavailable` when no checker is
+ * set up or it does not answer.
+ */
+export async function checkGrammar(
+  pool: pg.Pool,
+  store: BlobStore,
+  userId: string,
+  projectId: string,
+  fileId: string,
+  opts: { url?: string; fetcher?: typeof fetch } = {},
+): Promise<LanguageFinding[]> {
+  const settings = await languageSettings(pool, userId, projectId);
+  const file = (
+    await pool.query(
+      `select head_seq from files where id = $1 and project_id = $2 and eol is not null
+         and path ~* '\\.(tex|ltx)$'`,
+      [id(fileId), projectId],
+    )
+  ).rows[0];
+  if (!file) throw new AppError('not_found', 'No such file to check.');
+  const url = opts.url ?? process.env.GRAMMAR_URL;
+  if (!url) throw new AppError('unavailable', 'Spelling and grammar checking is not set up.');
+
+  const doc = new Y.Doc();
+  for (const update of await loadUpdates(pool, store, fileId)) Y.applyUpdate(doc, update);
+  const text = doc.getText(TEXT);
+  const src = text.toString();
+  const { annotation, segments } = prose(src);
+  const disabled = [...NEVER, ...settings.off].join(',');
+  // The same text, language and rules give the same answer.
+  const key = `${sha256(Buffer.from(src))}:${settings.language}:${disabled}`;
+  let matches = answers.get(key);
+  if (!matches) {
+    const res = await (opts.fetcher ?? fetch)(`${url.replace(/\/$/, '')}/v2/check`, {
+      method: 'POST',
+      body: new URLSearchParams({
+        data: JSON.stringify({ annotation }),
+        language: settings.language,
+        disabledRules: disabled,
+      }),
+      signal: AbortSignal.timeout(20_000),
+    }).catch(() => null);
+    if (!res?.ok)
+      throw new AppError('unavailable', 'The spelling and grammar checker did not answer.');
+    matches = ((await res.json()) as { matches: Match[] }).matches;
+    // shortcut: a few answers kept per process, the oldest dropped. Share them between
+    // processes if checking ever shows up in timings.
+    if (answers.size >= 32) answers.delete(answers.keys().next().value!);
+    answers.set(key, matches);
+  }
+
+  const known = new Set(settings.glossary.map((w) => w.toLowerCase()));
+  const place = (index: number, side: number) =>
+    Buffer.from(
+      Y.encodeRelativePosition(Y.createRelativePositionFromTypeIndex(text, index, side)),
+    ).toString('base64');
+  const findings: LanguageFinding[] = [];
+  for (const m of matches) {
+    const [from, to] = [m.offset, m.offset + m.length];
+    // Never in a formula, a unit, code, a path or a citation: only where all of it is prose.
+    if (to <= from || !inProse(segments, from, to)) continue;
+    const words = src.slice(from, to);
+    const spelling = m.rule.category.id === 'TYPOS';
+    if (spelling && known.has(words.toLowerCase())) continue;
+    findings.push({
+      from: place(from, 0),
+      to: place(to, -1),
+      words,
+      message: m.message,
+      replacements: m.replacements.slice(0, 5).map((r) => r.value),
+      rule: m.rule.id,
+      kind: spelling
+        ? 'spelling'
+        : ['STYLE', 'REDUNDANCY', 'PLAIN_ENGLISH', 'TYPOGRAPHY'].includes(m.rule.category.id)
+          ? 'style'
+          : 'grammar',
+    });
+  }
+  return findings;
+}

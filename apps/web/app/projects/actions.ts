@@ -19,6 +19,7 @@ import {
   restoreRevision,
   saveChart,
   saveRevision,
+  setLanguageSettings,
   setRole,
   setRootFile,
 } from '@paperweave/server';
@@ -264,5 +265,20 @@ export async function removeChartAction(projectId: string, chartId: string) {
   await act(back, async () => {
     await removeChart(db(), user.id, projectId, chartId);
     return `/projects/${projectId}#data`;
+  });
+}
+
+export async function languageAction(projectId: string, form: FormData) {
+  const back = `/projects/${projectId}`;
+  const user = await requireUser(back);
+  await act(back, async () => {
+    await setLanguageSettings(db(), user.id, projectId, {
+      language: text(form, 'language'),
+      // One word to a line, or several with spaces between.
+      glossary: text(form, 'glossary').split(/\s+/).filter(Boolean),
+      // The rules still ticked stay off.
+      off: form.getAll('off').map(String),
+    });
+    return `${back}?language=1#language`;
   });
 }

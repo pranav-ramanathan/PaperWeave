@@ -833,3 +833,10 @@ img.chart {
   width: 100%;
   font: inherit;
 }
+
+/* A spelling or grammar finding: a wavy line under it, as writers know it from elsewhere. */
+.finding-mark {
+  text-decoration: underline wavy var(--warn);
+  text-decoration-skip-ink: none;
+  text-underline-offset: 3px;
+}

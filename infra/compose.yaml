@@ -27,3 +27,16 @@ services:
   mail:
     image: axllent/mailpit@sha256:23a2ef85bc50853ab3093645d1d64679afd8887e89da5e48a88940c172591a4e
     ports: ['1025:1025', '8025:8025']
+
+  # Spelling and grammar: LanguageTool, run here so that no text leaves for anyone else's
+  # service. It takes a few seconds to start and about a gigabyte of memory.
+  grammar:
+    image: erikvl87/languagetool@sha256:ef8fa12cbd485166c9ceeb7139d76d56d07707a624da6bb1fc1fbb5411750527
+    environment:
+      Java_Xms: 256m
+      Java_Xmx: 1g
+    ports: ['8010:8010']
+    healthcheck:
+      test: ['CMD-SHELL', 'wget -q -O /dev/null http://127.0.0.1:8010/v2/languages || exit 1']
+      interval: 3s
+      retries: 40

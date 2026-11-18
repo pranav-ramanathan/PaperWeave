@@ -547,7 +547,7 @@ export function createVisual(opts: {
     frozen: block,
   };
   /** Stretches of the source to mark in the text: those with a thread of comments. */
-  let marked: { from: number; to: number; kind: 'thread' | 'proposal' }[] = [];
+  let marked: { from: number; to: number; kind: 'thread' | 'proposal' | 'finding' }[] = [];
   const editor: Editor = new Editor({
     element: opts.element,
     editable: opts.editable,

@@ -6,6 +6,7 @@ import {
   getProject,
   importReport,
   labelReport,
+  languageSettings,
   listCharts,
   listDatasets,
   listFiles,
@@ -24,6 +25,7 @@ import {
   recordEvidenceAction,
   removeEvidenceAction,
   inviteAction,
+  languageAction,
   removeAction,
   renameAction,
   restoreAction,
@@ -56,6 +58,7 @@ export default async function Project({
     moved?: string;
     looked?: string;
     described?: string;
+    language?: string;
     checked?: string;
     places?: string;
   }>;
@@ -75,6 +78,7 @@ export default async function Project({
     listCharts(db(), blobs(), user.id, id),
     listThreads(db(), blobs(), user.id, id),
     listProposals(db(), blobs(), user.id, id),
+    languageSettings(db(), user.id, id),
   ]).catch((err) => {
     // Not a member, or no such paper: the two look the same from outside.
     if (err instanceof AppError && err.code === 'not_found') notFound();
@@ -93,6 +97,7 @@ export default async function Project({
     charts,
     threads,
     proposals,
+    language,
   ] = loaded;
   const openThreads = threads.filter((t) => t.status === 'open');
   const openProposals = proposals.filter((p) => p.status === 'open');
@@ -665,6 +670,47 @@ export default async function Project({
           </ul>
         </>
       )}
+
+      <h2 id="language">Language</h2>
+      {query.language && <p role="status">Language settings saved.</p>}
+      <form action={languageAction.bind(null, id)}>
+        <label>
+          Spelling
+          <select name="language" defaultValue={language.language} disabled={!canWrite}>
+            <option value="en-GB">British English</option>
+            <option value="en-US">American English</option>
+          </select>
+        </label>
+        <label>
+          The paper&apos;s own words, which are not spelling mistakes
+          <textarea
+            name="glossary"
+            rows={3}
+            defaultValue={language.glossary.join('\n')}
+            disabled={!canWrite}
+            aria-describedby="glossary-help"
+          />
+        </label>
+        <small id="glossary-help">Names, coinages and abbreviations, one to a line.</small>
+        {language.off.length > 0 && (
+          <fieldset>
+            <legend>Rules switched off for this paper. Untick one to have it checked again.</legend>
+            {language.off.map((rule) => (
+              <label key={rule}>
+                <input
+                  type="checkbox"
+                  name="off"
+                  value={rule}
+                  defaultChecked
+                  disabled={!canWrite}
+                />{' '}
+                <code>{rule}</code>
+              </label>
+            ))}
+          </fieldset>
+        )}
+        {canWrite && <button type="submit">Save language settings</button>}
+      </form>
 
       <h2 id="revisions">Revisions</h2>
       <p>
