@@ -262,6 +262,9 @@ export default function FileEditor(props: {
         // Arrived from a place in the PDF: go to the line it named, once, now that there is text.
         const line = Number(new URLSearchParams(location.search).get('line'));
         if (line && !arrived) setTimeout(() => jump.current(line), 0);
+        // The file is here: it can be typed in. (Not again on a later reconnect: by then
+        // something else may be holding the editor shut.)
+        if (!arrived) setLocked(false);
         arrived = true;
         // Back in touch: find out whether what was typed meanwhile has arrived.
         if (unsaved) askSoon(50);
@@ -354,7 +357,9 @@ export default function FileEditor(props: {
           lineNumbers(),
           EditorView.lineWrapping,
           EditorView.contentAttributes.of({ 'aria-label': `LaTeX source of ${props.path}` }),
-          writable.of(lock(!canWrite)),
+          // Shut until the file has arrived. Typed into an editor still empty, words would
+          // land at the top of the file, wherever the caret was meant to be.
+          writable.of(lock(true)),
           keymap.of([...yUndoManagerKeymap, ...defaultKeymap]),
           yCollab(text, awareness, { undoManager: undo }),
           marks,
@@ -406,6 +411,8 @@ export default function FileEditor(props: {
           menu: setMenu,
         })
       : null;
+    // Like the source view, shut until the file has arrived.
+    visual?.editor.setEditable(false);
     live.current = { view, visual, undo };
 
     /** Switch views, carrying the selection across. */

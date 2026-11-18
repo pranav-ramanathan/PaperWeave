@@ -584,6 +584,32 @@ Built after the security review, which had it as its second open item.
 - **Not limited:** how many files a paper holds, and how often someone edits. A member can
   still grow the log by adding and deleting. Those are the review's "limits in general".
 
+## A compiler warning says which file it is in
+
+- **Before:** a warning from a build had a line and no file, so in a paper of several files
+  "line 19" did not say where. Marked as a shortcut in the code since Phase B.
+- **Now:** the file is the one TeX was reading when it wrote the warning, worked out from how
+  its log nests the files it opens (`readingAt` in `apps/workers/src/compile.ts`). On the
+  checks before submission the warning links to that file, and the link opens the editor at
+  the line. So do the other findings there that have a line.
+- **How far to trust it.** The log is not written to be read by a program: text in it has
+  brackets of its own. Lines that quote the paper's text are passed over, and other brackets
+  are taken to pair up within their line. A test builds each fixture and checks that every
+  warning is placed in a file that exists, on a line it has. A log that breaks those
+  assumptions could put a warning in the wrong file; it would never lose the warning.
+- A warning written while TeX reads one of its own files (a package's) gets no file.
+- Not changed: `LaTeX Font Warning` lines are still not reported at all.
+
+## How long a large import takes
+
+- An import still runs inside its request. Measured at the most files a paper may hold
+  (2,000): eight and a half seconds, nearly all of it storing the files one after another.
+- They are now stored sixteen at a time: about three seconds (`docs/benchmarks.md`, which
+  now has this row and fails in CI past sixty).
+- Size hardly matters: two files of 45 MB added a tenth of a second.
+- So a job queue for imports is still not built. It would be needed where something in front
+  of the app cuts requests off sooner than a few seconds, or if the limits are raised.
+
 ## How often the expensive things can be asked for
 
 - **Papers started: 100 an hour for one person**, whether by hand, from a template or out of
@@ -641,70 +667,74 @@ Built after the security review, which had it as its first open item.
   policy in `next.config.ts`. `docs/security-review.md` says why.
 - In development the policy also allows `eval`, which React uses there to show server errors.
 
-## Seen twice, not explained
+## Browser tests that fail once in a while
 
-Three browser tests have each failed once or twice in a full run and passed when run again.
-What they have in common, and what was done about it:
+Four browser tests have failed once or twice in a full run and passed when run again. One is
+explained and fixed. Three are not.
 
-- **Every failure was in a full run, none in a run of the test alone.** Each was a step that
-  took longer than the test allowed: five to eight seconds for something that takes a moment.
-- **Not the machine running short.** Memory and load were looked at during a full run: 11 GB
-  of 16 free, load under 2 on 4 cores.
-- **Not the database, the one time that could be checked.** Lock waits of over a second and
-  statements of over two are logged locally now. Nine full runs since logged neither, and one
-  of the nine was the run in which `revisions.spec` failed. The earlier failures were before
-  the logging.
-- **Found: a test's pages stayed open for the rest of the run.** The runner does not close
-  windows a test opens itself, which every test here does. Midway through a run the sync
-  server had about a dozen connections from tests that had finished, and those pages went on
-  asking for builds and tickets. Each test's windows are now closed when the next test starts
-  (`person` in `tests/e2e/helpers.ts`).
-- **That is a cause removed, not the cause shown.** If the failures were the many open pages,
-  they should stop. If they go on, it was something else, and each failure now says more than
-  it did (below).
-- **What is no longer tried by accident:** thirty pages open at once. Nothing tests that on
-  purpose. `docs/benchmarks.md` measures many people in one file, not many files open.
-- **Keep the whole output of a full run.** One of these failures was lost to a filter that
-  kept only the line that said it had failed.
+### Explained: `charts.spec`
 
-The three:
+- **What happened.** The test opened the data file and typed a row at once. The editor was
+  still empty, because the file had not arrived, so the caret was at the top. The row landed
+  above the heading row and became the heading row. No column was a number any more, and the
+  chart could not be redrawn: "Choose a column of the data file for the vertical axis".
+- **Seen in the test's own output**, the third time it failed: the columns read
+  "2024-03-05 (text), 44 (text), Field (text)".
+- **The test was wrong, and so was the editor.** A person on a slow connection could do the
+  same. The editors now take no typing until the file has arrived; a browser test holds the
+  connection back and checks that nothing typed early gets in. `charts.spec` and `data.spec`
+  wait for the file before they type.
 
-- `revisions.spec`, once, in a full local run: a status did not read as expected within five
-  seconds. Which status is not known: the output was not kept. By the time it failed, the test
-  was probably at the point where it opens the editor and waits for "All edits saved."
+### Not explained: `figures.spec`, `revisions.spec`, `editing.spec`
 
-- `charts.spec`, last step: after the data file was approved again and "Draw it again" pressed,
-  the chart's page still said "Out of date". Twice, both in full local runs with other tests'
-  pages still open in the background; not in runs of that test alone.
-  - The second time, the page said why: the redraw was refused with "Choose a column of the
-    data file for the vertical axis", so the form reached the server without that value.
-  - It is not that the form needs scripts: with scripts switched off it posts every value and
-    the redraw works (tried by hand in a browser test, not kept).
-  - The test now waits for the vertical-axis field to hold its value before pressing the
-    button, and checks the column types after the second approval. If the cause is a click
-    landing while the page's scripts are attaching, that wait hides it; if it is something
-    else, one of the two checks will now fail first and say which.
-- `figures.spec`, in CI once (the first run of PR 37): after "Insert" in the figure window, the
-  window was still open five seconds later. 37 other browser tests passed in that run.
-  - Not reproduced here: the test passed every time, alone and with every core kept busy.
-  - The editor gives the server eight seconds to answer a structural edit, and the test gave
-    the window five. So the run could not tell a slow answer from a refused one.
-  - The test (and the same step in `charts.spec`) now waits fifteen seconds and fails with the
-    window's own message if the edit is refused. If it happens again, the failure says which.
-  - Found while reading the code: the window kept showing what was wrong with the last try
-    while a new one was being made. It now clears that first.
-  - **Seen a second time**, in a full local run: with the longer wait, the window said the edit
-    could not be made. So the editor had an error from the server, or no answer in eight
-    seconds. Which of the two is not known. Alone, the test then passed five times of five.
-  - **A cause that would do this was found and removed** (see "Saving a revision no longer
-    holds up editing" below). **It is not shown that it was the cause of these two runs.** In
-    two later full runs with the old code, the database logged no wait for a lock of over a
-    second.
-  - If it happens again there is now more to go on. The sync server logs
-    `command on <file> took <n> ms` for a structural edit that takes over two seconds. The
-    browser says `edit not made: <why>` in its console, and the tests print it.
-  - For a person this would be a refused redraw with a message, and pressing again works. It
-    should still be understood.
+Each was a step that took longer than the test allowed, five to eight seconds for something
+that takes a moment:
+
+- `figures.spec`, twice (once in CI on PR 37, once locally): after "Insert" in the figure
+  window, the edit was not made. The second time the window said so. Whether the server
+  answered with an error or did not answer in eight seconds is not known.
+- `revisions.spec`, once: a status did not read as expected within five seconds. Which one is
+  not known, because the output was not kept. Probably "All edits saved." on opening the editor.
+- `editing.spec`, once: the owner's editor said "Saving your edits…" for five seconds, though
+  what the owner had typed was already on the other person's screen. So the server had the
+  edit, and the editor's question "do you have it?" went unanswered or was answered no.
+
+What is known about them:
+
+- **None happened in a run of the test alone,** and none in eleven runs of the browser tests
+  alone. The four local failures of this kind were in three runs, each started straight after
+  the service tests, which is also what CI does. But two more runs in that order passed, so
+  it is a lean, not a rule. (Whether the two earlier `charts.spec` failures were in that order
+  was not noted.)
+- **Not the machine running short.** 11 GB of 16 free, load under 2 on 4 cores. In a sampled
+  run, at most a tenth of the CPU was taken by the host and I/O stalls were under 70 ms in any
+  two seconds. That run passed, so it says what is normal, not what a bad moment looks like.
+- **Not the database, where that could be checked.** Lock waits of over a second and
+  statements of over two seconds were being logged locally when `revisions.spec` and
+  `editing.spec` failed. Neither run logged one.
+- **Not the object store or the grammar server, as far as was measured.** Straight after the
+  service tests, for two and a half minutes, a write to the store never took over 60 ms and
+  a read from the database never over 27. The grammar server logged no slow request.
+- **Not the pages left open.** A test's windows used to stay open, connected and asking for
+  things, for the rest of the run: about a dozen extra connections to the sync server by the
+  fourteenth test. They are now closed when the next test starts. `editing.spec` failed after
+  that change, so it was not the cause, or not the only one.
+- **Removed on the way, without being shown to be the cause:** saving a revision held every
+  file while it talked to the object store (below).
+
+What will say more next time:
+
+- The sync server logs `the sync server did not run for <n> ms` when it is kept from running
+  for over a second, and `command on <file> took <n> ms` for a structural edit over two.
+- The browser says `edit not made: <why>` in its console, and the tests print it.
+- **Keep the whole output of a full run.** One failure was lost to a filter that kept only
+  the line saying it had failed.
+- Locally, the database logs lock waits and statements over 150 ms
+  (`alter system set log_lock_waits`, `log_min_duration_statement`). That is a setting of the
+  local container, not of the repository.
+
+For a person, each of these would be a moment's wait or a message and a second try. They
+should still be understood.
 
 ## Decisions waiting on the owner
 

@@ -31,7 +31,8 @@ export default async function Submit({
         <li key={i}>
           {f.message}{' '}
           {f.fileId ? (
-            <Link href={`/projects/${id}/files/${f.fileId}`}>
+            // The editor goes to a line it is given.
+            <Link href={`/projects/${id}/files/${f.fileId}${f.line ? `?line=${f.line}` : ''}`}>
               {f.path}
               {f.line ? `, line ${f.line}` : ''}
             </Link>

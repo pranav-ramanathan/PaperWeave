@@ -99,6 +99,24 @@ test('the things people wait for, measured', async () => {
     'ms',
     5000,
   );
+  // As many files as a paper may hold. An import runs inside its request, so this is how long
+  // whatever stands in front of the app must be willing to wait.
+  const many = await writeZip([
+    {
+      path: 'main.tex',
+      bytes: Buffer.from('\\documentclass{article}\n\\begin{document}\nx\n\\end{document}\n'),
+    },
+    ...Array.from({ length: 1999 }, (_, i) => ({
+      path: `sections/s${i}.tex`,
+      bytes: Buffer.from(`% ${i}\n${'x'.repeat(2000)}\n`),
+    })),
+  ]);
+  took(
+    'Import a paper of 2,000 files',
+    (await ms(() => importZip(t.pool, store, owner.id, many, 'Bench of many'))) / 1000,
+    's',
+    60,
+  );
   took(
     'Download it as a ZIP',
     await ms(() => exportZip(t.pool, store, owner.id, paper)),

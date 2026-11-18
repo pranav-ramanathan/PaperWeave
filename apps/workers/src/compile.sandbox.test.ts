@@ -30,6 +30,12 @@ test.each(['article-basic', 'ieee-multifile', 'ams-multifile'])(
     expect(r.ok).toBe(true);
     expect(readFileSync(join(out, r.pdf!)).subarray(0, 5).toString()).toBe('%PDF-');
     expect(existsSync(join(out, r.synctex!))).toBe(true);
+    // Whatever was warned about is placed where it can be: in a file there is, on a line it has.
+    for (const d of r.diagnostics.filter((d) => d.file && !/\.(aux|bbl|toc|out)$/.test(d.file))) {
+      const path = join(FIXTURES, name, d.file!);
+      expect(existsSync(path), `${d.file}: ${d.message}`).toBe(true);
+      expect(readFileSync(path, 'utf8').split('\n').length).toBeGreaterThanOrEqual(d.line!);
+    }
   },
 );
 
@@ -92,6 +98,22 @@ test('errors are reported with file and line', async () => {
     file: 'sections/intro.tex',
     line: 8,
     message: 'Undefined control sequence.',
+  });
+});
+
+test('a warning is reported with the file it is in, not only the line', async () => {
+  const project = tmp();
+  cpSync(join(FIXTURES, 'ieee-multifile'), project, { recursive: true });
+  const intro = join(project, 'sections/intro.tex');
+  const before = readFileSync(intro, 'utf8');
+  writeFileSync(intro, `${before}\nSee Section~\\ref{sec:nowhere}.\n`);
+  const r = await compile(project, 'main.tex', tmp());
+  expect(r.ok).toBe(true);
+  expect(r.diagnostics).toContainEqual({
+    severity: 'warning',
+    file: 'sections/intro.tex',
+    line: before.split('\n').length + 1,
+    message: "Reference `sec:nowhere' on page 1 undefined",
   });
 });
 

@@ -196,10 +196,21 @@ export async function startSync(opts: {
     }
   });
 
+  // When this process is kept from running (by its own work, or by the machine), everyone's
+  // editing waits and nothing else says why. A clock that should tick every half second says so.
+  let ticked = Date.now();
+  const clock = setInterval(() => {
+    const late = Date.now() - ticked - 500;
+    if (late > 1000) console.error(`the sync server did not run for ${late} ms`);
+    ticked = Date.now();
+  }, 500);
+  clock.unref();
+
   await server.listen();
   return {
     port: opts.port,
     async stop() {
+      clearInterval(clock);
       await listener.end();
       await server.destroy();
     },

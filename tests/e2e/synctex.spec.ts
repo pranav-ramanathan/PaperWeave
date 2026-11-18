@@ -5,7 +5,7 @@ import { mkdtempSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { writeZip } from '../../packages/server/src/archive';
-import { clickAfter, person, run, showSource, signIn } from './helpers';
+import { caretLine, clickAfter, person, run, showSource, signIn } from './helpers';
 
 // Two pages: the second section starts the second page, and is in a file of its own.
 const MAIN = [
@@ -28,13 +28,6 @@ const SECOND = [
   '',
 ].join('\n');
 const build = (page: Page) => page.locator('.build');
-/** The line the caret is on in the source view. */
-const caretLine = (page: Page) =>
-  page.evaluate(() => {
-    const node = getSelection()?.anchorNode;
-    const line = (node instanceof Element ? node : node?.parentElement)?.closest('.cm-line');
-    return line ? [...line.parentElement!.children].indexOf(line) + 1 : 0;
-  });
 
 test('a line is shown in the PDF, and a place in the PDF leads back to its line', async ({
   browser,

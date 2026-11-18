@@ -82,6 +82,10 @@ test('a data file is described by its author, and leaves with the paper only if 
   // The file is edited. Its description is now of an older version, and the page says so.
   await page.getByRole('link', { name: 'data/latency.csv' }).first().click();
   await expect(page.getByRole('region', { name: 'Editor for data/latency.csv' })).toBeVisible();
+  // Not before the file is there: until it is, the editor takes no typing.
+  await expect(
+    page.getByRole('region', { name: 'Editor for data/latency.csv' }).getByRole('status'),
+  ).toHaveText('All edits saved.');
   await page.locator('.editor .cm-content').click();
   await page.keyboard.press('ControlOrMeta+End');
   await page.keyboard.type('Field,13,71,\n');
