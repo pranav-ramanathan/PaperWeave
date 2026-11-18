@@ -36,7 +36,10 @@ export async function inviteAction(projectId: string, form: FormData) {
 export async function roleAction(projectId: string, memberId: string, form: FormData) {
   const back = `/projects/${projectId}`;
   const user = await requireUser(back);
-  await act(back, () => setRole(db(), user.id, projectId, memberId, text(form, 'role')));
+  await act(back, async () => {
+    await setRole(db(), user.id, projectId, memberId, text(form, 'role'));
+    return `${back}?saved=1`;
+  });
 }
 
 export async function removeAction(projectId: string, memberId: string) {

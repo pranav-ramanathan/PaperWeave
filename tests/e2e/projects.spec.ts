@@ -97,6 +97,7 @@ test('sign in, create a paper, invite people, and keep outsiders out', async ({ 
     .getByRole('row', { name: reviewer.email })
     .getByRole('button', { name: 'Change' })
     .click();
+  await expect(owner.page.getByRole('status')).toContainText('Role changed');
   await reviewer.page.reload();
   await expect(reviewer.page.getByText('You are a viewer')).toBeVisible();
   await owner.page.getByRole('button', { name: `Remove ${reviewer.email}` }).click();

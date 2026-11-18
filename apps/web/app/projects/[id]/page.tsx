@@ -12,7 +12,7 @@ export default async function Project({
   searchParams,
 }: {
   params: Promise<{ id: string }>;
-  searchParams: Promise<{ error?: string; invited?: string }>;
+  searchParams: Promise<{ error?: string; invited?: string; saved?: string }>;
 }) {
   const { id } = await params;
   const user = await requireUser(`/projects/${id}`);
@@ -25,7 +25,7 @@ export default async function Project({
     throw err;
   });
   const [project, members] = loaded;
-  const { error, invited } = await searchParams;
+  const { error, invited, saved } = await searchParams;
   const owner = project.role === 'owner';
   return (
     <main className="page">
@@ -44,6 +44,7 @@ export default async function Project({
       </header>
       {error && <p role="alert">{error}</p>}
       {invited && <p role="status">Invitation sent to {invited}.</p>}
+      {saved && <p role="status">Role changed.</p>}
 
       <h2>People</h2>
       <table>
