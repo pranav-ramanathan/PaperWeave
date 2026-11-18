@@ -87,6 +87,23 @@ test('references and equations are inserted from the toolbar, the keyboard and t
   // The keyboard is back in the text, where it was.
   await page.keyboard.type(' as shown');
 
+  // A citation, chosen from the bibliography by author, year or title. The paper's existing
+  // citation says what it cites; the new one uses the command the paper already uses.
+  const cited = page.locator(`${VISUAL} .pw-cite`);
+  await expect(cited.first()).toHaveAttribute('aria-label', /^citation: Knuth 1984\. /);
+  await caretAfter(page, 'whitespace');
+  await page.keyboard.press('Alt+c');
+  const citing = page.getByRole('dialog', { name: 'Insert a citation' });
+  await citing.getByLabel(/^Find an entry/).fill('nobody wrote this');
+  await expect(citing).toContainText('Nothing matches.');
+  await citing.getByLabel(/^Find an entry/).fill('knuth 1984');
+  await expect(citing.getByRole('option')).toHaveText([/^knuth1984: Knuth 1984\. /]);
+  await expect(citing).toContainText('Inserts \\cite{knuth1984}.');
+  await page.keyboard.press('Enter');
+  await expect(citing).toBeHidden();
+  await expect(cited).toHaveCount(2);
+  await expect(cited.nth(1)).not.toHaveClass(/pw-unknown/);
+
   // Keyboard: Alt+= for an equation in the line, with a preview as it is typed.
   await caretAfter(page, 'characters');
   await page.keyboard.press('Alt+=');
@@ -105,6 +122,7 @@ test('references and equations are inserted from the toolbar, the keyboard and t
   const menu = page.getByRole('menu', { name: 'At this place' });
   await expect(menu.getByRole('menuitem')).toHaveText([
     'Insert a reference…',
+    'Insert a citation…',
     'Insert an equation…',
   ]);
   // It can be worked from the keyboard, and put away with Escape.
@@ -147,6 +165,7 @@ test('references and equations are inserted from the toolbar, the keyboard and t
     original
       .replace('Reviewers', 'Reviewers\\ref{sec:results}')
       .replace('opposite', 'opposite\\eqref{eq:commute} as shown')
+      .replace('and whitespace', 'and whitespace\\cite{knuth1984}')
       .replace('characters', 'characters$n \\le 3$')
       .replace('organised', 'organised\n\\begin{equation}\n  a^2 + b^2 = c^2\n\\end{equation}\n'),
   );

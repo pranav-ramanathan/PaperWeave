@@ -13,6 +13,7 @@ import type { Node as PMNode } from '@tiptap/pm/model';
 import { Plugin } from '@tiptap/pm/state';
 import katex from 'katex';
 import * as Y from 'yjs';
+import { bibliography, onBibliography } from './bibliography';
 import { numbers, onNumbers } from './numbers';
 
 const ENV = /^\\begin\{(\w+)\*?\}([\s\S]*)\\end\{\1\*?\}$/;
@@ -99,8 +100,8 @@ export function createVisual(opts: {
    * overwritten.
    */
   editMath?(src: string, apply: (replacement: string) => Promise<CommandResult>): void;
-  /** The person asked, from the keyboard, to insert a reference or an equation. */
-  ask?(what: 'reference' | 'equation'): void;
+  /** The person asked, from the keyboard, to insert a reference, a citation or an equation. */
+  ask?(what: 'reference' | 'citation' | 'equation'): void;
   /**
    * The person asked for the menu of things to do here: a right click, or the menu key. `x`
    * and `y` are where on the page; `formula` is set when it was asked for on a formula.
@@ -197,6 +198,27 @@ export function createVisual(opts: {
     if (opts.editMath && opts.editable) dom.ondblclick = () => openMath(getPos() ?? 0, src);
     return { dom, destroy: labelled ? onNumbers(draw) : undefined };
   };
+  /** A citation shows its keys, says on hover what they cite, and is marked if one has no entry. */
+  const cite = (node: PMNode) => {
+    const src: string = node.attrs.src;
+    const dom = el('span', 'pw-atom pw-cite');
+    const keys = src
+      .slice(src.lastIndexOf('{') + 1, -1)
+      .split(',')
+      .map((k) => k.trim())
+      .filter(Boolean);
+    dom.textContent = `[${keys.join(', ')}]`;
+    const draw = () => {
+      const b = bibliography();
+      const missing = b.known ? keys.filter((k) => !(k in b.entries)) : [];
+      dom.classList.toggle('pw-unknown', missing.length > 0);
+      const said = keys.map((k) => b.entries[k] ?? (b.known ? `${k}: not in the bibliography` : k));
+      dom.title = `${src}\n${said.join('\n')}`;
+      dom.setAttribute('aria-label', `citation: ${said.join('; ')}`);
+    };
+    draw();
+    return { dom, destroy: onBibliography(draw) };
+  };
   /** A reference shows the number its label has in the PDF, as the PDF prints it. */
   const ref = (node: PMNode) => {
     const src: string = node.attrs.src;
@@ -250,7 +272,7 @@ export function createVisual(opts: {
     math_inline: math(false),
     math_block: math(true),
     raw_inline: chip((s) => (s.length > 28 ? s.slice(0, 27) + '…' : s)),
-    cite: chip((s) => `[${s.slice(s.lastIndexOf('{') + 1, -1)}]`),
+    cite,
     ref,
     raw_block: block,
     frozen: block,
@@ -282,6 +304,7 @@ export function createVisual(opts: {
           // Alt+= is the equation key in word processors; Alt+R for a reference.
           'Alt-=': () => (opts.ask && opts.editable ? (opts.ask('equation'), true) : false),
           'Alt-r': () => (opts.ask && opts.editable ? (opts.ask('reference'), true) : false),
+          'Alt-c': () => (opts.ask && opts.editable ? (opts.ask('citation'), true) : false),
           // Enter on a selected formula opens it for editing.
           Enter: ({ editor: e }) => {
             const { selection } = e.state;

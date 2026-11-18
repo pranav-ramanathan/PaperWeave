@@ -1,6 +1,7 @@
 import {
   AppError,
   can,
+  citationReport,
   getProject,
   importReport,
   labelReport,
@@ -57,12 +58,13 @@ export default async function Project({
     importReport(db(), user.id, id),
     listRevisions(db(), user.id, id),
     labelReport(db(), blobs(), user.id, id),
+    citationReport(db(), blobs(), user.id, id),
   ]).catch((err) => {
     // Not a member, or no such paper: the two look the same from outside.
     if (err instanceof AppError && err.code === 'not_found') notFound();
     throw err;
   });
-  const [project, members, files, report, revisions, labels] = loaded;
+  const [project, members, files, report, revisions, labels, cited] = loaded;
   const writer = can(project.role, 'revision.write');
   const about = new Map(report?.files.map((f) => [f.path, f]));
   /** What the visual editor can do with a file, in a few words. */
@@ -310,6 +312,49 @@ export default async function Project({
               </label>{' '}
               <button type="submit">See what would change</button>
             </form>
+          )}
+        </>
+      )}
+
+      {(cited.entries.length > 0 || cited.missing.length > 0) && (
+        <>
+          <h2 id="bibliography">Bibliography</h2>
+          <p>
+            {cited.entries.length} {cited.entries.length === 1 ? 'entry' : 'entries'}.{' '}
+            {cited.missing.length + cited.duplicates.length === 0
+              ? 'Every citation has one.'
+              : 'Some need attention:'}
+          </p>
+          {cited.missing.length + cited.duplicates.length > 0 && (
+            <ul className="report">
+              {cited.missing.map((m) => (
+                <li key={`${m.fileId}:${m.line}:${m.key}`}>
+                  <Link href={`/projects/${id}/files/${m.fileId}`}>
+                    <code>
+                      {m.path}:{m.line}
+                    </code>
+                  </Link>{' '}
+                  cites <code>{m.key}</code>, and no entry has that key. The PDF shows a question
+                  mark there.
+                </li>
+              ))}
+              {cited.duplicates.map((d) => (
+                <li key={d.key}>
+                  <code>{d.key}</code> is the key of {d.places.length} entries:{' '}
+                  {d.places.map((p, i) => (
+                    <span key={`${p.fileId}:${p.line}`}>
+                      {i > 0 && ', '}
+                      <Link href={`/projects/${id}/files/${p.fileId}`}>
+                        <code>
+                          {p.path}:{p.line}
+                        </code>
+                      </Link>
+                    </span>
+                  ))}
+                  . Only one of them is used.
+                </li>
+              ))}
+            </ul>
           )}
         </>
       )}

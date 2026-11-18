@@ -59,7 +59,9 @@ test('numbers come from the compiled PDF and follow it when it changes', async (
   await showSource(page);
   await page.locator('.editor .cm-content').click();
   await page.keyboard.press('ControlOrMeta+Home');
-  await page.keyboard.type('\\section{Preface}\\label{sec:preface}\nSee \\ref{sec:nowhere}.\n\n');
+  await page.keyboard.type(
+    '\\section{Preface}\\label{sec:preface}\nSee \\ref{sec:nowhere} and \\cite{nobody2020}.\n\n',
+  );
   await page.getByRole('group', { name: 'View' }).getByRole('button', { name: 'Visual' }).click();
   await expect(buildStatus(page)).toHaveText('The PDF is behind the text.', { timeout: 30_000 });
   await expect(reference(page, 'sec:method')).toHaveText('II');
@@ -72,10 +74,22 @@ test('numbers come from the compiled PDF and follow it when it changes', async (
   await expect(reference(page, 'sec:nowhere')).toHaveText('??');
   await expect(reference(page, 'sec:nowhere')).toHaveClass(/pw-unknown/);
 
+  // A citation with no entry in the bibliography is marked too, and says so.
+  const uncited = page.locator(`${VISUAL} .pw-cite.pw-unknown`);
+  await expect(uncited).toHaveText('[nobody2020]');
+  await expect(uncited).toHaveAttribute(
+    'aria-label',
+    'citation: nobody2020: not in the bibliography',
+  );
+
   // The paper's page says where the broken reference is.
   await page.goto(paper);
   await expect(page.getByText('8 labels. Some need attention:')).toBeVisible();
   await expect(page.getByRole('listitem').filter({ hasText: 'sec:nowhere' })).toContainText(
     'sections/intro.tex:2 refers to sec:nowhere, and no label has that name.',
+  );
+  await expect(page.getByText('1 entry. Some need attention:')).toBeVisible();
+  await expect(page.getByRole('listitem').filter({ hasText: 'nobody2020' })).toContainText(
+    'sections/intro.tex:2 cites nobody2020, and no entry has that key.',
   );
 });

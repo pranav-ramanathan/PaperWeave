@@ -174,6 +174,22 @@ Read this first. Update it in every pull request.
     says so. On a formula the menu offers to edit it.
   - `apps/web/.../Tools.tsx` holds the three small windows. They are native dialogs and a
     `role="menu"` list, worked from the keyboard.
+- **D2, first part: the bibliography index and citing.**
+  - `bibEntries` (`packages/latex/src/bib.ts`) reads a .bib file into entries by key, with
+    where each is. It is an index only: nothing writes a .bib file from it. A test imports an
+    awkward one (byte order mark, CRLF, tabs, stray text between entries), reads it, and gets
+    the same bytes back.
+  - `citeIndex` finds the keys in `\cite`, `\citep`, `\parencite` and their relatives.
+  - The paper's page lists citations of a key no entry has, and keys that several entries have,
+    each with file and line (`citationReport`).
+  - In the visual view a citation says on hover what it cites ("Knuth 1984. The TeXbook"), and
+    is marked if it has no entry.
+  - A citation is inserted like a reference: toolbar, Alt+C, or the menu. The window finds
+    entries by key, author, year or title, and inserts the citation command the paper already
+    uses most.
+  - The bibliography is read when the file page opens and after the citation window closes. An
+    entry added in another tab shows after that.
+  - BibTeX and Biber both build already (C4, C5): latexmk runs whichever the paper asks for.
 - **Phase B spike.** Gate report: `docs/phase-b-gate.md`. Recommendation: go.
   - `packages/latex`: lossless block parser, incremental reparse, include graph, encoding round
     trip, coverage.
@@ -188,8 +204,8 @@ nothing, edit it together, build it, and download a ZIP and a PDF that belong to
 
 Next, in this order:
 
-1. **D2.** Bibliography: BibTeX and Biber, the key index, missing and duplicate keys, inserting
-   a citation, DOI lookup. The reference picker in `Tools.tsx` is the pattern for the citation one.
+1. **D2, the rest.** An explicit DOI lookup that records its source and time, and separate
+   statuses for "the metadata is right" and "this source supports this claim".
 2. **D3** onward, as in the plan.
 
 The Phase A replays are waiting on a person with accounts: `docs/rea/matrix.md`. The Prism one is
