@@ -120,6 +120,19 @@ Read this first. Update it in every pull request.
     saved and refused, connections let in, refused and open, structural edits, and compactions.
     Counts only. Nothing reads it yet: dashboards and alerts wait on the hosting decision.
   - Reconnects are not counted apart from first connections.
+- **D1, first part: numbers from the compiled PDF.**
+  - `labelIndex` (`packages/latex/src/labels.ts`) finds every `\label` and every reference
+    (`\ref`, `\eqref`, `\cref` and relatives) in a file, skipping comments and verbatim text.
+  - Each build stores the number and page LaTeX gave every label, read from its `.aux` files
+    (`builds.labels`). A test checks them against the text of the PDF itself, for two templates.
+  - In the visual editor a reference shows that number, as the PDF prints it ("II", "(2)"), and
+    a labelled equation row shows its tag. Until there is a PDF a reference shows its key. When
+    the text has moved on from the PDF the numbers are marked as old. A reference to a label
+    that does not exist shows "??", as the PDF does.
+  - The paper's page lists references to labels that do not exist, and label names used twice,
+    each with its file and line (`labelReport`).
+  - Not numbered: equations and sections without a label (LaTeX records numbers only for
+    labels), and maths that uses the paper's own macros, which still shows as source.
 - **Phase B spike.** Gate report: `docs/phase-b-gate.md`. Recommendation: go.
   - `packages/latex`: lossless block parser, incremental reparse, include graph, encoding round
     trip, coverage.
@@ -134,7 +147,11 @@ nothing, edit it together, build it, and download a ZIP and a PDF that belong to
 
 Next, in this order:
 
-1. **Phase D**, starting with D1 (maths and cross-references). Phase C is done.
+1. **D1, the rest.** Rename a label with the reference updates shown first (the same for a
+   renamed file and its `\input` lines); insert a reference or an equation from the toolbar,
+   the keyboard and the context menu; edit an equation's LaTeX in place with a live preview;
+   teach the in-browser renderer the paper's own macros.
+2. **D2** onward, as in the plan.
 
 The Phase A replays are waiting on a person with accounts: `docs/rea/matrix.md`. The Prism one is
 optional: its export was researched from public sources (`docs/rea/prism.md`) and is a plain LaTeX

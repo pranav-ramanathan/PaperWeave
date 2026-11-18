@@ -67,7 +67,7 @@ export function buildNext(
     // Only this paper's own builds are looked at: nothing is ever shared between papers.
     const hit = (
       await db.query(
-        `select id, status, diagnostics, pdf_digest, synctex_digest, log_digest from builds
+        `select id, status, diagnostics, pdf_digest, synctex_digest, log_digest, labels from builds
          where project_id = $1 and cache_key = $2 and status <> 'queued'
            and not coalesce(timed_out, false)
          order by created_at desc limit 1`,
@@ -83,6 +83,7 @@ export function buildNext(
         pdf_digest: hit.pdf_digest,
         synctex_digest: hit.synctex_digest,
         log_digest: hit.log_digest,
+        labels: hit.labels && JSON.stringify(hit.labels),
       });
       return true;
     }
@@ -118,6 +119,7 @@ export function buildNext(
         pdf_digest: await put(result.pdf),
         synctex_digest: await put(result.synctex),
         log_digest: await store.put(Buffer.from(result.log, 'latin1')),
+        labels: result.labels && JSON.stringify(result.labels),
       });
     } catch (err) {
       // The build machinery itself failed (no Docker, no image). Say so rather than retry forever.

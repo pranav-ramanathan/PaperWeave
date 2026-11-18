@@ -135,6 +135,25 @@ export async function buildOutput(
 }
 
 /**
+ * The number and page LaTeX gave each label in a build: what `\\ref` prints in that build's PDF.
+ * The build must belong to a paper the user is on.
+ */
+export async function buildLabels(
+  db: Db,
+  userId: string,
+  projectId: string,
+  buildId: string,
+): Promise<Record<string, { number: string; page: string }>> {
+  await authorize(db, userId, id(projectId), 'project.read');
+  const { rows } = await db.query('select labels from builds where id = $1 and project_id = $2', [
+    id(buildId),
+    projectId,
+  ]);
+  if (!rows[0]) throw new AppError('not_found', 'No such build.');
+  return rows[0].labels ?? {};
+}
+
+/**
  * How the build queue is doing, across all papers: for the people who run the service, not for
  * the people who use it. Counts and ages only.
  */

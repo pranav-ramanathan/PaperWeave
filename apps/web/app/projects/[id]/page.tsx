@@ -3,13 +3,14 @@ import {
   can,
   getProject,
   importReport,
+  labelReport,
   listFiles,
   listMembers,
   listRevisions,
 } from '@paperweave/server';
 import Link from 'next/link';
 import { notFound } from 'next/navigation';
-import { db, requireUser } from '../../../lib/server';
+import { blobs, db, requireUser } from '../../../lib/server';
 import {
   buildRevisionAction,
   deleteFileAction,
@@ -52,12 +53,13 @@ export default async function Project({
     listFiles(db(), user.id, id),
     importReport(db(), user.id, id),
     listRevisions(db(), user.id, id),
+    labelReport(db(), blobs(), user.id, id),
   ]).catch((err) => {
     // Not a member, or no such paper: the two look the same from outside.
     if (err instanceof AppError && err.code === 'not_found') notFound();
     throw err;
   });
-  const [project, members, files, report, revisions] = loaded;
+  const [project, members, files, report, revisions, labels] = loaded;
   const writer = can(project.role, 'revision.write');
   const about = new Map(report?.files.map((f) => [f.path, f]));
   /** What the visual editor can do with a file, in a few words. */
@@ -233,6 +235,49 @@ export default async function Project({
               </li>
             ))}
           </ul>
+        </>
+      )}
+
+      {(labels.labels.length > 0 || labels.undefined.length > 0) && (
+        <>
+          <h2>Labels and references</h2>
+          <p>
+            {labels.labels.length} {labels.labels.length === 1 ? 'label' : 'labels'}.{' '}
+            {labels.undefined.length + labels.duplicates.length === 0
+              ? 'Every reference points to one of them.'
+              : 'Some need attention:'}
+          </p>
+          {labels.undefined.length + labels.duplicates.length > 0 && (
+            <ul className="report">
+              {labels.undefined.map((r) => (
+                <li key={`${r.fileId}:${r.line}:${r.key}`}>
+                  <Link href={`/projects/${id}/files/${r.fileId}`}>
+                    <code>
+                      {r.path}:{r.line}
+                    </code>
+                  </Link>{' '}
+                  refers to <code>{r.key}</code>, and no label has that name. The PDF shows ??
+                  there.
+                </li>
+              ))}
+              {labels.duplicates.map((d) => (
+                <li key={d.key}>
+                  <code>{d.key}</code> names {d.places.length} labels:{' '}
+                  {d.places.map((p, i) => (
+                    <span key={`${p.fileId}:${p.line}`}>
+                      {i > 0 && ', '}
+                      <Link href={`/projects/${id}/files/${p.fileId}`}>
+                        <code>
+                          {p.path}:{p.line}
+                        </code>
+                      </Link>
+                    </span>
+                  ))}
+                  . References to it go to the last one.
+                </li>
+              ))}
+            </ul>
+          )}
         </>
       )}
 

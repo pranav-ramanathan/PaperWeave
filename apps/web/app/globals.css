@@ -153,6 +153,16 @@ span.pw-math:not(.pw-raw) {
   border: none;
   font-size: 1em;
 }
+/* A number taken from a PDF that is behind the text, and a reference LaTeX could not resolve. */
+.pw-stale.pw-ref,
+.pw-stale .katex-tag {
+  font-style: italic;
+  opacity: 0.65;
+}
+.pw-unknown {
+  color: var(--warn);
+  border-color: var(--warn);
+}
 .pw-cite,
 .pw-ref {
   color: var(--accent);
