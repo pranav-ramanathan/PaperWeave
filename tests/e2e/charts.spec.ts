@@ -120,6 +120,9 @@ test('a chart is drawn from approved data and is out of date once the data chang
   // The data is edited: the chart is of an older version, and the paper says so.
   await page.getByRole('link', { name: 'data/latency.csv' }).first().click();
   await expect(page.getByRole('region', { name: 'Editor for data/latency.csv' })).toBeVisible();
+  // Not before the file is there. This test once typed into the editor while it was still
+  // empty: the row landed at the top, became the heading row, and no column was a number.
+  await expect(page.locator('.editor .cm-content')).toContainText('2024-03-04,41,Field');
   await page.locator('.editor .cm-content').click();
   await page.keyboard.press('ControlOrMeta+End');
   await page.keyboard.type('2024-03-05,44,Field\n');

@@ -1,6 +1,7 @@
 // Turn an uploaded ZIP into one paper, or several if the archive holds several.
-// shortcut: runs inside the request. Move it onto the job queue when the build service (plan C4)
-// brings one in.
+// shortcut: runs inside the request. A paper of 2,000 files, the most allowed, takes a few
+// seconds (docs/benchmarks.md). Move it onto a job queue if a deployment cuts requests off
+// sooner than imports take there.
 import {
   coverage,
   decodeFile,
@@ -198,8 +199,14 @@ export async function importZip(
   }));
   await mayStartPapers(pool, userId, found.length, limits.papersPerHour);
   // Blobs first: they are content-addressed, so a failure later leaves nothing that matters behind.
+  // Sixteen at a time. One after another, a paper of two thousand files took eight and a half
+  // seconds to import; this way, three and a half.
   const digests = new Map<Uint8Array, string>();
-  for (const p of found) for (const e of p.entries) digests.set(e.bytes, await store.put(e.bytes));
+  const all = found.flatMap((p) => p.entries);
+  for (let i = 0; i < all.length; i += 16)
+    await Promise.all(
+      all.slice(i, i + 16).map(async (e) => digests.set(e.bytes, await store.put(e.bytes))),
+    );
   const made = await transaction(pool, async (db) => {
     const created: Project[] = [];
     for (const p of found) {

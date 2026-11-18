@@ -58,6 +58,14 @@ export async function person(browser: Browser, who: string) {
   return { page, email: address(who) };
 }
 
+/** The line the caret is on in the source view. */
+export const caretLine = (page: Page) =>
+  page.evaluate(() => {
+    const node = getSelection()?.anchorNode;
+    const line = (node instanceof Element ? node : node?.parentElement)?.closest('.cm-line');
+    return line ? [...line.parentElement!.children].indexOf(line) + 1 : 0;
+  });
+
 /** On a file's page, switch to the LaTeX source view. A .tex file opens in the visual view. */
 export const showSource = (page: Page) =>
   page.getByRole('group', { name: 'View' }).getByRole('button', { name: 'Source' }).click();

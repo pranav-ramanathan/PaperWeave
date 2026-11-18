@@ -6,7 +6,7 @@ import { mkdtempSync, readFileSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { readZip, writeZip } from '../../packages/server/src/archive';
-import { clickAfter, person, run, showSource, signIn, typingSaved } from './helpers';
+import { caretLine, clickAfter, person, run, showSource, signIn, typingSaved } from './helpers';
 
 const MAIN = [
   '\\documentclass{article}',
@@ -45,7 +45,10 @@ test('a paper is checked before submitting, put right, and downloaded as one rev
   // The finding leads to the file. The label is added there.
   await page.getByRole('link', { name: 'main.tex, line 4' }).click();
   await expect(page.getByRole('region', { name: 'Editor for main.tex' })).toBeVisible();
+  // And to the line: the caret is on it.
+  await expect(page).toHaveURL(/line=4$/);
   await showSource(page);
+  await expect.poll(() => caretLine(page)).toBe(4);
   await clickAfter(page, '.editor .cm-content', 'Introduction}');
   await page.keyboard.type('\\label{sec:intro}');
   await typingSaved(page);

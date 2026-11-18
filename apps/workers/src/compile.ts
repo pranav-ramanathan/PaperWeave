@@ -24,7 +24,7 @@ const TEX_UID = 10001;
 export type Diagnostic = {
   severity: 'error' | 'warning';
   message: string;
-  /** Path relative to the project. Warnings do not carry one yet. */
+  /** Path relative to the project. A warning has one when it was written while reading a file of the paper. */
   file?: string;
   line?: number;
 };
@@ -92,11 +92,55 @@ export function diagnostics(log: string): Diagnostic[] {
   // line in front of it, only an exclamation mark.
   for (const m of log.matchAll(/^!\s?(?:pdfTeX error: |LuaTeX error |)(.+)$/gm))
     out.push({ severity: 'error', message: m[1].trim() });
-  // shortcut: warnings carry a line but no file; follow the log's file stack when the build
-  // service needs to link them (plan C4).
-  for (const m of log.matchAll(WARNING))
-    out.push({ severity: 'warning', message: m[1], line: m[2] ? Number(m[2]) : undefined });
+  // A warning gives a line but not the file the line is in. That is whichever of the paper's
+  // files TeX was reading when it wrote the warning.
+  const reading = readingAt(log);
+  for (const m of log.matchAll(WARNING)) {
+    const line = m[2] ? Number(m[2]) : undefined;
+    const file = line === undefined ? undefined : reading(m.index);
+    out.push({ severity: 'warning', message: m[1], ...(file ? { file } : {}), line });
+  }
   return out;
+}
+
+/**
+ * Which of the paper's files TeX was reading at a place in its log. TeX writes "(" and a
+ * file's name when it starts on a file and ")" when it has finished it, so the log is nested
+ * the way the files are. Other text in the log has brackets of its own. Those are taken to
+ * pair up within their line; where the log quotes the paper's own text, which need not pair
+ * up at all, the line is passed over.
+ *
+ * A file TeX brought in from its own installation is not one of the paper's: a warning written
+ * while reading one gets no file.
+ */
+function readingAt(log: string): (offset: number) => string | undefined {
+  // The file being read from each place where that changes.
+  const changes: { at: number; file: string | undefined }[] = [];
+  const stack: (string | null)[] = [];
+  const opening = /\(((?:\.\/|\/)[^\s()]+)/y;
+  let at = 0;
+  let quoted = false;
+  for (const text of log.split('\n')) {
+    // The line after an over- or underfull box is the paragraph's text; "l.12 ..." is the
+    // line an error stopped at.
+    const skip = quoted || /^l\.\d+ /.test(text);
+    quoted = /^(?:Over|Under)full \\[hv]box/.test(text);
+    for (let i = 0; !skip && i < text.length; i++) {
+      if (text[i] === '(') {
+        opening.lastIndex = i;
+        const name = opening.exec(text)?.[1];
+        stack.push(name ?? null);
+        if (name) i += name.length;
+      } else if (text[i] === ')') stack.pop();
+      else continue;
+      const top = stack.findLast((f) => f !== null);
+      changes.push({ at: at + i, file: top?.startsWith('./') ? top.slice(2) : undefined });
+    }
+    // A bracket that was not a file's and was not closed on its line was never going to be.
+    while (stack.at(-1) === null) stack.pop();
+    at += text.length + 1;
+  }
+  return (offset) => changes.findLast((c) => c.at <= offset)?.file;
 }
 
 export type Compiler = 'pdflatex' | 'xelatex' | 'lualatex';

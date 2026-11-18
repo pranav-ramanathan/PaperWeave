@@ -178,3 +178,38 @@ test('an edit too large to save stops the editor, which says so and lets it be d
   await expect(source(watch)).not.toContainText('xxxx');
   await expect(status(page)).toContainText('too large to save');
 });
+
+test('a file takes no typing until it has arrived', async ({ browser }) => {
+  const { page, email } = await person(browser, 'rec-early');
+  const zip = join(mkdtempSync(join(tmpdir(), 'paperweave-e2e-')), `Early ${run}.zip`);
+  writeFileSync(zip, await writeZip([{ path: 'main.tex', bytes: Buffer.from(MAIN) }]));
+  await page.goto('/sign-in');
+  await signIn(page, email);
+  await page.getByLabel('Or import a ZIP of a LaTeX project').setInputFiles(zip);
+  await page.getByRole('button', { name: 'Import ZIP' }).click();
+
+  // The connection is kept waiting, as a slow network would keep it.
+  let letIn!: () => void;
+  const waiting = new Promise<void>((done) => (letIn = done));
+  await page.route('**/api/sync-ticket**', async (route) => {
+    await waiting;
+    await route.continue();
+  });
+  await page.getByRole('link', { name: 'main.tex' }).first().click();
+  await showSource(page);
+  await expect(status(page)).toHaveText('Opening…');
+  // The editor is empty and shut. Typed into, the words would land at the top of the file
+  // once it arrived, wherever they were meant to go.
+  await expect(source(page)).toHaveAttribute('contenteditable', 'false');
+  await source(page).click();
+  await page.keyboard.type('% typed too early\n');
+
+  letIn();
+  await expect(status(page)).toHaveText('All edits saved.');
+  await expect(source(page)).toContainText('Hello.');
+  await expect(source(page)).not.toContainText('too early');
+  await expect(source(page)).toHaveAttribute('contenteditable', 'true');
+  await typeAtStart(page, '% typed in time\n');
+  await expect(status(page)).toHaveText('All edits saved.');
+  await expect(source(page)).toContainText('% typed in time');
+});
