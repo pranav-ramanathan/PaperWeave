@@ -19,10 +19,11 @@ The editor spike runs at http://localhost:3000/spike:
 pnpm dev
 ```
 
-Compiling, and the tests that compile, need Docker and the TeX image:
+Compiling, the database and the object store need Docker:
 
 ```bash
 docker build -t paperweave-tex infra/tex
+docker compose -f infra/compose.yaml up -d --wait
 pnpm test:sandbox
 pnpm e2e
 ```

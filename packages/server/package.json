@@ -1,0 +1,17 @@
+{
+  "name": "@paperweave/server",
+  "private": true,
+  "type": "module",
+  "exports": "./src/index.ts",
+  "scripts": {
+    "migrate": "node src/migrate-cli.ts"
+  },
+  "dependencies": {
+    "aws4fetch": "^1.0.20",
+    "better-auth": "^1.7.25",
+    "pg": "^8.23.1"
+  },
+  "devDependencies": {
+    "@types/pg": "^8.23.1"
+  }
+}

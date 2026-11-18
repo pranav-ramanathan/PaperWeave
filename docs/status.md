@@ -17,8 +17,12 @@ Read this first. Update it in every pull request.
 
 ## Next
 
-Plan items C1 to C5 at single-user depth give the first end-to-end slice (import, edit, build,
-export). Start with C1: database, blob store, sign-in, roles and one `authorize()`.
+C1 is half done: `packages/server` has the migration runner, sign-in (magic links through Better
+Auth), the permission table (`authz.ts`), projects, members, invitations and the blob store. The
+other half is the web side: sign-in page, project pages and the HTTP routes that call these
+functions.
+
+After that, C2 (import) to C5 at single-user depth give the first end-to-end slice.
 
 The Phase A replays are waiting on a person with accounts: `docs/rea/matrix.md`. The Prism one is
 optional: its export was researched from public sources (`docs/rea/prism.md`) and is a plain LaTeX
@@ -43,8 +47,11 @@ See "What I need from you" in `docs/plan.md`. None blocks C1.
 
 - Tests that use randomness take a seed and print it on failure. `FUZZ=<n>` changes how many
   cases run.
-- Tests that need Docker and the TeX image are named `*.sandbox.test.ts` and run with
-  `pnpm test:sandbox`.
+- Tests that need Docker (the TeX image, Postgres, the object store) are named
+  `*.sandbox.test.ts` and run with `pnpm test:sandbox` after
+  `docker compose -f infra/compose.yaml up -d --wait`.
+- Every server function that touches a project takes the acting user and calls `authorize` first.
+  A non-member gets `not_found`, never `permission_denied`.
 - Browser tests run against a production build on port 3100. The dev server reloads the page when
   any file in the repo changes, test output included.
 - Never log manuscript text. Log IDs and counts.
