@@ -1,5 +1,5 @@
 // Shared by the browser tests that need a signed-in person.
-import { type Browser, expect, type Page } from '@playwright/test';
+import { type Browser, type BrowserContext, expect, type Page, test } from '@playwright/test';
 
 const MAIL = process.env.MAILPIT_URL ?? 'http://localhost:8025';
 export const run = Date.now().toString(36);
@@ -30,7 +30,17 @@ export async function signIn(page: Page, email: string) {
 }
 
 let people = 0;
+/** The test now running, and the browser windows it has opened through `person`. */
+let running = '';
+const opened: BrowserContext[] = [];
 export async function person(browser: Browser, who: string) {
+  // The runner does not close what a test opens this way. Left open, a test's pages stay
+  // connected and keep asking for builds and tickets under every later test. So the first
+  // person of a test closes the last test's windows. (The last test's close with the browser.)
+  if (running !== test.info().testId) {
+    running = test.info().testId;
+    await Promise.all(opened.splice(0).map((context) => context.close()));
+  }
   // Sign-in is rate-limited per client address (five links a minute). Each person in a test is
   // a different client, so each gets an address of their own, as a proxy in front would report.
   const ip = `10.${Math.floor(Math.random() * 250)}.${Math.floor(Math.random() * 250)}.${++people}`;
@@ -43,6 +53,7 @@ export async function person(browser: Browser, who: string) {
     if (said.type() === 'error' && said.text().includes('Content Security Policy'))
       throw new Error(`${said.page()?.url()}: ${said.text()}`);
   });
+  opened.push(context);
   const page = await context.newPage();
   return { page, email: address(who) };
 }

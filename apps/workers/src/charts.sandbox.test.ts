@@ -135,6 +135,12 @@ test('a chart is drawn from approved data into files of the paper, which a build
   expect(Buffer.from(again.find((f) => f.path === 'charts/latency.pdf')!.bytes)).toEqual(
     Buffer.from(pdf.bytes),
   );
+
+  // Each drawing runs a sandbox, so a paper's charts are drawn only so often in an hour. It
+  // has been asked for twice here, and the second gave the same files as the first.
+  expect(await code(saveChart(t.pool, store, users.owner.id, p.id, { ...LINE, id }, 2))).toBe(
+    'conflict',
+  );
 }, 120_000);
 
 test('a chart is out of date once its data changes, and is not redrawn from data nobody approved', async () => {

@@ -584,6 +584,17 @@ Built after the security review, which had it as its second open item.
 - **Not limited:** how many files a paper holds, and how often someone edits. A member can
   still grow the log by adding and deleting. Those are the review's "limits in general".
 
+## How often the expensive things can be asked for
+
+- **Papers started: 100 an hour for one person**, whether by hand, from a template or out of
+  archives (`LIMITS.papersPerHour`, `mayStartPapers` in `packages/server/src/projects.ts`).
+  An archive that would go past the number is refused whole.
+- **Chart drawings: 120 an hour for a paper**, the same as builds (`CHART_DRAWS_PER_HOUR`).
+  Counted in `chart_requests` (migration 0022), not `chart_draws`: a drawing that gives the
+  same files as before is not recorded there again, so it could not be counted from there.
+- The numbers are guesses at "far more than anyone means to do". Nothing measured them.
+- Not limited: reading pages, checking grammar, typing. See `docs/security-review.md`.
+
 ## Saving a revision no longer holds up editing
 
 - **What was wrong.** Cutting a revision (every build does it, and every save, export and
@@ -631,6 +642,36 @@ Built after the security review, which had it as its first open item.
 - In development the policy also allows `eval`, which React uses there to show server errors.
 
 ## Seen twice, not explained
+
+Three browser tests have each failed once or twice in a full run and passed when run again.
+What they have in common, and what was done about it:
+
+- **Every failure was in a full run, none in a run of the test alone.** Each was a step that
+  took longer than the test allowed: five to eight seconds for something that takes a moment.
+- **Not the machine running short.** Memory and load were looked at during a full run: 11 GB
+  of 16 free, load under 2 on 4 cores.
+- **Not the database, the one time that could be checked.** Lock waits of over a second and
+  statements of over two are logged locally now. Nine full runs since logged neither, and one
+  of the nine was the run in which `revisions.spec` failed. The earlier failures were before
+  the logging.
+- **Found: a test's pages stayed open for the rest of the run.** The runner does not close
+  windows a test opens itself, which every test here does. Midway through a run the sync
+  server had about a dozen connections from tests that had finished, and those pages went on
+  asking for builds and tickets. Each test's windows are now closed when the next test starts
+  (`person` in `tests/e2e/helpers.ts`).
+- **That is a cause removed, not the cause shown.** If the failures were the many open pages,
+  they should stop. If they go on, it was something else, and each failure now says more than
+  it did (below).
+- **What is no longer tried by accident:** thirty pages open at once. Nothing tests that on
+  purpose. `docs/benchmarks.md` measures many people in one file, not many files open.
+- **Keep the whole output of a full run.** One of these failures was lost to a filter that
+  kept only the line that said it had failed.
+
+The three:
+
+- `revisions.spec`, once, in a full local run: a status did not read as expected within five
+  seconds. Which status is not known: the output was not kept. By the time it failed, the test
+  was probably at the point where it opens the editor and waits for "All edits saved."
 
 - `charts.spec`, last step: after the data file was approved again and "Draw it again" pressed,
   the chart's page still said "Out of date". Twice, both in full local runs with other tests'

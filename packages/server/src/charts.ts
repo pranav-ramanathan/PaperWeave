@@ -61,6 +61,8 @@ export type ChartDraw = {
 
 const NAME = /^[a-z0-9][a-z0-9-]{0,39}$/;
 const MAX_GROUPS = 8;
+/** Drawings of one paper's charts in an hour. */
+export const CHART_DRAWS_PER_HOUR = 120;
 const bad = (why: string) => new AppError('invalid_input', why);
 /** Where a chart's files are kept in the paper. */
 export const chartPath = (name: string, ext: 'pdf' | 'png') => `charts/${name}.${ext}`;
@@ -236,8 +238,19 @@ export async function saveChart(
   userId: string,
   projectId: string,
   input: Record<string, unknown>,
+  perHour = CHART_DRAWS_PER_HOUR,
 ): Promise<string> {
   await authorize(pool, userId, id(projectId), 'file.write');
+  // Each drawing runs a sandbox, as a build does, and is held to the same number.
+  const drawn = await pool.query(
+    "select count(*)::int as n from chart_requests where project_id = $1 and created_at > now() - interval '1 hour'",
+    [projectId],
+  );
+  if (drawn.rows[0].n >= perHour)
+    throw new AppError(
+      'conflict',
+      `This paper's charts have been drawn ${perHour} times in the last hour. Try again in a little while.`,
+    );
   const existing = input.id
     ? (
         await pool.query(
@@ -266,6 +279,13 @@ export async function saveChart(
   // Left empty, or left as we wrote it for the chart as it was: our own sentence for this chart.
   const ours = existing && describeChart(existing.spec, table.columns);
   const alt = !given || given === ours ? describeChart(spec, table.columns) : given;
+  // Counted from here: this one will be drawn.
+  await pool.query(
+    `with old as (
+       delete from chart_requests where project_id = $1 and created_at < now() - interval '1 day'
+     ) insert into chart_requests (project_id) values ($1)`,
+    [projectId],
+  );
   if (existing) {
     await pool.query(
       `update charts set spec = $2, caption = $3, alt = $4, status = 'queued', problem = null

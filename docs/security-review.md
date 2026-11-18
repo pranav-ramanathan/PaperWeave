@@ -81,9 +81,14 @@ What it found is fixed in the same change, or listed under "Open" with what to d
 
 In rough order of how much they matter.
 
-1. **Limits on requests in general.** Sign-in links, builds and model reviews are limited.
-   Reading pages, checking grammar, drawing charts and importing archives are not, beyond
-   needing to be signed in. A proxy in front should limit requests per person.
+1. **Limits on requests in general.** What costs most is limited: sign-in links (five a
+   minute for an address), builds (120 an hour for a paper), chart drawings (120 an hour for a
+   paper), model reviews (30 an hour for a paper), and papers started (100 an hour for a
+   person, which with 300 MB a paper is what bounds how fast one account can fill the store).
+   Reading pages, checking grammar, uploading within a paper's limit and typing are not, beyond
+   needing to be signed in. A proxy in front should limit requests per person. There is no
+   limit on what one person's papers add up to over time: that is a decision about accounts,
+   not made here.
 2. **One advisory in a development tool.** `pnpm audit` on 18 November 2026 reports nothing in
    what the service runs (`pnpm audit --prod`), and one moderate advisory overall: `minimatch`,
    through the linter. It is not part of the running service and is given only this

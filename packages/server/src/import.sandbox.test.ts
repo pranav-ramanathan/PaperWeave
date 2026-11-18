@@ -6,7 +6,7 @@ import { afterAll, beforeAll, expect, test } from 'vitest';
 import { type Entry, LIMITS, readZip, writeZip } from './archive.ts';
 import { blobStore } from './blobs.ts';
 import { exportZip, importReport, importZip, listFiles } from './import.ts';
-import { acceptInvitation, invite, listProjects } from './projects.ts';
+import { acceptInvitation, createProject, invite, listProjects } from './projects.ts';
 import { TEST_ENV, testDb } from './testing.ts';
 
 const FIXTURES = join(import.meta.dirname, '../../../fixtures');
@@ -168,6 +168,43 @@ test('an archive of several papers becomes several papers', async () => {
     'export/export-errors.json',
     'export/conversations/1.json',
   ]);
+});
+
+test('one person can start only so many papers in an hour, however they start them', async () => {
+  const busy = await t.signIn('busy@example.org');
+  const limits = { ...LIMITS, papersPerHour: 3 };
+  const two = await writeZip([
+    ...fixture('article-basic', 'alpha/'),
+    ...fixture('article-basic', 'beta/'),
+  ]);
+  const one = await writeZip(fixture('article-basic'));
+  const count = async () => (await listProjects(t.pool, busy.id)).length;
+  const refused = (p: Promise<unknown>) =>
+    p.then(
+      () => 'made',
+      (e) => e.code,
+    );
+
+  await createProject(t.pool, busy.id, 'By hand', 3);
+  await importZip(t.pool, store, busy.id, one, 'From an archive', limits);
+  // An archive of two would make four: it is refused whole, and makes none.
+  expect(await refused(importZip(t.pool, store, busy.id, two, 'Two', limits))).toBe('conflict');
+  expect(await count()).toBe(2);
+  await createProject(t.pool, busy.id, 'The third', 3);
+  expect(await refused(createProject(t.pool, busy.id, 'A fourth', 3))).toBe('conflict');
+  expect(await refused(importZip(t.pool, store, busy.id, one, 'A fourth', limits))).toBe(
+    'conflict',
+  );
+  expect(await count()).toBe(3);
+  // It is each person's own count, and a paper started more than an hour ago is not in it.
+  await importZip(t.pool, store, viewer.id, two, 'Someone else', limits);
+  await t.pool.query(
+    `update projects set created_at = now() - interval '61 minutes' where name = 'By hand'
+     and id in (select project_id from project_members where user_id = $1)`,
+    [busy.id],
+  );
+  await createProject(t.pool, busy.id, 'An hour later', 3);
+  expect(await count()).toBe(4);
 });
 
 test('the compiler is read from the root file', async () => {

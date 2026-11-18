@@ -223,6 +223,9 @@ export default function FileEditor(props: {
       document: doc,
       // Asked for on every connection attempt: a ticket only lives for a minute.
       token: async () => {
+        // Their unsaved edits hold one the server will not take: connecting would send it again.
+        // Nothing is asked of the server until they are discarded.
+        if (oversized) throw new Error('held until the person discards them');
         // A ticket that cannot be fetched is the network or the server having a bad moment, not
         // a refusal: the attempt ends here and another is made shortly. (Signed out is an
         // answer, and comes back without a ticket.)
@@ -233,8 +236,6 @@ export default function FileEditor(props: {
           stumbled = true;
           throw new Error('no ticket this time');
         }
-        // Their unsaved edits hold one the server will not take: connecting would send it again.
-        if (oversized) throw new Error('held until the person discards them');
         const { ticket, restored } = answer;
         // Coming back online to a paper that was restored meanwhile: this person's unsent edits
         // were made to text that is no longer there. They are held until the person decides.
