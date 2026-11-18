@@ -341,6 +341,9 @@ export default function FileEditor(props: {
     const socket = provider.configuration.websocketProvider;
     const offline = () => {
       wantOpen = false;
+      // Said at once. With the network gone the socket can take many seconds to report that it
+      // has closed, and until then the status would go on saying everything is saved.
+      update({ connected: false });
       socket.disconnect();
     };
     const online = () => {
