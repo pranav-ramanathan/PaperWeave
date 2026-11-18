@@ -803,3 +803,33 @@ img.chart {
   background: rgb(255 214 10 / 28%);
   border-bottom: 2px solid var(--warn);
 }
+
+/* Text that someone has proposed to change: a dashed line under it, to tell it from a thread
+   without telling colours apart. */
+.proposal-mark {
+  background: rgb(31 95 191 / 12%);
+  border-bottom: 2px dashed var(--accent);
+}
+/* What a proposal would take away and put in. Each line says which it is in words. */
+.threads .change {
+  margin: 0.15rem 0;
+  font-family: ui-monospace, monospace;
+  font-size: 0.85rem;
+  overflow-wrap: anywhere;
+  white-space: pre-wrap;
+}
+.threads .change span {
+  font-family: system-ui, sans-serif;
+  color: var(--muted);
+}
+.threads del {
+  background: #fde7e7;
+}
+.threads ins {
+  background: #e3f5e8;
+}
+.threads input:not([type]) {
+  display: block;
+  width: 100%;
+  font: inherit;
+}

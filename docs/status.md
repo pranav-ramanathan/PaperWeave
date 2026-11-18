@@ -365,6 +365,30 @@ Read this first. Update it in every pull request.
   - "Show in the text" selects a thread's stretch in whichever view is open. The panel reads
     the threads again every five seconds. The paper's page lists its open threads.
   - Not yet: editing or deleting a comment.
+- **E2: proposed changes.** A "Proposed changes" panel under the editor. Anyone who may comment
+  (owner, editor, reviewer) selects text, or puts the caret where text should go, and proposes
+  what should stand there, with a reason. Nothing is written to the paper until an owner or
+  editor accepts it.
+  - A proposal is kept beside the text, not in it (`packages/server/src/proposals.ts`, table in
+    migration 0015), so a pending proposal is never in the PDF or a download. This is the
+    plan's default; the owner has not yet confirmed it (see `docs/plan.md`).
+  - Its stretch is two Yjs positions, as for threads, and it records the text it expects there.
+    Accepting goes through the command path with that expectation: it lands exactly as proposed
+    or not at all. The edit and the proposal's change of status are one transaction
+    (`runCommand` now takes `within`).
+  - A proposal whose text has changed since is **out of date**: it says how the text now reads,
+    cannot be accepted, and can be changed by its author or an editor into a proposal about the
+    text as it is (`reviseProposal`).
+  - An accept can be undone while the accepted text still stands as accepted: the old text is
+    put back, byte for byte, and the proposal is open again. Each step has its own idempotency
+    key, so a retried accept or undo is applied once.
+  - An owner or editor can reject; the author can withdraw. Decided proposals stay listed under
+    "Decided" with who decided: that list, with the revision diff, is the record of changes.
+  - Open proposals are marked in the text in both views with a dashed underline (threads have a
+    solid one). The paper's page lists open proposals and threads under "Review", and the checks
+    before submitting mention unfinished review without letting it stand in the way.
+  - Not yet: accepting several at once; a word-by-word diff inside a proposal (it shows the old
+    and the new text whole).
 - **A restore keeps what it replaces.** Found by the fault suite on a seed it had not run before.
   A restore put back the chosen revision but kept no copy of the paper as it stood, so text typed
   since the last revision (an edit that reached the server a moment before, say) was erased with
@@ -389,12 +413,12 @@ nothing, edit it together, build it, and download a ZIP and a PDF that belong to
 
 Next, in this order:
 
-1. **E2.** Proposed edits and tracked changes: a reviewer proposes a change to a stretch of
-   text without writing to the paper; an owner or editor accepts it (through the command path,
-   so a proposal on text that has changed is flagged stale), rejects it, or undoes an accept.
-   Proposals are stored beside the source, not in it, so the PDF never shows a pending one.
-   That choice is the owner's to confirm (see `docs/plan.md`); it is the plan's default.
-2. **E3** onward, as in the plan.
+1. **E3.** Grammar: inline spelling and grammar findings in prose, never inside an equation,
+   unit, code, path or citation; UK and US spelling; a glossary of the paper's own words; rules
+   that can be switched off. The engine is to be chosen by benchmark (self-hosted LanguageTool
+   is the spec's candidate). Findings become proposals, so accepting one is the same step.
+2. **E4** onward, as in the plan. Model processing stays off until the owner confirms
+   retention defaults.
 
 The Phase A replays are waiting on a person with accounts: `docs/rea/matrix.md`. The Prism one is
 optional: its export was researched from public sources (`docs/rea/prism.md`) and is a plain LaTeX

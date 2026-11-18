@@ -10,6 +10,7 @@ import {
   listDatasets,
   listFiles,
   listMembers,
+  listProposals,
   listRevisions,
   listThreads,
 } from '@paperweave/server';
@@ -73,6 +74,7 @@ export default async function Project({
     listDatasets(db(), blobs(), user.id, id),
     listCharts(db(), blobs(), user.id, id),
     listThreads(db(), blobs(), user.id, id),
+    listProposals(db(), blobs(), user.id, id),
   ]).catch((err) => {
     // Not a member, or no such paper: the two look the same from outside.
     if (err instanceof AppError && err.code === 'not_found') notFound();
@@ -90,11 +92,14 @@ export default async function Project({
     datasets,
     charts,
     threads,
+    proposals,
   ] = loaded;
   const openThreads = threads.filter((t) => t.status === 'open');
+  const openProposals = proposals.filter((p) => p.status === 'open');
   const dataFiles = files.filter((f) => /\.(csv|tsv)$/i.test(f.path) && !f.readonly);
   const reviewer = can(project.role, 'comment.write');
   const day = (iso: string) => iso.slice(0, 10);
+  const brief = (text: string) => (text.length > 80 ? `${text.slice(0, 80)}…` : text);
   const writer = can(project.role, 'revision.write');
   const about = new Map(report?.files.map((f) => [f.path, f]));
   /** What the visual editor can do with a file, in a few words. */
@@ -625,24 +630,39 @@ export default async function Project({
         </>
       )}
 
-      {threads.length > 0 && (
+      {threads.length + proposals.length > 0 && (
         <>
-          <h2 id="comments">Comments</h2>
-          {openThreads.length === 0 ? (
-            <p>Every thread is resolved.</p>
-          ) : (
-            <ul className="report">
-              {openThreads.map((t) => (
-                <li key={t.id}>
-                  <Link href={`/projects/${id}/files/${t.fileId}#comments`}>{t.path}</Link>:{' '}
-                  <q>{t.excerpt.length > 80 ? `${t.excerpt.slice(0, 80)}…` : t.excerpt}</q>
-                  {t.state === 'detached' && <strong> (this text has been deleted)</strong>}.{' '}
-                  {t.comments.length} {t.comments.length === 1 ? 'comment' : 'comments'}, the latest
-                  by {t.comments.at(-1)?.author ?? 'someone who has left'}.
-                </li>
-              ))}
-            </ul>
+          <h2 id="review">Review</h2>
+          {openThreads.length + openProposals.length === 0 && (
+            <p>Every thread is resolved and every proposed change is decided.</p>
           )}
+          <ul className="report">
+            {openProposals.map((p) => (
+              <li key={p.id}>
+                <Link href={`/projects/${id}/files/${p.fileId}#proposals`}>{p.path}</Link>:{' '}
+                {p.author ?? 'someone who has left'} proposes{' '}
+                {p.expected ? (
+                  <>
+                    changing <q>{brief(p.expected)}</q> to <q>{brief(p.replacement)}</q>
+                  </>
+                ) : (
+                  <>
+                    adding <q>{brief(p.replacement)}</q>
+                  </>
+                )}
+                .{p.stale && <strong> Out of date: the text has changed since.</strong>}
+              </li>
+            ))}
+            {openThreads.map((t) => (
+              <li key={t.id}>
+                <Link href={`/projects/${id}/files/${t.fileId}#comments`}>{t.path}</Link>:{' '}
+                <q>{brief(t.excerpt)}</q>
+                {t.state === 'detached' && <strong> (this text has been deleted)</strong>}.{' '}
+                {t.comments.length} {t.comments.length === 1 ? 'comment' : 'comments'}, the latest
+                by {t.comments.at(-1)?.author ?? 'someone who has left'}.
+              </li>
+            ))}
+          </ul>
         </>
       )}
 

@@ -13,7 +13,7 @@ import { id } from './projects.ts';
 export type Finding = {
   /** A problem must be put right before the paper is sent. A warning is worth a look. */
   level: 'problem' | 'warning';
-  kind: 'root' | 'file' | 'label' | 'citation' | 'build' | 'compiler' | 'chart';
+  kind: 'root' | 'file' | 'label' | 'citation' | 'build' | 'compiler' | 'chart' | 'review';
   message: string;
   /** Where to put it right: a place in a file, or a chart. */
   fileId?: string;
@@ -109,6 +109,25 @@ export async function submissionChecks(
         { chartId: c.id },
       );
   }
+
+  // Review that is not finished does not stop a paper being sent, but its author should know.
+  const waiting = (
+    await pool.query(
+      `select (select count(*)::int from threads t join files f on f.id = t.file_id
+                where t.project_id = $1 and t.status = 'open') as threads,
+              (select count(*)::int from proposals p join files f on f.id = p.file_id
+                where p.project_id = $1 and p.status = 'open') as proposals`,
+      [projectId],
+    )
+  ).rows[0];
+  const count = (n: number, one: string, many: string) => `${n} ${n === 1 ? one : many}`;
+  if (waiting.proposals)
+    warning(
+      'review',
+      `${count(waiting.proposals, 'proposed change has', 'proposed changes have')} not been decided.`,
+    );
+  if (waiting.threads)
+    warning('review', `${count(waiting.threads, 'thread is', 'threads are')} still open.`);
 
   const { latest } = await latestBuilds(pool, userId, projectId);
   const building = latest?.status === 'queued';

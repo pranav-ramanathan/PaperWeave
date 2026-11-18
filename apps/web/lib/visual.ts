@@ -547,7 +547,7 @@ export function createVisual(opts: {
     frozen: block,
   };
   /** Stretches of the source to mark in the text: those with a thread of comments. */
-  let marked: { from: number; to: number }[] = [];
+  let marked: { from: number; to: number; kind: 'thread' | 'proposal' }[] = [];
   const editor: Editor = new Editor({
     element: opts.element,
     editable: opts.editable,
@@ -576,7 +576,9 @@ export function createVisual(opts: {
                   state.doc,
                   marked.flatMap((m) => {
                     const [from, to] = [at(m.from), at(m.to)];
-                    return to > from ? [Decoration.inline(from, to, { class: 'thread-mark' })] : [];
+                    return to > from
+                      ? [Decoration.inline(from, to, { class: `${m.kind}-mark` })]
+                      : [];
                   }),
                 );
               },
@@ -683,7 +685,7 @@ export function createVisual(opts: {
       editor.commands.setTextSelection({ from: Math.min(from, size), to: Math.min(to, size) });
     },
     /** Mark these stretches of the source in the text. */
-    setMarks(ranges: { from: number; to: number }[]) {
+    setMarks(ranges: typeof marked) {
       marked = ranges;
       // Nothing changes but what is drawn.
       editor.view.dispatch(editor.state.tr.setMeta('marks', true));
