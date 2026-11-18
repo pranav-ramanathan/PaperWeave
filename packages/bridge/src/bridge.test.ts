@@ -324,3 +324,13 @@ test('carets map between the two views', () => {
   const at = DOC.indexOf('para,');
   expect(toSrc(r.bridge.model, r.state.doc, fromSrc(r.bridge.model, r.state.doc, at))).toBe(at);
 });
+
+test("when a file's text first arrives, the caret is at its start and not on the whole document", () => {
+  // The app opens an empty editor and the text comes from the server a moment later.
+  const r = replica('');
+  r.ytext.insert(0, fixtures['ieee-multifile/sections/intro.tex']);
+  r.check();
+  // A selection of everything would make the first key pressed replace the whole file.
+  expect(r.state.selection.toJSON()).toMatchObject({ type: 'text' });
+  expect(r.state.selection.empty).toBe(true);
+});

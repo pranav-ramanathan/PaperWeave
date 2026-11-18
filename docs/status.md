@@ -70,11 +70,25 @@ Read this first. Update it in every pull request.
     check and the edit happen while the file's row is locked, so typing and other commands wait.
   - A command carries a key chosen by the client. Sent again with the same key it is not applied
     again. Keys are kept for a day (`file_commands`).
-  - Over HTTP: `POST /projects/<id>/files/<fileId>/commands`, 200 or 409. Nothing in the app
-    sends one yet; C7's visual editor will.
+  - Editors ask for one over the live connection (see C7). There is no HTTP route for it.
   - `compactFile` rewrites a file's log as one entry holding the same document. The sync server
     does it each time a file's log has grown by 500 edits. Who typed each edit is not kept past
     a compaction.
+- **C7: the visual editor in the app.** A .tex file opens in the visual view, with a switch to
+  the source view. Both are views of the same text (`FileEditor.tsx`, `apps/web/lib/visual.ts`,
+  which `/spike` now shares).
+  - Switching views carries the selection across. Undo is one history per person for both views.
+  - Emphasis is a structural edit. The editor asks the sync server over its live connection; the
+    server runs `runCommand`, answers the author with the edit, and only then sends it to
+    everyone. The author applies the answer as their own edit, so it is an undo step of theirs.
+    C6's HTTP route could not guarantee that order (the broadcast sometimes won, and Undo then
+    took back the wrong thing), so it was removed.
+  - Found and fixed on the way: after a file's text first arrived, the visual editor's selection
+    was the whole document, and keys pressed before the first click registered were refused.
+  - Not built: other people's carets in the visual view (the source view has them), structural
+    edits other than emphasis, and remembering which view a person last used.
+  - Whether a file is "definitions, source only" comes from the import report, so a file added
+    later is never marked that way.
 - **Phase B spike.** Gate report: `docs/phase-b-gate.md`. Recommendation: go.
   - `packages/latex`: lossless block parser, incremental reparse, include graph, encoding round
     trip, coverage.
@@ -84,14 +98,12 @@ Read this first. Update it in every pull request.
 
 ## Next
 
-C1 to C6 are done. C1 to C5 complete the first end-to-end slice: import a ZIP or start from
+C1 to C7 are done. C1 to C5 complete the first end-to-end slice: import a ZIP or start from
 nothing, edit it together, build it, and download a ZIP and a PDF that belong to the same revision.
 
 Next, in this order:
 
-1. **C7.** The visual editor in the app, using `packages/bridge`. Structural edits go through
-   the command route; `Bridge.emphCommand` already builds a command of the right shape.
-2. **C8.** The fault suite and monitoring. It should include a restore while a client is offline:
+1. **C8.** The fault suite and monitoring. It should include a restore while a client is offline:
    today those offline edits are merged on reconnect like any others, and the plan's
    "recover unsynced changes" step is not built.
 
@@ -133,6 +145,8 @@ See "What I need from you" in `docs/plan.md`. None blocks C1.
   browser warns first. Keeping them on the device (IndexedDB) would survive that, at the cost of
   leaving manuscript text on shared computers: an owner decision, not yet made.
 - Names shown for other people in a file come from each client and are not verified.
+- Commands asked for over the live connection reach other editors through the one sync server
+  that ran them. Running more than one sync server needs that delivery to go through Postgres.
 - A resent edit can be stored twice. That is harmless to the text and goes at the next compaction.
 - Sign-in is rate-limited per client address, read from `X-Forwarded-For`. In production the app
   must sit behind a proxy that sets that header itself, or the limit can be dodged. Browser tests

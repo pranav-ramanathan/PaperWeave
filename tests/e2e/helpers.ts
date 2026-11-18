@@ -38,3 +38,7 @@ export async function person(browser: Browser, who: string) {
   const page = await context.newPage();
   return { page, email: address(who) };
 }
+
+/** On a file's page, switch to the LaTeX source view. A .tex file opens in the visual view. */
+export const showSource = (page: Page) =>
+  page.getByRole('group', { name: 'View' }).getByRole('button', { name: 'Source' }).click();

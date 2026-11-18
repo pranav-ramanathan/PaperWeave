@@ -5,7 +5,7 @@ import { expect, type Page, test } from '@playwright/test';
 import { mkdtempSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { person, run, signIn } from './helpers';
+import { person, run, showSource, signIn } from './helpers';
 
 const source = (page: Page) => page.locator('.editor .cm-content');
 const editorStatus = (page: Page) =>
@@ -49,6 +49,7 @@ test('a paper is started from nothing, and a deleted file comes back by restorin
 
   // Write the paper, and it builds with the uploaded file included.
   await page.getByRole('link', { name: 'paper.tex' }).click();
+  await showSource(page);
   await expect(editorStatus(page)).toHaveText('All edits saved.');
   await source(page).click();
   await page.keyboard.type(
@@ -71,6 +72,7 @@ test('a paper is started from nothing, and a deleted file comes back by restorin
   const other = await page.context().newPage();
   await other.goto(paper);
   await other.getByRole('link', { name: 'sections/intro.tex' }).click();
+  await showSource(other);
   await expect(source(other)).toContainText('Uploaded words.');
   await other.locator('.editor .cm-content').click();
   await other.keyboard.press('ControlOrMeta+End');
@@ -88,6 +90,7 @@ test('a paper is started from nothing, and a deleted file comes back by restorin
   await page.getByRole('button', { name: `Restore revision ${kept}` }).click();
   await expect(page.getByRole('status')).toContainText('Restored.');
   await page.getByRole('link', { name: 'sections/intro.tex' }).click();
+  await showSource(page);
   await expect(source(page)).toContainText('Uploaded words.');
   await expect(source(page)).toContainText('Typed before the delete.');
 });

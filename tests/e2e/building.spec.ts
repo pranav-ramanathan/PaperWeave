@@ -5,7 +5,7 @@ import { mkdtempSync, readdirSync, readFileSync, statSync, writeFileSync } from 
 import { tmpdir } from 'node:os';
 import { join, relative } from 'node:path';
 import { writeZip } from '../../packages/server/src/archive';
-import { emailedLink, person, run, signIn } from './helpers';
+import { emailedLink, person, run, showSource, signIn } from './helpers';
 
 const FIXTURE = join(import.meta.dirname, '../../fixtures/ieee-multifile');
 const build = (page: Page) => page.locator('.build');
@@ -41,6 +41,7 @@ test('the PDF builds by itself, a broken edit says where, and the last good PDF 
 
   // Opening a file is enough: the paper compiles without being asked.
   await owner.page.getByRole('link', { name: 'sections/intro.tex' }).click();
+  await showSource(owner.page);
   await expect(buildStatus(owner.page)).toHaveText('The PDF is up to date.', { timeout: 60_000 });
   const frame = build(owner.page).locator('iframe');
   const first = (await frame.getAttribute('src'))!;

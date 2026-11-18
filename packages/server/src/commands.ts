@@ -21,7 +21,9 @@ export type Command = {
   replacement: string;
 };
 export type CommandResult =
-  | { result: 'applied' | 'duplicate' }
+  /** `update` is the edit as a Yjs update, so its author can apply it as their own (and undo it). */
+  | { result: 'applied'; update: Uint8Array }
+  | { result: 'duplicate' }
   /** The stretch has changed. Nothing was done; here is the text as it stands. */
   | { result: 'conflict'; text: string };
 
@@ -66,6 +68,8 @@ export async function runCommand(
   userId: string,
   fileId: string,
   command: unknown,
+  // The sync server delivers the edit itself, after it has answered the author.
+  opts: { notify?: boolean } = {},
 ): Promise<CommandResult> {
   const c = check(command);
   if (!(await openFile(pool, userId, fileId)).canWrite)
@@ -107,13 +111,14 @@ export async function runCommand(
       const seq = await appendUpdate(db, fileId, userId, update);
       if (seq === null) throw new AppError('permission_denied', 'You cannot edit this file.');
       // Delivered when this transaction commits: people with the file open see the edit at once.
-      await db.query("select pg_notify('file_edits', $1)", [`${fileId}:${seq}`]);
+      if (opts.notify ?? true)
+        await db.query("select pg_notify('file_edits', $1)", [`${fileId}:${seq}`]);
     }
     await db.query('insert into file_commands (key, file_id, user_id) values ($1, $2, $3)', [
       c.key,
       fileId,
       userId,
     ]);
-    return { result: 'applied' };
+    return { result: 'applied', update };
   });
 }

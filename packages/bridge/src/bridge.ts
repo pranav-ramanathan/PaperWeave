@@ -2,7 +2,7 @@
 import { DEFAULT_TRANSPARENT, parse, reparse, sourceOnly } from '@paperweave/latex';
 import type { Node as PMNode, Schema } from '@tiptap/pm/model';
 import { ReplaceStep } from '@tiptap/pm/transform';
-import type { EditorState, Transaction } from '@tiptap/pm/state';
+import { type EditorState, Selection, type Transaction } from '@tiptap/pm/state';
 import * as Y from 'yjs';
 import { locate, model, type Model, projector } from './project.ts';
 import { diff, type Edit, emphEdit, translate, type Translation } from './translate.ts';
@@ -138,6 +138,11 @@ export class Bridge {
     } catch {
       tr.replaceWith(0, state.doc.content.size, next.content);
     }
+    // When everything is replaced (a file's text arriving, say) the selection is left on the
+    // whole document, where the next key pressed would replace the file. Put the caret at the
+    // first place text can go.
+    if (d.a === 0 && d.endA === state.doc.content.size)
+      tr.setSelection(Selection.findFrom(tr.doc.resolve(0), 1, true) ?? Selection.atStart(tr.doc));
     this.host.dispatch(tr.setMeta('projection', true).setMeta('addToHistory', false));
   }
 

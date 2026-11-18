@@ -68,7 +68,10 @@ function client(
   token = () => syncTicket(SECRET, user.id),
 ) {
   const doc = new Y.Doc();
-  const state = { refused: false, closed: 0 };
+  /** Answers to structural edits, each with the text this client held when it arrived. */
+  const replies: { key: string; result?: string; update?: string; error?: string; had: string }[] =
+    [];
+  const state = { refused: false, closed: 0, replies };
   const provider = new HocuspocusProvider({
     websocketProvider: new HocuspocusProviderWebsocket({
       url: `ws://127.0.0.1:${port}`,
@@ -82,6 +85,8 @@ function client(
     token,
     onAuthenticationFailed: () => void (state.refused = true),
     onClose: () => void state.closed++,
+    onStateless: ({ payload }) =>
+      void replies.push({ ...JSON.parse(payload), had: doc.getText(TEXT).toString() }),
   });
   // A provider given its own socket does not start using it until told to.
   provider.attach();
@@ -298,6 +303,63 @@ test('deleting a file closes it for everyone; restoring brings back the same fil
   expect(fresh.text.toString()).toBe(want);
 });
 
+test('a structural edit asked for over the connection is answered before it is broadcast', async () => {
+  const { project, file } = await paper();
+  const owner = client(users.owner, file);
+  const editor = client(users.editor, file);
+  const reviewer = client(users.reviewer, file);
+  await saved(owner, editor, reviewer);
+  const ask = (c: Client, expected: string, replacement: string, key = crypto.randomUUID()) => {
+    const from = c.text.toString().indexOf(expected);
+    const at = (i: number) =>
+      Buffer.from(
+        Y.encodeRelativePosition(Y.createRelativePositionFromTypeIndex(c.text, i)),
+      ).toString('base64url');
+    const command = { key, from: at(from), to: at(from + expected.length), expected, replacement };
+    c.provider.sendStateless(JSON.stringify(command));
+    return until('an answer', () => c.state.replies.some((r) => r.key === key)).then(() =>
+      c.state.replies.find((r) => r.key === key)!,
+    );
+  };
+
+  // The editor types, then asks at once. The typing is in before the edit is checked.
+  editor.text.insert(editor.text.toString().indexOf('Hello.') + 5, ' again');
+  const key = crypto.randomUUID();
+  const done = await ask(editor, 'Hello again.', '\\emph{Hello again.}', key);
+  expect(done.result).toBe('applied');
+  // The answer came first: the author did not yet have the edit, and gets it in the answer.
+  expect(done.had).toContain('Hello again.');
+  expect(done.had).not.toContain('\\emph');
+  Y.applyUpdate(editor.doc, Buffer.from(done.update!, 'base64url'), 'mine');
+  await until('everyone to see it', () =>
+    [owner, editor, reviewer].every((c) => c.text.toString().includes('\\emph{Hello again.}')),
+  );
+  expect(await stored(project)).toBe(MAIN.replace('Hello.', '\\emph{Hello again.}'));
+
+  // The same key again, a stale edit, a reviewer, and nonsense: answered, and nothing changes.
+  editor.state.replies.length = 0;
+  expect((await ask(editor, 'Hello again.', 'TWICE', key)).result).toBe('duplicate');
+  const stale = crypto.randomUUID();
+  editor.provider.sendStateless(
+    JSON.stringify({
+      key: stale,
+      from: 'AQZzb3VyY2UA',
+      to: 'AQZzb3VyY2UA',
+      expected: 'no longer there',
+      replacement: 'STALE',
+    }),
+  );
+  await until('the stale answer', () => editor.state.replies.some((r) => r.key === stale));
+  expect(editor.state.replies.find((r) => r.key === stale)).toMatchObject({ result: 'conflict' });
+  expect((await ask(reviewer, 'Hello', 'REVIEWER')).error).toBe('You cannot edit this file.');
+  editor.provider.sendStateless('not json at all');
+  editor.provider.sendStateless(JSON.stringify({ key: 'k', from: 7 }));
+  await until('the refusals', () => editor.state.replies.filter((r) => r.error).length === 2);
+  await new Promise((r) => setTimeout(r, 200));
+  expect(await stored(project)).toBe(MAIN.replace('Hello.', '\\emph{Hello again.}'));
+  expect(owner.text.toString()).toBe(editor.text.toString());
+});
+
 const logRows = async (file: string) =>
   (await t.pool.query('select count(*)::int as n from file_updates where file_id = $1', [file]))
     .rows[0].n;
@@ -329,7 +391,7 @@ test('a command reaches people who have the file open, and a stale one tells its
   // Once the owner's typing has reached the editor, the same action applies and both see it.
   await until('the typing to arrive', () => editor.text.toString().includes('Hello there.'));
   const again = command(editor, 'Hello there.', '\\textbf{Hello there.}');
-  expect(await runCommand(t.pool, store, users.editor.id, file, again)).toEqual({
+  expect(await runCommand(t.pool, store, users.editor.id, file, again)).toMatchObject({
     result: 'applied',
   });
   await until('both to see the command', () =>
@@ -364,7 +426,7 @@ test('the log is compacted as it grows, and someone who was offline through it s
     expected: 'line 0\n',
     replacement: '% first\n',
   });
-  expect(done).toEqual({ result: 'applied' });
+  expect(done).toMatchObject({ result: 'applied' });
   await until('the command to arrive', () => owner.text.toString().includes('% first\n'));
   owner.text.insert(0, '% top\n');
   await saved(owner);
