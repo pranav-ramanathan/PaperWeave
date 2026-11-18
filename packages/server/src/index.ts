@@ -1,4 +1,5 @@
 export * from './errors.ts';
+export * from './evidence.ts';
 export * from './db.ts';
 export * from './auth.ts';
 export * from './authz.ts';

@@ -5,7 +5,10 @@ import {
   createProject,
   deleteFile,
   invite,
+  lookUpDoi,
   proposeFileRename,
+  recordEvidence,
+  removeEvidence,
   removeMember,
   renameFileAndReferences,
   renameLabel,
@@ -160,5 +163,36 @@ export async function renameLabelAction(projectId: string, form: FormData) {
     const digest = text(form, 'digest');
     const { places } = await renameLabel(db(), blobs(), user.id, projectId, from, to, digest);
     return `/projects/${projectId}?relabelled=${encodeURIComponent(to)}&places=${places}#labels`;
+  });
+}
+
+export async function lookUpDoiAction(projectId: string, key: string) {
+  const back = `/projects/${projectId}`;
+  const user = await requireUser(back);
+  await act(back, async () => {
+    await lookUpDoi(db(), blobs(), user.id, projectId, key);
+    return `${back}?looked=${encodeURIComponent(key)}#bibliography`;
+  });
+}
+
+export async function recordEvidenceAction(projectId: string, key: string, form: FormData) {
+  const back = `/projects/${projectId}`;
+  const user = await requireUser(back);
+  await act(back, async () => {
+    await recordEvidence(db(), blobs(), user.id, projectId, key, {
+      claim: text(form, 'claim'),
+      verdict: text(form, 'verdict'),
+      note: text(form, 'note'),
+    });
+    return `${back}?checked=${encodeURIComponent(key)}#bibliography`;
+  });
+}
+
+export async function removeEvidenceAction(projectId: string, checkId: string) {
+  const back = `/projects/${projectId}`;
+  const user = await requireUser(back);
+  await act(back, async () => {
+    await removeEvidence(db(), user.id, projectId, checkId);
+    return `${back}#bibliography`;
   });
 }

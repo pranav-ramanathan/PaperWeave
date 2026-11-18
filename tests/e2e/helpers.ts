@@ -42,3 +42,39 @@ export async function person(browser: Browser, who: string) {
 /** On a file's page, switch to the LaTeX source view. A .tex file opens in the visual view. */
 export const showSource = (page: Page) =>
   page.getByRole('group', { name: 'View' }).getByRole('button', { name: 'Source' }).click();
+
+/**
+ * Wait until what was just typed into a file has been saved. The status says "Saving" for a
+ * moment first; looking only for "saved" could see the one from before the typing.
+ */
+export async function typingSaved(page: Page) {
+  const status = page.getByRole('region', { name: /^Editor for/ }).getByRole('status');
+  await expect(status).not.toHaveText('All edits saved.');
+  await expect(status).toHaveText('All edits saved.');
+}
+
+/** Double-click a word in an editor, as a person would to select it. */
+export async function selectWord(page: Page, within: string, word: string) {
+  // The file's text arrives a moment after its page does.
+  await expect(page.locator(within)).toContainText(word);
+  const at = await page.evaluate(
+    ([sel, w]) => {
+      const walker = document.createTreeWalker(document.querySelector(sel)!, NodeFilter.SHOW_TEXT);
+      for (let n = walker.nextNode(); n; n = walker.nextNode()) {
+        const i = n.textContent!.indexOf(w);
+        if (i < 0) continue;
+        n.parentElement!.scrollIntoView({ block: 'center' });
+        const range = document.createRange();
+        range.setStart(n, i);
+        range.setEnd(n, i + w.length);
+        const r = range.getBoundingClientRect();
+        return { x: r.x + r.width / 2, y: r.y + r.height / 2 };
+      }
+      return null;
+    },
+    [within, word] as const,
+  );
+  if (!at) throw new Error(`"${word}" is not shown in ${within}`);
+  await page.mouse.dblclick(at.x, at.y);
+  await expect.poll(() => page.evaluate(() => getSelection()!.toString())).toBe(word);
+}

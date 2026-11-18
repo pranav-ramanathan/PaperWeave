@@ -190,6 +190,23 @@ Read this first. Update it in every pull request.
   - The bibliography is read when the file page opens and after the citation window closes. An
     entry added in another tab shows after that.
   - BibTeX and Biber both build already (C4, C5): latexmk runs whichever the paper asks for.
+- **D2, second part: what has been checked about a citation.** Two things, recorded apart
+  (`packages/server/src/evidence.ts`, tables `doi_lookups` and `evidence_checks`), shown as two
+  columns on the paper's page. With this D2 is done.
+  - _Is the entry right?_ "Look up DOI" asks Crossref about the entry's DOI and sets the
+    registry's title, year, first author and venue beside the entry's. It records the outcome
+    (matches, differs with both sides, or no such DOI), the source and the time. Only the DOI
+    leaves the service. Nothing in the paper is changed. A lookup of an entry edited since is
+    marked as out of date.
+  - _Does the source support the claim?_ A person quotes one claim from the paper and says
+    whether the source supports it, partly supports it, or does not, with a note. If the
+    paper no longer says those words, the check says so.
+  - Owners, editors and reviewers may do both; viewers may read. A check is removed by its
+    author or by someone who can edit the paper.
+  - `CROSSREF_URL` points the lookup elsewhere; the browser tests point it at a stand-in. A
+    registry that does not answer is reported and nothing is recorded.
+  - A claim is matched by its words, not by its place in the text. Anchoring a check to a
+    place comes with review threads (E1).
 - **Phase B spike.** Gate report: `docs/phase-b-gate.md`. Recommendation: go.
   - `packages/latex`: lossless block parser, incremental reparse, include graph, encoding round
     trip, coverage.
@@ -204,9 +221,9 @@ nothing, edit it together, build it, and download a ZIP and a PDF that belong to
 
 Next, in this order:
 
-1. **D2, the rest.** An explicit DOI lookup that records its source and time, and separate
-   statuses for "the metadata is right" and "this source supports this claim".
-2. **D3** onward, as in the plan.
+1. **D3.** Figures and tables: assets, captions, alt text, simple table editing. Exit test: a
+   cell edit changes only that cell's bytes.
+2. **D4** onward, as in the plan.
 
 The Phase A replays are waiting on a person with accounts: `docs/rea/matrix.md`. The Prism one is
 optional: its export was researched from public sources (`docs/rea/prism.md`) and is a plain LaTeX
@@ -249,6 +266,8 @@ See "What I need from you" in `docs/plan.md`. None blocks C1.
 - Commands asked for over the live connection reach other editors through the one sync server
   that ran them. Running more than one sync server needs that delivery to go through Postgres.
 - A resent edit can be stored twice. That is harmless to the text and goes at the next compaction.
+- The editor says "Offline" as soon as the browser does. It does not wait for the socket, which
+  can take many seconds to notice.
 - Sign-in is rate-limited per client address, read from `X-Forwarded-For`. In production the app
   must sit behind a proxy that sets that header itself, or the limit can be dodged. Browser tests
   give each simulated person their own address the same way.

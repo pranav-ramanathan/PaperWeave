@@ -10,6 +10,8 @@ const services = {
   S3_BUCKET: 'paperweave',
   S3_ACCESS_KEY: 'dev',
   S3_SECRET_KEY: 'dev',
+  // A stand-in for the DOI registry, started by the test that needs one.
+  CROSSREF_URL: 'http://127.0.0.1:4391',
   ...(process.env as Record<string, string>),
 };
 

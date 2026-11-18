@@ -1,6 +1,7 @@
 import {
   AppError,
   can,
+  citationChecks,
   citationReport,
   getProject,
   importReport,
@@ -15,6 +16,9 @@ import { blobs, db, requireUser } from '../../../lib/server';
 import {
   buildRevisionAction,
   deleteFileAction,
+  lookUpDoiAction,
+  recordEvidenceAction,
+  removeEvidenceAction,
   inviteAction,
   removeAction,
   renameAction,
@@ -46,6 +50,8 @@ export default async function Project({
     root?: string;
     relabelled?: string;
     moved?: string;
+    looked?: string;
+    checked?: string;
     places?: string;
   }>;
 }) {
@@ -59,12 +65,15 @@ export default async function Project({
     listRevisions(db(), user.id, id),
     labelReport(db(), blobs(), user.id, id),
     citationReport(db(), blobs(), user.id, id),
+    citationChecks(db(), blobs(), user.id, id),
   ]).catch((err) => {
     // Not a member, or no such paper: the two look the same from outside.
     if (err instanceof AppError && err.code === 'not_found') notFound();
     throw err;
   });
-  const [project, members, files, report, revisions, labels, cited] = loaded;
+  const [project, members, files, report, revisions, labels, cited, checks] = loaded;
+  const reviewer = can(project.role, 'comment.write');
+  const day = (iso: string) => iso.slice(0, 10);
   const writer = can(project.role, 'revision.write');
   const about = new Map(report?.files.map((f) => [f.path, f]));
   /** What the visual editor can do with a file, in a few words. */
@@ -118,6 +127,16 @@ export default async function Project({
         </p>
       )}
       {root && <p role="status">Root file changed.</p>}
+      {query.looked && (
+        <p role="status">
+          Looked up <code>{query.looked}</code>. The result is beside it below.
+        </p>
+      )}
+      {query.checked && (
+        <p role="status">
+          Recorded an evidence check for <code>{query.checked}</code>.
+        </p>
+      )}
       {query.moved && (
         <p role="status">
           Renamed to <code>{query.moved}</code>
@@ -355,6 +374,160 @@ export default async function Project({
                 </li>
               ))}
             </ul>
+          )}
+          {cited.entries.length > 0 && (
+            <>
+              <p>
+                Two different things can be checked about a citation, and they are recorded apart.
+                Whether the <strong>entry is right</strong> is checked by looking its DOI up.
+                Whether the source <strong>supports what the paper says</strong> is a person&apos;s
+                judgement about one claim. One says nothing about the other.
+              </p>
+              <table>
+                <thead>
+                  <tr>
+                    <th scope="col">Entry</th>
+                    <th scope="col">Is the entry right?</th>
+                    <th scope="col">Does it support the claim?</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {cited.entries
+                    .filter((e, i) => cited.entries.findIndex((x) => x.key === e.key) === i)
+                    .map((e) => {
+                      const looked = checks.lookups[e.key];
+                      const evidence = checks.evidence[e.key] ?? [];
+                      const differing = looked?.comparison.filter((c) => !c.same) ?? [];
+                      return (
+                        <tr key={e.key}>
+                          <th scope="row">
+                            <code>{e.key}</code>
+                            <br />
+                            <span className="role">{e.description}</span>
+                          </th>
+                          <td>
+                            {!e.doi && !looked && 'No DOI to look up.'}
+                            {e.doi && !looked && 'Not looked up.'}
+                            {looked && (
+                              <>
+                                {looked.outcome === 'matches' && 'Matches the registry.'}
+                                {looked.outcome === 'not_found' &&
+                                  'The registry has no record of this DOI.'}
+                                {looked.outcome === 'differs' && (
+                                  <>
+                                    Differs from the registry:
+                                    <ul>
+                                      {differing.map((c) => (
+                                        <li key={c.field}>
+                                          {c.field}: the entry says “{c.entry || 'nothing'}”, the
+                                          registry “{c.registry || 'nothing'}”
+                                        </li>
+                                      ))}
+                                    </ul>
+                                  </>
+                                )}{' '}
+                                <span className="role">
+                                  Looked up in{' '}
+                                  {looked.source === 'crossref' ? 'Crossref' : looked.source} on{' '}
+                                  {day(looked.lookedUpAt)}
+                                  {looked.lookedUpBy ? ` by ${looked.lookedUpBy}` : ''}.
+                                </span>
+                                {looked.outOfDate && (
+                                  <>
+                                    {' '}
+                                    <strong>The entry has been changed since.</strong>
+                                  </>
+                                )}
+                              </>
+                            )}
+                            {reviewer && e.doi && (
+                              <form
+                                action={lookUpDoiAction.bind(null, id, e.key)}
+                                className="inline"
+                              >
+                                {' '}
+                                <button type="submit" aria-label={`Look up the DOI of ${e.key}`}>
+                                  {looked ? 'Look up again' : 'Look up DOI'}
+                                </button>
+                              </form>
+                            )}
+                          </td>
+                          <td>
+                            {evidence.length === 0 && 'No claim checked.'}
+                            <ul>
+                              {evidence.map((c) => (
+                                <li key={c.id}>
+                                  <strong>
+                                    {c.verdict === 'supports'
+                                      ? 'Supports'
+                                      : c.verdict === 'partly'
+                                        ? 'Partly supports'
+                                        : 'Does not support'}
+                                  </strong>
+                                  : “{c.claim}”{c.note ? ` (${c.note})` : ''}{' '}
+                                  <span className="role">
+                                    {c.checkedBy ?? 'Someone'}, {day(c.checkedAt)}.
+                                  </span>
+                                  {!c.stillSaid && (
+                                    <>
+                                      {' '}
+                                      <strong>The paper no longer says this.</strong>
+                                    </>
+                                  )}
+                                  {c.mine && (
+                                    <form
+                                      action={removeEvidenceAction.bind(null, id, c.id)}
+                                      className="inline"
+                                    >
+                                      {' '}
+                                      <button
+                                        type="submit"
+                                        aria-label={`Remove this check of ${e.key}`}
+                                      >
+                                        Remove
+                                      </button>
+                                    </form>
+                                  )}
+                                </li>
+                              ))}
+                            </ul>
+                            {reviewer && (
+                              <details>
+                                <summary>Record a check</summary>
+                                <form action={recordEvidenceAction.bind(null, id, e.key)}>
+                                  <label>
+                                    The claim, quoted from the paper
+                                    <textarea
+                                      name="claim"
+                                      required
+                                      maxLength={2000}
+                                      rows={2}
+                                      aria-label={`The claim that cites ${e.key}`}
+                                    />
+                                  </label>
+                                  <label>
+                                    The source
+                                    <select name="verdict" defaultValue="supports">
+                                      <option value="supports">supports it</option>
+                                      <option value="partly">partly supports it</option>
+                                      <option value="does_not_support">does not support it</option>
+                                    </select>
+                                  </label>
+                                  <label>
+                                    Note, such as where in the source
+                                    <input name="note" maxLength={2000} />
+                                  </label>
+                                  <button type="submit">Record</button>
+                                </form>
+                              </details>
+                            )}
+                          </td>
+                        </tr>
+                      );
+                    })}
+                </tbody>
+              </table>
+            </>
           )}
         </>
       )}
