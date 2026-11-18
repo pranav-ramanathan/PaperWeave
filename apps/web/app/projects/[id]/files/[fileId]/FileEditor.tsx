@@ -420,6 +420,7 @@ export default function FileEditor(props: {
     };
     stretch.current = (orCaret = false) => {
       const inVisual = visual && modeNow.current === 'visual';
+      if (inVisual) visual.catchUp();
       const sel = inVisual ? visual.editor.state.selection : view.state.selection.main;
       const [from, to] = inVisual
         ? [visual.toSource(sel.from, 1), visual.toSource(sel.to, -1)]
@@ -476,12 +477,14 @@ export default function FileEditor(props: {
       }
       return true;
     };
-    lineNow.current = () =>
-      view.state.doc.lineAt(
+    lineNow.current = () => {
+      if (visual && modeNow.current === 'visual') visual.catchUp();
+      return view.state.doc.lineAt(
         visual && modeNow.current === 'visual'
           ? visual.toSource(visual.editor.state.selection.head, -1)
           : view.state.selection.main.head,
       ).number;
+    };
 
     const setLocked = (on: boolean) => {
       view.dispatch({ effects: writable.reconfigure(lock(on || !canWrite)) });

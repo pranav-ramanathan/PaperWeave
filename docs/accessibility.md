@@ -1,0 +1,57 @@
+# Accessibility
+
+Where this stands, what holds it there, and what nobody has checked yet.
+
+## Held by tests
+
+`tests/e2e/a11y.spec.ts` runs in CI with the other browser tests.
+
+- **An automated audit** (axe, WCAG 2.1 A and AA rules) of the sign-in page, the list of papers, a
+  paper's page, a data file's page, the new-chart page, the checks before submitting, and the
+  editor in both views with a spelling finding, a thread, a proposed change and the PDF showing.
+  No failures.
+- **One flow with the keyboard alone**: Tab into the visual editor, select words with Shift and
+  the arrow keys, Tab to the comments, start a thread on the selection, go back to the toolbar,
+  show the caret's line in the PDF, and Tab to the PDF itself.
+
+Other browser tests hold narrower things: composing text with an input method while someone
+else edits the same paragraph (`spike.spec`), switching views with the selection kept
+(`visual.spec`), and the equation, reference, citation, figure and table windows opened from
+the keyboard (`insert.spec`).
+
+## What the audit and that flow found, now fixed
+
+- The PDF pane scrolled but could not be reached from the keyboard. It now takes the keyboard
+  and has a name.
+- The pages of the PDF were pictures with nothing to read. Each page now has its words laid
+  over it: a screen reader reads them and they can be selected.
+- Tabbing into the visual editor gave it the keyboard and no caret, so the arrow keys did
+  nothing. A file begins with its preamble, which is not text, and the browser had nowhere to
+  put the caret. The caret now goes where the editor's own selection is.
+- Selecting with the keyboard and then tabbing away could lose the end of the selection: a
+  comment was started on "Lat" when "Latency" was selected. Comments, proposed changes and
+  "Show in PDF" now read the selection as it is on the screen.
+
+## Status without colour
+
+- A thread's text is tinted and has a solid line under it; a proposed change has a dashed
+  line; a spelling or grammar finding has a wavy line.
+- A proposal says "Now:" and "Proposed:" in words beside the struck and added text, and says
+  "Out of date" in words.
+- A claim flag is a bordered box that begins "This changes more than the wording".
+- Saved, offline, held and refused states of the editor are sentences in a live region.
+- The band that shows a line in the PDF has an outline, and the place is also said in words.
+
+## Not checked
+
+- **A real screen reader.** Nothing here has been listened to with NVDA, JAWS or VoiceOver. The
+  audit checks names and roles; it does not check that what is announced makes sense, or that
+  live regions speak at the right moments. This is the largest gap.
+- **Browsers other than Chromium.** Firefox and Safari have not been run at all.
+- **Real input methods.** The composition test drives the browser's composition events; no
+  Japanese, Chinese or Korean input method has been typed with.
+- **Going from the PDF to the text without a pointer.** It needs a double-click on a page.
+  Going from the text to the PDF works from the keyboard.
+- **Zoom and reflow.** The pages have not been checked at 200% or 400% zoom, or on a narrow
+  window.
+- **Contrast of drawn charts and of formulas.** The audit checks the page's own text.

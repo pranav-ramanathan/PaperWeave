@@ -136,7 +136,9 @@ test('a chart is drawn from approved data and is out of date once the data chang
   await page.goto(chart);
   await page.getByRole('button', { name: 'Draw it again' }).click();
   // Drawn again from the new version: the row that was added is among those drawn.
-  await expect(page.getByText('Out of date.')).toHaveCount(0, { timeout: 30_000 });
+  // Checked against the whole page, so that a failure here shows what the page said instead.
+  // (Seen once in a full run, not since: the chart was still out of date after this click.)
+  await expect(page.locator('main')).not.toContainText('Out of date.', { timeout: 30_000 });
   await expect(page.getByText('Waiting to be drawn…')).toHaveCount(0, { timeout: 30_000 });
   await expect(page.locator('main [role=alert]')).toHaveCount(0);
   await expect(picture).toBeVisible();

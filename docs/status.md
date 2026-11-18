@@ -446,6 +446,14 @@ Read this first. Update it in every pull request.
     confirms retention defaults. The tests supply the model's answer themselves.
   - Not yet: approved figure captions and selected evidence from a chosen revision as context
     for the model; a setting for the provider's retention; deleting what was sent.
+- **F1: accessibility.** `docs/accessibility.md` says what is held by tests, what was found and
+  fixed, and what nobody has checked (a real screen reader is the largest gap).
+  - `tests/e2e/a11y.spec.ts`: an automated audit (axe, WCAG 2.1 A and AA) of seven pages
+    including the editor in both views with everything showing, and one flow done with the
+    keyboard alone.
+  - Fixed: the PDF pane could not be reached from the keyboard; the PDF's pages had no text (they
+    now carry their words, which also makes them selectable); tabbing into the visual editor
+    gave no caret; a keyboard selection could be cut short when the keyboard moved on.
 - **E5: review data.** With this Phase E is done.
   - "ZIP with review data", beside "Download ZIP" on the paper's page puts the paper's threads and proposed
     changes into the archive as `paperweave-review.json` (`exportReview` in
@@ -494,14 +502,20 @@ nothing, edit it together, build it, and download a ZIP and a PDF that belong to
 
 Next, in this order:
 
-1. **Phase F.** Beta readiness. In this order: accessibility (keyboard, screen reader, IME,
-   status that does not depend on colour, a text layer for the PDF); performance benchmarks; a
-   real restore drill; product metrics (imports and exports per template, two-author
-   activation, useful-suggestion rate); a security review; the Tectonic comparison.
+1. **Phase F, the rest.** In this order: performance benchmarks; a real restore drill; product
+   metrics (imports and exports per template, two-author activation, useful-suggestion rate);
+   a security review; the Tectonic comparison.
 
 The Phase A replays are waiting on a person with accounts: `docs/rea/matrix.md`. The Prism one is
 optional: its export was researched from public sources (`docs/rea/prism.md`) and is a plain LaTeX
 ZIP with no comments or history, so C2 imports it like any other ZIP.
+
+## Seen once, not explained
+
+- `charts.spec`, last step: after the data file was approved again and "Draw it again" pressed,
+  the chart's page still said "Out of date" for thirty seconds. Once, in a full local run; not
+  in four runs since. The check now prints the whole page when it fails, so the next time will
+  say whether the redraw was refused or never asked for.
 
 ## Decisions waiting on the owner
 
