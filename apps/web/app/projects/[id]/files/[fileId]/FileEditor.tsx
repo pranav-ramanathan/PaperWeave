@@ -1,8 +1,8 @@
 'use client';
 
 import { defaultKeymap } from '@codemirror/commands';
-import { Compartment, EditorState } from '@codemirror/state';
-import { EditorView, keymap, lineNumbers } from '@codemirror/view';
+import { Compartment, EditorState, StateEffect, StateField } from '@codemirror/state';
+import { Decoration, type DecorationSet, EditorView, keymap, lineNumbers } from '@codemirror/view';
 import { HocuspocusProvider } from '@hocuspocus/provider';
 import { type Command, type CommandResult, localChanges } from '@paperweave/bridge';
 import { useRouter } from 'next/navigation';
@@ -13,6 +13,8 @@ import * as Y from 'yjs';
 import { setBibliography } from '../../../../../lib/bibliography';
 import { onShow, showInPdf } from '../../../../../lib/pdfsync';
 import { createVisual, type Visual } from '../../../../../lib/visual';
+import type { Thread } from '@paperweave/server';
+import Threads, { type Member, type Stretch } from './Threads';
 import {
   CitationPicker,
   EditorMenu,
@@ -22,6 +24,27 @@ import {
   type FormulaRequest,
   ReferencePicker,
 } from './Tools';
+
+// The stretches of text with a thread of comments, marked in the source view.
+type Range = { from: number; to: number };
+const setMarks = StateEffect.define<Range[]>();
+const threadMark = Decoration.mark({ class: 'thread-mark' });
+const marks = StateField.define<DecorationSet>({
+  create: () => Decoration.none,
+  update(set, tr) {
+    set = set.map(tr.changes);
+    for (const e of tr.effects)
+      if (e.is(setMarks))
+        set = Decoration.set(
+          e.value
+            .filter((r) => r.to <= tr.newDoc.length)
+            .map((r) => threadMark.range(r.from, r.to)),
+          true,
+        );
+    return set;
+  },
+  provide: (field) => EditorView.decorations.from(field),
+});
 
 // Must match TEXT in packages/server/src/sync.ts.
 const TEXT = 'source';
@@ -72,6 +95,9 @@ export default function FileEditor(props: {
   sourceOnly: boolean;
   /** The paper's own macros, so that formulas written with them are drawn as formulas. */
   macros: Record<string, string>;
+  /** Whether this person may comment, and the others on the paper, whom they can mention. */
+  canComment: boolean;
+  members: Member[];
 }) {
   const { projectId, fileId, canWrite, user, syncUrl, sourceOnly } = props;
   const host = useRef<HTMLDivElement>(null);
@@ -85,6 +111,12 @@ export default function FileEditor(props: {
   /** Put the caret on a line of this file, and the line it is on now. Set once the editors exist. */
   const jump = useRef<(line: number) => void>(() => {});
   const lineNow = useRef<() => number>(() => 1);
+  /** The selected stretch as two places that move with the text, and how to select one again. */
+  const stretch = useRef<() => Stretch | null>(() => null);
+  const showStretch = useRef<(from: string, to: string) => boolean>(() => false);
+  /** The file's threads as last read, and how to mark their stretches where they now stand. */
+  const threadsNow = useRef<Thread[]>([]);
+  const markThreads = useRef(() => {});
   const router = useRouter();
   // A double-click in the PDF asks for a line: of this file, or of another one of the paper.
   useEffect(
@@ -273,6 +305,7 @@ export default function FileEditor(props: {
           writable.of(lock(!canWrite)),
           keymap.of([...yUndoManagerKeymap, ...defaultKeymap]),
           yCollab(text, awareness, { undoManager: undo }),
+          marks,
         ],
       }),
     });
@@ -351,6 +384,47 @@ export default function FileEditor(props: {
       view.dispatch({ selection: { anchor: from }, scrollIntoView: true });
       view.focus();
     };
+    stretch.current = () => {
+      const inVisual = visual && modeNow.current === 'visual';
+      const sel = inVisual ? visual.editor.state.selection : view.state.selection.main;
+      const [from, to] = inVisual
+        ? [visual.toSource(sel.from, 1), visual.toSource(sel.to, -1)]
+        : [sel.from, sel.to];
+      if (to <= from) return null;
+      // The start holds on to the character after it and the end to the one before it, so text
+      // typed against either end stays outside.
+      const place = (index: number, side: number) =>
+        toBase64(
+          Y.encodeRelativePosition(Y.createRelativePositionFromTypeIndex(text, index, side)),
+        );
+      return { from: place(from, 0), to: place(to, -1), words: text.toString().slice(from, to) };
+    };
+    const whereIs = (encoded: string) =>
+      Y.createAbsolutePositionFromRelativePosition(
+        Y.decodeRelativePosition(fromBase64(encoded)),
+        doc,
+      )?.index ?? -1;
+    markThreads.current = () => {
+      const ranges = threadsNow.current.flatMap((t) => {
+        const [from, to] = [whereIs(t.from), whereIs(t.to)];
+        return t.status === 'open' && from >= 0 && to > from ? [{ from, to }] : [];
+      });
+      view.dispatch({ effects: setMarks.of(ranges) });
+      visual?.setMarks(ranges);
+    };
+    // The stretches move as the text does. Marked again once every view has caught up with it.
+    const remark = () => queueMicrotask(() => markThreads.current());
+    text.observe(remark);
+    showStretch.current = (a, b) => {
+      const [from, to] = [whereIs(a), whereIs(b)];
+      if (from < 0 || to <= from) return false;
+      if (visual && modeNow.current === 'visual') visual.select(from, to);
+      else {
+        view.dispatch({ selection: { anchor: from, head: to }, scrollIntoView: true });
+        view.focus();
+      }
+      return true;
+    };
     lineNow.current = () =>
       view.state.doc.lineAt(
         visual && modeNow.current === 'visual'
@@ -409,6 +483,8 @@ export default function FileEditor(props: {
       window.removeEventListener('online', online);
       window.removeEventListener('beforeunload', warn);
       clearTimeout(asking);
+      // A stretch still waiting to be marked has no view to be marked in.
+      markThreads.current = () => {};
       changes.destroy();
       visual?.destroy();
       view.destroy();
@@ -532,6 +608,18 @@ export default function FileEditor(props: {
         onTable={askTable}
       />
       <div className="source" ref={host} hidden={mode !== 'source'} />
+      <Threads
+        projectId={projectId}
+        fileId={fileId}
+        canComment={props.canComment}
+        members={props.members}
+        selection={() => stretch.current()}
+        onThreads={(list) => {
+          threadsNow.current = list;
+          markThreads.current();
+        }}
+        show={(from, to) => showStretch.current(from, to)}
+      />
     </section>
   );
 }

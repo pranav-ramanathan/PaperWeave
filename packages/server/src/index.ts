@@ -13,6 +13,7 @@ export * from './labels.ts';
 export * from './submit.ts';
 export * from './sync.ts';
 export * from './templates.ts';
+export * from './threads.ts';
 export * from './builds.ts';
 export * from './revisions.ts';
 export * from './textdiff.ts';

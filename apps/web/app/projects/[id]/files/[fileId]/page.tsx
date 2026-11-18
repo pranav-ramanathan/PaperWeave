@@ -4,6 +4,7 @@ import {
   getProject,
   importReport,
   listFiles,
+  listMembers,
   openFile,
   paperMacros,
 } from '@paperweave/server';
@@ -28,11 +29,12 @@ export default async function FilePage({
     openFile(db(), user.id, fileId),
     importReport(db(), user.id, id),
     paperMacros(db(), blobs(), user.id, id),
+    listMembers(db(), user.id, id),
   ]).catch((err) => {
     if (err instanceof AppError && err.code !== 'permission_denied') notFound();
     throw err;
   });
-  const [project, files, file, report, macros] = loaded;
+  const [project, files, file, report, macros, members] = loaded;
   // A file ID from another paper must not open under this paper's address.
   if (file.projectId !== project.id) notFound();
   return (
@@ -69,6 +71,10 @@ export default async function FilePage({
           sourceOnly={!!report?.files.find((f) => f.path === file.path)?.sourceOnly}
           path={file.path}
           canWrite={file.canWrite}
+          canComment={can(project.role, 'comment.write')}
+          members={members
+            .filter((m) => m.userId !== user.id)
+            .map((m) => ({ userId: m.userId, email: m.email }))}
           user={user.email}
           syncUrl={process.env.SYNC_URL ?? 'ws://localhost:4100'}
         />

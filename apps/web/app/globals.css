@@ -468,6 +468,7 @@ div.pw-frozen strong {
   font: inherit;
 }
 .build button,
+.threads button,
 .editor .toolbar button {
   padding: 0.15rem 0.55rem;
   border: 1px solid var(--line);
@@ -740,4 +741,65 @@ img.chart {
   max-width: min(100%, 36rem);
   height: auto;
   border: 1px solid var(--line);
+}
+
+/* The comments on a file, under its text. */
+.threads {
+  margin-top: 1rem;
+  padding-top: 0.5rem;
+  border-top: 1px solid var(--line);
+}
+.threads h2 {
+  font-size: 1rem;
+  margin: 0 0 0.5rem;
+}
+.threads ul,
+.threads ol {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+}
+.threads article {
+  margin: 0.75rem 0;
+  padding: 0.5rem 0.75rem;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: var(--paper);
+}
+.threads blockquote {
+  margin: 0 0 0.4rem;
+  padding-left: 0.6rem;
+  border-left: 3px solid var(--accent);
+  font-family: ui-monospace, monospace;
+  font-size: 0.85rem;
+  overflow-wrap: anywhere;
+  white-space: pre-wrap;
+}
+.threads ol p {
+  margin: 0.1rem 0 0.5rem;
+  white-space: pre-wrap;
+}
+.threads .note {
+  color: var(--muted);
+}
+.threads textarea {
+  display: block;
+  width: 100%;
+  font: inherit;
+}
+.threads fieldset {
+  border: 0;
+  padding: 0;
+  margin: 0.25rem 0;
+}
+.threads button {
+  font: inherit;
+  margin-right: 0.4rem;
+}
+
+/* Text that has a thread of comments, in either view. Underlined as well as tinted, so that it
+   does not depend on telling colours apart. */
+.thread-mark {
+  background: rgb(255 214 10 / 28%);
+  border-bottom: 2px solid var(--warn);
 }
