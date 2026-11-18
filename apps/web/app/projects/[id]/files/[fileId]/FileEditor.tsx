@@ -9,8 +9,15 @@ import { useEffect, useRef, useState } from 'react';
 import { flushSync } from 'react-dom';
 import { yCollab, yUndoManagerKeymap } from 'y-codemirror.next';
 import * as Y from 'yjs';
+import { setBibliography } from '../../../../../lib/bibliography';
 import { createVisual, type Visual } from '../../../../../lib/visual';
-import { EditorMenu, FormulaBox, type FormulaRequest, ReferencePicker } from './Tools';
+import {
+  CitationPicker,
+  EditorMenu,
+  FormulaBox,
+  type FormulaRequest,
+  ReferencePicker,
+} from './Tools';
 
 // Must match TEXT in packages/server/src/sync.ts.
 const TEXT = 'source';
@@ -73,6 +80,7 @@ export default function FileEditor(props: {
   /** A formula being edited or inserted, a reference being chosen, and the menu, when open. */
   const [formula, setFormula] = useState<FormulaRequest | null>(null);
   const [picker, setPicker] = useState<{ apply: FormulaRequest['apply'] } | null>(null);
+  const [citing, setCiting] = useState<{ apply: FormulaRequest['apply'] } | null>(null);
   const [menu, setMenu] = useState<{ x: number; y: number; formula?: () => void } | null>(null);
   /** Start inserting something where the caret is. The place is fixed now, not when it is done. */
   const insertHere = (then: (apply: FormulaRequest['apply']) => void) => {
@@ -82,17 +90,34 @@ export default function FileEditor(props: {
   };
   const askEquation = () => insertHere((apply) => setFormula({ src: '', place: 'inline', apply }));
   const askReference = () => insertHere((apply) => setPicker({ apply }));
+  const askCitation = () => insertHere((apply) => setCiting({ apply }));
   // The editors are made once; what they call must be what this render means.
-  const asks = useRef({ equation: askEquation, reference: askReference });
-  asks.current = { equation: askEquation, reference: askReference };
+  const asks = useRef({ equation: askEquation, reference: askReference, citation: askCitation });
+  asks.current = { equation: askEquation, reference: askReference, citation: askCitation };
   // When a window closes, the keyboard goes back to the text. This runs after the window's own
   // effect has closed it, which is when the browser has handed focus back.
-  const windowOpen = !!formula || !!picker;
+  const windowOpen = !!formula || !!picker || !!citing;
   const hadWindow = useRef(false);
   useEffect(() => {
     if (hadWindow.current && !windowOpen && mode === 'visual') live.current?.visual?.focus();
     hadWindow.current = windowOpen;
   }, [windowOpen, mode]);
+  // What the bibliography holds, so that citations can say what they cite. Read when the page
+  // opens, and again after a citation window closes (an entry may have been added meanwhile).
+  useEffect(() => {
+    if (!props.visual || citing) return;
+    let stop = false;
+    void fetch(`/projects/${projectId}/citations`)
+      .then((res) => (res.ok ? res.json() : null))
+      .then((found: { entries: { key: string; description: string }[] } | null) => {
+        if (stop || !found) return;
+        const entries = Object.fromEntries(found.entries.map((e) => [e.key, e.description]));
+        setBibliography({ entries, known: true });
+      })
+      .catch(() => {});
+    return () => void (stop = true);
+  }, [projectId, props.visual, citing]);
+  useEffect(() => () => setBibliography({ entries: {}, known: false }), []);
   // Until the editors exist there is no selection to carry: a click just changes the view.
   const switchTo = useRef<(next: Mode) => void>(setMode);
   const [sync, setSync] = useState<Sync>({
@@ -316,6 +341,9 @@ export default function FileEditor(props: {
     const socket = provider.configuration.websocketProvider;
     const offline = () => {
       wantOpen = false;
+      // Said at once. With the network gone the socket can take many seconds to report that it
+      // has closed, and until then the status would go on saying everything is saved.
+      update({ connected: false });
       socket.disconnect();
     };
     const online = () => {
@@ -401,6 +429,9 @@ export default function FileEditor(props: {
               <button type="button" onClick={askReference} aria-keyshortcuts="Alt+R" title="Alt+R">
                 Reference
               </button>
+              <button type="button" onClick={askCitation} aria-keyshortcuts="Alt+C" title="Alt+C">
+                Citation
+              </button>
               <button type="button" onClick={askEquation} aria-keyshortcuts="Alt+=" title="Alt+=">
                 Equation
               </button>
@@ -414,6 +445,7 @@ export default function FileEditor(props: {
       <div className="visual" ref={visualHost} hidden={mode !== 'visual'} />
       <FormulaBox request={formula} macros={macros.current} onDone={() => setFormula(null)} />
       <ReferencePicker request={picker} projectId={projectId} onDone={() => setPicker(null)} />
+      <CitationPicker request={citing} projectId={projectId} onDone={() => setCiting(null)} />
       <EditorMenu
         at={menu}
         onClose={() => {
@@ -421,6 +453,7 @@ export default function FileEditor(props: {
           live.current?.visual?.focus();
         }}
         onReference={askReference}
+        onCitation={askCitation}
         onEquation={askEquation}
       />
       <div className="source" ref={host} hidden={mode !== 'source'} />

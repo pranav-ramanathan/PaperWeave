@@ -10,15 +10,23 @@ const REFS = new Set([
   ...['ref', 'eqref', 'pageref', 'autoref', 'nameref', 'vref', 'Vref', 'vpageref', 'subref'],
   ...['cref', 'Cref', 'cpageref', 'Cpageref', 'namecref', 'crefrange', 'Crefrange', 'labelcref'],
 ]);
+const CITES = new Set([
+  ...['cite', 'citep', 'citet', 'citealt', 'citealp', 'citeauthor', 'citeyear', 'citeyearpar'],
+  ...['citenum', 'citetitle', 'nocite', 'parencite', 'textcite', 'autocite', 'footcite'],
+  ...['smartcite', 'supercite', 'fullcite', 'footfullcite', 'Cite', 'Citep', 'Citet'],
+  ...['Parencite', 'Textcite', 'Autocite', 'Citeauthor'],
+]);
 const VERBATIM = /^\\begin\{(verbatim\*?|lstlisting|minted|Verbatim|comment)\}/;
 
+/** One key in the braces of a command: `\\ref{key}`, or one of several in `\\cite{a, b}`. */
+type Use = { key: string; command: string; at: number; end: number; keyAt: number };
+
 /**
- * Every label defined and every reference made in a piece of LaTeX. Comments and verbatim text
- * are skipped. A key built from a macro argument (`\label{fig:#1}`) is not a key and is left out.
+ * Every key given to the commands `wanted` names, with where it is. Comments and verbatim text
+ * are skipped. A key built from a macro argument (`\\label{fig:#1}`) is not a key and is left out.
  */
-export function labelIndex(src: string): { labels: LabelDef[]; refs: RefUse[] } {
-  const labels: LabelDef[] = [];
-  const refs: RefUse[] = [];
+function keyUses(src: string, wanted: (command: string) => boolean): Use[] {
+  const out: Use[] = [];
   for (let i = 0; i < src.length; i++) {
     const c = src[i];
     if (c === '%') {
@@ -33,26 +41,28 @@ export function labelIndex(src: string): { labels: LabelDef[]; refs: RefUse[] } 
       i = close < 0 ? src.length : close;
       continue;
     }
-    const name = /^\\([a-zA-Z]+)\*?/.exec(src.slice(i, i + 20));
+    const name = /^\\([a-zA-Z]+)\*?/.exec(src.slice(i, i + 24));
     if (!name) {
       // An escaped character, such as \% or \\: never the start of anything here.
       i++;
       continue;
     }
     let p = i + name[0].length;
-    const isLabel = name[1] === 'label';
     if (name[1] === 'verb') {
       const close = src.indexOf(src[p], p + 1);
       i = close < 0 ? src.length : close;
       continue;
     }
-    if (!isLabel && !REFS.has(name[1])) {
+    if (!wanted(name[1])) {
       i = p - 1;
       continue;
     }
-    // \cref and friends may take an optional argument first.
-    while (src[p] === ' ') p++;
-    if (src[p] === '[') p = src.indexOf(']', p) + 1 || src.length;
+    // Optional arguments come first: \cref[x]{..}, \citep[see][p.~3]{..}.
+    for (;;) {
+      while (src[p] === ' ') p++;
+      if (src[p] !== '[') break;
+      p = src.indexOf(']', p) + 1 || src.length;
+    }
     // crefrange takes two groups; everything else one.
     for (let group = 0; group < (name[1].endsWith('range') ? 2 : 1) && src[p] === '{'; group++) {
       const close = src.indexOf('}', p);
@@ -63,14 +73,30 @@ export function labelIndex(src: string): { labels: LabelDef[]; refs: RefUse[] } 
         const at = keyAt + part.indexOf(key);
         keyAt += part.length + 1;
         if (!key || /[#\\{]/.test(key)) continue;
-        if (isLabel) labels.push({ key, at: i, end: close + 1, keyAt: at });
-        else refs.push({ key, command: name[1], at: i, end: close + 1, keyAt: at });
+        out.push({ key, command: name[1], at: i, end: close + 1, keyAt: at });
       }
       p = close + 1;
     }
     i = p - 1;
   }
-  return { labels, refs };
+  return out;
+}
+
+/** Every label defined and every reference made in a piece of LaTeX. */
+export function labelIndex(src: string): { labels: LabelDef[]; refs: RefUse[] } {
+  const uses = keyUses(src, (name) => name === 'label' || REFS.has(name));
+  return {
+    labels: uses
+      .filter((u) => u.command === 'label')
+      .map(({ key, at, end, keyAt }) => ({ key, at, end, keyAt })),
+    refs: uses.filter((u) => u.command !== 'label'),
+  };
+}
+
+/** One key in a `\\cite{...}` or one of its relatives. `\\nocite{*}` names no key. */
+export type CiteUse = Use;
+export function citeIndex(src: string): CiteUse[] {
+  return keyUses(src, (name) => CITES.has(name)).filter((u) => u.key !== '*');
 }
 
 /** The first `{...}` group at `at`, braces balanced, without its outer braces. */

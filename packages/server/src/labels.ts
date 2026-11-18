@@ -27,13 +27,15 @@ export async function texFiles(
   projectId: string,
   /** Hold the files' rows, so that nothing is typed into them until the transaction ends. */
   lock = false,
+  /** Which files, by the end of their path. */
+  ending = '\\.(tex|ltx)$',
 ) {
   const { rows } = await pool.query(
     `select f.id, f.path, f.digest, f.eol, f.bom, f.head_seq, p.root_file_id = f.id as root
      from files f join projects p on p.id = f.project_id
-     where f.project_id = $1 and f.eol is not null and f.path ~* '\\.(tex|ltx)$' order by f.path
+     where f.project_id = $1 and f.eol is not null and f.path ~* $2 order by f.path
      ${lock ? 'for update of f' : ''}`,
-    [projectId],
+    [projectId, ending],
   );
   const files: { id: string; path: string; root: boolean; text: string }[] = [];
   for (const f of rows) {

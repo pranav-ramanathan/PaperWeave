@@ -4,3 +4,4 @@ export * from './graph.ts';
 export * from './coverage.ts';
 export * from './labels.ts';
 export * from './macros.ts';
+export * from './bib.ts';

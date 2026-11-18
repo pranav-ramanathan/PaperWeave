@@ -138,93 +138,94 @@ export function FormulaBox(props: {
   );
 }
 
-type Label = { key: string; path: string; line: number };
+/** One thing that can be chosen: what the list shows, what typing matches, and what it inserts. */
+type Choice = { key: string; text: string; match: string; latex: string };
 
-/** Choose one of the paper's labels and insert a reference to it. */
-export function ReferencePicker(props: {
+/** A window to choose one of a list read from the paper, and insert what it stands for. */
+function Picker(props: {
   request: { apply: Apply } | null;
-  projectId: string;
+  id: string;
+  title: string;
+  find: string;
+  listed: string;
+  /** What to say when the paper has none. */
+  none: string;
+  load(): Promise<Choice[]>;
   onDone(): void;
 }) {
-  const { request, projectId, onDone } = props;
+  const { request, load, onDone } = props;
   const box = useDialog(!!request);
-  const [labels, setLabels] = useState<Label[] | null>(null);
+  const [choices, setChoices] = useState<Choice[] | null>(null);
   const [filter, setFilter] = useState('');
   const [chosen, setChosen] = useState('');
   const [problem, setProblem] = useState('');
+  // The loader is made anew on every render; the list is read once per opening.
+  const loader = useRef(load);
+  loader.current = load;
   useEffect(() => {
     if (!request) return;
     let stop = false;
-    setLabels(null);
+    setChoices(null);
     setFilter('');
     setProblem('');
-    void fetch(`/projects/${projectId}/labels`)
-      .then((res) => (res.ok ? res.json() : []))
-      .then((found: Label[]) => {
-        // A name used twice is one choice: a reference cannot say which it means.
-        if (!stop) setLabels(found.filter((l, i) => found.findIndex((x) => x.key === l.key) === i));
-      })
-      .catch(() => !stop && setLabels([]));
+    loader
+      .current()
+      .then((found) => !stop && setChoices(found))
+      .catch(() => !stop && setChoices([]));
     return () => void (stop = true);
-  }, [request, projectId]);
-  const shown = (labels ?? []).filter((l) => l.key.toLowerCase().includes(filter.toLowerCase()));
-  const key = shown.some((l) => l.key === chosen) ? chosen : (shown[0]?.key ?? '');
-  // Equations are referred to in brackets.
-  const latex = key ? `\\${/^eqn?[:.-]/i.test(key) ? 'eqref' : 'ref'}{${key}}` : '';
+  }, [request]);
+  const shown = (choices ?? []).filter((c) => c.match.toLowerCase().includes(filter.toLowerCase()));
+  const pick = shown.find((c) => c.key === chosen) ?? shown[0];
   const insert = async () => {
-    if (!request || !latex) return;
+    if (!request || !pick) return;
     try {
-      await request.apply(latex);
+      await request.apply(pick.latex);
       onDone();
     } catch {
       setProblem('That edit could not be made. Check the connection and try again.');
     }
   };
   return (
-    <dialog ref={box} className="tool" aria-labelledby="picker-title" onClose={onDone}>
+    <dialog ref={box} className="tool" aria-labelledby={props.id} onClose={onDone}>
       <form
         onSubmit={(e) => {
           e.preventDefault();
           void insert();
         }}
       >
-        <h2 id="picker-title">Insert a reference</h2>
+        <h2 id={props.id}>{props.title}</h2>
         <label>
-          Find a label
+          {props.find}
           <input value={filter} onChange={(e) => setFilter(e.target.value)} />
         </label>
-        {labels === null ? (
-          <p>Reading the paper&apos;s labels…</p>
+        {choices === null ? (
+          <p>Reading the paper…</p>
         ) : shown.length === 0 ? (
-          <p>{labels.length ? 'No label matches.' : 'This paper has no labels yet.'}</p>
+          <p>{choices.length ? 'Nothing matches.' : props.none}</p>
         ) : (
           <label>
-            Label
+            {props.listed}
             <select
               size={Math.max(2, Math.min(8, shown.length))}
-              value={key}
+              value={pick?.key ?? ''}
               onChange={(e) => setChosen(e.target.value)}
             >
-              {shown.map((l) => {
-                const number = numbers().labels[l.key]?.number;
-                return (
-                  <option key={l.key} value={l.key}>
-                    {l.key}
-                    {number ? `, number ${number}` : ''} ({l.path})
-                  </option>
-                );
-              })}
+              {shown.map((c) => (
+                <option key={c.key} value={c.key}>
+                  {c.text}
+                </option>
+              ))}
             </select>
           </label>
         )}
-        {latex && (
+        {pick && (
           <p className="note">
-            Inserts <code>{latex}</code>.
+            Inserts <code>{pick.latex}</code>.
           </p>
         )}
         {problem && <p role="alert">{problem}</p>}
         <p>
-          <button type="submit" disabled={!latex}>
+          <button type="submit" disabled={!pick}>
             Insert
           </button>{' '}
           <button type="button" onClick={onDone}>
@@ -236,11 +237,90 @@ export function ReferencePicker(props: {
   );
 }
 
+type Label = { key: string; path: string; line: number };
+
+/** Choose one of the paper's labels and insert a reference to it. */
+export function ReferencePicker(props: {
+  request: { apply: Apply } | null;
+  projectId: string;
+  onDone(): void;
+}) {
+  const load = async () => {
+    const res = await fetch(`/projects/${props.projectId}/labels`);
+    const found: Label[] = res.ok ? await res.json() : [];
+    return (
+      found
+        // A name used twice is one choice: a reference cannot say which it means.
+        .filter((l, i) => found.findIndex((x) => x.key === l.key) === i)
+        .map((l) => {
+          const number = numbers().labels[l.key]?.number;
+          return {
+            key: l.key,
+            text: `${l.key}${number ? `, number ${number}` : ''} (${l.path})`,
+            match: l.key,
+            // Equations are referred to in brackets.
+            latex: `\\${/^eqn?[:.-]/i.test(l.key) ? 'eqref' : 'ref'}{${l.key}}`,
+          };
+        })
+    );
+  };
+  return (
+    <Picker
+      request={props.request}
+      id="reference-title"
+      title="Insert a reference"
+      find="Find a label"
+      listed="Label"
+      none="This paper has no labels yet."
+      load={load}
+      onDone={props.onDone}
+    />
+  );
+}
+
+type Cited = { entries: { key: string; description: string; path: string }[]; command: string };
+
+/** Choose an entry of the paper's bibliography and insert a citation of it. */
+export function CitationPicker(props: {
+  request: { apply: Apply } | null;
+  projectId: string;
+  onDone(): void;
+}) {
+  const load = async () => {
+    const res = await fetch(`/projects/${props.projectId}/citations`);
+    const { entries, command }: Cited = res.ok ? await res.json() : { entries: [], command: '' };
+    return (
+      entries
+        .filter((e, i) => entries.findIndex((x) => x.key === e.key) === i)
+        // The command the paper already uses most, so that the new citation looks like the rest.
+        .map((e) => ({
+          key: e.key,
+          text: `${e.key}: ${e.description}`,
+          match: `${e.key} ${e.description}`,
+          latex: `\\${command}{${e.key}}`,
+        }))
+    );
+  };
+  return (
+    <Picker
+      request={props.request}
+      id="citation-title"
+      title="Insert a citation"
+      find="Find an entry, by key, author, year or title"
+      listed="Entry"
+      none="This paper's bibliography has no entries yet. Add them to a .bib file."
+      load={load}
+      onDone={props.onDone}
+    />
+  );
+}
+
 /** The menu that opens on a right click, or the menu key, in the visual view. */
 export function EditorMenu(props: {
   at: { x: number; y: number; formula?: () => void } | null;
   onClose(): void;
   onReference(): void;
+  onCitation(): void;
   onEquation(): void;
 }) {
   const { at, onClose } = props;
@@ -257,6 +337,7 @@ export function EditorMenu(props: {
   const items: [string, () => void][] = [
     ...(at.formula ? ([['Edit formula…', at.formula]] as [string, () => void][]) : []),
     ['Insert a reference…', props.onReference],
+    ['Insert a citation…', props.onCitation],
     ['Insert an equation…', props.onEquation],
   ];
   const move = (by: number) => {
