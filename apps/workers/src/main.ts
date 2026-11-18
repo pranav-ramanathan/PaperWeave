@@ -17,7 +17,7 @@ console.log(`build worker ready, toolchain ${image.slice(0, 19)}`);
 
 for (;;) {
   try {
-    while ((await buildNext(pool, store, image)) || (await drawNext(pool, store)));
+    while ((await buildNext(pool, store, image)) || (await drawNext(pool, store, image)));
   } catch (err) {
     console.error('worker error:', (err as Error).message);
   }

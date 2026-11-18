@@ -100,6 +100,7 @@ export async function putFile(
   await db.query('update projects set manifest_version = manifest_version + 1 where id = $1', [
     projectId,
   ]);
+  return digest;
 }
 
 /**
@@ -291,22 +292,37 @@ export async function picture(
     dir,
     new Set<string>(rows.map((f) => f.path)),
   );
-  const type = SHOWN[path?.split('.').pop()?.toLowerCase() ?? ''];
-  const bytes = type && (await store.get(rows.find((f) => f.path === path).digest));
+  // A PDF cannot be shown as it is. A drawn chart has a PNG of the same name beside it: that is
+  // shown in its place.
+  const twin = path?.replace(/\.pdf$/i, '.png');
+  const shown = rows.find((f) => f.path === twin) ? twin : path;
+  const type = SHOWN[shown?.split('.').pop()?.toLowerCase() ?? ''];
+  const bytes = type && (await store.get(rows.find((f) => f.path === shown).digest));
   if (!path || !bytes) throw new AppError('not_found', 'No picture of that name can be shown.');
   return { bytes, type, path };
 }
 
-/** The paper's pictures, each as an `\\includegraphics` in it would name it. */
+/**
+ * The paper's pictures, each as an `\\includegraphics` in it would name it. A drawn chart is
+ * offered once, as its PDF, with the caption and description its author gave it.
+ */
 export async function pictures(db: Db, userId: string, projectId: string) {
   await authorize(db, userId, id(projectId), 'project.read');
   const { rows } = await db.query(
-    `select f.path, p.root_file_id = f.id as root from files f
-     join projects p on p.id = f.project_id where f.project_id = $1 order by f.path`,
+    `select f.path, p.root_file_id = f.id as root, c.caption, c.alt,
+            c.id is not null and f.path like '%.png' as twin
+     from files f join projects p on p.id = f.project_id
+     left join charts c on c.project_id = f.project_id
+       and f.path in ('charts/' || c.name || '.pdf', 'charts/' || c.name || '.png')
+     where f.project_id = $1 order by f.path`,
     [projectId],
   );
   const dir = rootDir(rows.find((f) => f.root)?.path ?? '');
   return rows
-    .filter((f) => /\.(png|jpe?g|pdf|eps)$/i.test(f.path) && !f.root)
-    .map((f) => ({ path: f.path as string, target: relativeTo(dir, f.path) }));
+    .filter((f) => /\.(png|jpe?g|pdf|eps)$/i.test(f.path) && !f.root && !f.twin)
+    .map((f) => ({
+      path: f.path as string,
+      target: relativeTo(dir, f.path),
+      ...(f.caption === null ? {} : { caption: f.caption as string, alt: f.alt as string }),
+    }));
 }

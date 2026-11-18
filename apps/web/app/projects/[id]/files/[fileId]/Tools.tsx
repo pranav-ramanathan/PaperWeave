@@ -156,6 +156,8 @@ function labelFor(prefix: string, caption: string, taken: Set<string>) {
   }
 }
 
+type Picture = { path: string; target: string; caption?: string; alt?: string };
+
 /** The window that asks what a new figure or table should hold, and inserts it. */
 export function FloatBox(props: {
   request: FloatRequest | null;
@@ -164,7 +166,7 @@ export function FloatBox(props: {
 }) {
   const { request, projectId, onDone } = props;
   const box = useDialog(!!request);
-  const [pictures, setPictures] = useState<{ path: string; target: string }[]>([]);
+  const [pictures, setPictures] = useState<Picture[]>([]);
   const [labels, setLabels] = useState<Set<string>>(new Set());
   const [target, setTarget] = useState('');
   const [alt, setAlt] = useState('');
@@ -172,6 +174,13 @@ export function FloatBox(props: {
   const [rows, setRows] = useState(3);
   const [columns, setColumns] = useState(3);
   const [problem, setProblem] = useState('');
+  /** A drawn chart brings the caption and description its author gave it. */
+  const choose = (p?: Picture) => {
+    setTarget(p?.target ?? '');
+    if (p?.caption === undefined) return;
+    setCaption(p.caption);
+    setAlt(p.alt ?? '');
+  };
   useEffect(() => {
     if (!request) return;
     let stop = false;
@@ -183,9 +192,9 @@ export function FloatBox(props: {
         .then((res) => (res.ok ? res.json() : []))
         .then((found: T) => !stop && then(found))
         .catch(() => {});
-    read<{ path: string; target: string }[]>(`/projects/${projectId}/pictures`, (found) => {
+    read<Picture[]>(`/projects/${projectId}/pictures`, (found) => {
       setPictures(found);
-      setTarget(found[0]?.target ?? '');
+      choose(found[0]);
     });
     // So that the new label is not one the paper already has.
     read<{ key: string }[]>(`/projects/${projectId}/labels`, (found) =>
@@ -260,7 +269,10 @@ export function FloatBox(props: {
           <>
             <label>
               Picture
-              <select value={target} onChange={(e) => setTarget(e.target.value)}>
+              <select
+                value={target}
+                onChange={(e) => choose(pictures.find((p) => p.target === e.target.value))}
+              >
                 {pictures.map((p) => (
                   <option key={p.path} value={p.target}>
                     {p.path}

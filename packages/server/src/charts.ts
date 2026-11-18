@@ -1,5 +1,6 @@
 // Charts: a scatter, line or bar chart of two columns of a described data file. The chart worker
 // draws it to a PDF and a PNG, which are kept as files of the paper under charts/.
+import { cellText } from '@paperweave/latex';
 import type pg from 'pg';
 import { authorize } from './authz.ts';
 import { type BlobStore, sha256 } from './blobs.ts';
@@ -39,8 +40,23 @@ export type Chart = {
   drawnAt: string | null;
   /** The data file is no longer the version this was drawn from. */
   stale: boolean;
-  /** The chart in a sentence, for people who cannot see it. */
+  /** The chart in a sentence, for people who cannot see it: its author's words, or ours. */
   alt: string;
+  caption: string;
+  /** The version (sha256) of the data file it was drawn from. */
+  version: string | null;
+};
+/** One drawing of a chart: what it was made from, and with what. */
+export type ChartDraw = {
+  drawnAt: string;
+  pdf: string;
+  png: string;
+  record: {
+    data: { path: string; sha256: string; columns: Column[]; missing: string[] };
+    chart: ChartSpec;
+    rowsLeftOut: number;
+    generator: Record<string, string>;
+  };
 };
 
 const NAME = /^[a-z0-9][a-z0-9-]{0,39}$/;
@@ -225,7 +241,7 @@ export async function saveChart(
   const existing = input.id
     ? (
         await pool.query(
-          'select id, name, dataset_file_id from charts where id = $1 and project_id = $2',
+          'select id, name, dataset_file_id, spec from charts where id = $1 and project_id = $2',
           [id(String(input.id)), projectId],
         )
       ).rows[0]
@@ -239,10 +255,22 @@ export async function saveChart(
   const spec = checkChart(input, table.columns);
   // Found now rather than by the worker: a chart that cannot be drawn from this data.
   vegaLite(spec, table);
+  const words = (v: unknown) => (typeof v === 'string' ? v.replace(/\s+/g, ' ').trim() : '');
+  // Both go into LaTeX as they are when the chart is put into the paper.
+  const caption = words(input.caption);
+  if (caption.length > 500 || !cellText(caption))
+    throw bad('A caption cannot hold an unescaped & or %, and its braces must match.');
+  const given = words(input.alt);
+  if (given.length > 300 || /[{}%#\\\]]/.test(given))
+    throw bad('A description cannot hold { } % # ] or a backslash. Say it in plain words.');
+  // Left empty, or left as we wrote it for the chart as it was: our own sentence for this chart.
+  const ours = existing && describeChart(existing.spec, table.columns);
+  const alt = !given || given === ours ? describeChart(spec, table.columns) : given;
   if (existing) {
     await pool.query(
-      "update charts set spec = $2, status = 'queued', problem = null where id = $1",
-      [existing.id, JSON.stringify(spec)],
+      `update charts set spec = $2, caption = $3, alt = $4, status = 'queued', problem = null
+       where id = $1`,
+      [existing.id, JSON.stringify(spec), caption, alt],
     );
   } else {
     // The chart's files must not take the place of files someone put there.
@@ -258,9 +286,9 @@ export async function saveChart(
     : (
         await pool
           .query(
-            `insert into charts (project_id, name, dataset_file_id, spec, created_by)
-             values ($1, $2, $3, $4, $5) returning id`,
-            [projectId, name, dataset, JSON.stringify(spec), userId],
+            `insert into charts (project_id, name, dataset_file_id, spec, created_by, caption, alt)
+             values ($1, $2, $3, $4, $5, $6, $7) returning id`,
+            [projectId, name, dataset, JSON.stringify(spec), userId, caption, alt],
           )
           .catch((err) => {
             if (err.code === '23505')
@@ -282,9 +310,8 @@ export async function listCharts(
   await authorize(pool, userId, id(projectId), 'project.read');
   const { rows } = await pool.query(
     `select c.id, c.name, c.dataset_file_id, c.spec, c.status, c.problem, c.left_out, c.drawn_at,
-            c.drawn_digest, d.columns, f.path, f.digest, f.eol, f.bom, f.head_seq
+            c.drawn_digest, c.caption, c.alt, f.path, f.digest, f.eol, f.bom, f.head_seq
      from charts c left join files f on f.id = c.dataset_file_id
-     left join datasets d on d.file_id = c.dataset_file_id
      where c.project_id = $1 order by c.name`,
     [projectId],
   );
@@ -307,10 +334,52 @@ export async function listCharts(
       leftOut: r.left_out,
       drawnAt: r.drawn_at?.toISOString() ?? null,
       stale: r.status === 'drawn' && versions.get(r.dataset_file_id) !== r.drawn_digest,
-      alt: describeChart(r.spec, r.columns ?? []),
+      alt: r.alt,
+      caption: r.caption,
+      version: r.drawn_digest,
     });
   }
   return out;
+}
+
+/**
+ * Write down one drawing of a chart, for the worker. Drawing the same chart of the same data
+ * with the same tools again adds nothing.
+ */
+export async function recordDraw(
+  db: Db,
+  projectId: string,
+  name: string,
+  draw: Omit<ChartDraw, 'drawnAt'>,
+) {
+  await db.query(
+    `insert into chart_draws (project_id, name, pdf_digest, png_digest, record)
+     select $1, $2, $3, $4, $5::jsonb where not exists (
+       select 1 from chart_draws
+       where project_id = $1 and name = $2 and pdf_digest = $3 and png_digest = $4 and record = $5::jsonb)`,
+    [projectId, name, draw.pdf, draw.png, JSON.stringify(draw.record)],
+  );
+}
+
+/** Every drawing of a chart, newest first. */
+export async function chartDraws(
+  db: Db,
+  userId: string,
+  projectId: string,
+  name: string,
+): Promise<ChartDraw[]> {
+  await authorize(db, userId, id(projectId), 'project.read');
+  const { rows } = await db.query(
+    `select drawn_at, pdf_digest, png_digest, record from chart_draws
+     where project_id = $1 and name = $2 order by id desc`,
+    [projectId, name],
+  );
+  return rows.map((r) => ({
+    drawnAt: r.drawn_at.toISOString(),
+    pdf: r.pdf_digest,
+    png: r.png_digest,
+    record: r.record,
+  }));
 }
 
 /** Take a chart off the paper's list. Its files stay in the paper until someone deletes them. */

@@ -281,6 +281,22 @@ Read this first. Update it in every pull request.
     at the new version and approved its description; the worker checks again when it draws.
   - Queue: rows of table `charts` with status `queued` (migration 0011), taken by the same
     worker process as builds.
+- **D4, third part: captions, descriptions and the record of how a chart was made.** With this
+  D4 is done.
+  - A chart has a caption and a description for people who cannot see it. Left empty, the
+    description is our own sentence ("Line chart of latency (ms) against day."), which follows
+    the chart when its kind or columns change; the author's own words are kept.
+  - In the visual editor's "Insert a figure", a chart is offered once, as its PDF, and brings
+    its caption and description. The editor shows the PNG of the same name in the PDF's place
+    (`picture` in `packages/server/src/files.ts`).
+  - Every drawing is written to `chart_draws` (migration 0012): the data file and its exact
+    version, the columns used with their units, the spellings for "no value", the chart's
+    specification, rows left out, the versions of Vega and Vega-Lite and the sandbox image, and
+    the digests of the two files. Rows are never changed and outlive the chart. The chart's page
+    lists them under "How it was made".
+  - The toolchain manifest of a download (`paperweave-toolchain.json`) has a `charts` entry for
+    each drawn chart among its files, found by the file's bytes, so it is right for the revision
+    downloaded.
 - **A restore keeps what it replaces.** Found by the fault suite on a seed it had not run before.
   A restore put back the chosen revision but kept no copy of the paper as it stood, so text typed
   since the last revision (an edit that reached the server a moment before, say) was erased with
@@ -305,11 +321,10 @@ nothing, edit it together, build it, and download a ZIP and a PDF that belong to
 
 Next, in this order:
 
-1. **D4, the rest.** A caption and alt text for each chart, written by its author; putting a
-   chart into the paper as a figure from the visual editor (today: insert a figure and choose
-   `charts/<name>.png`, or write `\includegraphics` by hand); a record of how each chart was
-   made (data version, columns, how rows were combined) that travels with the paper.
-2. **D5** onward, as in the plan.
+1. **D5.** Submission: SyncTeX navigation both ways, templates, pre-submit checks (missing
+   asset, undefined label, unresolved citation, compiler warning, out-of-date chart), and the
+   published import matrix.
+2. **Phase E** onward, as in the plan.
 
 The Phase A replays are waiting on a person with accounts: `docs/rea/matrix.md`. The Prism one is
 optional: its export was researched from public sources (`docs/rea/prism.md`) and is a plain LaTeX

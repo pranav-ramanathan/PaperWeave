@@ -211,6 +211,21 @@ export async function exportRevision(
         [revisionId],
       )
     ).rows[0];
+    // Where each drawn chart among the files came from: which data, which version of it, what
+    // was drawn and with what. Found by the file's bytes, so it is right for this revision.
+    const drawn = (
+      await db.query(
+        `select pdf_digest, png_digest, record from chart_draws
+         where project_id = $1 and (pdf_digest = any($2) or png_digest = any($2)) order by id`,
+        [projectId, shared.map((f) => f.digest)],
+      )
+    ).rows;
+    const charts = Object.fromEntries(
+      shared.flatMap((f) => {
+        const from = drawn.findLast((d) => d.pdf_digest === f.digest || d.png_digest === f.digest);
+        return from ? [[f.path, from.record]] : [];
+      }),
+    );
     const epoch = Math.floor(new Date(revision.created_at).getTime() / 1000);
     const engine = { pdflatex: '-pdf', xelatex: '-xelatex', lualatex: '-lualatex' }[
       revision.compiler as string
@@ -227,6 +242,7 @@ export async function exportRevision(
         sourceDateEpoch: epoch,
         command: `SOURCE_DATE_EPOCH=${epoch} latexmk -norc ${engine} -no-shell-escape -interaction=nonstopmode ${revision.root}`,
         files: Object.fromEntries(shared.map((f) => [f.path, `sha256:${f.digest}`])),
+        charts,
       },
       null,
       2,
