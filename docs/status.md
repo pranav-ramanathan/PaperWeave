@@ -747,6 +747,8 @@ Changed on the way, and worth keeping:
 
 ### For next time
 
+- When a browser test fails in CI, the run now keeps `test-results/` for a week as an
+  artifact named `browser-test-results`: for each failed test, what its page showed.
 - **Keep the whole output of a full run.** One failure was lost to a filter that kept only the
   line saying it had failed. The explanation came from the first failure whose output was kept.
 - Failures only in full runs, never alone, were a matter of timing: a step landing in one
