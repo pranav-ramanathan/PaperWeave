@@ -9,7 +9,7 @@ import { type Db, transaction } from './db.ts';
 import { AppError } from './errors.ts';
 import { removeFile } from './files.ts';
 import { id } from './projects.ts';
-import { currentBytes, editFile } from './sync.ts';
+import { currentBytes, editFile, openFile } from './sync.ts';
 import { type DiffLine, diffLines } from './textdiff.ts';
 
 export type Revision = {
@@ -372,4 +372,17 @@ export async function restoreRevision(
     [projectId, revision.compiler, revision.root],
   );
   return cutRevision(pool, store, userId, projectId, { kind: 'restore', restoredFrom: revisionId });
+}
+
+/**
+ * The number of the newest restore of the paper a file belongs to, or 0 if it was never restored.
+ * A client that reconnects and finds this changed knows the paper was restored while it was away.
+ */
+export async function lastRestore(db: Db, userId: string, fileId: string): Promise<number> {
+  const { projectId } = await openFile(db, userId, fileId);
+  const { rows } = await db.query(
+    "select coalesce(max(number), 0)::int as n from revisions where project_id = $1 and kind = 'restore'",
+    [projectId],
+  );
+  return rows[0].n;
 }

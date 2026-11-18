@@ -20,7 +20,14 @@ const COLOURS = ['#1f5fbf', '#8a4b00', '#1a7f55', '#9b2d86', '#b3261e', '#5b5bd6
 const colourFor = (name: string) =>
   COLOURS[[...name].reduce((n, c) => n + c.charCodeAt(0), 0) % COLOURS.length];
 
-type Sync = { connected: boolean; loaded: boolean; unsynced: number; refused: boolean };
+type Sync = {
+  connected: boolean;
+  loaded: boolean;
+  unsynced: number;
+  refused: boolean;
+  /** The paper was restored while this person was offline with edits of their own. */
+  held: boolean;
+};
 type Mode = 'visual' | 'source';
 /** The sync server's answer to a structural edit. */
 type Reply = { result?: CommandResult; update?: string; error?: string };
@@ -62,7 +69,10 @@ export default function FileEditor(props: {
     loaded: false,
     unsynced: 0,
     refused: false,
+    held: false,
   });
+  const keepEdits = useRef(() => {});
+  const discardEdits = useRef(() => {});
   const [others, setOthers] = useState<string[]>([]);
 
   useEffect(() => {
@@ -74,11 +84,31 @@ export default function FileEditor(props: {
       name: fileId,
       document: doc,
       // Asked for on every connection attempt: a ticket only lives for a minute.
-      token: async () => (await (await fetch('/api/sync-ticket')).json()).ticket ?? '',
-      onStatus: ({ status }) => update({ connected: status === 'connected' }),
+      token: async () => {
+        const { ticket, restored } = await (await fetch(`/api/sync-ticket?file=${fileId}`)).json();
+        // Coming back online to a paper that was restored meanwhile: this person's unsent edits
+        // were made to text that is no longer there. They are held until the person decides.
+        if (restoreSeen !== null && restored !== restoreSeen && provider.hasUnsyncedChanges) {
+          restoreHeld = restored;
+          update({ held: true });
+          setLocked(true);
+          // Thrown, not sent: the connection attempt ends here, without bothering the server.
+          throw new Error('held until the person decides');
+        }
+        restoreSeen = restored;
+        return ticket ?? '';
+      },
+      onStatus: ({ status }) => {
+        update({ connected: status === 'connected' });
+        // "Apply my edits" closed the connection to open a fresh one: do that once it has closed.
+        if (status === 'disconnected' && reopen) {
+          reopen = false;
+          void provider.configuration.websocketProvider.connect();
+        }
+      },
       onSynced: () => update({ loaded: true }),
       onUnsyncedChanges: ({ number }) => update({ unsynced: number }),
-      onAuthenticationFailed: () => refuse(),
+      onAuthenticationFailed: () => restoreHeld === null && refuse(),
       onStateless: ({ payload }) => {
         const reply: Reply & { key: string } = JSON.parse(payload);
         waiting.get(reply.key)?.(reply);
@@ -86,6 +116,10 @@ export default function FileEditor(props: {
       // The server closes a file it will no longer serve: access was taken away, or it was deleted.
       onClose: ({ event }) => event.reason === NO_ACCESS && refuse(),
     });
+    /** The paper's newest restore when this tab last connected, and one found since, if held. */
+    let restoreSeen: number | null = null;
+    let restoreHeld: number | null = null;
+    let reopen = false;
     const awareness = provider.awareness!;
     awareness.setLocalStateField('user', {
       name: user,
@@ -180,16 +214,34 @@ export default function FileEditor(props: {
     };
     switchTo.current = show;
 
+    const setLocked = (on: boolean) => {
+      view.dispatch({ effects: writable.reconfigure(lock(on || !canWrite)) });
+      visual?.editor.setEditable(!on && canWrite);
+    };
     // Typing into a file that is no longer served would go nowhere, so it stops.
     const refuse = () => {
       update({ refused: true });
-      view.dispatch({ effects: writable.reconfigure(lock(true)) });
-      visual?.editor.setEditable(false);
+      setLocked(true);
+    };
+    // "Apply my edits": connect again, and the held edits merge into the restored text.
+    // "Discard my edits": a fresh page starts from the server's text, without the held edits.
+    discardEdits.current = () => {
+      discarding = true;
+      location.reload();
+    };
+    keepEdits.current = () => {
+      restoreSeen = restoreHeld;
+      restoreHeld = null;
+      update({ held: false });
+      setLocked(false);
+      reopen = true;
+      socket.disconnect();
     };
 
     // Closing the tab with edits the server has not confirmed would lose them.
+    let discarding = false;
     const warn = (e: BeforeUnloadEvent) => {
-      if (provider.hasUnsyncedChanges) e.preventDefault();
+      if (provider.hasUnsyncedChanges && !discarding) e.preventDefault();
     };
     window.addEventListener('beforeunload', warn);
     // An open socket can sit silent for a long time after the network goes. When the browser
@@ -215,15 +267,17 @@ export default function FileEditor(props: {
   const waiting = `${sync.unsynced} edit${sync.unsynced === 1 ? '' : 's'}`;
   const status = sync.refused
     ? 'You no longer have access to this file, or it has been deleted.'
-    : !sync.loaded
-      ? 'Opening…'
-      : !sync.connected
-        ? `Offline. ${sync.unsynced ? `${waiting} waiting to be saved.` : 'Nothing is waiting to be saved.'}`
-        : !canWrite
-          ? 'Read only. You can read along but not edit.'
-          : sync.unsynced
-            ? `Saving ${waiting}…`
-            : 'All edits saved.';
+    : sync.held
+      ? `This paper was restored to an earlier revision while you were offline. Your ${waiting} from before that ${sync.unsynced === 1 ? 'is' : 'are'} not saved.`
+      : !sync.loaded
+        ? 'Opening…'
+        : !sync.connected
+          ? `Offline. ${sync.unsynced ? `${waiting} waiting to be saved.` : 'Nothing is waiting to be saved.'}`
+          : !canWrite
+            ? 'Read only. You can read along but not edit.'
+            : sync.unsynced
+              ? `Saving ${waiting}…`
+              : 'All edits saved.';
   return (
     <section aria-label={`Editor for ${props.path}`}>
       <div className="editor-bar">
@@ -231,6 +285,16 @@ export default function FileEditor(props: {
         <span role="status" aria-live="polite" data-state={sync.connected ? 'online' : 'offline'}>
           {status}
         </span>
+        {sync.held && (
+          <span role="group" aria-label="Your unsaved edits">
+            <button type="button" onClick={() => keepEdits.current()}>
+              Apply my edits to the restored paper
+            </button>
+            <button type="button" onClick={() => discardEdits.current()}>
+              Discard my edits
+            </button>
+          </span>
+        )}
         <span>
           {others.length ? `Also here: ${[...new Set(others)].join(', ')}` : 'Nobody else is here.'}
         </span>

@@ -14,6 +14,7 @@ import {
   exportRevision,
   listRevisions,
   renameFile,
+  lastRestore,
   restoreRevision,
   revisionPdf,
   saveRevision,
@@ -180,7 +181,11 @@ test('restoring puts the paper back as a new revision and erases nothing', async
   expect(await code(restoreRevision(t.pool, store, viewer.id, p.id, good.id))).toBe(
     'permission_denied',
   );
+  expect(await lastRestore(t.pool, viewer.id, p.main)).toBe(0);
   const restored = await restoreRevision(t.pool, store, owner.id, p.id, good.id);
+  // Anyone on the paper can see that it was restored, and when; nobody else can.
+  expect(await lastRestore(t.pool, viewer.id, p.main)).toBe(restored.number);
+  expect(await code(lastRestore(t.pool, outsider.id, p.main))).toBe('not_found');
   const now = await files(await exportZip(t.pool, store, owner.id, p.id));
   expect(now['main.tex']).toBe(MAIN);
   expect(now['body.tex']).toBe(BODY);
