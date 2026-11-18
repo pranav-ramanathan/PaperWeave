@@ -7,6 +7,7 @@ import {
   invite,
   removeMember,
   renameFile,
+  renameLabel,
   requestBuild,
   restoreRevision,
   saveRevision,
@@ -118,5 +119,17 @@ export async function rootAction(projectId: string, fileId: string) {
   await act(back, async () => {
     await setRootFile(db(), user.id, projectId, fileId);
     return `${back}?root=1`;
+  });
+}
+
+export async function renameLabelAction(projectId: string, form: FormData) {
+  const [from, to] = [text(form, 'from'), text(form, 'to')];
+  // A refusal goes back to the list of changes, made afresh, with the reason above it.
+  const back = `/projects/${projectId}/labels/rename?from=${encodeURIComponent(from)}&to=${encodeURIComponent(to)}`;
+  const user = await requireUser(back);
+  await act(back, async () => {
+    const digest = text(form, 'digest');
+    const { places } = await renameLabel(db(), blobs(), user.id, projectId, from, to, digest);
+    return `/projects/${projectId}?relabelled=${encodeURIComponent(to)}&places=${places}#labels`;
   });
 }
