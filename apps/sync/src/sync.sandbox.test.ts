@@ -402,6 +402,85 @@ test('the log is compacted as it grows, and someone who was offline through it s
   expect(await stored(project)).toBe(text.replaceAll('\n', '\r\n'));
 });
 
+test('an edit that is too large is not saved, and its author is told why', async () => {
+  const { project, file } = await paper();
+  const refusals = (c: { state: { reasons: string[] } }) =>
+    c.state.reasons.filter((r) => r.endsWith(':too-large')).length;
+
+  // One edit of more than two megabytes.
+  const owner = client(users.owner, file);
+  const editor = client(users.editor, file);
+  await saved(owner, editor);
+  owner.text.insert(0, 'y'.repeat(2_100_000));
+  // It is refused, and refused again when the client sends it again: never taken.
+  // Refused with the reason, which is what stops the editor sending it again.
+  await until('the large edit to be refused', () => refusals(owner) === 1);
+  owner.provider.destroy();
+  // Larger than anything read off the wire: the connection is closed before it is looked at.
+  const huge = client(users.second, file);
+  await saved(huge);
+  huge.text.insert(0, 'z'.repeat(4_100_000));
+  await until('the huge edit to close the connection', () =>
+    huge.state.reasons.some((r) => r.startsWith('1009:')),
+  );
+  huge.provider.destroy();
+  // Everyone else carries on, and nothing of either edit was kept.
+  editor.text.insert(0, '% small\n');
+  await saved(editor);
+  const held = `% small\n${MAIN.replaceAll('\r\n', '\n')}`;
+  expect(editor.text.toString()).toBe(held);
+  expect(await stored(project)).toBe(`% small\r\n${MAIN}`);
+
+  // A file cannot be typed past the limit either, here set low. Edits that do not take it over
+  // are taken as before, and one that makes it shorter is taken at the limit.
+  const low = await startSync({
+    pool: t.pool,
+    store,
+    secret: SECRET,
+    port: sync.port + 600,
+    databaseUrl: t.url,
+    maxFileText: held.length + 40,
+  });
+  try {
+    const a = client(users.owner, file, low.port);
+    const b = client(users.editor, file, low.port);
+    await saved(a, b);
+    a.text.insert(0, '% thirty characters of comment\n');
+    await saved(a);
+    b.text.insert(0, '% and this one is over\n');
+    await until('the edit over the limit to be refused', () => refusals(b) >= 1);
+    b.provider.destroy();
+    a.text.delete(0, 9);
+    a.text.insert(0, '% fine\n');
+    await saved(a);
+    const text = await stored(project);
+    expect(text).not.toContain('over');
+    expect(text.startsWith('% fine\r\n')).toBe(true);
+    // A structural edit is held to the same limit.
+    const place = (i: number) =>
+      Y.encodeRelativePosition(Y.createRelativePositionFromTypeIndex(a.text, i));
+    const add = (n: number) =>
+      runCommand(
+        t.pool,
+        store,
+        users.owner.id,
+        file,
+        {
+          key: crypto.randomUUID(),
+          from: place(0),
+          to: place(0),
+          expected: '',
+          replacement: 'x'.repeat(n),
+        },
+        { maxFileText: held.length + 40 },
+      );
+    await expect(add(60)).rejects.toThrow('it would make the file too large');
+    expect(await add(5)).toMatchObject({ result: 'applied' });
+  } finally {
+    await low.stop();
+  }
+});
+
 test('the metrics page gives counts to whoever holds the token, and nothing to anyone else', async () => {
   const url = `http://127.0.0.1:${sync.port}/metrics`;
   expect((await fetch(url)).status).toBe(401);

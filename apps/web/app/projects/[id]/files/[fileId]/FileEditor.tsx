@@ -56,6 +56,8 @@ const marks = StateField.define<DecorationSet>({
 const TEXT = 'source';
 // Must match the reason apps/sync/src/server.ts gives when it closes a file.
 const NO_ACCESS = 'no-access';
+/** The sync server's word for an edit it will not take for its size. */
+const TOO_LARGE = 'too-large';
 // Presence colours, chosen to stay readable on white. People are told apart by name as well.
 const COLOURS = ['#1f5fbf', '#8a4b00', '#1a7f55', '#9b2d86', '#b3261e', '#5b5bd6'];
 const colourFor = (name: string) =>
@@ -69,6 +71,8 @@ type Sync = {
   refused: boolean;
   /** The paper was restored while this person was offline with edits of their own. */
   held: boolean;
+  /** The server would not take an edit for its size. Their unsaved edits cannot be kept. */
+  tooLarge: boolean;
 };
 type Mode = 'visual' | 'source';
 /** The sync server's answer to a structural edit. */
@@ -203,6 +207,7 @@ export default function FileEditor(props: {
     unsaved: false,
     refused: false,
     held: false,
+    tooLarge: false,
   });
   const keepEdits = useRef(() => {});
   const discardEdits = useRef(() => {});
@@ -228,6 +233,8 @@ export default function FileEditor(props: {
           stumbled = true;
           throw new Error('no ticket this time');
         }
+        // Their unsaved edits hold one the server will not take: connecting would send it again.
+        if (oversized) throw new Error('held until the person discards them');
         const { ticket, restored } = answer;
         // Coming back online to a paper that was restored meanwhile: this person's unsent edits
         // were made to text that is no longer there. They are held until the person decides.
@@ -259,7 +266,7 @@ export default function FileEditor(props: {
         if (unsaved) askSoon(50);
       },
       onAuthenticationFailed: () => {
-        if (restoreHeld !== null) return;
+        if (restoreHeld !== null || oversized) return;
         if (!stumbled) return refuse();
         stumbled = false;
         // Closing the connection is what makes the next attempt: see onStatus.
@@ -273,7 +280,15 @@ export default function FileEditor(props: {
         waiting.get(reply.key)?.(reply);
       },
       // The server closes a file it will no longer serve: access was taken away, or it was deleted.
-      onClose: ({ event }) => event.reason === NO_ACCESS && refuse(),
+      // Or it will not take an edit for its size, which a message larger than it reads at all
+      // (code 1009) is too. Sent again it would be refused again, so the editor stops.
+      onClose: ({ event }) => {
+        if (event.reason === NO_ACCESS) return refuse();
+        if (event.reason !== TOO_LARGE && event.code !== 1009) return;
+        oversized = true;
+        update({ tooLarge: true });
+        setLocked(true);
+      },
     });
     let arrived = false;
     // Whether this person's changes are saved is asked of the server, not inferred: "do you hold
@@ -310,6 +325,8 @@ export default function FileEditor(props: {
     let wantOpen = true;
     /** The last attempt to connect ended because no ticket could be fetched. */
     let stumbled = false;
+    /** The server refused an edit for its size. */
+    let oversized = false;
     const awareness = provider.awareness!;
     awareness.setLocalStateField('user', {
       name: user,
@@ -551,17 +568,19 @@ export default function FileEditor(props: {
 
   const status = sync.refused
     ? 'You no longer have access to this file, or it has been deleted.'
-    : sync.held
-      ? 'This paper was restored to an earlier revision while you were offline. Your edits from before that are not saved.'
-      : !sync.loaded
-        ? 'Opening…'
-        : !sync.connected
-          ? `Offline. ${sync.unsaved ? 'Your edits are waiting to be saved.' : 'Nothing is waiting to be saved.'}`
-          : !canWrite
-            ? 'Read only. You can read along but not edit.'
-            : sync.unsaved
-              ? 'Saving your edits…'
-              : 'All edits saved.';
+    : sync.tooLarge
+      ? 'An edit of yours is too large to save, so your unsaved edits cannot be kept. Copy what you need from them, then discard them. To add a large file to the paper, upload it.'
+      : sync.held
+        ? 'This paper was restored to an earlier revision while you were offline. Your edits from before that are not saved.'
+        : !sync.loaded
+          ? 'Opening…'
+          : !sync.connected
+            ? `Offline. ${sync.unsaved ? 'Your edits are waiting to be saved.' : 'Nothing is waiting to be saved.'}`
+            : !canWrite
+              ? 'Read only. You can read along but not edit.'
+              : sync.unsaved
+                ? 'Saving your edits…'
+                : 'All edits saved.';
   return (
     <section aria-label={`Editor for ${props.path}`}>
       <div className="editor-bar">
@@ -569,11 +588,13 @@ export default function FileEditor(props: {
         <span role="status" aria-live="polite" data-state={sync.connected ? 'online' : 'offline'}>
           {status}
         </span>
-        {sync.held && (
+        {(sync.held || sync.tooLarge) && (
           <span role="group" aria-label="Your unsaved edits">
-            <button type="button" onClick={() => keepEdits.current()}>
-              Apply my edits to the restored paper
-            </button>
+            {sync.held && !sync.tooLarge && (
+              <button type="button" onClick={() => keepEdits.current()}>
+                Apply my edits to the restored paper
+              </button>
+            )}
             <button type="button" onClick={() => discardEdits.current()}>
               Discard my edits
             </button>

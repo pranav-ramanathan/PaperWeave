@@ -5,6 +5,7 @@ import { createHmac, timingSafeEqual } from 'node:crypto';
 import { decodeFile, encodeFile } from '@paperweave/latex';
 import type pg from 'pg';
 import * as Y from 'yjs';
+import { LIMITS } from './archive.ts';
 import { can, type Role, ROLES } from './authz.ts';
 import type { BlobStore } from './blobs.ts';
 import { type Db, transaction } from './db.ts';
@@ -14,6 +15,25 @@ import { id } from './projects.ts';
 /** The name of the one shared text inside each file's Yjs document. */
 export const TEXT = 'source';
 const WRITERS = ROLES.filter((r) => can(r, 'file.write'));
+
+/** The largest single edit that is taken, in bytes as it arrives. */
+export const MAX_EDIT_BYTES = 2_000_000;
+/** The longest a file's text may be made by editing: what could have been imported. */
+export const MAX_FILE_TEXT = LIMITS.fileBytes;
+
+/**
+ * Whether an edit is too large to take: by itself, or for what it would make of the file.
+ * An edit is never smaller than the text it adds, so the file is only measured, on a copy, when
+ * the edit could take it over the limit.
+ */
+export function tooLarge(document: Y.Doc, update: Uint8Array, max = MAX_FILE_TEXT) {
+  if (update.length > MAX_EDIT_BYTES) return true;
+  if (document.getText(TEXT).length + update.length <= max) return false;
+  const copy = new Y.Doc();
+  Y.applyUpdate(copy, Y.encodeStateAsUpdate(document));
+  Y.applyUpdate(copy, update);
+  return copy.getText(TEXT).length > max;
+}
 
 const sign = (secret: string, body: string) =>
   createHmac('sha256', `sync-ticket:${secret}`).update(body).digest('base64url');

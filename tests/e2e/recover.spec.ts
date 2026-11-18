@@ -117,3 +117,64 @@ test('edits made offline across a restore are held until their author decides', 
   expect(failed).toBeGreaterThanOrEqual(3);
   await expect(source(watch)).toContainText('% typed while away');
 });
+
+test('an edit too large to save stops the editor, which says so and lets it be discarded', async ({
+  browser,
+}) => {
+  const { page, email } = await person(browser, 'rec-large');
+  const zip = join(mkdtempSync(join(tmpdir(), 'paperweave-e2e-')), `Large ${run}.zip`);
+  writeFileSync(
+    zip,
+    await writeZip([
+      { path: 'main.tex', bytes: Buffer.from(MAIN) },
+      { path: 'notes.txt', bytes: Buffer.from('Notes.\n') },
+    ]),
+  );
+  await page.goto('/sign-in');
+  await signIn(page, email);
+  await page.getByLabel('Or import a ZIP of a LaTeX project').setInputFiles(zip);
+  await page.getByRole('button', { name: 'Import ZIP' }).click();
+  await page.getByRole('link', { name: 'notes.txt' }).first().click();
+  await expect(status(page)).toHaveText('All edits saved.');
+  // The same file in a second tab, to see what the server holds.
+  const watch = await page.context().newPage();
+  await watch.goto(page.url());
+  await expect(status(watch)).toHaveText('All edits saved.');
+
+  /** Paste lines of 71 characters into the file, all at once. */
+  const paste = async (lines: number) => {
+    await source(page).click();
+    await source(page).evaluate((el, n) => {
+      const data = new DataTransfer();
+      data.setData('text/plain', `${'x'.repeat(70)}\n`.repeat(n));
+      el.dispatchEvent(new ClipboardEvent('paste', { clipboardData: data, bubbles: true }));
+    }, lines);
+  };
+  // More than two megabytes: the server reads the edit and refuses it.
+  await paste(30_000);
+  await expect(status(page)).toContainText('too large to save', { timeout: 30_000 });
+  await expect(source(page)).toHaveAttribute('contenteditable', 'false');
+  // Nobody else got it, and it is not sent again.
+  await typeAtStart(watch, 'Still fine. ');
+  await expect(status(watch)).toHaveText('All edits saved.');
+  await expect(source(watch)).not.toContainText('xxxx');
+  await expect(status(page)).toContainText('too large to save');
+
+  // Discarded, the editor starts again from what the server holds.
+  await page.getByRole('button', { name: 'Discard my edits' }).click();
+  await expect(status(page)).toHaveText('All edits saved.', { timeout: 30_000 });
+  // (The other tab's caret is shown in the text, between the two.)
+  await expect(source(page)).toContainText(/Still fine\. .*Notes\./);
+  await expect(source(page)).not.toContainText('xxxx');
+  await typeAtStart(page, 'And on. ');
+  await expect(source(watch)).toContainText(/And on\. .*Still fine\. .*Notes\./);
+
+  // More than the server reads off the wire at all: it closes the connection instead. The editor
+  // takes that the same way, and does not connect again to send it again.
+  await paste(60_000);
+  await expect(status(page)).toContainText('too large to save', { timeout: 30_000 });
+  await typeAtStart(watch, 'Even so. ');
+  await expect(status(watch)).toHaveText('All edits saved.');
+  await expect(source(watch)).not.toContainText('xxxx');
+  await expect(status(page)).toContainText('too large to save');
+});

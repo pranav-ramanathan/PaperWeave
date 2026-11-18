@@ -567,6 +567,23 @@ code that can be written here:
    one is optional: its export was researched from public sources (`docs/rea/prism.md`) and is
    a plain LaTeX ZIP with no comments or history, so it imports like any other ZIP.
 
+## An edit that is too large
+
+Built after the security review, which had it as its second open item.
+
+- **Limits.** 4 MB for anything read off the sync connection, 2 MB for one edit, 50 MB for a
+  file's text (`MAX_EDIT_BYTES`, `MAX_FILE_TEXT` in `packages/server/src/sync.ts`). A
+  structural edit is held to the file limit too.
+- **What the server does.** The edit is not saved and not applied. The connection is told
+  `too-large` and closed. Counted as `paperweave_sync_edits_too_large_total`.
+- **What the editor does.** It stops, says the edit was too large and that unsaved edits
+  cannot be kept, and offers "Discard my edits". It does not connect again until then, because
+  connecting would send the same edit again. The text can still be selected and copied.
+- **Why everything unsaved goes, not just the large edit:** the editor cannot take one edit
+  back out of what it has not yet sent; later edits may rest on it.
+- **Not limited:** how many files a paper holds, and how often someone edits. A member can
+  still grow the log by adding and deleting. Those are the review's "limits in general".
+
 ## Seen twice, not explained
 
 - `charts.spec`, last step: after the data file was approved again and "Draw it again" pressed,

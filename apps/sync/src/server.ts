@@ -9,7 +9,9 @@ import {
   holds,
   loadUpdates,
   openFile,
+  MAX_EDIT_BYTES,
   runCommand,
+  tooLarge,
   verifyTicket,
 } from '@paperweave/server';
 import pg from 'pg';
@@ -22,6 +24,8 @@ type Context = { userId: string; projectId: string };
 const SYNC_STEP_1 = 0;
 /** An update with no inserts and no deletes is two zero bytes. */
 const isEmpty = (update: Uint8Array) => update.length <= 2;
+/** Why the server closes a connection whose edit it will not take. The editor knows the word. */
+export const TOO_LARGE = 'too-large';
 
 export async function startSync(opts: {
   pool: pg.Pool;
@@ -33,12 +37,17 @@ export async function startSync(opts: {
   compactEvery?: number;
   /** Whoever sends this token may read /metrics. Without one there is no such page. */
   metricsToken?: string;
+  /** The longest a file's text may be made by editing. The default is what could be imported. */
+  maxFileText?: number;
 }) {
   const { pool, store, secret, compactEvery = 500 } = opts;
   const counts = newCounts();
   const server = new Server<Context>({
     port: opts.port,
     quiet: true,
+    // Nothing larger is read off the wire, signed in or not. Above the largest edit that is
+    // taken, so that an edit that is too large is normally refused below, with the reason.
+    websocketOptions: { maxPayload: 2 * MAX_EDIT_BYTES },
 
     async onAuthenticate({ token, documentName, connectionConfig }) {
       try {
@@ -92,7 +101,7 @@ export async function startSync(opts: {
           (connection.context as Context).userId,
           documentName,
           { ...c, from: bytes(c?.from), to: bytes(c?.to) },
-          { notify: false },
+          { notify: false, maxFileText: opts.maxFileText },
         );
         if (done.result !== 'applied') {
           counts.commandsNotApplied++;
@@ -119,6 +128,14 @@ export async function startSync(opts: {
         // Not saved and not applied. Everyone sends what they have deleted when they connect, so
         // only something this file does not already hold counts as an edit that was refused.
         if (!Y.snapshotContainsUpdate(Y.snapshot(document), payload)) counts.editsRejected++;
+        return;
+      }
+      if (tooLarge(document, payload, opts.maxFileText)) {
+        // Not saved and not applied. The editor would send it again on every reconnect, so the
+        // connection is closed with the reason, and the editor stops and says so.
+        counts.editsTooLarge++;
+        connection.readOnly = true;
+        connection.close({ code: 1009, reason: TOO_LARGE });
         return;
       }
       const seq = await appendUpdate(pool, documentName, context.userId, payload);
