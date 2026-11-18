@@ -6,6 +6,7 @@ import {
   appendUpdate,
   type BlobStore,
   compactFile,
+  holds,
   loadUpdates,
   openFile,
   runCommand,
@@ -13,6 +14,7 @@ import {
 } from '@paperweave/server';
 import pg from 'pg';
 import * as Y from 'yjs';
+import { metricsText, newCounts, serveMetrics } from './metrics.ts';
 
 type Context = { userId: string; projectId: string };
 
@@ -29,19 +31,38 @@ export async function startSync(opts: {
   databaseUrl: string;
   /** A file's log is rewritten as one entry each time it has grown by this many edits. */
   compactEvery?: number;
+  /** Whoever sends this token may read /metrics. Without one there is no such page. */
+  metricsToken?: string;
 }) {
   const { pool, store, secret, compactEvery = 500 } = opts;
+  const counts = newCounts();
   const server = new Server<Context>({
     port: opts.port,
     quiet: true,
 
     async onAuthenticate({ token, documentName, connectionConfig }) {
-      const userId = verifyTicket(secret, token);
-      if (!userId) throw new Error('unauthorized');
-      // Throws for anyone who is not on the paper: the connection is refused.
-      const file = await openFile(pool, userId, documentName);
-      connectionConfig.readOnly = !file.canWrite;
-      return { userId, projectId: file.projectId };
+      try {
+        const userId = verifyTicket(secret, token);
+        if (!userId) throw new Error('unauthorized');
+        // Throws for anyone who is not on the paper: the connection is refused.
+        const file = await openFile(pool, userId, documentName);
+        connectionConfig.readOnly = !file.canWrite;
+        counts.connections++;
+        return { userId, projectId: file.projectId };
+      } catch (err) {
+        counts.refusedConnections++;
+        throw err;
+      }
+    },
+
+    async onDisconnect() {
+      counts.disconnections++;
+    },
+
+    async onRequest({ request, response }) {
+      const text = () => metricsText(pool, counts, server.hocuspocus.getConnectionsCount());
+      // Rejecting with nothing tells the library the request has been answered.
+      if (await serveMetrics(request, response, opts.metricsToken, text)) return Promise.reject();
     },
 
     async onLoadDocument({ document, documentName }) {
@@ -49,13 +70,19 @@ export async function startSync(opts: {
         Y.applyUpdate(document, update);
     },
 
-    // A structural edit, asked for by an editor. Messages on one connection are handled in order,
-    // so every edit this person typed before asking is already in.
+    // An editor asks one of two things: whether the server has all its changes, or for a
+    // structural edit. Messages on one connection are handled in order, so every edit this
+    // person sent before asking has been dealt with.
     async onStateless({ connection, document, documentName, payload }) {
       let key: unknown;
       const answer = (reply: object) => connection.sendStateless(JSON.stringify({ key, ...reply }));
       try {
         const c = JSON.parse(payload);
+        // "Do you have all my changes?" Asked by an editor before it says they are saved.
+        if (typeof c?.saved === 'string')
+          return connection.sendStateless(
+            JSON.stringify({ n: c.n, saved: holds(document, Buffer.from(c.saved, 'base64url')) }),
+          );
         key = c?.key;
         const bytes = (v: unknown) =>
           typeof v === 'string' ? Buffer.from(v, 'base64url') : undefined;
@@ -67,7 +94,11 @@ export async function startSync(opts: {
           { ...c, from: bytes(c?.from), to: bytes(c?.to) },
           { notify: false },
         );
-        if (done.result !== 'applied') return answer({ result: done.result });
+        if (done.result !== 'applied') {
+          counts.commandsNotApplied++;
+          return answer({ result: done.result });
+        }
+        counts.commandsApplied++;
         // The author is answered first, with the edit, so that it is theirs to undo. Then it goes
         // to everyone with the file open, the author included, for whom it changes nothing more.
         answer({ result: 'applied', update: Buffer.from(done.update).toString('base64url') });
@@ -75,22 +106,35 @@ export async function startSync(opts: {
       } catch (err) {
         if (!(err instanceof AppError) && !(err instanceof SyntaxError))
           console.error(`command on ${documentName} failed:`, (err as Error).message);
+        counts.commandsNotApplied++;
         answer({ error: err instanceof AppError ? err.message : 'That edit could not be made.' });
       }
     },
 
     // Runs, and is awaited, before an incoming edit is applied and before it is acknowledged.
     // If the write fails this throws, the connection closes and the client resends on reconnect.
-    async beforeSync({ type, payload, connection, context, documentName }) {
-      if (type === SYNC_STEP_1 || connection.readOnly || isEmpty(payload)) return;
+    async beforeSync({ type, payload, connection, context, document, documentName }) {
+      if (type === SYNC_STEP_1 || isEmpty(payload)) return;
+      if (connection.readOnly) {
+        // Not saved and not applied. Everyone sends what they have deleted when they connect, so
+        // only something this file does not already hold counts as an edit that was refused.
+        if (!Y.snapshotContainsUpdate(Y.snapshot(document), payload)) counts.editsRejected++;
+        return;
+      }
       const seq = await appendUpdate(pool, documentName, context.userId, payload);
       // Write access was taken away since connecting. Hocuspocus now answers "not saved" and
       // does not apply the edit.
-      if (seq === null) connection.readOnly = true;
-      else if (seq % compactEvery === 0)
+      if (seq === null) {
+        counts.editsRejected++;
+        connection.readOnly = true;
+        return;
+      }
+      counts.editsSaved++;
+      if (seq % compactEvery === 0)
         // Not waited for: the edit is saved already, and this only tidies the log behind it.
-        compactFile(pool, documentName).catch((err) =>
-          console.error(`compacting ${documentName} failed:`, (err as Error).message),
+        compactFile(pool, documentName).then(
+          () => void counts.compactions++,
+          (err) => console.error(`compacting ${documentName} failed:`, (err as Error).message),
         );
     },
   });

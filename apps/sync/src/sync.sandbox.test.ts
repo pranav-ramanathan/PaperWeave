@@ -1,7 +1,6 @@
 // Needs the services in infra/compose.yaml. Run: pnpm test:sandbox
 import { type ChildProcess, spawn } from 'node:child_process';
 import { join } from 'node:path';
-import { HocuspocusProvider, HocuspocusProviderWebsocket } from '@hocuspocus/provider';
 import {
   acceptInvitation,
   blobStore,
@@ -13,6 +12,7 @@ import {
   listFiles,
   readZip,
   removeMember,
+  requestBuild,
   restoreRevision,
   runCommand,
   saveRevision,
@@ -20,15 +20,17 @@ import {
   createFile,
   listRevisions,
   syncTicket,
-  TEXT,
   writeZip,
 } from '@paperweave/server';
 import { afterAll, beforeAll, expect, test } from 'vitest';
 import * as Y from 'yjs';
 import { TEST_ENV, testDb } from '../../../packages/server/src/testing.ts';
+import { serveMetrics } from './metrics.ts';
 import { startSync } from './server.ts';
+import { type Client, closeAll, connect, saved, until } from './testing.ts';
 
 const SECRET = TEST_ENV.BETTER_AUTH_SECRET;
+const METRICS_TOKEN = 'a-token-for-the-metrics-page';
 const store = blobStore(TEST_ENV);
 const MAIN = '\\documentclass{article}\r\n\\begin{document}\r\nHello.\r\n\\end{document}\r\n';
 let t: Awaited<ReturnType<typeof testDb>>;
@@ -38,7 +40,6 @@ const users = {} as Record<
   'owner' | 'editor' | 'second' | 'reviewer' | 'viewer' | 'outsider',
   User
 >;
-const open: HocuspocusProvider[] = [];
 /** The separately started server that the kill test kills. */
 let child: ChildProcess | undefined;
 
@@ -59,53 +60,8 @@ async function paper() {
   return { project: project.id, file: file.id };
 }
 
-/** Connect as a user, the way the browser will. */
-function client(
-  user: User,
-  file: string,
-  port = sync.port,
-  // A fresh ticket for every connection attempt, as the web app will mint them.
-  token = () => syncTicket(SECRET, user.id),
-) {
-  const doc = new Y.Doc();
-  /** Answers to structural edits, each with the text this client held when it arrived. */
-  const replies: { key: string; result?: string; update?: string; error?: string; had: string }[] =
-    [];
-  const state = { refused: false, closed: 0, replies };
-  const provider = new HocuspocusProvider({
-    websocketProvider: new HocuspocusProviderWebsocket({
-      url: `ws://127.0.0.1:${port}`,
-      // Reconnect quickly. The library refuses a delay below its minimum, silently.
-      delay: 50,
-      minDelay: 50,
-      maxDelay: 200,
-    }),
-    name: file,
-    document: doc,
-    token,
-    onAuthenticationFailed: () => void (state.refused = true),
-    onClose: () => void state.closed++,
-    onStateless: ({ payload }) =>
-      void replies.push({ ...JSON.parse(payload), had: doc.getText(TEXT).toString() }),
-  });
-  // A provider given its own socket does not start using it until told to.
-  provider.attach();
-  open.push(provider);
-  return { doc, provider, state, text: doc.getText(TEXT) };
-}
-type Client = ReturnType<typeof client>;
-
-async function until(what: string, ok: () => boolean | Promise<boolean>, ms = 15_000) {
-  const end = Date.now() + ms;
-  while (!(await ok())) {
-    if (Date.now() > end) throw new Error(`timed out waiting for ${what}`);
-    await new Promise((r) => setTimeout(r, 20));
-  }
-}
-const saved = (...cs: Client[]) =>
-  until('edits to be saved', () =>
-    cs.every((c) => c.provider.synced && !c.provider.hasUnsyncedChanges),
-  );
+const client = (user: User, file: string, port = sync.port, token?: () => string) =>
+  connect(SECRET, user, file, port, token);
 
 /** The text the stored log adds up to, read back the way export reads it. */
 async function stored(project: string) {
@@ -127,14 +83,12 @@ beforeAll(async () => {
     databaseUrl: t.url,
     // Small, so that a test can type its way past it.
     compactEvery: 20,
+    metricsToken: METRICS_TOKEN,
   });
 });
 afterAll(async () => {
   child?.kill('SIGKILL');
-  for (const p of open) {
-    p.destroy();
-    p.configuration.websocketProvider.destroy();
-  }
+  closeAll();
   await sync.stop();
   await t.close();
 });
@@ -446,6 +400,54 @@ test('the log is compacted as it grows, and someone who was offline through it s
   expect(text).toContain('% first\n');
   expect(text.match(/line \d+\n/g)).toHaveLength(49);
   expect(await stored(project)).toBe(text.replaceAll('\n', '\r\n'));
+});
+
+test('the metrics page gives counts to whoever holds the token, and nothing to anyone else', async () => {
+  const url = `http://127.0.0.1:${sync.port}/metrics`;
+  expect((await fetch(url)).status).toBe(401);
+  expect((await fetch(url, { headers: { authorization: 'Bearer wrong-token' } })).status).toBe(401);
+  // With no token set, there is no such page.
+  const answer = { status: 0, writeHead: (code: number) => void (answer.status = code), end() {} };
+  const asked = { url: '/metrics', headers: { authorization: 'Bearer anything' } };
+  expect(await serveMetrics(asked as never, answer as never, undefined, async () => '')).toBe(true);
+  expect(answer.status).toBe(404);
+
+  const read = async () => {
+    const res = await fetch(url, { headers: { authorization: `Bearer ${METRICS_TOKEN}` } });
+    expect(res.status).toBe(200);
+    const text = await res.text();
+    const value = (name: string) => Number(new RegExp(`^${name} (\\S+)$`, 'm').exec(text)?.[1]);
+    return Object.assign(value, { text });
+  };
+  const { project, file } = await paper();
+  const owner = client(users.owner, file);
+  const reviewer = client(users.reviewer, file);
+  await saved(owner, reviewer);
+  const before = await read();
+  owner.text.insert(0, 'COUNTED-NOT-QUOTED ');
+  await saved(owner);
+  reviewer.text.insert(0, 'refused ');
+  const outsider = client(users.outsider, file);
+  await until('the outsider to be refused', () => outsider.state.refused);
+  await until(
+    'the refused edit to be counted',
+    async () =>
+      (await read())('paperweave_sync_edits_rejected_total') >
+      before('paperweave_sync_edits_rejected_total'),
+  );
+  await requestBuild(t.pool, users.owner.id, project);
+  const after = await read();
+  const more = (name: string) => after(name) - before(name);
+  expect(more('paperweave_sync_edits_saved_total')).toBeGreaterThanOrEqual(1);
+  expect(more('paperweave_sync_edits_rejected_total')).toBe(1);
+  expect(more('paperweave_sync_refused_connections_total')).toBe(1);
+  expect(after('paperweave_sync_connections_open')).toBeGreaterThanOrEqual(2);
+  expect(more('paperweave_builds_queued')).toBe(1);
+  expect(after('paperweave_build_queue_age_seconds')).toBeGreaterThan(0);
+  expect(after('paperweave_builds_last_hour{result="failed"}')).toBe(0);
+  // Counts only: nothing anyone typed is on the page.
+  expect(after.text).not.toContain('COUNTED');
+  expect(after.text).toMatch(/^# TYPE paperweave_sync_edits_saved_total counter$/m);
 });
 
 test('killing the server mid-save loses nothing it acknowledged, and nothing at all after reconnect', async () => {

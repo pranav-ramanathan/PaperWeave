@@ -355,6 +355,10 @@ export async function restoreRevision(
         let s = 0;
         while (s < have.length - p && s < want.length - p && have.at(-1 - s) === want.at(-1 - s))
           s++;
+        // Whole lines only. An edit made offline before the restore is merged in at an edge of
+        // the replaced part; this way it lands between two lines, never inside one.
+        while (p > 0 && have[p - 1] !== '\n') p--;
+        while (s > 0 && have[have.length - s - 1] !== '\n') s--;
         text.delete(p, have.length - p - s);
         text.insert(p, want.slice(p, want.length - s));
       });

@@ -133,3 +133,30 @@ export async function buildOutput(
   if (!bytes) throw new AppError('not_found', 'No such build output.');
   return bytes;
 }
+
+/**
+ * How the build queue is doing, across all papers: for the people who run the service, not for
+ * the people who use it. Counts and ages only.
+ */
+export async function buildHealth(db: Db) {
+  const { rows } = await db.query(
+    `select
+       count(*) filter (where status = 'queued')::int as queued,
+       coalesce(extract(epoch from now() - min(created_at) filter (where status = 'queued')), 0)::float
+         as "oldestQueuedSeconds",
+       count(*) filter (where status = 'succeeded' and finished_at > now() - interval '1 hour')::int
+         as succeeded,
+       count(*) filter (where status = 'failed' and finished_at > now() - interval '1 hour')::int
+         as failed,
+       count(*) filter (where timed_out and finished_at > now() - interval '1 hour')::int
+         as "timedOut"
+     from builds`,
+  );
+  return rows[0] as {
+    queued: number;
+    oldestQueuedSeconds: number;
+    succeeded: number;
+    failed: number;
+    timedOut: number;
+  };
+}

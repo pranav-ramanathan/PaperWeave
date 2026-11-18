@@ -13,5 +13,7 @@ const sync = await startSync({
   secret: need('BETTER_AUTH_SECRET'),
   port: Number(process.env.SYNC_PORT ?? 4100),
   databaseUrl: need('DATABASE_URL'),
+  compactEvery: Number(process.env.SYNC_COMPACT_EVERY ?? 500),
+  metricsToken: process.env.METRICS_TOKEN,
 });
 console.log(`sync server listening on ${sync.port}`);
