@@ -8,6 +8,7 @@ import {
   fromSrc,
   toSrc,
 } from '@paperweave/bridge';
+import { cellText, floatParts, type Span } from '@paperweave/latex';
 import { Editor, Extension, type Node } from '@tiptap/core';
 import type { Node as PMNode } from '@tiptap/pm/model';
 import { Plugin } from '@tiptap/pm/state';
@@ -246,8 +247,150 @@ export function createVisual(opts: {
     dom.title = node.attrs.src;
     return { dom };
   };
+  /** Text as it reads, for showing: `100\\%` as 100%. What is edited is always the LaTeX itself. */
+  const shown = (latex: string) => latex.replace(/\\([%&_#$])/g, '$1');
+  /**
+   * One part of a figure or table that is edited where it stands: a cell, a caption. Pressing
+   * it turns it into a field holding its LaTeX; Enter puts the new text in its place, by way of
+   * the server, and only if the part still says what it said. Escape leaves it alone.
+   */
+  const part = (
+    getPos: () => number | undefined,
+    span: Span,
+    name: string,
+    allowed: (text: string) => string | null = () => null,
+    /** Told which field is open, or null when none is, so that its owner can speak for it. */
+    opened: (field: HTMLInputElement | null) => void = () => {},
+  ) => {
+    if (!opts.editable) return el('span', 'pw-part', shown(span.text));
+    const button = el('button', 'pw-part', shown(span.text) || '\u00a0');
+    button.type = 'button';
+    button.setAttribute('aria-label', `${name}: ${shown(span.text) || 'empty'}. Edit`);
+    button.onclick = () => {
+      const pos = getPos() ?? 0;
+      const input = el('input', 'pw-part');
+      input.value = input.defaultValue = span.text;
+      input.spellcheck = false;
+      input.setAttribute('aria-label', name);
+      input.size = Math.max(4, span.text.length + 2);
+      let over = false;
+      const leave = () => {
+        over = true;
+        opened(null);
+        if (input.isConnected) input.replaceWith(button);
+      };
+      const apply = async () => {
+        const text = input.value.trim();
+        if (text === span.text) return leave();
+        const problem = allowed(text);
+        if (problem) return say(problem);
+        const c = bridge.atomCommand(editor.state, pos, text, span);
+        if (!c) return say('That has moved. Edit it in the source.');
+        over = true;
+        try {
+          const result = await opts.run(c);
+          if (result === 'conflict')
+            say('Someone changed that while you were editing it. Look again, then try again.');
+        } catch {
+          say('That edit could not be made. Check the connection and try again.');
+        }
+        // Applied, the figure or table is drawn again from the new source; if not, as it was.
+        leave();
+        editor.commands.setNodeSelection(Math.min(pos, editor.state.doc.content.size - 1));
+        editor.view.focus();
+      };
+      input.onkeydown = (e) => {
+        if (e.key === 'Enter') void apply();
+        else if (e.key === 'Escape') {
+          leave();
+          button.focus();
+        }
+      };
+      input.onblur = () => !over && leave();
+      button.replaceWith(input);
+      opened(input);
+      input.focus();
+      input.select();
+    };
+    return button;
+  };
+
   const block = (node: PMNode, getPos: () => number | undefined) => {
     const frozen = node.type.name === 'frozen';
+    const float = frozen ? null : floatParts(node.attrs.src);
+    // A simple table is drawn as a grid, and its cells and caption are edited in place. So is
+    // a figure's caption. Anything else of theirs is edited in the source.
+    const grid = float?.table?.simple ? float.table : null;
+    if (float && (grid || float.caption)) {
+      /** The field open in this figure or table, if one is. */
+      let field: HTMLInputElement | null = null;
+      const opened = (f: HTMLInputElement | null) => void (field = f);
+      const dom = el('div', `pw-atom pw-block pw-float pw-${float.kind}`);
+      dom.setAttribute('role', 'group');
+      dom.setAttribute('aria-label', float.kind === 'table' ? 'Table' : 'Figure');
+      const caption = float.caption
+        ? [
+            el('span', 'pw-label', float.kind === 'table' ? 'Table: ' : 'Figure: '),
+            part(getPos, float.caption, 'Caption', undefined, opened),
+          ]
+        : [];
+      if (grid) {
+        const table = el('table', '');
+        if (caption.length) {
+          const c = el('caption', '');
+          c.append(...caption);
+          table.append(c);
+        }
+        const body = el('tbody', '');
+        grid.rows.forEach((row, i) => {
+          const tr = el('tr', '');
+          row.forEach((cell, j) => {
+            const td = el(i === 0 ? 'th' : 'td', '');
+            if (i === 0) td.setAttribute('scope', 'col');
+            td.append(
+              part(
+                getPos,
+                cell,
+                `Row ${i + 1}, column ${j + 1}`,
+                (text) =>
+                  cellText(text)
+                    ? null
+                    : 'A cell cannot hold an unescaped &, a row break or a %. Edit the table in the source for that.',
+                opened,
+              ),
+            );
+            tr.append(td);
+          });
+          body.append(tr);
+        });
+        table.append(body);
+        dom.append(table);
+      } else {
+        const what = float.graphics.map((g) => g.target.text).join(', ');
+        dom.append(el('p', 'pw-label', what ? `Picture: ${what}` : `LaTeX: ${node.attrs.label}`));
+        const c = el('p', 'pw-caption');
+        c.append(...caption);
+        dom.append(c);
+      }
+      const go = el('button', '', 'Edit in source');
+      go.type = 'button';
+      go.onclick = () => opts.showInSource(getPos() ?? 0, getPos() ?? 0);
+      dom.append(go);
+      return {
+        dom,
+        // What happens inside (typing in a field, pressing a part) is ours, not the editor's.
+        stopEvent: (e: Event) => e.target instanceof HTMLElement && dom.contains(e.target),
+        ignoreMutation: () => true,
+        // Drawn again because its source changed under an open field: what was being typed
+        // would vanish without a word, so it is said, with the text.
+        destroy() {
+          if (field && field.value.trim() !== field.defaultValue)
+            say(
+              `Someone changed this ${float.kind} while you were editing it. Your text was not put in: ${field.value}`,
+            );
+        },
+      };
+    }
     const dom = el('div', `pw-atom pw-block ${frozen ? 'pw-frozen' : 'pw-raw'}`);
     dom.setAttribute('role', 'group');
     const pos = getPos() ?? 0;
@@ -267,7 +410,15 @@ export function createVisual(opts: {
 
   const views: Record<
     string,
-    (node: PMNode, getPos: () => number | undefined) => { dom: HTMLElement; destroy?: () => void }
+    (
+      node: PMNode,
+      getPos: () => number | undefined,
+    ) => {
+      dom: HTMLElement;
+      destroy?: () => void;
+      stopEvent?: (e: Event) => boolean;
+      ignoreMutation?: () => boolean;
+    }
   > = {
     math_inline: math(false),
     math_block: math(true),

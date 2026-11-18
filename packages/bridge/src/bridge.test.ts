@@ -1,3 +1,4 @@
+import { floatParts } from '../../latex/src/floats.ts';
 import { fragment, rng } from '../../latex/src/testutil.ts';
 import { NodeSelection, TextSelection } from '@tiptap/pm/state';
 import { expect, test } from 'vitest';
@@ -419,4 +420,62 @@ test('LaTeX is inserted at the caret, wherever the text has moved to meanwhile',
   });
   const tr = r.state.tr.setSelection(NodeSelection.create(r.state.doc, atom));
   expect(r.bridge.insertCommand(r.state.apply(tr), 'x')).toBeNull();
+});
+
+test('editing one cell of a table changes only that cell, and two people can edit two cells', () => {
+  const r = replica(fixtures['ieee-multifile/tables/ablation.tex']);
+  const table = () => {
+    let at = -1;
+    let src = '';
+    r.state.doc.forEach((node, pos) => {
+      if (node.type.name === 'raw_block' && floatParts(node.attrs.src))
+        [at, src] = [pos, node.attrs.src];
+    });
+    return { at, parts: floatParts(src)!, src };
+  };
+  const before = r.src;
+  // Every cell in turn: the file differs from the original in that cell and nowhere else.
+  const first = table();
+  first.parts.table!.rows.forEach((row, i) =>
+    row.forEach((_, j) => {
+      const now = table();
+      const cell = now.parts.table!.rows[i][j];
+      const c = r.bridge.atomCommand(r.state, now.at, `<${i},${j}>`, cell)!;
+      expect(c.expected).toBe(cell.text);
+      expect(r.bridge.applyCommand(c)).toBe('applied');
+      r.check();
+    }),
+  );
+  let want = before;
+  let shift = 0;
+  const start = before.indexOf(first.src);
+  first.parts.table!.rows.forEach((row, i) =>
+    row.forEach((cell, j) => {
+      const at = start + cell.at + shift;
+      want = want.slice(0, at) + `<${i},${j}>` + want.slice(at + cell.text.length);
+      shift += `<${i},${j}>`.length - cell.text.length;
+    }),
+  );
+  expect(r.src).toBe(want);
+
+  // Two commands built from the same view, for two different cells: both go through.
+  const now = table();
+  const a = r.bridge.atomCommand(r.state, now.at, 'A', now.parts.table!.rows[1][0])!;
+  const b = r.bridge.atomCommand(r.state, now.at, 'B', now.parts.table!.rows[2][2])!;
+  // For the same cell: the second finds it changed.
+  const again = r.bridge.atomCommand(r.state, now.at, 'C', now.parts.table!.rows[1][0])!;
+  expect(r.bridge.applyCommand(a)).toBe('applied');
+  expect(r.bridge.applyCommand(b)).toBe('applied');
+  expect(r.bridge.applyCommand(again)).toBe('conflict');
+  const after = table().parts.table!.rows.map((row) => row.map((c) => c.text));
+  expect(after[1][0]).toBe('A');
+  expect(after[2][2]).toBe('B');
+  r.check();
+
+  // The caption is a part like any other; a stretch outside the atom is not one.
+  const cap = table();
+  const c = r.bridge.atomCommand(r.state, cap.at, 'A new caption', cap.parts.caption!)!;
+  expect(r.bridge.applyCommand(c)).toBe('applied');
+  expect(r.src).toContain('\\caption{A new caption}');
+  expect(r.bridge.atomCommand(r.state, cap.at, 'x', { at: 0, end: 99_999 })).toBeNull();
 });

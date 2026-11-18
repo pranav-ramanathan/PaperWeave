@@ -182,9 +182,16 @@ export class Bridge {
 
   /**
    * Build the command that replaces the source of the atom at `pos` (a formula, a reference, a
-   * block of raw LaTeX), or null if there is no atom there.
+   * block of raw LaTeX), or null if there is no atom there. With `part`, only that stretch of
+   * the atom's source is replaced (one cell of a table, say), and only that stretch has to be
+   * as it was: a change to another part of the same atom does not get in the way.
    */
-  atomCommand(state: EditorState, pos: number, replacement: string): Command | null {
+  atomCommand(
+    state: EditorState,
+    pos: number,
+    replacement: string,
+    part?: { at: number; end: number },
+  ): Command | null {
     const node = state.doc.nodeAt(pos);
     const src: unknown = node?.attrs.src;
     if (!node?.isAtom || typeof src !== 'string' || !src) return null;
@@ -202,11 +209,13 @@ export class Bridge {
     // The model must agree with the text about where the atom is, or nothing is built.
     if (this.ytext.toString().slice(from, from + src.length) !== src) return null;
     const rel = (i: number) => Y.createRelativePositionFromTypeIndex(this.ytext, i);
+    const [start, end] = part ? [part.at, part.end] : [0, src.length];
+    if (start < 0 || end < start || end > src.length) return null;
     return {
       key: crypto.randomUUID(),
-      from: rel(from),
-      to: rel(from + src.length),
-      expected: src,
+      from: rel(from + start),
+      to: rel(from + end),
+      expected: src.slice(start, end),
       replacement,
     };
   }
