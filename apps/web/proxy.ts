@@ -12,7 +12,8 @@ export function pagePolicy(nonce: string, sync: string, dev: boolean) {
     // Style sheets are held to the number too: an injected one could read what is on the page
     // and send it away. Styles set on single elements are not, because the editors and the
     // maths renderer set them as they draw; those cannot select or send anything.
-    `style-src-elem 'self' 'nonce-${nonce}'`,
+    // (In development the framework's own tools add style sheets without the number.)
+    dev ? "style-src-elem 'self' 'unsafe-inline'" : `style-src-elem 'self' 'nonce-${nonce}'`,
     "style-src-attr 'unsafe-inline'",
     // For a browser that knows neither of the two above.
     "style-src 'self' 'unsafe-inline'",
