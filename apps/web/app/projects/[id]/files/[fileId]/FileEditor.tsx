@@ -104,6 +104,8 @@ export default function FileEditor(props: {
   /** Whether this person may comment, and the others on the paper, whom they can mention. */
   canComment: boolean;
   members: Member[];
+  /** The paper's owner allows passages to be sent to a model for a review. */
+  canReview: boolean;
 }) {
   const { projectId, fileId, canWrite, user, syncUrl, sourceOnly } = props;
   const host = useRef<HTMLDivElement>(null);
@@ -216,7 +218,17 @@ export default function FileEditor(props: {
       document: doc,
       // Asked for on every connection attempt: a ticket only lives for a minute.
       token: async () => {
-        const { ticket, restored } = await (await fetch(`/api/sync-ticket?file=${fileId}`)).json();
+        // A ticket that cannot be fetched is the network or the server having a bad moment, not
+        // a refusal: the attempt ends here and another is made shortly. (Signed out is an
+        // answer, and comes back without a ticket.)
+        const answer = await fetch(`/api/sync-ticket?file=${fileId}`)
+          .then((res) => (res.ok || res.status === 401 ? res.json() : null))
+          .catch(() => null);
+        if (!answer) {
+          stumbled = true;
+          throw new Error('no ticket this time');
+        }
+        const { ticket, restored } = answer;
         // Coming back online to a paper that was restored meanwhile: this person's unsent edits
         // were made to text that is no longer there. They are held until the person decides.
         if (restoreSeen !== null && restored !== restoreSeen && unsaved) {
@@ -246,7 +258,15 @@ export default function FileEditor(props: {
         // Back in touch: find out whether what was typed meanwhile has arrived.
         if (unsaved) askSoon(50);
       },
-      onAuthenticationFailed: () => restoreHeld === null && refuse(),
+      onAuthenticationFailed: () => {
+        if (restoreHeld !== null) return;
+        if (!stumbled) return refuse();
+        stumbled = false;
+        // Closing the connection is what makes the next attempt: see onStatus.
+        setTimeout(() => {
+          if (wantOpen) provider.configuration.websocketProvider.disconnect();
+        }, 1000);
+      },
       onStateless: ({ payload }) => {
         const reply: (Reply & { key: string }) | Saved = JSON.parse(payload);
         if ('saved' in reply) return answered(reply);
@@ -288,6 +308,8 @@ export default function FileEditor(props: {
     let restoreHeld: number | null = null;
     /** Whether this tab should be connected: false only while the browser says it is offline. */
     let wantOpen = true;
+    /** The last attempt to connect ended because no ticket could be fetched. */
+    let stumbled = false;
     const awareness = provider.awareness!;
     awareness.setLocalStateField('user', {
       name: user,
@@ -659,6 +681,7 @@ export default function FileEditor(props: {
         fileId={fileId}
         canPropose={props.canComment}
         canDecide={canWrite}
+        canReview={props.canReview}
         selection={() => stretch.current(true)}
         show={(from, to) => showStretch.current(from, to)}
         onProposals={(list) => {

@@ -5,6 +5,7 @@ import type pg from 'pg';
 import * as Y from 'yjs';
 import { authorize, can } from './authz.ts';
 import type { BlobStore } from './blobs.ts';
+import { claimChanges, describeClaimChange } from './claims.ts';
 import { runCommand } from './commands.ts';
 import type { Db } from './db.ts';
 import { AppError } from './errors.ts';
@@ -30,6 +31,17 @@ export type Proposal = {
   stale: boolean;
   /** The stretch as it reads now. */
   now: string;
+  /**
+   * What accepting it would change about what the passage claims, besides its wording: a
+   * number, a negation, a cause, a citation. In words, for whoever decides.
+   */
+  flags: string[];
+  /** A person wrote it, or a model review did at a person's request. */
+  origin: 'person' | 'critique';
+  /** For a model review: the model and the version of the claim rules. */
+  madeBy: string | null;
+  /** For a model review: what in the passage the change rests on. */
+  evidence: string[];
   author: string | null;
   /** Whether the person asking wrote it. */
   mine: boolean;
@@ -297,6 +309,7 @@ export async function listProposals(
   const { rows } = await pool.query(
     `select p.id, p.file_id, f.path, p.anchor_from, p.anchor_to, p.expected, p.replacement,
             p.reason, p.status, p.author, p.created_at, p.decided_at, a.email as author_email,
+            p.origin, p.made_by, p.evidence,
             d.email as decider_email
      from proposals p join files f on f.id = p.file_id
      left join "user" a on a.id = p.author left join "user" d on d.id = p.decided_by
@@ -327,6 +340,10 @@ export async function listProposals(
           ? !known || now !== r.expected
           : r.status === 'accepted' && (!known || now !== r.replacement),
       now,
+      flags: claimChanges(r.expected, r.replacement).map(describeClaimChange),
+      origin: r.origin,
+      madeBy: r.made_by,
+      evidence: r.evidence,
       author: r.author_email,
       mine: r.author === userId,
       createdAt: r.created_at.toISOString(),

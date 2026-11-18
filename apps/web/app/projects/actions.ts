@@ -20,6 +20,7 @@ import {
   saveChart,
   saveRevision,
   setLanguageSettings,
+  setModelProcessing,
   setRole,
   setRootFile,
 } from '@paperweave/server';
@@ -280,5 +281,14 @@ export async function languageAction(projectId: string, form: FormData) {
       off: form.getAll('off').map(String),
     });
     return `${back}?language=1#language`;
+  });
+}
+
+export async function modelProcessingAction(projectId: string, form: FormData) {
+  const back = `/projects/${projectId}`;
+  const user = await requireUser(back);
+  await act(back, async () => {
+    await setModelProcessing(db(), user.id, projectId, form.get('allow') === 'on');
+    return `${back}?assistance=1#assistance`;
   });
 }

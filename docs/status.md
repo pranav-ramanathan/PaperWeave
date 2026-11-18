@@ -416,6 +416,42 @@ Read this first. Update it in every pull request.
   - Five rules are always off because they do not fit LaTeX source (its quotation marks, the
     spacing around stand-ins, Oxford -ize as an error): `NEVER` in
     `packages/server/src/grammar.ts`.
+- **E4: scientific critique.** Two parts: rules that say what an edit changes about a claim,
+  which run on every proposed change, and a review by a language model, which is off by default.
+  - **Claim flags** (`packages/server/src/claims.ts`, rules version `claims-1`). The old and new
+    text of a proposal are compared for numbers, units, negation, direction, certainty,
+    causation, scope, novelty, significance, citations and references, and names. Any difference
+    is shown on the proposal ("The numbers differ: 40 → 30.") before anyone decides. They are
+    rules over text, not a model, and err towards flagging.
+  - `fixtures/critique/challenge.json` has 45 rewrites. Every one that changes a claim is
+    flagged for the change it makes, and none of the ten that only reword is flagged; a unit
+    test holds both. One case the rules are known to miss ("doubled" to "tripled") is written
+    down there as such. The set is synthetic: a set from real manuscripts, reviewed by people,
+    is still the owner's to supply.
+  - **Model review** (`packages/server/src/critique.ts`). "Ask a model to review the selected
+    text" sends the selected passage (at most 6,000 characters) and the paper's own words, and
+    nothing else. The answer becomes proposed changes, each with its reason and what in the
+    passage it rests on, and questions, which are threads. Nothing is applied. A suggestion that
+    does not quote the passage exactly is left out.
+  - Three things must all hold before any text is sent: the deployment names a provider
+    (`MODEL_PROVIDER=anthropic`), it has credentials, and the paper's owner has ticked "Allow
+    passages of this paper to be sent" (migration 0017, off by default, owner only). With the
+    owner's switch off the function returns before anything else; a service test with a
+    stand-in for the model holds that nothing is sent.
+  - Each proposal from a review records the model that answered and the rules version
+    (`proposals.origin`, `made_by`, `evidence`; migration 0018).
+  - The provider call uses the Anthropic SDK with a schema for the answer, and asks for the
+    provider's fallback model if the first declines. **It has not been run against the real
+    provider**: there is no key here, and the plan keeps model processing off until the owner
+    confirms retention defaults. The tests supply the model's answer themselves.
+  - Not yet: approved figure captions and selected evidence from a chosen revision as context
+    for the model; a setting for the provider's retention; deleting what was sent.
+- **A failed ticket fetch is not a refusal.** Found by a browser test failing once under load.
+  Coming back online, the editor asks the web app for a ticket to connect with. If that request
+  failed for a moment, the editor treated it as being refused and locked itself with "You no
+  longer have access to this file". Now only an answer locks it (the sync server refusing, or
+  being signed out); a fetch that fails is tried again a second later. `recover.spec` fails the
+  first two fetches and holds that the editor carries on.
 - **A restore keeps what it replaces.** Found by the fault suite on a seed it had not run before.
   A restore put back the chosen revision but kept no copy of the paper as it stood, so text typed
   since the last revision (an edit that reached the server a moment before, say) was erased with
@@ -440,14 +476,10 @@ nothing, edit it together, build it, and download a ZIP and a PDF that belong to
 
 Next, in this order:
 
-1. **E4.** Scientific critique: a Review action that returns suggestions with a diff, the
-   reasoning, the evidence, and flags for changed claims (quantities, causation, negation,
-   attribution); a question for the author where evidence is thin; a per-paper off switch; the
-   smallest relevant text sent; model and rule versions recorded. This sends text to a model
-   provider, so it stays off until the owner confirms retention defaults (`docs/plan.md`). What
-   can be built first without sending anything: the off switch, the record of versions, the
-   claim-change flags (they are rules over a diff), and the challenge set they are tested on.
-2. **E5** onward, as in the plan.
+1. **E5.** Review metadata: an explicit export of threads and proposals with a paper, and
+   bringing them back in from an archive that has them, with a report of what is missing.
+2. **Phase F**, as in the plan: accessibility, benchmarks, a restore drill, product metrics,
+   a security review, the Tectonic comparison.
 
 The Phase A replays are waiting on a person with accounts: `docs/rea/matrix.md`. The Prism one is
 optional: its export was researched from public sources (`docs/rea/prism.md`) and is a plain LaTeX

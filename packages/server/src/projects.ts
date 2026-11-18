@@ -176,3 +176,24 @@ export async function removeMember(db: Db, userId: string, projectId: string, me
   // Live connections are re-checked at once rather than at their next edit.
   await db.query("select pg_notify('acl', $1)", [projectId]);
 }
+
+/** Whether this paper's text may be sent to a model provider. */
+export async function modelProcessing(db: Db, userId: string, projectId: string) {
+  await authorize(db, userId, id(projectId), 'project.read');
+  const { rows } = await db.query('select model_processing from projects where id = $1', [
+    projectId,
+  ]);
+  return rows[0].model_processing as boolean;
+}
+
+/** Allow or stop it. The owner's decision alone. */
+export async function setModelProcessing(
+  db: Db,
+  userId: string,
+  projectId: string,
+  on: unknown,
+): Promise<void> {
+  await authorize(db, userId, id(projectId), 'project.settings');
+  if (typeof on !== 'boolean') throw new AppError('invalid_input', 'Say yes or no.');
+  await db.query('update projects set model_processing = $2 where id = $1', [projectId, on]);
+}

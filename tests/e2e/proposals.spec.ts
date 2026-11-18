@@ -68,6 +68,9 @@ test('a reviewer proposes a change; the owner accepts it, undoes that, and rejec
   await expect(proposal(reviewer.page)).toContainText('Now: forty');
   await expect(proposal(reviewer.page)).toContainText('Proposed: thirty');
   await expect(proposal(reviewer.page)).toContainText('Why: Measured again.');
+  // It changes a number, and says so to whoever will decide.
+  await expect(proposal(reviewer.page)).toContainText('This changes more than the wording.');
+  await expect(proposal(reviewer.page)).toContainText('The numbers differ: forty → thirty.');
   await expect(reviewer.page.locator(`${VISUAL} .proposal-mark`)).toHaveText('forty');
   // Theirs to change or withdraw, not to accept.
   await expect(proposal(reviewer.page).getByRole('button', { name: 'Accept' })).toHaveCount(0);
@@ -131,4 +134,28 @@ test('a reviewer proposes a change; the owner accepts it, undoes that, and rejec
   await panel(owner.page).getByText('Decided (2)').click();
   await expect(added(owner.page)).toContainText(`Rejected by ${owner.email}.`);
   await expect(owner.page.locator(SOURCE)).not.toContainText('So far.');
+
+  // A review by a model is not offered until the paper's owner allows text to be sent.
+  const ask = (page: Page) =>
+    panel(page).getByRole('button', { name: 'Ask a model to review the selected text' });
+  await expect(ask(owner.page)).toHaveCount(0);
+  const file = owner.page.url();
+  await owner.page.goto(file.replace(/\/files\/.*$/, ''));
+  const allow = owner.page.getByRole('checkbox', { name: /Allow passages of this paper/ });
+  await expect(allow).not.toBeChecked();
+  await allow.check();
+  await owner.page
+    .locator('form')
+    .filter({ has: allow })
+    .getByRole('button', { name: 'Save' })
+    .click();
+  await expect(owner.page.getByRole('status')).toHaveText('Saved.');
+  // Allowed for this paper, but this deployment names no provider: it says so and sends nothing.
+  await owner.page.goto(file);
+  await showSource(owner.page);
+  await selectWord(owner.page, SOURCE, 'Nothing');
+  await owner.page.keyboard.press('Home');
+  await owner.page.keyboard.press('Shift+End');
+  await ask(owner.page).click();
+  await expect(panel(owner.page)).toContainText('Reviews by a model are not set up.');
 });
