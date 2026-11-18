@@ -105,9 +105,10 @@ function papers(entries: Entry[], skipped: Skipped[]) {
   }));
 }
 
-function report(
+/** What an archive's files amount to as a paper: its root, compiler, and what can be edited how. */
+export function describeImport(
   entries: Entry[],
-  skipped: Skipped[],
+  skipped: Skipped[] = [],
 ): { report: ImportReport; meta: Map<string, ReturnType<typeof decodeFile>> } {
   const meta = new Map<string, ReturnType<typeof decodeFile>>();
   const texts: Record<string, string> = {};
@@ -187,7 +188,10 @@ export async function importZip(
   limits: Limits = LIMITS,
 ): Promise<Project[]> {
   const { entries, skipped } = await readZip(zip, limits);
-  const found = papers(entries, skipped).map((p) => ({ ...p, ...report(p.entries, p.skipped) }));
+  const found = papers(entries, skipped).map((p) => ({
+    ...p,
+    ...describeImport(p.entries, p.skipped),
+  }));
   // Blobs first: they are content-addressed, so a failure later leaves nothing that matters behind.
   const digests = new Map<Uint8Array, string>();
   for (const p of found) for (const e of p.entries) digests.set(e.bytes, await store.put(e.bytes));

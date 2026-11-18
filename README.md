@@ -5,6 +5,7 @@ A collaborative academic writing workspace: a visual editor over LaTeX source, a
 - Spec: `docs/spec.md`
 - Plan: `docs/plan.md`
 - Where things stand and what is next: `docs/status.md`
+- What happens to each kind of paper on import: `docs/import-matrix.md`
 
 ## Develop
 
