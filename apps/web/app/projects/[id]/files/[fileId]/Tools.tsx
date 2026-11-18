@@ -239,6 +239,8 @@ export function FloatBox(props: {
           '  \\end{tabular}',
           '\\end{table}',
         ];
+    // What was wrong with the last try is not said of this one.
+    setProblem('');
     try {
       // On lines of its own, like any figure or table in the source.
       await request.apply(`\n${lines.join('\n')}\n`);

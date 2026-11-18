@@ -197,3 +197,30 @@ export async function setModelProcessing(
   if (typeof on !== 'boolean') throw new AppError('invalid_input', 'Say yes or no.');
   await db.query('update projects set model_processing = $2 where id = $1', [projectId, on]);
 }
+
+/**
+ * How far a paper has come along the path a new one takes: written in, built, shared, taken
+ * away. For showing a new owner what to do next. Each is a fact about the paper, not a record
+ * of clicks.
+ */
+export async function firstSteps(db: Db, userId: string, projectId: string) {
+  await authorize(db, userId, id(projectId), 'project.read');
+  const { rows } = await db.query(
+    `select
+       exists (select 1 from files where project_id = $1) as "hasFiles",
+       -- The first entry of a file's log is the file as it arrived; a second is an edit.
+       exists (select 1 from files where project_id = $1 and head_seq > 1) as written,
+       exists (select 1 from builds where project_id = $1 and pdf_digest is not null) as built,
+       (select count(*) from project_members where project_id = $1) > 1
+         or exists (select 1 from invitations where project_id = $1) as shared,
+       exists (select 1 from downloads where project_id = $1) as downloaded`,
+    [projectId],
+  );
+  return rows[0] as {
+    hasFiles: boolean;
+    written: boolean;
+    built: boolean;
+    shared: boolean;
+    downloaded: boolean;
+  };
+}

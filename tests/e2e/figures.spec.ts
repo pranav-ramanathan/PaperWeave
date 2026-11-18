@@ -102,7 +102,12 @@ test('a figure shows its picture, and is given a description in place', async ({
   await expect(box.getByRole('alert')).toContainText('A caption cannot hold an unescaped &');
   await box.getByLabel('Caption').fill('A second dot');
   await box.getByRole('button', { name: 'Insert' }).click();
-  await expect(box).toBeHidden();
+  // The editor gives the server eight seconds to answer. If the edit is refused, the window
+  // says why, and so does this.
+  await expect(async () => {
+    expect(await box.getByRole('alert').allTextContents()).toEqual([]);
+    await expect(box).toBeHidden({ timeout: 1000 });
+  }).toPass({ timeout: 15_000 });
   const figures = page.locator(VISUAL).getByRole('group', { name: 'Figure' });
   await expect(figures).toHaveCount(2);
   await expect(figures.nth(1).locator('img')).toHaveAttribute('alt', 'Another square');

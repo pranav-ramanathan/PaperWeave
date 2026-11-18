@@ -446,6 +446,12 @@ Read this first. Update it in every pull request.
     confirms retention defaults. The tests supply the model's answer themselves.
   - Not yet: approved figure captions and selected evidence from a chosen revision as context
     for the model; a setting for the provider's retention; deleting what was sent.
+- **F6: onboarding.** Someone with no papers is told the three ways to begin (a template, a
+  ZIP, nothing). A new paper's page has "First steps" for its owner: give it files, write in it,
+  see the PDF, bring in a co-author, take it away, each marked "Done" or "To do" in words with
+  where to do it. The list comes from the paper's own state (`firstSteps` in
+  `packages/server/src/projects.ts`), not from a record of clicks, and goes away once all are
+  done.
 - **F5: the Tectonic comparison.** `docs/tectonic-comparison.md`. Each fixture built with the
   service's TeX Live image and with Tectonic 0.15.0, with no network, by
   `infra/tectonic/compare.sh`. Recommendation: stay with TeX Live.
@@ -561,12 +567,30 @@ code that can be written here:
    one is optional: its export was researched from public sources (`docs/rea/prism.md`) and is
    a plain LaTeX ZIP with no comments or history, so it imports like any other ZIP.
 
-## Seen once, not explained
+## Seen twice, not explained
 
 - `charts.spec`, last step: after the data file was approved again and "Draw it again" pressed,
-  the chart's page still said "Out of date" for thirty seconds. Once, in a full local run; not
-  in four runs since. The check now prints the whole page when it fails, so the next time will
-  say whether the redraw was refused or never asked for.
+  the chart's page still said "Out of date". Twice, both in full local runs with other tests'
+  pages still open in the background; not in runs of that test alone.
+  - The second time, the page said why: the redraw was refused with "Choose a column of the
+    data file for the vertical axis", so the form reached the server without that value.
+  - It is not that the form needs scripts: with scripts switched off it posts every value and
+    the redraw works (tried by hand in a browser test, not kept).
+  - The test now waits for the vertical-axis field to hold its value before pressing the
+    button, and checks the column types after the second approval. If the cause is a click
+    landing while the page's scripts are attaching, that wait hides it; if it is something
+    else, one of the two checks will now fail first and say which.
+- `figures.spec`, in CI once (the first run of PR 37): after "Insert" in the figure window, the
+  window was still open five seconds later. 37 other browser tests passed in that run.
+  - Not reproduced here: the test passed every time, alone and with every core kept busy.
+  - The editor gives the server eight seconds to answer a structural edit, and the test gave
+    the window five. So the run could not tell a slow answer from a refused one.
+  - The test (and the same step in `charts.spec`) now waits fifteen seconds and fails with the
+    window's own message if the edit is refused. If it happens again, the failure says which.
+  - Found while reading the code: the window kept showing what was wrong with the last try
+    while a new one was being made. It now clears that first.
+  - For a person this would be a refused redraw with a message, and pressing again works. It
+    should still be understood.
 
 ## Decisions waiting on the owner
 
