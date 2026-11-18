@@ -9,11 +9,11 @@ export const dynamic = 'force-dynamic';
 export default async function Projects({
   searchParams,
 }: {
-  searchParams: Promise<{ error?: string }>;
+  searchParams: Promise<{ error?: string; imported?: string }>;
 }) {
   const user = await requireUser('/projects');
   const projects = await listProjects(db(), user.id);
-  const { error } = await searchParams;
+  const { error, imported } = await searchParams;
   return (
     <main className="page">
       <header className="bar">
@@ -22,6 +22,7 @@ export default async function Projects({
         <SignOut />
       </header>
       {error && <p role="alert">{error}</p>}
+      {imported && <p role="status">Imported {imported} papers from the archive.</p>}
       {projects.length ? (
         <ul className="list">
           {projects.map((p) => (
@@ -40,6 +41,13 @@ export default async function Projects({
           <input name="name" required maxLength={200} />
         </label>
         <button type="submit">Create paper</button>
+      </form>
+      <form action="/api/projects/import" method="post" encType="multipart/form-data">
+        <label>
+          Or import a ZIP of a LaTeX project
+          <input type="file" name="zip" accept=".zip,application/zip" required />
+        </label>
+        <button type="submit">Import ZIP</button>
       </form>
     </main>
   );

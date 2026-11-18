@@ -4,3 +4,5 @@ export * from './auth.ts';
 export * from './authz.ts';
 export * from './projects.ts';
 export * from './blobs.ts';
+export * from './archive.ts';
+export * from './import.ts';

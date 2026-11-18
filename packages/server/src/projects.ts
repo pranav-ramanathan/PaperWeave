@@ -7,7 +7,7 @@ import { AppError } from './errors.ts';
 
 const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 /** Reject anything that is not an ID before it reaches a query that expects one. */
-const id = (value: unknown) => {
+export const id = (value: unknown) => {
   if (typeof value !== 'string' || !UUID.test(value))
     throw new AppError('not_found', 'No such project.');
   return value;
@@ -16,6 +16,7 @@ const hash = (token: string) => createHash('sha256').update(token).digest('hex')
 const INVITE_DAYS = 14;
 
 export type Project = { id: string; name: string; role: Role };
+export type ProjectDetail = Project & { compiler: string; root: string | null };
 export type Member = { userId: string; email: string; name: string; role: Role };
 
 export async function createProject(
@@ -46,9 +47,17 @@ export async function listProjects(db: Db, userId: string): Promise<Project[]> {
   return rows;
 }
 
-export async function getProject(db: Db, userId: string, projectId: string): Promise<Project> {
+export async function getProject(
+  db: Db,
+  userId: string,
+  projectId: string,
+): Promise<ProjectDetail> {
   const role = await authorize(db, userId, id(projectId), 'project.read');
-  const { rows } = await db.query('select id, name from projects where id = $1', [projectId]);
+  const { rows } = await db.query(
+    `select p.id, p.name, p.compiler, f.path as root from projects p left join files f on f.id = p.root_file_id
+     where p.id = $1`,
+    [projectId],
+  );
   return { ...rows[0], role };
 }
 

@@ -1,6 +1,13 @@
 // The web app's handles on the database, sign-in and email. Created on first use, so building
 // the app does not need a database.
-import { AppError, connect, createAuth, type Auth } from '@paperweave/server';
+import {
+  AppError,
+  blobStore,
+  type BlobStore,
+  connect,
+  createAuth,
+  type Auth,
+} from '@paperweave/server';
 import { headers } from 'next/headers';
 import { notFound, redirect } from 'next/navigation';
 import nodemailer from 'nodemailer';
@@ -34,8 +41,14 @@ function services() {
   return (g.__paperweave = { pool, auth });
 }
 export const db = () => services().pool;
+let store: BlobStore | undefined;
+export const blobs = () => (store ??= blobStore());
 export const auth = () => services().auth;
 export const baseUrl = () => need('BETTER_AUTH_URL').replace(/\/$/, '');
+
+/** A form posted to a route handler must come from this site's own pages. */
+export const sameOrigin = (request: Request) =>
+  request.headers.get('origin') === new URL(baseUrl()).origin;
 
 /** Only ever send people to a path on this site. */
 export const safePath = (next: unknown, fallback = '/projects') =>

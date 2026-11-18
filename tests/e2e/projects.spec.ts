@@ -1,39 +1,7 @@
 // Sign-in, papers, people and invitations, through the real pages and real emails.
 // Needs the services in infra/compose.yaml; email is read back from the local mail catcher.
-import { type Browser, expect, type Page, test } from '@playwright/test';
-
-const MAIL = process.env.MAILPIT_URL ?? 'http://localhost:8025';
-const run = Date.now().toString(36);
-const address = (who: string) => `${who}-${run}@example.org`;
-
-/** The first link in the newest email sent to an address. */
-async function emailedLink(to: string, containing: string): Promise<string> {
-  for (let i = 0; i < 40; i++) {
-    const found = await (
-      await fetch(`${MAIL}/api/v1/search?query=${encodeURIComponent(`to:${to}`)}`)
-    ).json();
-    for (const m of found.messages ?? []) {
-      const { Text } = await (await fetch(`${MAIL}/api/v1/message/${m.ID}`)).json();
-      const link = /https?:\/\/\S+/.exec(Text as string)?.[0];
-      if (link?.includes(containing)) return link;
-    }
-    await new Promise((r) => setTimeout(r, 250));
-  }
-  throw new Error(`no email with a ${containing} link reached ${to}`);
-}
-
-/** Ask for a sign-in link on the page that is showing the form, then follow it. */
-async function signIn(page: Page, email: string) {
-  await page.getByLabel('Email address').fill(email);
-  await page.getByRole('button', { name: 'Email me a sign-in link' }).click();
-  await expect(page.getByRole('status')).toContainText('Check');
-  await page.goto(await emailedLink(email, '/magic-link/verify'));
-}
-
-async function person(browser: Browser, who: string) {
-  const page = await (await browser.newContext()).newPage();
-  return { page, email: address(who) };
-}
+import { expect, test } from '@playwright/test';
+import { address, emailedLink, person, run, signIn } from './helpers';
 
 test('sign in, create a paper, invite people, and keep outsiders out', async ({ browser }) => {
   const owner = await person(browser, 'owner');
