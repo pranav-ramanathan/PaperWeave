@@ -334,3 +334,48 @@ test("when a file's text first arrives, the caret is at its start and not on the
   expect(r.state.selection.toJSON()).toMatchObject({ type: 'text' });
   expect(r.state.selection.empty).toBe(true);
 });
+
+test('every atom can be replaced by a command that touches only its own source', () => {
+  let atoms = 0;
+  for (const [path, text] of Object.entries(fixtures)) {
+    const r = replica(text);
+    const found: { pos: number; src: string; type: string }[] = [];
+    r.state.doc.descendants((node, pos) => {
+      if (node.isAtom && typeof node.attrs.src === 'string' && node.attrs.src)
+        found.push({ pos, src: node.attrs.src, type: node.type.name });
+    });
+    for (const a of found) {
+      const c = r.bridge.atomCommand(r.state, a.pos, a.src);
+      expect(c, `${path}: ${a.type} ${a.src.slice(0, 30)}`).not.toBeNull();
+      const from = Y.createAbsolutePositionFromRelativePosition(c!.from, r.ydoc)!.index;
+      const to = Y.createAbsolutePositionFromRelativePosition(c!.to, r.ydoc)!.index;
+      expect(r.src.slice(from, to), `${path}: ${a.type}`).toBe(a.src);
+      atoms++;
+    }
+  }
+  expect(atoms).toBeGreaterThan(40);
+
+  // Replacing a formula changes those bytes and no others, and the two views still agree.
+  const r = replica(fixtures['ieee-multifile/sections/method.tex']);
+  let inline = -1;
+  let display = -1;
+  r.state.doc.descendants((node, pos) => {
+    if (node.type.name === 'math_inline' && inline < 0) inline = pos;
+    if (node.type.name === 'math_block' && display < 0) display = pos;
+  });
+  const before = r.src;
+  expect(r.bridge.applyCommand(r.bridge.atomCommand(r.state, inline, '$T_0$')!)).toBe('applied');
+  expect(r.src).toBe(before.replace('$T$', '$T_0$'));
+  r.check();
+  const block = r.state.doc.nodeAt(display)!.attrs.src as string;
+  const edited = block.replace('+ c .', '+ c + 1 .');
+  expect(r.bridge.applyCommand(r.bridge.atomCommand(r.state, display, edited)!)).toBe('applied');
+  expect(r.src).toBe(before.replace('$T$', '$T_0$').replace('+ c .', '+ c + 1 .'));
+  r.check();
+  // A formula someone else changed meanwhile is not overwritten.
+  const stale = r.bridge.atomCommand(r.state, display, 'x');
+  r.ytext.insert(r.src.indexOf('+ c + 1'), '2');
+  expect(r.bridge.applyCommand(stale!)).toBe('conflict');
+  // Not an atom: no command.
+  expect(r.bridge.atomCommand(r.state, 1, 'x')).toBeNull();
+});
