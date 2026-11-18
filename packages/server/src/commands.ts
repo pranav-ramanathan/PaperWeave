@@ -5,7 +5,7 @@ import * as Y from 'yjs';
 import type { BlobStore } from './blobs.ts';
 import { type Db, transaction } from './db.ts';
 import { AppError } from './errors.ts';
-import { appendUpdate, loadUpdates, openFile, TEXT } from './sync.ts';
+import { appendUpdate, loadUpdates, MAX_FILE_TEXT, openFile, TEXT } from './sync.ts';
 
 const MAX_TEXT = 1_000_000;
 const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
@@ -77,6 +77,8 @@ export async function runCommand(
      * positions that follow the text.
      */
     within?: (db: Db, placed: { from: Uint8Array; to: Uint8Array }) => Promise<void>;
+    /** The longest the file's text may become. The default is what could be imported. */
+    maxFileText?: number;
   } = {},
 ): Promise<CommandResult> {
   const c = check(command);
@@ -106,6 +108,11 @@ export async function runCommand(
     const now = text.toString();
     if (from < 0 || to < from || now.slice(from, to) !== c.expected)
       return { result: 'conflict', text: now };
+    if (now.length - (to - from) + c.replacement.length > (opts.maxFileText ?? MAX_FILE_TEXT))
+      throw new AppError(
+        'invalid_input',
+        'That edit cannot be applied: it would make the file too large.',
+      );
 
     const before = Y.encodeStateVector(doc);
     doc.transact(() => {

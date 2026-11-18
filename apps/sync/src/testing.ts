@@ -26,7 +26,7 @@ export function connect(
     saved?: boolean;
     had: string;
   }[] = [];
-  const state = { refused: false, closed: 0, replies };
+  const state = { refused: false, closed: 0, reasons: [] as string[], replies };
   const socket = new HocuspocusProviderWebsocket({
     url: `ws://127.0.0.1:${port}`,
     // Reconnect quickly. The library refuses a delay below its minimum, silently.
@@ -40,7 +40,10 @@ export function connect(
     document: doc,
     token,
     onAuthenticationFailed: () => void (state.refused = true),
-    onClose: () => void state.closed++,
+    onClose: ({ event }) => {
+      state.closed++;
+      state.reasons.push(`${event.code}:${event.reason}`);
+    },
     onStateless: ({ payload }) =>
       void replies.push({ ...JSON.parse(payload), had: doc.getText(TEXT).toString() }),
   });

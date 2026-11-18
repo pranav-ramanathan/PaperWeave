@@ -42,6 +42,17 @@ What it found is fixed in the same change, or listed under "Open" with what to d
 - **Nothing limited how often a paper asked for a model review.** Each request costs money and
   sends text out. A paper may now ask 30 times an hour; a test holds that nothing is sent past
   the limit. (The feature is off unless a deployment and the paper's owner both turn it on.)
+- **An edit could be any size.** The sync server read a message of up to 100 MB from anyone
+  who could connect, and took an edit of that size from anyone who could write. Fixed after the
+  first version of this review:
+  - Nothing over 4 MB is read off the wire. The connection is closed instead.
+  - An edit over 2 MB is not saved and not applied.
+  - A file's text cannot be made longer than 50 MB by editing, by typing or by a structural
+    edit. That is the size of the largest file that can be imported.
+  - The editor is told why, stops, says so, and offers to discard the unsaved edits. It does
+    not connect again to send the edit again. A service test and a browser test hold all of it.
+  - What this does not limit: how many files a paper has, or how often someone edits. See
+    "Limits on requests in general" below.
 - **A lost connection could lock the editor as if access had been refused.** Not a hole, but
   it was found the same way: see "A failed ticket fetch is not a refusal" in `docs/status.md`.
 
@@ -53,26 +64,24 @@ In rough order of how much they matter.
    what injected script could do if a way to inject one were found. None was found. A strict
    policy needs a nonce on every script the framework emits; that is a change to how pages are
    served and wants its own testing.
-2. **An edit can be any size.** The sync server takes an update of up to the WebSocket's own
-   limit (100 MB) from anyone who may write to a file, and files have no size limit once they
-   are being edited. A member could fill the database. Refusing an oversized edit needs the
-   editor to say so and drop it, or it would retry for ever.
-3. **Limits on requests in general.** Sign-in links, builds and model reviews are limited.
+2. **Limits on requests in general.** Sign-in links, builds and model reviews are limited.
    Reading pages, checking grammar, drawing charts and importing archives are not, beyond
    needing to be signed in. A proxy in front should limit requests per person.
-4. **`picomatch`, one high-severity advisory with no fixed version.** It is in the tree
+   Nor is there a limit on how many files a paper holds or how much they add up to, beyond
+   50 MB a file.
+3. **`picomatch`, one high-severity advisory with no fixed version.** It is in the tree
    through the sign-in library's own development tooling, and is not reached with anything a
    visitor sends. To be looked at again when a fixed version exists.
-5. **A PDF opened by itself is shown by the browser's own viewer from this site's address.**
+4. **A PDF opened by itself is shown by the browser's own viewer from this site's address.**
    The PDFs are built here from the paper's LaTeX in the sandbox, so their content is the
    authors'. Serving them from a separate address would remove the question.
-6. **The sync ticket names a person, not a file.** It lives for a minute and the sync server
+5. **The sync ticket names a person, not a file.** It lives for a minute and the sync server
    checks the person's role on the file when it is used, so it grants nothing the person does
    not have. Binding it to the file would be tidier.
-7. **Model reviews read text an author did not write.** A passage can contain text meant to
+6. **Model reviews read text an author did not write.** A passage can contain text meant to
    steer the model. What the model returns can only become a proposed change that quotes the
    passage exactly, or a question, and a person decides on each; it cannot act. Reviewers
    should still read a review's proposals as carefully as anyone else's.
-8. **What only a deployment can settle:** TLS and HSTS, the production sandbox (the tests use
+7. **What only a deployment can settle:** TLS and HSTS, the production sandbox (the tests use
    Docker on one machine), where the object store and its backups live, retention at the
    model provider, and who can read the metrics page. These wait on the hosting decision.
