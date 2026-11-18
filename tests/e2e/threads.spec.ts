@@ -123,6 +123,28 @@ test('a reviewer starts a thread, the owner answers, and it outlives the text it
   await expect(paperPage.getByRole('listitem').filter({ hasText: 'the latest by' })).toContainText(
     `main.tex: forty. 2 comments, the latest by ${owner.email}.`,
   );
+
+  // The paper is downloaded with its review and imported again: the thread arrives with it,
+  // under the names of the people who wrote it.
+  const [download] = await Promise.all([
+    paperPage.waitForEvent('download'),
+    paperPage.getByRole('link', { name: 'ZIP with review data' }).click(),
+  ]);
+  await paperPage.goto('/projects');
+  await paperPage
+    .getByLabel('Or import a ZIP of a LaTeX project')
+    .setInputFiles(await download.path());
+  await paperPage.getByRole('button', { name: 'Import ZIP' }).click();
+  await expect(
+    paperPage.getByText(/Review data came with the archive: 1 thread and 0 proposed changes/),
+  ).toBeVisible();
+  await expect(paperPage.getByRole('listitem').filter({ hasText: 'the latest by' })).toContainText(
+    `main.tex: forty. 2 comments, the latest by ${owner.email}.`,
+  );
+  await paperPage.getByRole('link', { name: 'main.tex' }).first().click();
+  await expect(paperPage.getByRole('article', { name: 'Thread on “forty”' })).toContainText(
+    reviewer.email,
+  );
   await paperPage.close();
 
   // Resolved, it moves out of the way but is not gone.

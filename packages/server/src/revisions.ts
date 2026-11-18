@@ -188,6 +188,8 @@ export async function exportRevision(
   projectId: string,
   revisionId: string,
   manifest = false,
+  /** More to put in the archive beside the paper's files. */
+  extra: Entry[] = [],
 ): Promise<{ zip: Uint8Array; paper: string; number: number }> {
   await authorize(db, userId, id(projectId), 'project.export');
   const { revision, files } = await load(db, projectId, revisionId);
@@ -249,7 +251,11 @@ export async function exportRevision(
     );
     entries.push({ path: 'paperweave-toolchain.json', bytes: Buffer.from(text + '\n') });
   }
-  return { zip: await writeZip(entries), paper: revision.paper, number: revision.number };
+  return {
+    zip: await writeZip([...entries, ...extra]),
+    paper: revision.paper,
+    number: revision.number,
+  };
 }
 
 /** The PDF built from exactly this revision, or `not_found` if it has not been built. */

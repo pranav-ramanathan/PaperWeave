@@ -308,7 +308,8 @@ export async function listProposals(
   await authorize(pool, userId, id(projectId), 'project.read');
   const { rows } = await pool.query(
     `select p.id, p.file_id, f.path, p.anchor_from, p.anchor_to, p.expected, p.replacement,
-            p.reason, p.status, p.author, p.created_at, p.decided_at, a.email as author_email,
+            p.reason, p.status, p.author, p.created_at, p.decided_at,
+            coalesce(a.email, p.imported_author) as author_email,
             p.origin, p.made_by, p.evidence,
             d.email as decider_email
      from proposals p join files f on f.id = p.file_id
