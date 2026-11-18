@@ -213,14 +213,20 @@ test('a visually edited paper compiles to a PDF, and a broken one reports where'
   await open(page);
   await visualCaret(page, 'A', 'Authors of technical');
   await page.keyboard.type(' & 100% scientific');
+  // What came back is read on its way to the page: the page's policy does not let a script
+  // fetch the link's address, and nothing on the page needs to.
+  let head = '';
+  await page.route('**/api/spike/compile', async (route) => {
+    const answer = await route.fetch();
+    head = (await answer.body()).subarray(0, 5).toString();
+    await route.fulfill({ response: answer });
+  });
   await page.getByRole('button', { name: 'Compile PDF' }).click();
-  const link = page.getByRole('link', { name: 'Open the compiled PDF' });
-  await expect(link).toBeVisible({ timeout: 60_000 });
-  const head = await link.evaluate(async (a: HTMLAnchorElement) => {
-    const bytes = await (await fetch(a.href)).arrayBuffer();
-    return new TextDecoder().decode(bytes.slice(0, 5));
+  await expect(page.getByRole('link', { name: 'Open the compiled PDF' })).toBeVisible({
+    timeout: 60_000,
   });
   expect(head).toBe('%PDF-');
+  await page.unroute('**/api/spike/compile');
 
   await sourceCaret(page, 'A', 'Reviewers then');
   await page.keyboard.type('\\nosuchmacro ');

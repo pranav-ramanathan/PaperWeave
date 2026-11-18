@@ -90,6 +90,7 @@ test('sign-in never sends people to another site', async ({ browser }) => {
 test('every answer says how it may be used: not in a frame, not guessed at, not posted elsewhere', async ({
   request,
 }) => {
+  const policies = new Map<string, string>();
   for (const path of ['/sign-in', '/projects', '/api/sync-ticket']) {
     const headers = (await request.get(path, { maxRedirects: 0 })).headers();
     expect(headers['x-frame-options'], path).toBe('DENY');
@@ -97,5 +98,21 @@ test('every answer says how it may be used: not in a frame, not guessed at, not 
     expect(headers['referrer-policy'], path).toBe('same-origin');
     expect(headers['content-security-policy'], path).toContain("frame-ancestors 'none'");
     expect(headers['content-security-policy'], path).toContain("form-action 'self'");
+    policies.set(path, headers['content-security-policy']);
   }
+  // A page also says which scripts may run on it: those marked with a number made up for that
+  // one answer, and what they load. Nothing else, and nothing from anywhere else.
+  const page = policies.get('/sign-in')!;
+  const number = /script-src 'self' 'nonce-([^']+)' 'strict-dynamic';/.exec(page)?.[1];
+  expect(number, page).toBeTruthy();
+  expect(page).toContain("default-src 'self'");
+  expect(page).toContain("object-src 'none'");
+  expect(page).not.toContain('unsafe-eval');
+  // A new number each time, and the page's own scripts carry it: they are the ones that run.
+  const answer = await request.get('/sign-in');
+  const sent = /'nonce-([^']+)'/.exec(answer.headers()['content-security-policy'])![1];
+  expect(sent).not.toBe(number);
+  const scripts = (await answer.text()).match(/<script[^>]*>/g) ?? [];
+  expect(scripts.length).toBeGreaterThan(0);
+  for (const script of scripts) expect(script).toContain(`nonce="${sent}"`);
 });

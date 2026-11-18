@@ -560,7 +560,7 @@ code that can be written here:
    on (and with what retention at the provider).
 2. **What each document says was not checked.** A real screen reader, browsers other than
    Chromium and real input methods (`docs/accessibility.md`); the open items of
-   `docs/security-review.md`, the first being a script policy; losing the object store
+   `docs/security-review.md`, the first being limits on requests in general; losing the object store
    (`docs/restore-drill.md`); real manuscripts for the grammar benchmark and the claim
    challenge set, which are synthetic today.
 3. **The Phase A replays**, which need a person with accounts: `docs/rea/matrix.md`. The Prism
@@ -583,6 +583,26 @@ Built after the security review, which had it as its second open item.
   back out of what it has not yet sent; later edits may rest on it.
 - **Not limited:** how many files a paper holds, and how often someone edits. A member can
   still grow the log by adding and deleting. Those are the review's "limits in general".
+
+## Which scripts may run on a page
+
+Built after the security review, which had it as its first open item.
+
+- **Where.** `apps/web/proxy.ts` makes a number for each request for a page and sends the
+  policy with it. Next.js reads the number from the policy and puts it on its own scripts.
+  The root layout waits for the request, so no page is made ahead of time: one made ahead of
+  time could not carry a request's number.
+- **A deployment must set `SYNC_URL` for the web app** to the sync server's address. It
+  already had to, for the editor to connect; now the policy is built from it too, and an
+  editor pointed anywhere else is refused by the browser.
+- **A new page that loads something from elsewhere will be refused it.** The browser tests
+  fail when that happens (`tests/e2e/helpers.ts`), and the message names what was refused.
+  Add it to the policy only if the page needs it.
+- **Not checked by those tests:** the workbench at `/spike`, whose tests open pages their own
+  way. It runs under the same policy.
+- **Styles are not held to the number**, and PDFs and ZIPs asked for by address keep the plain
+  policy in `next.config.ts`. `docs/security-review.md` says why.
+- In development the policy also allows `eval`, which React uses there to show server errors.
 
 ## Seen twice, not explained
 
