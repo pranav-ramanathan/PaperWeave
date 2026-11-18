@@ -46,3 +46,62 @@ export function localChanges(doc: Y.Doc, onChange: () => void = () => {}) {
     destroy: () => doc.off('afterTransaction', watch),
   };
 }
+
+/**
+ * Keep the answer to "has the server got everything changed here?" up to date, by asking.
+ *
+ * It asks once typing pauses, and then again, less and less often, until the answer is yes. It
+ * does not wait to be told no: a question that could not be sent, or whose answer never came,
+ * would otherwise leave "saving" on the screen for good.
+ */
+export function watchSaved(
+  doc: Y.Doc,
+  opts: {
+    /** Send a question to the server. */
+    send(question: string): void;
+    /** Whether a question can be sent now. */
+    ready(): boolean;
+    /** Called when the answer changes. */
+    say(unsaved: boolean): void;
+  },
+) {
+  let unsaved = false;
+  let timer: ReturnType<typeof setTimeout> | undefined;
+  let wait = 500;
+  const askIn = (ms: number) => {
+    clearTimeout(timer);
+    timer = setTimeout(() => {
+      if (opts.ready()) opts.send(JSON.stringify(changes.question()));
+      askIn((wait = Math.min(wait * 2, 8000)));
+    }, ms);
+  };
+  const changes = localChanges(doc, () => {
+    unsaved = true;
+    wait = 500;
+    opts.say(true);
+    // Asked once typing pauses, not after every key.
+    askIn(300);
+  });
+  return {
+    get unsaved() {
+      return unsaved;
+    },
+    /** The server's answer to question `n`. A yes to an old question is not a yes to this one. */
+    answered(reply: { n: number; saved: boolean }) {
+      if (!reply.saved || !changes.confirmed(reply.n)) return;
+      unsaved = false;
+      clearTimeout(timer);
+      opts.say(false);
+    },
+    /** Back in touch with the server: ask now, not when the next turn comes round. */
+    reconnected() {
+      if (!unsaved) return;
+      wait = 500;
+      askIn(50);
+    },
+    destroy() {
+      clearTimeout(timer);
+      changes.destroy();
+    },
+  };
+}
