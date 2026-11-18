@@ -13,7 +13,8 @@ import * as Y from 'yjs';
 import { setBibliography } from '../../../../../lib/bibliography';
 import { onShow, showInPdf } from '../../../../../lib/pdfsync';
 import { createVisual, type Visual } from '../../../../../lib/visual';
-import type { Thread } from '@paperweave/server';
+import type { Proposal, Thread } from '@paperweave/server';
+import Proposals from './Proposals';
 import Threads, { type Member, type Stretch } from './Threads';
 import {
   CitationPicker,
@@ -25,10 +26,13 @@ import {
   ReferencePicker,
 } from './Tools';
 
-// The stretches of text with a thread of comments, marked in the source view.
-type Range = { from: number; to: number };
+// The stretches of text with a thread of comments or a proposed change, marked in the source view.
+type Range = { from: number; to: number; kind: 'thread' | 'proposal' };
 const setMarks = StateEffect.define<Range[]>();
-const threadMark = Decoration.mark({ class: 'thread-mark' });
+const MARK = {
+  thread: Decoration.mark({ class: 'thread-mark' }),
+  proposal: Decoration.mark({ class: 'proposal-mark' }),
+};
 const marks = StateField.define<DecorationSet>({
   create: () => Decoration.none,
   update(set, tr) {
@@ -38,7 +42,7 @@ const marks = StateField.define<DecorationSet>({
         set = Decoration.set(
           e.value
             .filter((r) => r.to <= tr.newDoc.length)
-            .map((r) => threadMark.range(r.from, r.to)),
+            .map((r) => MARK[r.kind].range(r.from, r.to)),
           true,
         );
     return set;
@@ -112,10 +116,11 @@ export default function FileEditor(props: {
   const jump = useRef<(line: number) => void>(() => {});
   const lineNow = useRef<() => number>(() => 1);
   /** The selected stretch as two places that move with the text, and how to select one again. */
-  const stretch = useRef<() => Stretch | null>(() => null);
+  const stretch = useRef<(orCaret?: boolean) => Stretch | null>(() => null);
   const showStretch = useRef<(from: string, to: string) => boolean>(() => false);
   /** The file's threads as last read, and how to mark their stretches where they now stand. */
   const threadsNow = useRef<Thread[]>([]);
+  const proposalsNow = useRef<Proposal[]>([]);
   const markThreads = useRef(() => {});
   const router = useRouter();
   // A double-click in the PDF asks for a line: of this file, or of another one of the paper.
@@ -384,13 +389,14 @@ export default function FileEditor(props: {
       view.dispatch({ selection: { anchor: from }, scrollIntoView: true });
       view.focus();
     };
-    stretch.current = () => {
+    stretch.current = (orCaret = false) => {
       const inVisual = visual && modeNow.current === 'visual';
       const sel = inVisual ? visual.editor.state.selection : view.state.selection.main;
       const [from, to] = inVisual
         ? [visual.toSource(sel.from, 1), visual.toSource(sel.to, -1)]
         : [sel.from, sel.to];
-      if (to <= from) return null;
+      // With nothing selected there is only a place: enough for proposing to add text there.
+      if (to < from || (to === from && !orCaret)) return null;
       // The start holds on to the character after it and the end to the one before it, so text
       // typed against either end stays outside.
       const place = (index: number, side: number) =>
@@ -405,9 +411,13 @@ export default function FileEditor(props: {
         doc,
       )?.index ?? -1;
     markThreads.current = () => {
-      const ranges = threadsNow.current.flatMap((t) => {
-        const [from, to] = [whereIs(t.from), whereIs(t.to)];
-        return t.status === 'open' && from >= 0 && to > from ? [{ from, to }] : [];
+      const open = [
+        ...threadsNow.current.map((t) => ({ ...t, kind: 'thread' as const })),
+        ...proposalsNow.current.map((p) => ({ ...p, kind: 'proposal' as const })),
+      ];
+      const ranges = open.flatMap((x) => {
+        const [from, to] = [whereIs(x.from), whereIs(x.to)];
+        return x.status === 'open' && from >= 0 && to > from ? [{ from, to, kind: x.kind }] : [];
       });
       view.dispatch({ effects: setMarks.of(ranges) });
       visual?.setMarks(ranges);
@@ -417,7 +427,7 @@ export default function FileEditor(props: {
     text.observe(remark);
     showStretch.current = (a, b) => {
       const [from, to] = [whereIs(a), whereIs(b)];
-      if (from < 0 || to <= from) return false;
+      if (from < 0 || to < from) return false;
       if (visual && modeNow.current === 'visual') visual.select(from, to);
       else {
         view.dispatch({ selection: { anchor: from, head: to }, scrollIntoView: true });
@@ -608,6 +618,18 @@ export default function FileEditor(props: {
         onTable={askTable}
       />
       <div className="source" ref={host} hidden={mode !== 'source'} />
+      <Proposals
+        projectId={projectId}
+        fileId={fileId}
+        canPropose={props.canComment}
+        canDecide={canWrite}
+        selection={() => stretch.current(true)}
+        show={(from, to) => showStretch.current(from, to)}
+        onProposals={(list) => {
+          proposalsNow.current = list;
+          markThreads.current();
+        }}
+      />
       <Threads
         projectId={projectId}
         fileId={fileId}

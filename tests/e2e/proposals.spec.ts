@@ -1,0 +1,134 @@
+// Proposed changes: a reviewer, who cannot edit, proposes; the owner accepts, undoes, and
+// rejects; a proposal about text that has changed says so. Needs the services and the sync
+// server.
+import { expect, type Page, test } from '@playwright/test';
+import { mkdtempSync, writeFileSync } from 'node:fs';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
+import { writeZip } from '../../packages/server/src/archive';
+import {
+  clickAfter,
+  emailedLink,
+  person,
+  run,
+  selectWord,
+  showSource,
+  signIn,
+  typingSaved,
+} from './helpers';
+
+const MAIN = [
+  '\\documentclass{article}',
+  '\\begin{document}',
+  'Latency stays below forty milliseconds for most edits.',
+  '',
+  'Nothing else is claimed here.',
+  '\\end{document}',
+  '',
+].join('\n');
+const VISUAL = '.editor .visual .ProseMirror';
+const SOURCE = '.editor .cm-content';
+const panel = (page: Page) => page.getByRole('region', { name: 'Proposed changes' });
+
+test('a reviewer proposes a change; the owner accepts it, undoes that, and rejects another', async ({
+  browser,
+}) => {
+  test.setTimeout(120_000);
+  const owner = await person(browser, 'proposal-owner');
+  const reviewer = await person(browser, 'proposal-reviewer');
+  const zip = join(mkdtempSync(join(tmpdir(), 'paperweave-e2e-')), `Proposals ${run}.zip`);
+  writeFileSync(zip, await writeZip([{ path: 'main.tex', bytes: Buffer.from(MAIN) }]));
+  await owner.page.goto('/sign-in');
+  await signIn(owner.page, owner.email);
+  await owner.page.getByLabel('Or import a ZIP of a LaTeX project').setInputFiles(zip);
+  await owner.page.getByRole('button', { name: 'Import ZIP' }).click();
+  await owner.page.getByLabel('Their email address').fill(reviewer.email);
+  await owner.page.getByLabel('Their role').selectOption('reviewer');
+  await owner.page.getByRole('button', { name: 'Send invitation' }).click();
+  await expect(owner.page.getByRole('status')).toContainText(reviewer.email);
+  await reviewer.page.goto(await emailedLink(reviewer.email, '/invitations/'));
+  await signIn(reviewer.page, reviewer.email);
+  await reviewer.page.getByRole('button', { name: 'Join this paper' }).click();
+  await expect(reviewer.page.getByText('You are a reviewer')).toBeVisible();
+  await owner.page.getByRole('link', { name: 'main.tex' }).first().click();
+  await showSource(owner.page);
+  await expect(owner.page.locator(SOURCE)).toContainText('below forty milliseconds');
+
+  // The reviewer selects a word and proposes another. The paper does not change.
+  await reviewer.page.getByRole('link', { name: 'main.tex' }).first().click();
+  await expect(panel(reviewer.page).getByText('No open proposals on this file.')).toBeVisible();
+  await selectWord(reviewer.page, VISUAL, 'forty');
+  await panel(reviewer.page).getByRole('button', { name: 'Propose a change here' }).click();
+  await expect(panel(reviewer.page).getByLabel('Replace it with')).toHaveValue('forty');
+  await panel(reviewer.page).getByLabel('Replace it with').fill('thirty');
+  await panel(reviewer.page).getByLabel('Why (optional)').fill('Measured again.');
+  await panel(reviewer.page).getByRole('button', { name: 'Propose', exact: true }).click();
+  const proposal = (page: Page) =>
+    page.getByRole('article', { name: 'Proposal to change “forty”' });
+  await expect(proposal(reviewer.page)).toContainText('Now: forty');
+  await expect(proposal(reviewer.page)).toContainText('Proposed: thirty');
+  await expect(proposal(reviewer.page)).toContainText('Why: Measured again.');
+  await expect(reviewer.page.locator(`${VISUAL} .proposal-mark`)).toHaveText('forty');
+  // Theirs to change or withdraw, not to accept.
+  await expect(proposal(reviewer.page).getByRole('button', { name: 'Accept' })).toHaveCount(0);
+  await expect(proposal(reviewer.page).getByRole('button', { name: 'Withdraw' })).toBeVisible();
+
+  // The paper's page says what is waiting.
+  const paperPage = await owner.page.context().newPage();
+  await paperPage.goto(owner.page.url().replace(/\/files\/.*$/, ''));
+  await expect(paperPage.getByRole('listitem').filter({ hasText: 'proposes' })).toContainText(
+    `main.tex: ${reviewer.email} proposes changing forty to thirty.`,
+  );
+  await paperPage.close();
+
+  // The owner sees it beside the text, which still says what it said, and accepts it.
+  await expect(proposal(owner.page)).toContainText('Proposed: thirty', { timeout: 15_000 });
+  await expect(owner.page.locator(`${SOURCE} .proposal-mark`)).toHaveText('forty');
+  await proposal(owner.page).getByRole('button', { name: 'Accept' }).click();
+  await expect(owner.page.locator(SOURCE)).toContainText('below thirty milliseconds');
+  // The reviewer's copy follows, as for any edit.
+  await expect(reviewer.page.locator(VISUAL)).toContainText('below thirty milliseconds');
+  await expect(panel(owner.page).getByText('No open proposals on this file.')).toBeVisible();
+  await panel(owner.page).getByText('Decided (1)').click();
+  await expect(proposal(owner.page)).toContainText(`Accepted by ${owner.email}.`);
+
+  // Undone: the old word is back, and the proposal is open again.
+  await proposal(owner.page).getByRole('button', { name: 'Undo the accept' }).click();
+  await expect(owner.page.locator(SOURCE)).toContainText('below forty milliseconds');
+  await expect(proposal(owner.page).getByRole('button', { name: 'Accept' })).toBeEnabled();
+
+  // The owner changes the word. The proposal is now about text its author never saw: it says
+  // so, and cannot be accepted until its author has looked again.
+  await selectWord(owner.page, SOURCE, 'forty');
+  await owner.page.keyboard.press('ArrowLeft');
+  for (let i = 0; i < 3; i++) await owner.page.keyboard.press('ArrowRight');
+  await owner.page.keyboard.type('-');
+  await typingSaved(owner.page);
+  await expect(proposal(owner.page)).toContainText('Out of date.', { timeout: 15_000 });
+  await expect(proposal(owner.page)).toContainText('It now reads: for-ty');
+  await expect(proposal(owner.page).getByRole('button', { name: 'Accept' })).toBeDisabled();
+  await expect(proposal(reviewer.page)).toContainText('Out of date.', { timeout: 15_000 });
+  await proposal(reviewer.page).getByRole('button', { name: 'Change the proposal' }).click();
+  await proposal(reviewer.page).getByLabel('Replace it with').fill('thirty-five');
+  await proposal(reviewer.page).getByRole('button', { name: 'Save the proposal' }).click();
+  const revised = (page: Page) =>
+    page.getByRole('article', { name: 'Proposal to change “for-ty”' });
+  await expect(revised(reviewer.page)).toContainText('Proposed: thirty-five');
+  await expect(revised(reviewer.page)).not.toContainText('Out of date.');
+  await expect(revised(owner.page)).toContainText('Proposed: thirty-five', { timeout: 15_000 });
+  await revised(owner.page).getByRole('button', { name: 'Accept' }).click();
+  await expect(owner.page.locator(SOURCE)).toContainText('below thirty-five milliseconds');
+
+  // With nothing selected, a proposal adds text at the caret. This one is turned down.
+  await clickAfter(reviewer.page, VISUAL, 'claimed here.');
+  await panel(reviewer.page).getByRole('button', { name: 'Propose a change here' }).click();
+  await panel(reviewer.page).getByLabel('Text to add at the caret').fill(' So far.');
+  await panel(reviewer.page).getByRole('button', { name: 'Propose', exact: true }).click();
+  const added = (page: Page) => page.getByRole('article', { name: 'Proposal to change nothing' });
+  await expect(added(owner.page)).toContainText('Proposed: So far.', { timeout: 15_000 });
+  await added(owner.page).getByRole('button', { name: 'Reject' }).click();
+  // (The list of decided proposals went away when the accept was undone; it is closed again.)
+  await panel(owner.page).getByText('Decided (2)').click();
+  await expect(added(owner.page)).toContainText(`Rejected by ${owner.email}.`);
+  await expect(owner.page.locator(SOURCE)).not.toContainText('So far.');
+});

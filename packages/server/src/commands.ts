@@ -3,7 +3,7 @@
 import type pg from 'pg';
 import * as Y from 'yjs';
 import type { BlobStore } from './blobs.ts';
-import { transaction } from './db.ts';
+import { type Db, transaction } from './db.ts';
 import { AppError } from './errors.ts';
 import { appendUpdate, loadUpdates, openFile, TEXT } from './sync.ts';
 
@@ -68,8 +68,16 @@ export async function runCommand(
   userId: string,
   fileId: string,
   command: unknown,
-  // The sync server delivers the edit itself, after it has answered the author.
-  opts: { notify?: boolean } = {},
+  opts: {
+    // The sync server delivers the edit itself, after it has answered the author.
+    notify?: boolean;
+    /**
+     * More to do in the same transaction once the edit is made: it and the edit happen
+     * together or not at all. `placed` is where the replacement now stands, as two encoded
+     * positions that follow the text.
+     */
+    within?: (db: Db, placed: { from: Uint8Array; to: Uint8Array }) => Promise<void>;
+  } = {},
 ): Promise<CommandResult> {
   const c = check(command);
   if (!(await openFile(pool, userId, fileId)).canWrite)
@@ -119,6 +127,12 @@ export async function runCommand(
       fileId,
       userId,
     ]);
+    const place = (index: number, side: number) =>
+      Y.encodeRelativePosition(Y.createRelativePositionFromTypeIndex(text, index, side));
+    await opts.within?.(db, {
+      from: place(from, 0),
+      to: place(from + c.replacement.length, -1),
+    });
     return { result: 'applied', update };
   });
 }
