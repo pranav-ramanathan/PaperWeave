@@ -83,7 +83,8 @@ export async function startSync(opts: {
           connection.readOnly = !(await openFile(pool, connection.context.userId, name)).canWrite;
         } catch (err) {
           if (!(err instanceof AppError)) throw err;
-          connection.close();
+          // The reason tells the editor this is final, not a dropped connection.
+          connection.close({ code: 4403, reason: 'no-access' });
         }
       }
     }

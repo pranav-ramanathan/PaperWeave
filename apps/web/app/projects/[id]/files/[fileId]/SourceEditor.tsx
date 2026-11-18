@@ -1,7 +1,7 @@
 'use client';
 
 import { defaultKeymap } from '@codemirror/commands';
-import { EditorState } from '@codemirror/state';
+import { Compartment, EditorState } from '@codemirror/state';
 import { EditorView, keymap, lineNumbers } from '@codemirror/view';
 import { HocuspocusProvider } from '@hocuspocus/provider';
 import { useEffect, useRef, useState } from 'react';
@@ -10,6 +10,8 @@ import * as Y from 'yjs';
 
 // Must match TEXT in packages/server/src/sync.ts.
 const TEXT = 'source';
+// Must match the reason apps/sync/src/server.ts gives when it closes a file.
+const NO_ACCESS = 'no-access';
 // Presence colours, chosen to stay readable on white. People are told apart by name as well.
 const COLOURS = ['#1f5fbf', '#8a4b00', '#1a7f55', '#9b2d86', '#b3261e', '#5b5bd6'];
 const colourFor = (name: string) =>
@@ -47,7 +49,9 @@ export default function SourceEditor(props: {
       onStatus: ({ status }) => update({ connected: status === 'connected' }),
       onSynced: () => update({ loaded: true }),
       onUnsyncedChanges: ({ number }) => update({ unsynced: number }),
-      onAuthenticationFailed: () => update({ refused: true }),
+      onAuthenticationFailed: () => refuse(),
+      // The server closes a file it will no longer serve: access was taken away, or it was deleted.
+      onClose: ({ event }) => event.reason === NO_ACCESS && refuse(),
     });
     const awareness = provider.awareness!;
     awareness.setLocalStateField('user', {
@@ -64,6 +68,8 @@ export default function SourceEditor(props: {
       );
     awareness.on('change', seen);
 
+    const writable = new Compartment();
+    const lock = (on: boolean) => [EditorState.readOnly.of(on), EditorView.editable.of(!on)];
     const view = new EditorView({
       parent: host.current!,
       state: EditorState.create({
@@ -71,14 +77,19 @@ export default function SourceEditor(props: {
           lineNumbers(),
           EditorView.lineWrapping,
           EditorView.contentAttributes.of({ 'aria-label': `LaTeX source of ${props.path}` }),
-          EditorState.readOnly.of(!canWrite),
-          EditorView.editable.of(canWrite),
+          writable.of(lock(!canWrite)),
           keymap.of([...yUndoManagerKeymap, ...defaultKeymap]),
           // One undo history per person: undo never takes back someone else's edit.
           yCollab(text, awareness, { undoManager: new Y.UndoManager(text) }),
         ],
       }),
     });
+
+    // Typing into a file that is no longer served would go nowhere, so it stops.
+    const refuse = () => {
+      update({ refused: true });
+      view.dispatch({ effects: writable.reconfigure(lock(true)) });
+    };
 
     // Closing the tab with edits the server has not confirmed would lose them.
     const warn = (e: BeforeUnloadEvent) => {
@@ -105,7 +116,7 @@ export default function SourceEditor(props: {
 
   const waiting = `${sync.unsynced} edit${sync.unsynced === 1 ? '' : 's'}`;
   const status = sync.refused
-    ? 'You no longer have access to this file.'
+    ? 'You no longer have access to this file, or it has been deleted.'
     : !sync.loaded
       ? 'Opening…'
       : !sync.connected
