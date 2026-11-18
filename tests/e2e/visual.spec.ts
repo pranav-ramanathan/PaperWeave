@@ -134,6 +134,8 @@ test('visual edits reach the source through the server, byte for byte', async ({
 
   // LaTeX the visual view does not edit is shown as it is, with a way to its source.
   await owner.page.getByRole('link', { name: 'main.tex' }).click();
+  // The file that was open has such buttons too: wait for the one that was asked for.
+  await expect(owner.page.getByRole('region', { name: 'Editor for main.tex' })).toBeVisible();
   await owner.page.locator(VISUAL).getByRole('button', { name: 'Edit in source' }).first().click();
   await expect(view(owner.page, 'Source')).toHaveAttribute('aria-pressed', 'true');
   await expect(owner.page.locator(SOURCE)).toBeFocused();

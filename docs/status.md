@@ -342,6 +342,29 @@ Read this first. Update it in every pull request.
     "Open the PDF by itself" opens the browser's viewer. A text layer is left for Phase F.
   - When the PDF is behind the text, lines are those of the text that was built, so a place can
     be a few lines off until the next build.
+- **E1: threads.** Comments about a stretch of a file's text, in a "Comments" panel under the
+  editor. Owners, editors and reviewers can start a thread on the selected text (in either
+  view), reply, mention others on the paper, resolve and open again. Viewers read.
+  - A thread's stretch is two Yjs relative positions (`packages/server/src/threads.ts`, tables
+    in migration 0014). The start holds on to the character after it and the end to the one
+    before, so text typed against either end stays outside, and the stretch follows the text.
+  - `listThreads` says where each thread stands: `attached` (the text is as it was), `changed`
+    (edited since, with how it reads now) or `detached` (all of it deleted). A detached thread
+    keeps the words it was about and 80 characters either side, and can still be answered and
+    resolved.
+  - A detached thread can be attached again to the words it was started on, where they stand
+    now, if they are in the file exactly once (`reattachThread`). Otherwise it says why not.
+  - The editor makes the positions from its own copy of the text; the server checks them
+    against the saved text and takes the words from there, not from the client. A stretch typed
+    a moment ago and not yet saved is refused with "try again in a moment".
+  - Open threads are marked in the text in both views (tinted and underlined). The editor
+    places the marks from its own copy of the text, so they move as it is typed into without
+    waiting for the server.
+  - A mention sends an email that says who mentioned whom, on which paper, with a link. It
+    holds none of the comment or the text.
+  - "Show in the text" selects a thread's stretch in whichever view is open. The panel reads
+    the threads again every five seconds. The paper's page lists its open threads.
+  - Not yet: editing or deleting a comment.
 - **A restore keeps what it replaces.** Found by the fault suite on a seed it had not run before.
   A restore put back the chosen revision but kept no copy of the paper as it stood, so text typed
   since the last revision (an edit that reached the server a moment before, say) was erased with
@@ -366,10 +389,12 @@ nothing, edit it together, build it, and download a ZIP and a PDF that belong to
 
 Next, in this order:
 
-1. **E1.** Threads: comments anchored to a stretch of text, replies, mentions, resolving. A
-   thread whose text is deleted is kept, detached, with the text it was about.
-2. **E2** onward, as in the plan. The owner's decision on where tracked changes are stored
-   (beside the source, not in it) is wanted before E2.
+1. **E2.** Proposed edits and tracked changes: a reviewer proposes a change to a stretch of
+   text without writing to the paper; an owner or editor accepts it (through the command path,
+   so a proposal on text that has changed is flagged stale), rejects it, or undoes an accept.
+   Proposals are stored beside the source, not in it, so the PDF never shows a pending one.
+   That choice is the owner's to confirm (see `docs/plan.md`); it is the plan's default.
+2. **E3** onward, as in the plan.
 
 The Phase A replays are waiting on a person with accounts: `docs/rea/matrix.md`. The Prism one is
 optional: its export was researched from public sources (`docs/rea/prism.md`) and is a plain LaTeX

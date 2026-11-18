@@ -19,6 +19,7 @@ import {
 import { Editor, Extension, type Node } from '@tiptap/core';
 import type { Node as PMNode } from '@tiptap/pm/model';
 import { Plugin } from '@tiptap/pm/state';
+import { Decoration, DecorationSet } from '@tiptap/pm/view';
 import katex from 'katex';
 import * as Y from 'yjs';
 import { bibliography, onBibliography } from './bibliography';
@@ -545,6 +546,8 @@ export function createVisual(opts: {
     raw_block: block,
     frozen: block,
   };
+  /** Stretches of the source to mark in the text: those with a thread of comments. */
+  let marked: { from: number; to: number }[] = [];
   const editor: Editor = new Editor({
     element: opts.element,
     editable: opts.editable,
@@ -562,6 +565,23 @@ export function createVisual(opts: {
         name: 'bridge',
         addProseMirrorPlugins: () => [
           new Plugin({ filterTransaction: (tr, state) => !bridge || bridge.filter(tr, state) }),
+          // The stretches of text that have a thread of comments, marked where they stand now.
+          new Plugin({
+            props: {
+              decorations: (state) => {
+                if (!bridge || !marked.length) return null;
+                const size = state.doc.content.size;
+                const at = (off: number) => Math.min(size, fromSrc(bridge.model, state.doc, off));
+                return DecorationSet.create(
+                  state.doc,
+                  marked.flatMap((m) => {
+                    const [from, to] = [at(m.from), at(m.to)];
+                    return to > from ? [Decoration.inline(from, to, { class: 'thread-mark' })] : [];
+                  }),
+                );
+              },
+            },
+          }),
         ],
         onTransaction: ({ transaction }) => bridge?.applied(transaction),
         addKeyboardShortcuts: () => ({
@@ -661,6 +681,12 @@ export function createVisual(opts: {
       editor.view.focus();
       const size = editor.state.doc.content.size;
       editor.commands.setTextSelection({ from: Math.min(from, size), to: Math.min(to, size) });
+    },
+    /** Mark these stretches of the source in the text. */
+    setMarks(ranges: { from: number; to: number }[]) {
+      marked = ranges;
+      // Nothing changes but what is drawn.
+      editor.view.dispatch(editor.state.tr.setMeta('marks', true));
     },
     /** Where a place in the visual document is in the source text. */
     toSource: (pos: number, side: -1 | 1) => toSrc(bridge.model, editor.state.doc, pos, side),

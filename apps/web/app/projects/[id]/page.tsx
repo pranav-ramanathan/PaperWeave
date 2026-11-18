@@ -11,6 +11,7 @@ import {
   listFiles,
   listMembers,
   listRevisions,
+  listThreads,
 } from '@paperweave/server';
 import Link from 'next/link';
 import { notFound } from 'next/navigation';
@@ -71,13 +72,26 @@ export default async function Project({
     citationChecks(db(), blobs(), user.id, id),
     listDatasets(db(), blobs(), user.id, id),
     listCharts(db(), blobs(), user.id, id),
+    listThreads(db(), blobs(), user.id, id),
   ]).catch((err) => {
     // Not a member, or no such paper: the two look the same from outside.
     if (err instanceof AppError && err.code === 'not_found') notFound();
     throw err;
   });
-  const [project, members, files, report, revisions, labels, cited, checks, datasets, charts] =
-    loaded;
+  const [
+    project,
+    members,
+    files,
+    report,
+    revisions,
+    labels,
+    cited,
+    checks,
+    datasets,
+    charts,
+    threads,
+  ] = loaded;
+  const openThreads = threads.filter((t) => t.status === 'open');
   const dataFiles = files.filter((f) => /\.(csv|tsv)$/i.test(f.path) && !f.readonly);
   const reviewer = can(project.role, 'comment.write');
   const day = (iso: string) => iso.slice(0, 10);
@@ -607,6 +621,27 @@ export default async function Project({
                 ))}
               </ul>
             </>
+          )}
+        </>
+      )}
+
+      {threads.length > 0 && (
+        <>
+          <h2 id="comments">Comments</h2>
+          {openThreads.length === 0 ? (
+            <p>Every thread is resolved.</p>
+          ) : (
+            <ul className="report">
+              {openThreads.map((t) => (
+                <li key={t.id}>
+                  <Link href={`/projects/${id}/files/${t.fileId}#comments`}>{t.path}</Link>:{' '}
+                  <q>{t.excerpt.length > 80 ? `${t.excerpt.slice(0, 80)}…` : t.excerpt}</q>
+                  {t.state === 'detached' && <strong> (this text has been deleted)</strong>}.{' '}
+                  {t.comments.length} {t.comments.length === 1 ? 'comment' : 'comments'}, the latest
+                  by {t.comments.at(-1)?.author ?? 'someone who has left'}.
+                </li>
+              ))}
+            </ul>
           )}
         </>
       )}
