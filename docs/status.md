@@ -98,6 +98,28 @@ Read this first. Update it in every pull request.
   - This is the editor's own check. The server would still accept the edits from a client that
     did not ask; anyone who can send them may edit the file anyway.
   - It is per paper, not per file: a restore that did not touch the open file still asks.
+- **C8, second part: the fault suite and monitoring.**
+  - `apps/sync/src/faults.sandbox.test.ts`: three people type while connections drop, edits
+    are delivered twice, the server is killed, access is taken away and given back, the log is
+    compacted and the paper is restored. Nothing the server confirmed may be missing from the
+    stored text, at any check or right after a kill, and everyone must end with the same text.
+    Seeded: `SEED=<n> FAULTS=<steps>` replays a run. It passed 20 seeds in a row, and one run of
+    500 steps.
+  - "Saved" is now exact. The editor asks the server whether it holds every insert and delete
+    made in this tab (`localChanges` in `packages/bridge`, `holds` in `packages/server`). The
+    sync library's own count reaches zero too early after a reconnect, because edits queued
+    while offline are confirmed after the count was reset. The status line, the warning on
+    closing the tab, and the hold after a restore all use the exact answer.
+  - Restores replace whole lines. An edit made offline before a restore is merged in at an edge
+    of the replaced part, and used to be able to land in the middle of a line.
+  - The editor reconnects whenever it should be connected. The library ignores a request to
+    connect made while a disconnect is still closing, which could leave a tab offline for good.
+  - Monitoring: the sync server serves `/metrics` (Prometheus text) to whoever sends
+    `METRICS_TOKEN`; with no token set the page does not exist. It reports the build queue's
+    length and the age of its oldest entry, builds finished in the last hour by result, edits
+    saved and refused, connections let in, refused and open, structural edits, and compactions.
+    Counts only. Nothing reads it yet: dashboards and alerts wait on the hosting decision.
+  - Reconnects are not counted apart from first connections.
 - **Phase B spike.** Gate report: `docs/phase-b-gate.md`. Recommendation: go.
   - `packages/latex`: lossless block parser, incremental reparse, include graph, encoding round
     trip, coverage.
@@ -107,14 +129,12 @@ Read this first. Update it in every pull request.
 
 ## Next
 
-C1 to C7 are done. C1 to C5 complete the first end-to-end slice: import a ZIP or start from
+Phase C (C1 to C8) is done. C1 to C5 complete the first end-to-end slice: import a ZIP or start from
 nothing, edit it together, build it, and download a ZIP and a PDF that belong to the same revision.
 
 Next, in this order:
 
-1. **C8, the rest.** The fault suite (zero acknowledged edits lost across disconnect, duplicate
-   delivery, restart, revocation and restore) and monitoring (queue age, build failures, rejected
-   writes, reconnects).
+1. **Phase D**, starting with D1 (maths and cross-references). Phase C is done.
 
 The Phase A replays are waiting on a person with accounts: `docs/rea/matrix.md`. The Prism one is
 optional: its export was researched from public sources (`docs/rea/prism.md`) and is a plain LaTeX
@@ -138,7 +158,7 @@ See "What I need from you" in `docs/plan.md`. None blocks C1.
 ## Conventions
 
 - Tests that use randomness take a seed and print it on failure. `FUZZ=<n>` changes how many
-  cases run.
+  cases run; the fault suite takes `SEED=<n>` and `FAULTS=<steps>`.
 - Tests that need Docker (the TeX image, Postgres, the object store) are named
   `*.sandbox.test.ts` and run with `pnpm test:sandbox` after
   `docker compose -f infra/compose.yaml up -d --wait`.

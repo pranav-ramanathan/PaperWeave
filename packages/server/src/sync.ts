@@ -183,6 +183,27 @@ export async function compactFile(pool: pg.Pool, fileId: string): Promise<number
   });
 }
 
+/**
+ * Whether a document holds everything in a snapshot: every insert it counts and every delete it
+ * lists. The sync server's copy only ever holds what is already in the log, so for that copy
+ * "holds" means "saved".
+ */
+export function holds(doc: Y.Doc, snapshot: Uint8Array): boolean {
+  const want = Y.decodeSnapshot(snapshot);
+  for (const [client, clock] of want.sv) if (Y.getState(doc.store, client) < clock) return false;
+  // Ranges of deleted text per author, adjoining ones merged, so one wanted range lies in one.
+  const have = Y.createDeleteSetFromStructStore(doc.store);
+  for (const [client, ranges] of want.ds.clients)
+    for (const w of ranges)
+      if (
+        !(have.clients.get(client) ?? []).some(
+          (h) => h.clock <= w.clock && w.clock + w.len <= h.clock + h.len,
+        )
+      )
+        return false;
+  return true;
+}
+
 /** A file's bytes as they stand now: the uploaded bytes if nobody has edited it, else its text. */
 export async function currentBytes(
   db: Db,

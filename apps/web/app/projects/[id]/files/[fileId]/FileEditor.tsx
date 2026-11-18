@@ -4,7 +4,7 @@ import { defaultKeymap } from '@codemirror/commands';
 import { Compartment, EditorState } from '@codemirror/state';
 import { EditorView, keymap, lineNumbers } from '@codemirror/view';
 import { HocuspocusProvider } from '@hocuspocus/provider';
-import type { Command, CommandResult } from '@paperweave/bridge';
+import { type Command, type CommandResult, localChanges } from '@paperweave/bridge';
 import { useEffect, useRef, useState } from 'react';
 import { flushSync } from 'react-dom';
 import { yCollab, yUndoManagerKeymap } from 'y-codemirror.next';
@@ -23,7 +23,8 @@ const colourFor = (name: string) =>
 type Sync = {
   connected: boolean;
   loaded: boolean;
-  unsynced: number;
+  /** This person has made changes that the server has not confirmed it holds. */
+  unsaved: boolean;
   refused: boolean;
   /** The paper was restored while this person was offline with edits of their own. */
   held: boolean;
@@ -31,6 +32,8 @@ type Sync = {
 type Mode = 'visual' | 'source';
 /** The sync server's answer to a structural edit. */
 type Reply = { result?: CommandResult; update?: string; error?: string };
+/** Its answer to "do you have all my changes?". */
+type Saved = { n: number; saved: boolean };
 
 const toBase64 = (bytes: Uint8Array) =>
   btoa(String.fromCharCode(...bytes))
@@ -67,7 +70,7 @@ export default function FileEditor(props: {
   const [sync, setSync] = useState<Sync>({
     connected: false,
     loaded: false,
-    unsynced: 0,
+    unsaved: false,
     refused: false,
     held: false,
   });
@@ -88,7 +91,7 @@ export default function FileEditor(props: {
         const { ticket, restored } = await (await fetch(`/api/sync-ticket?file=${fileId}`)).json();
         // Coming back online to a paper that was restored meanwhile: this person's unsent edits
         // were made to text that is no longer there. They are held until the person decides.
-        if (restoreSeen !== null && restored !== restoreSeen && provider.hasUnsyncedChanges) {
+        if (restoreSeen !== null && restored !== restoreSeen && unsaved) {
           restoreHeld = restored;
           update({ held: true });
           setLocked(true);
@@ -100,26 +103,58 @@ export default function FileEditor(props: {
       },
       onStatus: ({ status }) => {
         update({ connected: status === 'connected' });
-        // "Apply my edits" closed the connection to open a fresh one: do that once it has closed.
-        if (status === 'disconnected' && reopen) {
-          reopen = false;
-          void provider.configuration.websocketProvider.connect();
-        }
+        // The library ignores a request to connect made while a disconnect is still closing,
+        // and then stays down. So whenever the connection has closed and this tab should be
+        // connected, and the library is not going to try by itself, ask again.
+        const socket = provider.configuration.websocketProvider;
+        if (status === 'disconnected' && wantOpen && !socket.shouldConnect) void socket.connect();
       },
-      onSynced: () => update({ loaded: true }),
-      onUnsyncedChanges: ({ number }) => update({ unsynced: number }),
+      onSynced: () => {
+        update({ loaded: true });
+        // Back in touch: find out whether what was typed meanwhile has arrived.
+        if (unsaved) askSoon(50);
+      },
       onAuthenticationFailed: () => restoreHeld === null && refuse(),
       onStateless: ({ payload }) => {
-        const reply: Reply & { key: string } = JSON.parse(payload);
+        const reply: (Reply & { key: string }) | Saved = JSON.parse(payload);
+        if ('saved' in reply) return answered(reply);
         waiting.get(reply.key)?.(reply);
       },
       // The server closes a file it will no longer serve: access was taken away, or it was deleted.
       onClose: ({ event }) => event.reason === NO_ACCESS && refuse(),
     });
+    // Whether this person's changes are saved is asked of the server, not inferred: "do you hold
+    // every insert and delete I have made?". The sync library's own count of confirmations
+    // reaches zero too early after a reconnect.
+    let unsaved = false;
+    let asking: ReturnType<typeof setTimeout> | undefined;
+    let retry = 500;
+    const askSoon = (ms: number) => {
+      clearTimeout(asking);
+      asking = setTimeout(() => {
+        if (provider.synced) provider.sendStateless(JSON.stringify(changes.question()));
+      }, ms);
+    };
+    const changes = localChanges(doc, () => {
+      unsaved = true;
+      retry = 500;
+      update({ unsaved: true });
+      // Asked once typing pauses, not after every key.
+      askSoon(300);
+    });
+    const answered = (reply: Saved) => {
+      if (reply.saved && changes.confirmed(reply.n)) {
+        unsaved = false;
+        return update({ unsaved: false });
+      }
+      // Not there yet (or more was typed since): ask again, less and less often.
+      if (!reply.saved) askSoon((retry = Math.min(retry * 2, 8000)));
+    };
     /** The paper's newest restore when this tab last connected, and one found since, if held. */
     let restoreSeen: number | null = null;
     let restoreHeld: number | null = null;
-    let reopen = false;
+    /** Whether this tab should be connected: false only while the browser says it is offline. */
+    let wantOpen = true;
     const awareness = provider.awareness!;
     awareness.setLocalStateField('user', {
       name: user,
@@ -234,27 +269,35 @@ export default function FileEditor(props: {
       restoreHeld = null;
       update({ held: false });
       setLocked(false);
-      reopen = true;
+      // A fresh connection, made once this one has closed.
       socket.disconnect();
     };
 
     // Closing the tab with edits the server has not confirmed would lose them.
     let discarding = false;
     const warn = (e: BeforeUnloadEvent) => {
-      if (provider.hasUnsyncedChanges && !discarding) e.preventDefault();
+      if (unsaved && !discarding) e.preventDefault();
     };
     window.addEventListener('beforeunload', warn);
     // An open socket can sit silent for a long time after the network goes. When the browser
     // says it is offline, say so at once, and reconnect the moment it is back.
     const socket = provider.configuration.websocketProvider;
-    const offline = () => socket.disconnect();
-    const online = () => void socket.connect();
+    const offline = () => {
+      wantOpen = false;
+      socket.disconnect();
+    };
+    const online = () => {
+      wantOpen = true;
+      void socket.connect();
+    };
     window.addEventListener('offline', offline);
     window.addEventListener('online', online);
     return () => {
       window.removeEventListener('offline', offline);
       window.removeEventListener('online', online);
       window.removeEventListener('beforeunload', warn);
+      clearTimeout(asking);
+      changes.destroy();
       visual?.destroy();
       view.destroy();
       undo.destroy();
@@ -264,19 +307,18 @@ export default function FileEditor(props: {
     // The editor is rebuilt only when a different file is opened.
   }, [projectId, fileId, canWrite, user, syncUrl, props.path, props.visual, sourceOnly]);
 
-  const waiting = `${sync.unsynced} edit${sync.unsynced === 1 ? '' : 's'}`;
   const status = sync.refused
     ? 'You no longer have access to this file, or it has been deleted.'
     : sync.held
-      ? `This paper was restored to an earlier revision while you were offline. Your ${waiting} from before that ${sync.unsynced === 1 ? 'is' : 'are'} not saved.`
+      ? 'This paper was restored to an earlier revision while you were offline. Your edits from before that are not saved.'
       : !sync.loaded
         ? 'Opening…'
         : !sync.connected
-          ? `Offline. ${sync.unsynced ? `${waiting} waiting to be saved.` : 'Nothing is waiting to be saved.'}`
+          ? `Offline. ${sync.unsaved ? 'Your edits are waiting to be saved.' : 'Nothing is waiting to be saved.'}`
           : !canWrite
             ? 'Read only. You can read along but not edit.'
-            : sync.unsynced
-              ? `Saving ${waiting}…`
+            : sync.unsaved
+              ? 'Saving your edits…'
               : 'All edits saved.';
   return (
     <section aria-label={`Editor for ${props.path}`}>
