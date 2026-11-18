@@ -9,7 +9,8 @@ import { useEffect, useRef, useState } from 'react';
 import { flushSync } from 'react-dom';
 import { yCollab, yUndoManagerKeymap } from 'y-codemirror.next';
 import * as Y from 'yjs';
-import { createVisual, renderMath, type Visual } from '../../../../../lib/visual';
+import { createVisual, type Visual } from '../../../../../lib/visual';
+import { EditorMenu, FormulaBox, type FormulaRequest, ReferencePicker } from './Tools';
 
 // Must match TEXT in packages/server/src/sync.ts.
 const TEXT = 'source';
@@ -69,44 +70,29 @@ export default function FileEditor(props: {
   const [note, setNote] = useState('');
   // The paper's macros as they were when the page was made. Not a reason to rebuild the editors.
   const macros = useRef(props.macros);
-  /** A formula open for editing: what the person has typed, and how to put it in its place. */
-  const [formula, setFormula] = useState<{
-    draft: string;
-    problem: string;
-    apply(replacement: string): Promise<CommandResult>;
-  } | null>(null);
-  const formulaBox = useRef<HTMLDialogElement>(null);
-  const preview = useRef<HTMLDivElement>(null);
-  const [previewProblem, setPreviewProblem] = useState('');
-  useEffect(() => {
-    const box = formulaBox.current;
-    if (formula && box && !box.open) box.showModal();
-    if (!formula && box?.open) box.close();
-  }, [formula]);
-  const draft = formula?.draft;
-  useEffect(() => {
-    if (draft === undefined || !preview.current) return;
-    try {
-      renderMath(preview.current, draft, { macros: macros.current });
-      setPreviewProblem('');
-    } catch (err) {
-      preview.current.textContent = '';
-      setPreviewProblem((err as Error).message);
-    }
-  }, [draft]);
-  const applyFormula = async () => {
-    if (!formula) return;
-    const failed = (problem: string) => setFormula((f) => f && { ...f, problem });
-    try {
-      // The server replaces the formula only if it still says what it said when it was opened.
-      if ((await formula.apply(formula.draft)) !== 'conflict') return setFormula(null);
-      failed(
-        'Someone changed this formula while you were editing it. Copy your text if you want to keep it, cancel, and open the formula again.',
-      );
-    } catch {
-      failed('That edit could not be made. Check the connection and try again.');
-    }
+  /** A formula being edited or inserted, a reference being chosen, and the menu, when open. */
+  const [formula, setFormula] = useState<FormulaRequest | null>(null);
+  const [picker, setPicker] = useState<{ apply: FormulaRequest['apply'] } | null>(null);
+  const [menu, setMenu] = useState<{ x: number; y: number; formula?: () => void } | null>(null);
+  /** Start inserting something where the caret is. The place is fixed now, not when it is done. */
+  const insertHere = (then: (apply: FormulaRequest['apply']) => void) => {
+    const apply = live.current?.visual?.insertion();
+    if (apply) then(apply);
+    else setNote('Put the caret in the text where it should go, then try again.');
   };
+  const askEquation = () => insertHere((apply) => setFormula({ src: '', place: 'inline', apply }));
+  const askReference = () => insertHere((apply) => setPicker({ apply }));
+  // The editors are made once; what they call must be what this render means.
+  const asks = useRef({ equation: askEquation, reference: askReference });
+  asks.current = { equation: askEquation, reference: askReference };
+  // When a window closes, the keyboard goes back to the text. This runs after the window's own
+  // effect has closed it, which is when the browser has handed focus back.
+  const windowOpen = !!formula || !!picker;
+  const hadWindow = useRef(false);
+  useEffect(() => {
+    if (hadWindow.current && !windowOpen && mode === 'visual') live.current?.visual?.focus();
+    hadWindow.current = windowOpen;
+  }, [windowOpen, mode]);
   // Until the editors exist there is no selection to carry: a click just changes the view.
   const switchTo = useRef<(next: Mode) => void>(setMode);
   const [sync, setSync] = useState<Sync>({
@@ -267,7 +253,9 @@ export default function FileEditor(props: {
           showInSource: (from, to) => show('source', from, to),
           run,
           macros: macros.current,
-          editMath: (src, apply) => setFormula({ draft: src, problem: '', apply }),
+          editMath: (src, apply) => setFormula({ src, place: null, apply }),
+          ask: (what) => asks.current[what](),
+          menu: setMenu,
         })
       : null;
     live.current = { view, visual, undo };
@@ -410,6 +398,12 @@ export default function FileEditor(props: {
               <button type="button" onClick={() => live.current?.undo.redo()}>
                 Redo
               </button>
+              <button type="button" onClick={askReference} aria-keyshortcuts="Alt+R" title="Alt+R">
+                Reference
+              </button>
+              <button type="button" onClick={askEquation} aria-keyshortcuts="Alt+=" title="Alt+=">
+                Equation
+              </button>
             </span>
           )}
           <span className="note" aria-live="polite">
@@ -418,47 +412,17 @@ export default function FileEditor(props: {
         </div>
       )}
       <div className="visual" ref={visualHost} hidden={mode !== 'visual'} />
-      <dialog
-        ref={formulaBox}
-        className="formula"
-        aria-labelledby="formula-title"
-        onClose={() => setFormula(null)}
-      >
-        <form
-          onSubmit={(e) => {
-            e.preventDefault();
-            void applyFormula();
-          }}
-        >
-          <h2 id="formula-title">Edit formula</h2>
-          <label>
-            LaTeX
-            <textarea
-              rows={6}
-              spellCheck={false}
-              value={formula?.draft ?? ''}
-              onChange={(e) => setFormula((f) => f && { ...f, draft: e.target.value, problem: '' })}
-            />
-          </label>
-          <p className="label">As it will look</p>
-          <div className="preview" ref={preview} />
-          {previewProblem && (
-            <p className="note">
-              This cannot be drawn here ({previewProblem}). It can still be applied: the PDF is what
-              decides.
-            </p>
-          )}
-          {formula?.problem && <p role="alert">{formula.problem}</p>}
-          <p>
-            <button type="submit" disabled={!formula?.draft.trim()}>
-              Apply
-            </button>{' '}
-            <button type="button" onClick={() => setFormula(null)}>
-              Cancel
-            </button>
-          </p>
-        </form>
-      </dialog>
+      <FormulaBox request={formula} macros={macros.current} onDone={() => setFormula(null)} />
+      <ReferencePicker request={picker} projectId={projectId} onDone={() => setPicker(null)} />
+      <EditorMenu
+        at={menu}
+        onClose={() => {
+          setMenu(null);
+          live.current?.visual?.focus();
+        }}
+        onReference={askReference}
+        onEquation={askEquation}
+      />
       <div className="source" ref={host} hidden={mode !== 'source'} />
     </section>
   );

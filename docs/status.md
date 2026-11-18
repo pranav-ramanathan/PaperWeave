@@ -160,6 +160,20 @@ Read this first. Update it in every pull request.
     (`macroDefs`, `paperMacros`). So does the visual view itself.
   - Macros are read when the page loads. A macro defined since shows after a reload.
   - A formula the browser cannot draw can still be applied: the PDF is what decides.
+- **D1, fifth part: inserting references and equations.** In the visual view, three ways each:
+  the toolbar ("Reference", "Equation"), the keyboard (Alt+R, Alt+=), and a menu at a place in
+  the text (right click, or the menu key). With that, D1 is done.
+  - A reference is chosen from the paper's labels, each shown with its number in the PDF and
+    its file; typing narrows the list. A label that starts `eq:` is inserted as `\eqref`.
+  - An equation goes in the line (`$...$`) or on a line of its own, numbered
+    (`\begin{equation}`), with a preview as it is typed.
+  - Insertions go through the server, at the place the caret was when the window opened, even
+    if the text has moved since (`Bridge.insertCommand`). Afterwards the caret is just after
+    what was inserted.
+  - The menu replaces the browser's own; Shift + right click still opens that one, and the menu
+    says so. On a formula the menu offers to edit it.
+  - `apps/web/.../Tools.tsx` holds the three small windows. They are native dialogs and a
+    `role="menu"` list, worked from the keyboard.
 - **Phase B spike.** Gate report: `docs/phase-b-gate.md`. Recommendation: go.
   - `packages/latex`: lossless block parser, incremental reparse, include graph, encoding round
     trip, coverage.
@@ -174,9 +188,9 @@ nothing, edit it together, build it, and download a ZIP and a PDF that belong to
 
 Next, in this order:
 
-1. **D1, the rest.** Insert a reference or an equation from the toolbar, the keyboard and the
-   context menu.
-2. **D2** onward, as in the plan.
+1. **D2.** Bibliography: BibTeX and Biber, the key index, missing and duplicate keys, inserting
+   a citation, DOI lookup. The reference picker in `Tools.tsx` is the pattern for the citation one.
+2. **D3** onward, as in the plan.
 
 The Phase A replays are waiting on a person with accounts: `docs/rea/matrix.md`. The Prism one is
 optional: its export was researched from public sources (`docs/rea/prism.md`) and is a plain LaTeX

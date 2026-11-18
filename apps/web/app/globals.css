@@ -511,20 +511,20 @@ div.pw-frozen strong {
 }
 
 /* Editing one formula's LaTeX. */
-dialog.formula {
+dialog.tool {
   width: min(42rem, 92vw);
   border: 1px solid var(--line);
   border-radius: 10px;
   padding: 1rem 1.25rem;
 }
-dialog.formula::backdrop {
+dialog.tool::backdrop {
   background: rgb(0 0 0 / 0.35);
 }
-dialog.formula h2 {
+dialog.tool h2 {
   margin: 0 0 0.6rem;
   font-size: 1.1rem;
 }
-dialog.formula textarea {
+dialog.tool textarea {
   display: block;
   width: 100%;
   font:
@@ -532,21 +532,76 @@ dialog.formula textarea {
     monospace;
   margin-top: 0.25rem;
 }
-dialog.formula .label {
+dialog.tool .label {
   margin: 0.8rem 0 0.2rem;
   color: var(--muted);
 }
-dialog.formula .preview {
+dialog.tool .preview {
   min-height: 3rem;
   padding: 0.5rem;
   border: 1px dashed var(--line);
   border-radius: 6px;
   overflow-x: auto;
 }
-dialog.formula .note {
+dialog.tool .note {
   color: var(--muted);
 }
-dialog.formula button {
+dialog.tool button {
   font: inherit;
   padding: 0.2rem 0.7rem;
+}
+dialog.tool input,
+dialog.tool select {
+  display: block;
+  width: 100%;
+  font: inherit;
+  margin: 0.25rem 0 0.6rem;
+}
+dialog.tool fieldset {
+  border: 0;
+  padding: 0;
+  margin: 0 0 0.6rem;
+}
+dialog.tool fieldset input {
+  display: inline;
+  width: auto;
+  margin: 0;
+}
+dialog.tool legend {
+  padding: 0;
+  color: var(--muted);
+}
+
+/* The menu at a place in the visual view. */
+.menu {
+  position: fixed;
+  z-index: 10;
+  margin: 0;
+  padding: 0.25rem;
+  list-style: none;
+  background: var(--paper);
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  box-shadow: 0 6px 20px rgb(0 0 0 / 0.15);
+}
+.menu button {
+  display: block;
+  width: 100%;
+  padding: 0.3rem 0.8rem;
+  border: 0;
+  border-radius: 5px;
+  background: none;
+  font: inherit;
+  text-align: left;
+  cursor: pointer;
+}
+.menu button:hover,
+.menu button:focus-visible {
+  background: var(--wash);
+  outline: 2px solid var(--accent);
+}
+.menu .hint {
+  padding: 0.3rem 0.8rem 0.1rem;
+  color: var(--muted);
+  font-size: 0.8rem;
 }

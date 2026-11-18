@@ -99,19 +99,53 @@ export function createVisual(opts: {
    * overwritten.
    */
   editMath?(src: string, apply: (replacement: string) => Promise<CommandResult>): void;
+  /** The person asked, from the keyboard, to insert a reference or an equation. */
+  ask?(what: 'reference' | 'equation'): void;
+  /**
+   * The person asked for the menu of things to do here: a right click, or the menu key. `x`
+   * and `y` are where on the page; `formula` is set when it was asked for on a formula.
+   */
+  menu?(at: { x: number; y: number; formula?: () => void }): void;
 }) {
   const { undo, say } = opts;
   // eslint-disable-next-line prefer-const -- the editor's plugins need the bridge, which needs the editor's schema
   let bridge: Bridge;
+  /**
+   * Bring the editor's idea of the selection up to date with the browser's. The editor hears of
+   * a moved caret a moment after it moves; a shortcut pressed in that moment would otherwise
+   * act where the caret was.
+   */
+  const catchUp = () => {
+    const { view } = editor;
+    const sel = view.dom.ownerDocument.getSelection();
+    if (!view.hasFocus() || !sel?.anchorNode || !sel.focusNode) return;
+    if (!view.dom.contains(sel.anchorNode) || !view.dom.contains(sel.focusNode)) return;
+    try {
+      const a = view.posAtDOM(sel.anchorNode, sel.anchorOffset);
+      const b = view.posAtDOM(sel.focusNode, sel.focusOffset);
+      const { from, to } = editor.state.selection;
+      if (Math.min(a, b) !== from || Math.max(a, b) !== to)
+        editor.commands.setTextSelection({ from: Math.min(a, b), to: Math.max(a, b) });
+    } catch {
+      // A selection the editor cannot place (inside a drawn formula, say): leave its own.
+    }
+  };
+  /**
+   * Where the caret should be when the keyboard comes back from a window opened here. The
+   * browser, handing focus back, may put it at the start of the text.
+   */
+  let resume: { from: number; to: number } | null = null;
   /** Open the formula at `pos` for editing. What it says now is what a later edit must find. */
   const openMath = (pos: number, src: string) => {
     const c = bridge.atomCommand(editor.state, pos, src);
     if (!c) return say('That formula cannot be edited here. Edit it in the source.');
+    resume = { from: editor.state.selection.from, to: editor.state.selection.to };
     opts.editMath!(src, async (replacement) =>
       opts.run({ ...c, key: crypto.randomUUID(), replacement }),
     );
   };
   const emph = () => {
+    catchUp();
     const c = bridge.emphCommand(editor.state);
     if (!c) say('Emphasis needs a selection inside one block.');
     else
@@ -245,6 +279,9 @@ export function createVisual(opts: {
           'Mod-y': () => !!undo.redo() || true,
           'Mod-Shift-z': () => !!undo.redo() || true,
           'Mod-i': emph,
+          // Alt+= is the equation key in word processors; Alt+R for a reference.
+          'Alt-=': () => (opts.ask && opts.editable ? (opts.ask('equation'), true) : false),
+          'Alt-r': () => (opts.ask && opts.editable ? (opts.ask('reference'), true) : false),
           // Enter on a selected formula opens it for editing.
           Enter: ({ editor: e }) => {
             const { selection } = e.state;
@@ -273,10 +310,65 @@ export function createVisual(opts: {
   bridge.attach({ getState: () => editor.state, dispatch: (tr) => editor.view.dispatch(tr) });
   bridge.sync();
 
+  // Our own menu in place of the browser's, unless Shift is held: that one has copy, paste and
+  // spelling, and stays one key away.
+  const onMenu = (event: MouseEvent) => {
+    if (!opts.menu || !opts.editable || event.shiftKey) return;
+    event.preventDefault();
+    // From the keyboard there is no pointer: the menu opens at the caret.
+    const keyboard = event.button !== 2;
+    const caret = editor.view.coordsAtPos(editor.state.selection.from);
+    const at = keyboard
+      ? { x: caret.left, y: caret.bottom }
+      : { x: event.clientX, y: event.clientY };
+    const hit = keyboard ? null : editor.view.posAtCoords({ left: at.x, top: at.y });
+    // A click on a formula lands inside it (`inside`) or just beside it.
+    const pos = hit ? (hit.inside >= 0 ? hit.inside : hit.pos) : editor.state.selection.from;
+    const node = editor.state.doc.nodeAt(pos);
+    const formula = node?.type.name.startsWith('math_')
+      ? () => openMath(pos, node.attrs.src)
+      : undefined;
+    // The caret goes where the click was, so that what is inserted goes there too.
+    if (hit && !formula) editor.commands.setTextSelection(hit.pos);
+    opts.menu({ ...at, formula });
+  };
+  editor.view.dom.addEventListener('contextmenu', onMenu);
+
   return {
     editor,
     bridge,
     emph,
+    /**
+     * Get ready to insert LaTeX where the caret is now. Returns the function that inserts it, by
+     * way of the server, or null if the caret is not in running text.
+     */
+    insertion(): ((latex: string) => Promise<CommandResult>) | null {
+      catchUp();
+      const c = bridge.insertCommand(editor.state, '');
+      if (!c) return null;
+      resume = { from: editor.state.selection.from, to: editor.state.selection.to };
+      return async (latex) => {
+        const result = await opts.run({ ...c, key: crypto.randomUUID(), replacement: latex });
+        // The caret goes just after what was inserted, so that typing carries on from there
+        // rather than over a selection that now reaches across it. The place was named by the
+        // character after it, which is now the character after the insertion.
+        const after = Y.createAbsolutePositionFromRelativePosition(c.to, opts.ytext.doc!)?.index;
+        if (result !== 'conflict' && after != null) {
+          const caret = fromSrc(bridge.model, editor.state.doc, after);
+          resume = { from: caret, to: caret };
+          editor.commands.setTextSelection(caret);
+        }
+        return result;
+      };
+    },
+    /** Put the keyboard back in the visual view, with the caret where it should be. */
+    focus() {
+      const { from, to } = resume ?? editor.state.selection;
+      resume = null;
+      editor.view.focus();
+      const size = editor.state.doc.content.size;
+      editor.commands.setTextSelection({ from: Math.min(from, size), to: Math.min(to, size) });
+    },
     /** Where a place in the visual document is in the source text. */
     toSource: (pos: number, side: -1 | 1) => toSrc(bridge.model, editor.state.doc, pos, side),
     /** Select, in the visual document, the stretch between two places in the source text. */
@@ -290,6 +382,7 @@ export function createVisual(opts: {
         .run();
     },
     destroy() {
+      editor.view.dom.removeEventListener('contextmenu', onMenu);
       bridge.destroy();
       editor.destroy();
     },
