@@ -3,6 +3,7 @@
 import {
   acceptInvitation,
   approveDataset,
+  createFromTemplate,
   createProject,
   deleteFile,
   invite,
@@ -27,10 +28,13 @@ const text = (form: FormData, name: string) => String(form.get(name) ?? '');
 
 export async function createAction(form: FormData) {
   const user = await requireUser('/projects');
-  await act(
-    '/projects',
-    async () => `/projects/${(await createProject(db(), user.id, text(form, 'name'))).id}`,
-  );
+  await act('/projects', async () => {
+    const template = text(form, 'template');
+    const made = template
+      ? await createFromTemplate(db(), blobs(), user.id, text(form, 'name'), template)
+      : await createProject(db(), user.id, text(form, 'name'));
+    return `/projects/${made.id}`;
+  });
 }
 
 export async function inviteAction(projectId: string, form: FormData) {

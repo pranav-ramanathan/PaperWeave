@@ -312,6 +312,18 @@ Read this first. Update it in every pull request.
     PDF, all of the revision that was built. "Build the paper and check again" asks for a build;
     the page looks again by itself while one runs.
   - A chart the paper does not show is not checked.
+- **D5, second part: templates and the import matrix.**
+  - A new paper can be started from a template: Article, IEEE conference paper, AMS article
+    (`packages/server/src/templates.ts`). A template is brought in the way an uploaded ZIP is,
+    so it gets the same report, root and compiler. Each builds as it is and passes the checks
+    before submitting; a sandbox test holds that. `projects.template` records which one a
+    paper came from (migration 0013), for counting later how each kind fares.
+  - `docs/import-matrix.md` says, for each fixture and template: class, compiler, bibliography
+    tool, how much of the prose can be edited visually, and which files are source only; then
+    the packages they load and what is not supported. It is written by
+    `packages/server/src/matrix.test.ts` from the papers themselves
+    (`WRITE_MATRIX=1 pnpm vitest run packages/server/src/matrix.test.ts`), and that test fails
+    when the file no longer matches them.
 - **A restore keeps what it replaces.** Found by the fault suite on a seed it had not run before.
   A restore put back the chosen revision but kept no copy of the paper as it stood, so text typed
   since the last revision (an edit that reached the server a moment before, say) was erased with
@@ -336,9 +348,9 @@ nothing, edit it together, build it, and download a ZIP and a PDF that belong to
 
 Next, in this order:
 
-1. **D5, the rest.** Templates to start a paper from; the published import matrix; SyncTeX
-   navigation both ways between the source and the PDF (the PDF is shown in the browser's own
-   viewer today, so this needs PDF.js).
+1. **D5, the rest.** SyncTeX navigation both ways between the source and the PDF. The PDF is
+   shown in the browser's own viewer today, so this needs PDF.js; the build already keeps the
+   SyncTeX file of every revision it builds.
 2. **Phase E** onward, as in the plan.
 
 The Phase A replays are waiting on a person with accounts: `docs/rea/matrix.md`. The Prism one is

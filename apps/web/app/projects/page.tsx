@@ -1,4 +1,4 @@
-import { listProjects } from '@paperweave/server';
+import { listProjects, TEMPLATES } from '@paperweave/server';
 import Link from 'next/link';
 import { db, requireUser } from '../../lib/server';
 import SignOut from '../SignOut';
@@ -40,7 +40,19 @@ export default async function Projects({
           Name of a new paper
           <input name="name" required maxLength={200} />
         </label>
+        <label>
+          Start from
+          <select name="template" defaultValue="" aria-describedby="template-help">
+            <option value="">An empty paper</option>
+            {TEMPLATES.map((t) => (
+              <option key={t.id} value={t.id}>
+                {t.name}
+              </option>
+            ))}
+          </select>
+        </label>
         <button type="submit">Create paper</button>
+        <small id="template-help">{TEMPLATES.map((t) => `${t.name}: ${t.about}`).join(' ')}</small>
       </form>
       <form action="/api/projects/import" method="post" encType="multipart/form-data">
         <label>
