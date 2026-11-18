@@ -633,6 +633,41 @@ Built after the security review, which had it as its second open item.
 - The numbers are guesses at "far more than anyone means to do". Nothing measured them.
 - Not limited: reading pages, checking grammar, typing. See `docs/security-review.md`.
 
+## Saved edits that did not reach the people in the file
+
+Found by the fault suite (`apps/sync/src/faults.sandbox.test.ts`), which failed once in CI and
+about once in twenty-five runs on a busy machine.
+
+- **What happened.** Two people leave a file a moment apart. The first has edits the server
+  has not yet worked through. The sync library drops the first from the file's list as their
+  socket closes, but goes on through their edits. When the second leaves, nobody is listed, so
+  the file is unloaded at once. The first person's remaining edits are then saved to the log
+  and applied to a copy of the file that nobody is on. Whoever opens the file next reads the
+  log before those edits are in it, and is never sent them.
+- **For people:** everything was saved, and a reload showed it. But until then the person in
+  the file did not see text that was in the paper, and a download or a build could hold words
+  they had never been shown.
+- **Seen, not guessed.** A trace of the server showed the order of events above, and a
+  detector for "an edit arrived on a copy that is not the open one" fired in 11 of 30 replays
+  of one seed.
+- **Now** (`apps/sync/src/server.ts`): an edit saved from a connection that is no longer on
+  the open copy is passed on to the open copy. And the first time someone is let in to a
+  freshly read copy, the log is read once more from where the reading began, for anything
+  saved while it was being read. Counted as `paperweave_sync_edits_off_the_open_copy_total`.
+- **Tests.** A service test makes it happen with a server whose writes are slow: without the
+  change the next person never gets the text (two runs of three), with it they do. The seed
+  that failed: 0 of 30 after. Fresh seeds on a busy machine: 0 of 26 after.
+- **Not changed:** the library still drops the connection early. This works around it. It
+  would be worth reporting to the library's authors; that has not been done.
+
+A second failure of the fault suite, found while looking, was the suite's own mistake: it
+recorded what a saved revision held from the text a moment before saving, and an edit still
+on its way in could land between. The revision was right and the record wrong. The suite now
+reads what the revision holds from the revision. One seed failed every time before this and
+passes now.
+
+When the suite fails with people apart, it now says who lacks what and who alone has what.
+
 ## Saving a revision no longer holds up editing
 
 - **What was wrong.** Cutting a revision (every build does it, and every save, export and

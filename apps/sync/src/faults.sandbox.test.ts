@@ -223,9 +223,14 @@ test(`${STEPS} steps of typing through faults lose nothing (seed ${SEED})`, asyn
       3,
       'save',
       async () => {
-        const now = await settle();
+        await settle();
         const { id } = await saveRevision(t.pool, store, users.owner.id, project.id, `s${count}`);
-        saves.push({ id, marks: now });
+        // What the revision holds is read from the revision. It can hold more than was stored a
+        // moment before it was cut: an edit from someone who has just left may still be on its
+        // way in.
+        const { zip } = await exportRevision(t.pool, store, users.owner.id, project.id, id);
+        const held = marks(Buffer.from((await readZip(zip)).entries[0].bytes).toString());
+        saves.push({ id, marks: new Set(held) });
       },
     ],
     [
@@ -279,7 +284,20 @@ test(`${STEPS} steps of typing through faults lose nothing (seed ${SEED})`, asyn
     const final = await stored();
     await until('everyone to have the stored text', () =>
       people.every((p) => p.text.toString() === final),
-    );
+    ).catch((err: Error) => {
+      // Who is apart from the stored text, and how: what they lack and what only they have.
+      const want = new Set(marks(final));
+      const apart = people
+        .filter((p) => p.text.toString() !== final)
+        .map((p) => {
+          const has = new Set(marks(p.text.toString()));
+          const lacks = [...want].filter((m) => !has.has(m));
+          const extra = [...has].filter((m) => !want.has(m));
+          return `${p.name} (${p.socket.status}, ${p.provider.synced ? 'synced' : 'not synced'}) lacks ${lacks.length} [${lacks.slice(0, 6).join(' ')}] and alone has ${extra.length} [${extra.slice(0, 6).join(' ')}]`;
+        });
+      err.message += `: ${apart.join('; ')}`;
+      throw err;
+    });
     // Every mark anyone typed is there exactly once, unless a restore took it away.
     const want = [...typed].filter((m) => !gone.has(m)).sort();
     expect(marks(final).sort()).toEqual(want);

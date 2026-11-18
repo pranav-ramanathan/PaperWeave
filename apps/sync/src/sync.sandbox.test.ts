@@ -486,6 +486,66 @@ test('an edit that is too large is not saved, and its author is told why', async
   }
 });
 
+test('what someone typed as they left reaches whoever opens the file next', async () => {
+  // The library can drop a connection from its file as its socket closes and still go on
+  // through the edits that connection had sent. When the last other person then leaves, the
+  // file is unloaded with those edits still to come. They are saved, and must still reach the
+  // next person in, who will have opened the file from the log before they were written to it.
+  //
+  // A server whose writes to the log are slow, so that the edits are still queued when their
+  // author has gone and the next person has arrived.
+  const slow = new Proxy(t.pool, {
+    get(pool, key) {
+      if (key !== 'query') return Reflect.get(pool, key, pool);
+      return async (...args: unknown[]) => {
+        if (String(args[0]).includes('insert into file_updates'))
+          await new Promise((r) => setTimeout(r, 25));
+        return (pool.query as (...a: unknown[]) => unknown)(...args);
+      };
+    },
+  });
+  const server = await startSync({
+    pool: slow,
+    store,
+    secret: SECRET,
+    port: sync.port + 700,
+    databaseUrl: t.url,
+  });
+  try {
+    const { project, file } = await paper();
+    const leaving = client(users.owner, file, server.port);
+    const other = client(users.second, file, server.port);
+    await saved(leaving, other);
+    // One message for each edit, so that the server has a queue of them.
+    for (let i = 0; i < 20; i++) {
+      leaving.text.insert(0, `<${i}>\n`);
+      await new Promise((r) => setImmediate(r));
+    }
+    // The author goes with most of the edits still waiting their turn. Then the other person
+    // goes, who has nothing waiting: with nobody listed, the file is unloaded there and then.
+    leaving.socket.disconnect();
+    await new Promise((r) => setTimeout(r, 80));
+    other.socket.disconnect();
+    await new Promise((r) => setTimeout(r, 80));
+    expect(await stored(project)).not.toContain('<19>');
+    const arriving = client(users.editor, file, server.port);
+    await saved(arriving);
+    // Neither comes back. Everything that was saved, the one who arrived has, without having
+    // to open the file again.
+    await until('the edits still queued to be saved', async () =>
+      (await stored(project)).includes('<19>'),
+    );
+    await until(
+      'the arrival to have the stored text',
+      async () => arriving.text.toString().replaceAll('\n', '\r\n') === (await stored(project)),
+      3000,
+    );
+    expect(arriving.text.toString()).toContain('<0>');
+  } finally {
+    await server.stop();
+  }
+});
+
 test('the metrics page gives counts to whoever holds the token, and nothing to anyone else', async () => {
   const url = `http://127.0.0.1:${sync.port}/metrics`;
   expect((await fetch(url)).status).toBe(401);

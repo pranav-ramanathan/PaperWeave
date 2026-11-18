@@ -42,6 +42,21 @@ export async function startSync(opts: {
 }) {
   const { pool, store, secret, compactEvery = 500 } = opts;
   const counts = newCounts();
+  /** For a file being read from its log: where the log stood when the reading began. */
+  const loadedAt = new Map<string, number>();
+  /**
+   * Bring the open copy of a file up to its log, from a place in the log on. That entry and
+   * any after it: if the log was rewritten as one entry since, the edit is in a later one.
+   */
+  const catchUp = async (fileId: string, from: number) => {
+    const document = server.hocuspocus.documents.get(fileId);
+    if (!document) return;
+    const { rows } = await pool.query(
+      'select update from file_updates where file_id = $1 and seq >= $2 order by seq',
+      [fileId, from],
+    );
+    for (const r of rows) Y.applyUpdate(document, new Uint8Array(r.update));
+  };
   const server = new Server<Context>({
     port: opts.port,
     quiet: true,
@@ -75,8 +90,28 @@ export async function startSync(opts: {
     },
 
     async onLoadDocument({ document, documentName }) {
+      // Where the log stood before it was read: anything saved after this is looked for again
+      // once the file is open (see `connected`).
+      const head = await pool.query('select head_seq from files where id = $1', [documentName]);
+      loadedAt.set(documentName, Number(head.rows[0]?.head_seq ?? 0));
       for (const update of await loadUpdates(pool, store, documentName))
         Y.applyUpdate(document, update);
+    },
+
+    // An edit can be saved to a file's log while this copy of the file is being read from it,
+    // by a connection that is on its way out (see beforeSync). So the first time someone is
+    // let in to a freshly read copy, the log is read once more from where the reading began.
+    async connected({ documentName, connection }) {
+      if (server.hocuspocus.documents.get(documentName) !== connection.document) {
+        // Not seen to happen. If it did, this person would see nobody else's edits.
+        console.error(`a connection to ${documentName} is on a copy that is not the open one`);
+        counts.editsOffTheOpenCopy++;
+        return connection.webSocket.close(4409, 'stale');
+      }
+      const from = loadedAt.get(documentName);
+      if (from === undefined) return;
+      loadedAt.delete(documentName);
+      await catchUp(documentName, from + 1);
     },
 
     // An editor asks one of two things: whether the server has all its changes, or for a
@@ -152,6 +187,14 @@ export async function startSync(opts: {
         return;
       }
       counts.editsSaved++;
+      // The library drops a connection from its file as soon as its socket starts to close, and
+      // goes on through the edits it had already sent. If it was the last one, the file is
+      // unloaded meanwhile, and this edit is applied to a copy nobody is on. It is saved all the
+      // same, so whoever has the file open by now is brought up to it.
+      if (server.hocuspocus.documents.get(documentName) !== document) {
+        counts.editsOffTheOpenCopy++;
+        await catchUp(documentName, seq);
+      }
       if (seq % compactEvery === 0)
         // Not waited for: the edit is saved already, and this only tidies the log behind it.
         compactFile(pool, documentName).then(
@@ -171,14 +214,7 @@ export async function startSync(opts: {
       // An edit made on the server (a restore, say): it is already in the log, so it only needs
       // to reach the people who have the file open.
       const [fileId, seq] = (payload ?? '').split(':');
-      const document = server.hocuspocus.documents.get(fileId);
-      if (!document) return;
-      const { rows } = await pool.query(
-        // That entry and any after it: if the log was compacted since, the edit is in a later one.
-        'select update from file_updates where file_id = $1 and seq >= $2 order by seq',
-        [fileId, seq],
-      );
-      for (const r of rows) Y.applyUpdate(document, new Uint8Array(r.update));
+      await catchUp(fileId, Number(seq));
       return;
     }
     const projectId = payload;
