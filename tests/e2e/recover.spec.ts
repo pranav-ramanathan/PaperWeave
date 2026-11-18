@@ -102,4 +102,18 @@ test('edits made offline across a restore are held until their author decides', 
   await expect(source(editor.page)).toContainText('Hello.');
   await expect(source(editor.page)).not.toContainText('% to be discarded');
   await expect(source(watch)).not.toContainText('% to be discarded');
+
+  // Coming back online, the first tries to get a ticket fail: the network, not a refusal. The
+  // editor does not lock itself; it tries again and carries on.
+  let failed = 0;
+  await editor.page.route('**/api/sync-ticket**', (route) =>
+    failed++ < 2 ? route.abort() : route.continue(),
+  );
+  await editor.page.context().setOffline(true);
+  await expect(status(editor.page)).toContainText('Offline.');
+  await typeAtStart(editor.page, '% typed while away\n');
+  await editor.page.context().setOffline(false);
+  await expect(status(editor.page)).toHaveText('All edits saved.', { timeout: 30_000 });
+  expect(failed).toBeGreaterThanOrEqual(3);
+  await expect(source(watch)).toContainText('% typed while away');
 });

@@ -14,6 +14,7 @@ import {
   listProposals,
   listRevisions,
   listThreads,
+  modelProcessing,
 } from '@paperweave/server';
 import Link from 'next/link';
 import { notFound } from 'next/navigation';
@@ -26,6 +27,7 @@ import {
   removeEvidenceAction,
   inviteAction,
   languageAction,
+  modelProcessingAction,
   removeAction,
   renameAction,
   restoreAction,
@@ -59,6 +61,7 @@ export default async function Project({
     looked?: string;
     described?: string;
     language?: string;
+    assistance?: string;
     checked?: string;
     places?: string;
   }>;
@@ -79,6 +82,7 @@ export default async function Project({
     listThreads(db(), blobs(), user.id, id),
     listProposals(db(), blobs(), user.id, id),
     languageSettings(db(), user.id, id),
+    modelProcessing(db(), user.id, id),
   ]).catch((err) => {
     // Not a member, or no such paper: the two look the same from outside.
     if (err instanceof AppError && err.code === 'not_found') notFound();
@@ -98,6 +102,7 @@ export default async function Project({
     threads,
     proposals,
     language,
+    allowModel,
   ] = loaded;
   const openThreads = threads.filter((t) => t.status === 'open');
   const openProposals = proposals.filter((p) => p.status === 'open');
@@ -711,6 +716,30 @@ export default async function Project({
         )}
         {canWrite && <button type="submit">Save language settings</button>}
       </form>
+
+      <h2 id="assistance">Writing assistance</h2>
+      {query.assistance && <p role="status">Saved.</p>}
+      <p>
+        A review by a language model reads the passage it is asked about and proposes changes, which
+        are never made unless someone accepts them. For that, the passage is sent to the
+        model&apos;s provider. Spelling and grammar checking is separate and sends nothing outside
+        this service.
+      </p>
+      {owner ? (
+        <form action={modelProcessingAction.bind(null, id)}>
+          <label>
+            <input type="checkbox" name="allow" defaultChecked={allowModel} /> Allow passages of
+            this paper to be sent to the model provider when someone asks for a review
+          </label>
+          <button type="submit">Save</button>
+        </form>
+      ) : (
+        <p>
+          {allowModel
+            ? 'The owner of this paper allows it.'
+            : 'The owner of this paper has not allowed it, so nothing is sent.'}
+        </p>
+      )}
 
       <h2 id="revisions">Revisions</h2>
       <p>

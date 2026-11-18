@@ -840,3 +840,18 @@ img.chart {
   text-decoration-skip-ink: none;
   text-underline-offset: 3px;
 }
+
+/* What a proposed change would alter about a claim. Set apart by a border and by its words. */
+.threads .flags {
+  margin: 0.4rem 0;
+  padding: 0.4rem 0.6rem;
+  border: 1px solid var(--warn);
+  border-left-width: 4px;
+  border-radius: 4px;
+  background: var(--warn-wash);
+}
+.threads .flags ul {
+  list-style: disc;
+  margin: 0.25rem 0 0;
+  padding-left: 1.2rem;
+}

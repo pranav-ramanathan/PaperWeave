@@ -64,13 +64,16 @@ export default function Proposals(props: {
   fileId: string;
   canPropose: boolean;
   canDecide: boolean;
+  /** The paper's owner allows passages to be sent to a model for a review. */
+  canReview: boolean;
   /** The stretch selected in the editor now; with nothing selected, the place of the caret. */
   selection(): Stretch | null;
   show(from: string, to: string): boolean;
   /** Told the proposals each time they are read, so that the editor can mark them in the text. */
   onProposals(proposals: Proposal[]): void;
 }) {
-  const { projectId, fileId, canPropose, canDecide } = props;
+  const { projectId, fileId, canPropose, canDecide, canReview } = props;
+  const [reviewing, setReviewing] = useState(false);
   const [proposals, setProposals] = useState<Proposal[] | null>(null);
   const [starting, setStarting] = useState<Stretch | null>(null);
   const [revising, setRevising] = useState<string | null>(null);
@@ -122,6 +125,22 @@ export default function Proposals(props: {
           <ins>{p.replacement || '(nothing: the text is removed)'}</ins>
         </p>
         {p.reason && <p>Why: {p.reason}</p>}
+        {p.origin === 'critique' && (
+          <p className="note">
+            From a model review ({p.madeBy}), asked for by {p.author ?? 'someone who has left'}.
+            {p.evidence.length > 0 && ` It rests on: ${p.evidence.join('; ')}.`}
+          </p>
+        )}
+        {p.flags.length > 0 && p.status === 'open' && (
+          <div className="flags">
+            <strong>This changes more than the wording. Check before accepting:</strong>
+            <ul>
+              {p.flags.map((flag) => (
+                <li key={flag}>{flag}</li>
+              ))}
+            </ul>
+          </div>
+        )}
         <p className="note">
           {p.author ?? 'Someone who has left'}, {day(p.createdAt)}.{' '}
           {p.status === 'accepted' && `Accepted by ${p.decidedBy ?? 'someone who has left'}.`}
@@ -206,6 +225,37 @@ export default function Proposals(props: {
           }}
         >
           Propose a change here
+        </button>
+      )}
+      {canPropose && canReview && !starting && (
+        <button
+          type="button"
+          disabled={reviewing}
+          onClick={async () => {
+            const picked = props.selection();
+            if (!picked?.words) return setNote('Select the passage to review first.');
+            setReviewing(true);
+            setNote('Asking the model. This can take a minute…');
+            const res = await fetch(`/projects/${projectId}/review`, {
+              method: 'POST',
+              headers: { 'content-type': 'application/json' },
+              body: JSON.stringify({ file: fileId, from: picked.from, to: picked.to }),
+            }).catch(() => null);
+            const answer = (await res?.json().catch(() => null)) as {
+              error?: string;
+              proposed?: number;
+              asked?: number;
+            } | null;
+            setReviewing(false);
+            await read();
+            setNote(
+              res?.ok && answer
+                ? `The review proposed ${answer.proposed} ${answer.proposed === 1 ? 'change' : 'changes'} and asked ${answer.asked} ${answer.asked === 1 ? 'question' : 'questions'}. Nothing has been changed.`
+                : (answer?.error ?? 'The review could not be asked for. Try again.'),
+            );
+          }}
+        >
+          Ask a model to review the selected text
         </button>
       )}
       {starting && (

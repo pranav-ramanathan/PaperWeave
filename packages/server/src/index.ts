@@ -1,5 +1,6 @@
 export * from './errors.ts';
 export * from './evidence.ts';
+export * from './critique.ts';
 export * from './csv.ts';
 export * from './data.ts';
 export * from './db.ts';
@@ -20,6 +21,7 @@ export * from './revisions.ts';
 export * from './textdiff.ts';
 export * from './charts.ts';
 export * from './citations.ts';
+export * from './claims.ts';
 export * from './commands.ts';
 export * from './files.ts';
 export * from './grammar.ts';
