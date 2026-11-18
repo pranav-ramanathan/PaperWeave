@@ -1,6 +1,6 @@
 // A paper's labels and the references to them, read from the text as it stands now.
 import { createHash } from 'node:crypto';
-import { decodeFile, includeGraph, labelIndex } from '@paperweave/latex';
+import { decodeFile, includeGraph, labelIndex, macroDefs } from '@paperweave/latex';
 import type pg from 'pg';
 import * as Y from 'yjs';
 import { authorize } from './authz.ts';
@@ -76,6 +76,30 @@ export async function labelReport(
   report.undefined = refs.filter((r) => !byKey.has(r.key));
   for (const [key, places] of byKey) if (places.length > 1) report.duplicates.push({ key, places });
   return report;
+}
+
+/**
+ * The simple macros the paper defines before its text begins: in the root file's preamble and in
+ * the files that preamble reads. The editor gives them to its maths renderer.
+ */
+export async function paperMacros(
+  pool: pg.Pool,
+  store: BlobStore,
+  userId: string,
+  projectId: string,
+): Promise<Record<string, string>> {
+  await authorize(pool, userId, id(projectId), 'project.read');
+  const files = await texFiles(pool, store, projectId);
+  const root = files.find((f) => f.root);
+  if (!root) return {};
+  const texts = Object.fromEntries(files.map((f) => [f.path, f.text]));
+  const begins = root.text.indexOf('\\begin{document}');
+  const preamble = begins < 0 ? root.text : root.text.slice(0, begins);
+  // In the order TeX reads them, so that a later definition of a name wins.
+  let macros = macroDefs(preamble);
+  for (const path of includeGraph(texts, root.path).preamble)
+    macros = { ...macros, ...macroDefs(texts[path] ?? '') };
+  return macros;
 }
 
 /** One line that a rename would change, before and after. */

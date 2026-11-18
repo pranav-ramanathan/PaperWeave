@@ -509,3 +509,44 @@ div.pw-frozen strong {
   border-color: var(--accent);
   color: #fff;
 }
+
+/* Editing one formula's LaTeX. */
+dialog.formula {
+  width: min(42rem, 92vw);
+  border: 1px solid var(--line);
+  border-radius: 10px;
+  padding: 1rem 1.25rem;
+}
+dialog.formula::backdrop {
+  background: rgb(0 0 0 / 0.35);
+}
+dialog.formula h2 {
+  margin: 0 0 0.6rem;
+  font-size: 1.1rem;
+}
+dialog.formula textarea {
+  display: block;
+  width: 100%;
+  font:
+    0.9rem ui-monospace,
+    monospace;
+  margin-top: 0.25rem;
+}
+dialog.formula .label {
+  margin: 0.8rem 0 0.2rem;
+  color: var(--muted);
+}
+dialog.formula .preview {
+  min-height: 3rem;
+  padding: 0.5rem;
+  border: 1px dashed var(--line);
+  border-radius: 6px;
+  overflow-x: auto;
+}
+dialog.formula .note {
+  color: var(--muted);
+}
+dialog.formula button {
+  font: inherit;
+  padding: 0.2rem 0.7rem;
+}

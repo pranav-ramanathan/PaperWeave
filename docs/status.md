@@ -132,7 +132,7 @@ Read this first. Update it in every pull request.
   - The paper's page lists references to labels that do not exist, and label names used twice,
     each with its file and line (`labelReport`).
   - Not numbered: equations and sections without a label (LaTeX records numbers only for
-    labels), and maths that uses the paper's own macros, which still shows as source.
+    labels).
 - **D1, second part: renaming a label.** On the paper's page: choose a label and a new name.
   A page then lists every line that would change, in every file, and nothing has changed yet.
   Confirming changes them all in one transaction, or none.
@@ -150,6 +150,16 @@ Read this first. Update it in every pull request.
   - "Rename only" is offered too, and says the paper will not build until the lines are fixed.
   - Not handled: moving the root file to another folder, which changes what every relative
     path in the paper means.
+- **D1, fourth part: editing a formula in place.** A double click on a formula in the visual
+  view, or Enter when it is selected, opens its LaTeX with a preview that follows what is typed.
+  - Apply goes through the server (`Bridge.atomCommand`, then `runCommand`). What the formula
+    said when it was opened is what the server must find: a formula someone else changed
+    meanwhile is not overwritten, and the person is told. The edit can be undone.
+  - The preview draws the paper's own macros: `\newcommand` and relatives, plain `\def`, and
+    `\DeclareMathOperator`, read from the root file's preamble and the files it reads
+    (`macroDefs`, `paperMacros`). So does the visual view itself.
+  - Macros are read when the page loads. A macro defined since shows after a reload.
+  - A formula the browser cannot draw can still be applied: the PDF is what decides.
 - **Phase B spike.** Gate report: `docs/phase-b-gate.md`. Recommendation: go.
   - `packages/latex`: lossless block parser, incremental reparse, include graph, encoding round
     trip, coverage.
@@ -165,8 +175,7 @@ nothing, edit it together, build it, and download a ZIP and a PDF that belong to
 Next, in this order:
 
 1. **D1, the rest.** Insert a reference or an equation from the toolbar, the keyboard and the
-   context menu; edit an equation's LaTeX in place with a live preview; teach the in-browser
-   renderer the paper's own macros.
+   context menu.
 2. **D2** onward, as in the plan.
 
 The Phase A replays are waiting on a person with accounts: `docs/rea/matrix.md`. The Prism one is

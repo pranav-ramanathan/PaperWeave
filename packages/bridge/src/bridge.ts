@@ -4,7 +4,7 @@ import type { Node as PMNode, Schema } from '@tiptap/pm/model';
 import { ReplaceStep } from '@tiptap/pm/transform';
 import { type EditorState, Selection, type Transaction } from '@tiptap/pm/state';
 import * as Y from 'yjs';
-import { locate, model, type Model, projector } from './project.ts';
+import { locate, model, type Model, projector, toSrc } from './project.ts';
 import { diff, type Edit, emphEdit, translate, type Translation } from './translate.ts';
 
 export type Host = { getState(): EditorState; dispatch(tr: Transaction): void };
@@ -161,6 +161,37 @@ export class Bridge {
       to: rel(e.to),
       expected: x.text.slice(e.from, e.to),
       replacement: e.insert,
+    };
+  }
+
+  /**
+   * Build the command that replaces the source of the atom at `pos` (a formula, a reference, a
+   * block of raw LaTeX), or null if there is no atom there.
+   */
+  atomCommand(state: EditorState, pos: number, replacement: string): Command | null {
+    const node = state.doc.nodeAt(pos);
+    const src: unknown = node?.attrs.src;
+    if (!node?.isAtom || typeof src !== 'string' || !src) return null;
+    let from: number;
+    if (node.isInline) from = toSrc(this.model, state.doc, pos, 1);
+    else {
+      // A block's text may carry the blank lines around the atom's own source.
+      const i = state.doc.resolve(pos).index(0);
+      const block =
+        this.model.blocks[this.model.phantom && i > this.model.phantom.index ? i - 1 : i];
+      const within = block ? block.body.text.indexOf(src) : -1;
+      if (within < 0) return null;
+      from = block.start + within;
+    }
+    // The model must agree with the text about where the atom is, or nothing is built.
+    if (this.ytext.toString().slice(from, from + src.length) !== src) return null;
+    const rel = (i: number) => Y.createRelativePositionFromTypeIndex(this.ytext, i);
+    return {
+      key: crypto.randomUUID(),
+      from: rel(from),
+      to: rel(from + src.length),
+      expected: src,
+      replacement,
     };
   }
 

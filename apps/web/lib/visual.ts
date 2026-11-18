@@ -50,6 +50,26 @@ function tex(src: string, numberOf?: (key: string) => string | undefined) {
   return src;
 }
 
+/** Whether a formula's source is of the kind set on lines of its own. */
+export const isDisplay = (src: string) => /^(\\begin\{|\\\[|\$\$)/.test(src.trim());
+
+/**
+ * Draw a formula into an element. `macros` are the paper's own; `numberOf` gives the number a
+ * label has in the PDF. Throws what the renderer throws if the source cannot be drawn.
+ */
+export function renderMath(
+  dom: HTMLElement,
+  src: string,
+  opts: { macros?: Record<string, string>; numberOf?: (key: string) => string | undefined } = {},
+) {
+  katex.render(tex(src.trim(), opts.numberOf), dom, {
+    displayMode: isDisplay(src),
+    throwOnError: true,
+    // A copy: the renderer writes into what it is given.
+    macros: { ...opts.macros },
+  });
+}
+
 function el<K extends keyof HTMLElementTagNameMap>(tag: K, className: string, text = '') {
   const e = document.createElement(tag);
   e.className = className;
@@ -71,10 +91,26 @@ export function createVisual(opts: {
   showInSource(from: number, to: number): void;
   /** Carry out a structural edit. The app sends it to the server; the spike applies it locally. */
   run(command: Command): CommandResult | Promise<CommandResult>;
+  /** The paper's own macros, for drawing formulas that use them. */
+  macros?: Record<string, string>;
+  /**
+   * The person asked to edit a formula. `apply` replaces it with new LaTeX, by way of the
+   * server, but only if it still says `src`: what someone else changed meanwhile is not
+   * overwritten.
+   */
+  editMath?(src: string, apply: (replacement: string) => Promise<CommandResult>): void;
 }) {
   const { undo, say } = opts;
   // eslint-disable-next-line prefer-const -- the editor's plugins need the bridge, which needs the editor's schema
   let bridge: Bridge;
+  /** Open the formula at `pos` for editing. What it says now is what a later edit must find. */
+  const openMath = (pos: number, src: string) => {
+    const c = bridge.atomCommand(editor.state, pos, src);
+    if (!c) return say('That formula cannot be edited here. Edit it in the source.');
+    opts.editMath!(src, async (replacement) =>
+      opts.run({ ...c, key: crypto.randomUUID(), replacement }),
+    );
+  };
   const emph = () => {
     const c = bridge.emphCommand(editor.state);
     if (!c) say('Emphasis needs a selection inside one block.');
@@ -95,16 +131,16 @@ export function createVisual(opts: {
       ? src
       : `${src}\nNumbered as in the PDF${n.stale ? ', which is behind the text' : ''}.`;
   };
-  const math = (display: boolean) => (node: PMNode) => {
+  const math = (display: boolean) => (node: PMNode, getPos: () => number | undefined) => {
     const src: string = node.attrs.src;
     const dom = el(display ? 'div' : 'span', `pw-atom pw-math${display ? ' pw-block' : ''}`);
     const labelled = display && src.includes('\\label{');
     const draw = () => {
       const n = numbers();
       const attempt = (numbered: boolean) =>
-        katex.render(tex(src, numbered ? (key) => n.labels[key]?.number : undefined), dom, {
-          displayMode: display,
-          throwOnError: true,
+        renderMath(dom, src, {
+          macros: opts.macros,
+          numberOf: numbered ? (key) => n.labels[key]?.number : undefined,
         });
       dom.classList.remove('pw-raw');
       try {
@@ -115,7 +151,7 @@ export function createVisual(opts: {
           attempt(false);
         }
       } catch {
-        // Project macros are unknown to the in-browser renderer: show the source as it is.
+        // Something the in-browser renderer does not know: show the source as it is.
         dom.textContent = src;
         dom.classList.add('pw-raw');
       }
@@ -123,6 +159,8 @@ export function createVisual(opts: {
       else dom.title = src;
     };
     draw();
+    // A double click opens the formula's LaTeX for editing. So does Enter, when it is selected.
+    if (opts.editMath && opts.editable) dom.ondblclick = () => openMath(getPos() ?? 0, src);
     return { dom, destroy: labelled ? onNumbers(draw) : undefined };
   };
   /** A reference shows the number its label has in the PDF, as the PDF prints it. */
@@ -207,6 +245,21 @@ export function createVisual(opts: {
           'Mod-y': () => !!undo.redo() || true,
           'Mod-Shift-z': () => !!undo.redo() || true,
           'Mod-i': emph,
+          // Enter on a selected formula opens it for editing.
+          Enter: ({ editor: e }) => {
+            const { selection } = e.state;
+            const node = e.state.doc.nodeAt(selection.from);
+            if (
+              !opts.editMath ||
+              !opts.editable ||
+              selection.empty ||
+              !node?.type.name.startsWith('math_')
+            )
+              return false;
+            if (selection.to !== selection.from + node.nodeSize) return false;
+            openMath(selection.from, node.attrs.src);
+            return true;
+          },
         }),
       }),
     ],
