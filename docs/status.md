@@ -297,6 +297,21 @@ Read this first. Update it in every pull request.
   - The toolchain manifest of a download (`paperweave-toolchain.json`) has a `charts` entry for
     each drawn chart among its files, found by the file's bytes, so it is right for the revision
     downloaded.
+- **D5, first part: the checks before submitting.** `/projects/<id>/submit`, linked from the
+  paper's page, lists what stands between the paper as it is and one that can be sent
+  (`submissionChecks` in `packages/server/src/submit.ts`). Each finding names its place and
+  links to the file or chart.
+  - Problems: no root file; a file the paper names and does not have (`\input`, a picture, a
+    bibliography); a reference to a label that is not there; a label given twice; a citation of
+    a key no entry has; a chart the paper shows that is out of date, failed or not yet drawn; no
+    build, a build still running, a build older than the text, a failed build and each compiler
+    error.
+  - Worth a look, and not in the way: compiler warnings, two bibliography entries with one key,
+    a file name put together by a macro (it cannot be checked).
+  - With no problem left, the page offers the ZIP, the ZIP with its toolchain manifest, and the
+    PDF, all of the revision that was built. "Build the paper and check again" asks for a build;
+    the page looks again by itself while one runs.
+  - A chart the paper does not show is not checked.
 - **A restore keeps what it replaces.** Found by the fault suite on a seed it had not run before.
   A restore put back the chosen revision but kept no copy of the paper as it stood, so text typed
   since the last revision (an edit that reached the server a moment before, say) was erased with
@@ -321,9 +336,9 @@ nothing, edit it together, build it, and download a ZIP and a PDF that belong to
 
 Next, in this order:
 
-1. **D5.** Submission: SyncTeX navigation both ways, templates, pre-submit checks (missing
-   asset, undefined label, unresolved citation, compiler warning, out-of-date chart), and the
-   published import matrix.
+1. **D5, the rest.** Templates to start a paper from; the published import matrix; SyncTeX
+   navigation both ways between the source and the PDF (the PDF is shown in the browser's own
+   viewer today, so this needs PDF.js).
 2. **Phase E** onward, as in the plan.
 
 The Phase A replays are waiting on a person with accounts: `docs/rea/matrix.md`. The Prism one is

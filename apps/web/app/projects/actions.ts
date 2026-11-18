@@ -96,6 +96,14 @@ export async function buildRevisionAction(projectId: string, revisionId: string)
   });
 }
 
+export async function buildNowAction(projectId: string) {
+  const back = `/projects/${projectId}/submit`;
+  const user = await requireUser(back);
+  await act(back, async () => {
+    await requestBuild(db(), user.id, projectId);
+  });
+}
+
 export async function restoreAction(projectId: string, revisionId: string) {
   const back = `/projects/${projectId}`;
   const user = await requireUser(back);

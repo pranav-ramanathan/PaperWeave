@@ -168,7 +168,8 @@ export default async function Project({
             <code>{project.compiler}</code>.{' '}
             {can(project.role, 'project.export') && (
               <a href={`/projects/${id}/export`}>Download ZIP</a>
-            )}
+            )}{' '}
+            <Link href={`/projects/${id}/submit`}>Check before submitting</Link>
           </p>
           <table>
             <thead>

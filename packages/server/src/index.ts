@@ -10,6 +10,7 @@ export * from './blobs.ts';
 export * from './archive.ts';
 export * from './import.ts';
 export * from './labels.ts';
+export * from './submit.ts';
 export * from './sync.ts';
 export * from './builds.ts';
 export * from './revisions.ts';
