@@ -569,9 +569,12 @@ What is left is not code that can be written here:
    Chromium and real input methods (`docs/accessibility.md`); losing the object store
    (`docs/restore-drill.md`); real manuscripts for the grammar benchmark and the claim
    challenge set, which are synthetic today.
-4. **The Phase A replays**, which need a person with accounts: `docs/rea/matrix.md`. The Prism
-   one is optional: its export was researched from public sources (`docs/rea/prism.md`) and is
-   a plain LaTeX ZIP with no comments or history, so it imports like any other ZIP.
+4. **The Phase A replays**, which need a person with accounts: `docs/rea/matrix.md`. What the
+   products' public documentation says has been gathered for all six (`docs/rea/overleaf.md`,
+   `grammarly.md`, `prism.md`); nothing in it called for a change to what is built. Each file
+   marks what no page says, which is what a live replay is still for. **Overleaf's terms
+   forbid automated access to its site**: `overleaf.md` says what was read before that was
+   noticed, and whether to keep that file is the owner's call.
 
 If more is to be built before those are settled, the candidates are in the code as
 `shortcut:` comments (seven of them, each saying when it stops being good enough) and in the
@@ -668,6 +671,18 @@ passes now.
 
 When the suite fails with people apart, it now says who lacks what and who alone has what.
 
+Two things about tests, found on the way and not about the product:
+
+- **The fault suite once timed out at its first step in CI**, before any fault: three clients
+  connect to a server just started, and one was not confirmed in fifteen seconds. Not
+  explained, and not reproduced in 28 runs on a busy machine. That wait now says which client
+  was stuck and how.
+- **`recover.spec`, "a file takes no typing until it has arrived", failed about once in 25
+  runs.** It held the connection back by holding the request for a ticket, and now and then
+  the editor connected without that request being seen at all. Why is not known. The test now
+  holds the connection to the sync server itself, set up before any page loads: 80 passes
+  running. The editor's behaviour was not at fault in the failing runs: the file had arrived.
+
 ## Saving a revision no longer holds up editing
 
 - **What was wrong.** Cutting a revision (every build does it, and every save, export and
@@ -716,7 +731,8 @@ Built after the security review, which had it as its first open item.
   keep the plain policy in `next.config.ts`. `docs/security-review.md` says why.
 - `apps/web/app/not-found.tsx` is the app's own page for an address that leads nowhere or a
   paper that is not the person's to see. The framework's own page brings an inline style sheet.
-- In development the policy also allows `eval`, which React uses there to show server errors.
+- In development the policy also allows `eval`, which React uses there to show server errors,
+  and style sheets without the number, which the framework's own tools add there.
 
 ## Browser tests that failed once in a while
 
