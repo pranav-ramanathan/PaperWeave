@@ -6,7 +6,7 @@ import {
   reviseProposal,
   undoAccept,
 } from '@paperweave/server';
-import { blobs, currentUser, db, sameOrigin } from '../../../../../lib/server';
+import { blobs, currentUser, db, readJson, sameOrigin } from '../../../../../lib/server';
 
 export async function POST(
   request: Request,
@@ -17,7 +17,7 @@ export async function POST(
   if (!user) return Response.json({ error: 'Sign in first.' }, { status: 401 });
   const { id, proposalId } = await params;
   try {
-    const input = await request.json().catch(() => null);
+    const input = await readJson(request);
     const action: unknown = input && typeof input === 'object' ? input.action : null;
     if (action === 'accept') await acceptProposal(db(), blobs(), user.id, id, proposalId);
     else if (action === 'undo') await undoAccept(db(), blobs(), user.id, id, proposalId);

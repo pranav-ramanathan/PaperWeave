@@ -9,6 +9,9 @@ const FIXTURES = join(process.cwd(), '../../fixtures');
 const PROJECTS = ['ieee-multifile', 'article-basic', 'ams-multifile'];
 
 export async function POST(request: Request) {
+  // The spike is a workbench for developers. It compiles whatever it is sent for anyone who
+  // asks, so it exists only where SPIKE=1 says so, which is never a deployment people use.
+  if (process.env.SPIKE !== '1') return new Response('Not found.', { status: 404 });
   const body: unknown = await request.json().catch(() => null);
   const { project, file, text } = (body ?? {}) as Record<string, unknown>;
   // Only a known project, an existing .tex file inside it, and a bounded amount of text.

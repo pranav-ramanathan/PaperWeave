@@ -446,6 +446,33 @@ Read this first. Update it in every pull request.
     confirms retention defaults. The tests supply the model's answer themselves.
   - Not yet: approved figure captions and selected evidence from a chosen revision as context
     for the model; a setting for the provider's retention; deleting what was sent.
+- **F6: onboarding.** Someone with no papers is told the three ways to begin (a template, a
+  ZIP, nothing). A new paper's page has "First steps" for its owner: give it files, write in it,
+  see the PDF, bring in a co-author, take it away, each marked "Done" or "To do" in words with
+  where to do it. The list comes from the paper's own state (`firstSteps` in
+  `packages/server/src/projects.ts`), not from a record of clicks, and goes away once all are
+  done.
+- **F5: the Tectonic comparison.** `docs/tectonic-comparison.md`. Each fixture built with the
+  service's TeX Live image and with Tectonic 0.15.0, with no network, by
+  `infra/tectonic/compare.sh`. Recommendation: stay with TeX Live.
+  - Both build the article and the IEEE paper to the same number of pages in about the same
+    time. Under Tectonic the IEEE paper is set in Latin Modern, not Times, and its headings are
+    not in small capitals. The AMS paper, which uses Biber, does not build with Tectonic.
+  - Tectonic also fetches TeX files from the network the first time a paper needs them, which
+    the service's builds never allow.
+  - The Tectonic image is kept (`infra/tectonic/Dockerfile`) only for repeating the comparison.
+    Nothing in the service uses it, and CI does not build it.
+- **F4: security review.** `docs/security-review.md`: what was checked and how, what was found
+  and fixed, and eight things left open with what to do about each.
+  - Fixed: the Phase B workbench (`/spike` and `/api/spike/compile`) compiled LaTeX for anyone
+    without signing in. Both now exist only with `SPIKE=1`, which the tests set and a
+    deployment must not.
+  - Fixed: no security headers were sent (now in `apps/web/next.config.ts`); upload and import
+    trusted the length a request claimed (`bounded` in `apps/web/lib/server.ts` reads with a
+    cap); nothing limited how often a paper asked for a model review (30 an hour,
+    `model_requests`, migration 0021).
+  - Open, most important first: no script policy yet; an edit can be any size; no general
+    request limits; the rest in the document.
 - **F3: a restore drill and benchmarks.**
   - `infra/backup.sh` and `infra/restore.sh` dump and restore the database.
     `pnpm --filter @paperweave/server check-blobs` then checks that the object store holds
@@ -525,23 +552,45 @@ Read this first. Update it in every pull request.
 
 ## Next
 
-Phase C (C1 to C8) is done. C1 to C5 complete the first end-to-end slice: import a ZIP or start from
-nothing, edit it together, build it, and download a ZIP and a PDF that belong to the same revision.
+Every item in `docs/plan.md` from the scaffold to Phase F has been built. What is left is not
+code that can be written here:
 
-Next, in this order:
+1. **The owner's decisions**, listed below. Two of them change what should be built next:
+   whether proposals stay stored beside the text, and whether model processing may be turned
+   on (and with what retention at the provider).
+2. **What each document says was not checked.** A real screen reader, browsers other than
+   Chromium and real input methods (`docs/accessibility.md`); the open items of
+   `docs/security-review.md`, the first being a script policy; losing the object store
+   (`docs/restore-drill.md`); real manuscripts for the grammar benchmark and the claim
+   challenge set, which are synthetic today.
+3. **The Phase A replays**, which need a person with accounts: `docs/rea/matrix.md`. The Prism
+   one is optional: its export was researched from public sources (`docs/rea/prism.md`) and is
+   a plain LaTeX ZIP with no comments or history, so it imports like any other ZIP.
 
-1. **Phase F, the rest.** A security review, then the Tectonic comparison.
-
-The Phase A replays are waiting on a person with accounts: `docs/rea/matrix.md`. The Prism one is
-optional: its export was researched from public sources (`docs/rea/prism.md`) and is a plain LaTeX
-ZIP with no comments or history, so C2 imports it like any other ZIP.
-
-## Seen once, not explained
+## Seen twice, not explained
 
 - `charts.spec`, last step: after the data file was approved again and "Draw it again" pressed,
-  the chart's page still said "Out of date" for thirty seconds. Once, in a full local run; not
-  in four runs since. The check now prints the whole page when it fails, so the next time will
-  say whether the redraw was refused or never asked for.
+  the chart's page still said "Out of date". Twice, both in full local runs with other tests'
+  pages still open in the background; not in runs of that test alone.
+  - The second time, the page said why: the redraw was refused with "Choose a column of the
+    data file for the vertical axis", so the form reached the server without that value.
+  - It is not that the form needs scripts: with scripts switched off it posts every value and
+    the redraw works (tried by hand in a browser test, not kept).
+  - The test now waits for the vertical-axis field to hold its value before pressing the
+    button, and checks the column types after the second approval. If the cause is a click
+    landing while the page's scripts are attaching, that wait hides it; if it is something
+    else, one of the two checks will now fail first and say which.
+- `figures.spec`, in CI once (the first run of PR 37): after "Insert" in the figure window, the
+  window was still open five seconds later. 37 other browser tests passed in that run.
+  - Not reproduced here: the test passed every time, alone and with every core kept busy.
+  - The editor gives the server eight seconds to answer a structural edit, and the test gave
+    the window five. So the run could not tell a slow answer from a refused one.
+  - The test (and the same step in `charts.spec`) now waits fifteen seconds and fails with the
+    window's own message if the edit is refused. If it happens again, the failure says which.
+  - Found while reading the code: the window kept showing what was wrong with the last try
+    while a new one was being made. It now clears that first.
+  - For a person this would be a refused redraw with a message, and pressing again works. It
+    should still be understood.
 
 ## Decisions waiting on the owner
 

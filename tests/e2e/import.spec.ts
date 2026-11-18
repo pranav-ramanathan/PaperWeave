@@ -45,7 +45,7 @@ test('import a ZIP, read the report, and download the same bytes', async ({ brow
   const row = (path: string) => owner.page.getByRole('row', { name: path });
   await expect(row('macros.tex')).toContainText('Definitions: edited in source only');
   await expect(row('sections/intro.tex')).toContainText('% editable visually');
-  const report = owner.page.locator('.report');
+  const report = owner.page.locator('.report:not(.first-steps)');
   await expect(report).toContainText('Comments, history and sharing settings');
   await expect(report).toContainText('latexmkrc (build script, never run)');
 
@@ -97,6 +97,6 @@ test('a ZIP that is not a LaTeX project is refused and creates nothing', async (
     await visitor.page.getByRole('button', { name: 'Import ZIP' }).click();
     await expect(visitor.page.locator('main [role=alert]')).toContainText(why);
   }
-  await expect(visitor.page.getByText('You are not in any paper yet')).toBeVisible();
+  await expect(visitor.page.getByRole('heading', { name: 'Start your first paper' })).toBeVisible();
   expect(address('bad-zip')).toBe(visitor.email);
 });

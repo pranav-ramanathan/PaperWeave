@@ -13,6 +13,8 @@ const services = {
   // A stand-in for the DOI registry, started by the test that needs one.
   CROSSREF_URL: 'http://127.0.0.1:4391',
   GRAMMAR_URL: 'http://127.0.0.1:8010',
+  // The editor workbench at /spike, which the spike tests use. Off anywhere people use.
+  SPIKE: '1',
   ...(process.env as Record<string, string>),
 };
 

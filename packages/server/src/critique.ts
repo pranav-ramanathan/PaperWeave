@@ -20,6 +20,8 @@ import { loadUpdates, TEXT } from './sync.ts';
 import { startThread } from './threads.ts';
 
 const MODEL = 'claude-opus-5-5';
+/** How many reviews one paper may ask for in an hour. Each costs money and sends text out. */
+export const REVIEWS_PER_HOUR = 30;
 /** The most that is sent in one request: a few paragraphs. */
 export const MAX_PASSAGE = 6000;
 
@@ -112,7 +114,7 @@ export async function reviewPassage(
   projectId: string,
   fileId: string,
   input: { from: unknown; to: unknown },
-  opts: { ask?: Ask; provider?: string } = {},
+  opts: { ask?: Ask; provider?: string; perHour?: number } = {},
 ): Promise<{ proposed: number; asked: number; left: number }> {
   await authorize(pool, userId, id(projectId), 'proposal.create');
   const paper = (
@@ -163,6 +165,22 @@ export async function reviewPassage(
       `Select less: a review takes up to ${MAX_PASSAGE} characters at a time.`,
     );
 
+  // Counted before asking, so that a request that fails still counts against the hour.
+  const perHour = opts.perHour ?? REVIEWS_PER_HOUR;
+  const recent = await pool.query(
+    `select count(*)::int as n from model_requests
+     where project_id = $1 and created_at > now() - interval '1 hour'`,
+    [projectId],
+  );
+  if (recent.rows[0].n >= perHour)
+    throw new AppError(
+      'conflict',
+      `This paper has asked for ${perHour} reviews in the last hour. Try again in a little while.`,
+    );
+  await pool.query('insert into model_requests (project_id, user_id) values ($1, $2)', [
+    projectId,
+    userId,
+  ]);
   const { review, model } = await (opts.ask ?? askClaude)({ passage, glossary: paper.glossary });
   const answer = Review.parse(review);
   /** Where a quote stands in the file, if it is in the passage exactly once. */

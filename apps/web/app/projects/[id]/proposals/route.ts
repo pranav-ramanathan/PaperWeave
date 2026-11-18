@@ -1,6 +1,6 @@
 // The proposed edits of a paper (?file=<id> for one file's), and proposing one.
 import { AppError, listProposals, propose } from '@paperweave/server';
-import { blobs, currentUser, db, sameOrigin } from '../../../../lib/server';
+import { blobs, currentUser, db, readJson, sameOrigin } from '../../../../lib/server';
 
 type Params = { params: Promise<{ id: string }> };
 const failed = (err: unknown) => {
@@ -25,7 +25,7 @@ export async function POST(request: Request, { params }: Params) {
   const user = await currentUser();
   if (!user) return Response.json({ error: 'Sign in first.' }, { status: 401 });
   try {
-    const input = await request.json().catch(() => null);
+    const input = await readJson(request);
     if (!input || typeof input !== 'object')
       throw new AppError('invalid_input', 'That is not a proposal.');
     const bytes = (v: unknown) =>

@@ -3,6 +3,7 @@ import {
   can,
   citationChecks,
   citationReport,
+  firstSteps,
   getProject,
   importReport,
   labelReport,
@@ -83,6 +84,7 @@ export default async function Project({
     listProposals(db(), blobs(), user.id, id),
     languageSettings(db(), user.id, id),
     modelProcessing(db(), user.id, id),
+    firstSteps(db(), user.id, id),
   ]).catch((err) => {
     // Not a member, or no such paper: the two look the same from outside.
     if (err instanceof AppError && err.code === 'not_found') notFound();
@@ -103,6 +105,7 @@ export default async function Project({
     proposals,
     language,
     allowModel,
+    steps,
   ] = loaded;
   const openThreads = threads.filter((t) => t.status === 'open');
   const openProposals = proposals.filter((p) => p.status === 'open');
@@ -163,6 +166,48 @@ export default async function Project({
         </p>
       )}
       {root && <p role="status">Root file changed.</p>}
+
+      {owner && !(steps.written && steps.built && steps.shared && steps.downloaded) && (
+        <section aria-labelledby="first-steps">
+          <h2 id="first-steps">First steps</h2>
+          <p>What a new paper usually needs, and how far this one has come.</p>
+          <ol className="report first-steps">
+            {(
+              [
+                [
+                  steps.hasFiles,
+                  'Give it something to hold',
+                  'Add a file below, or start again from a template or a ZIP on the list of papers.',
+                ],
+                [
+                  steps.written,
+                  'Write in it',
+                  'Open a .tex file under Files. It opens as the paper reads; "Source" shows the LaTeX.',
+                ],
+                [
+                  steps.built,
+                  'See the PDF',
+                  'It is built beside the text when a file is open, and again whenever you stop typing.',
+                ],
+                [
+                  steps.shared,
+                  'Bring in a co-author',
+                  'Under People, invite someone as an editor to write with you, or as a reviewer to comment and propose changes.',
+                ],
+                [
+                  steps.downloaded,
+                  'Take it away',
+                  '"Check before submitting" says what is still wrong and gives the ZIP and PDF of one revision.',
+                ],
+              ] as const
+            ).map(([done, what, how]) => (
+              <li key={what}>
+                <strong>{done ? 'Done' : 'To do'}:</strong> {what}.{!done && ` ${how}`}
+              </li>
+            ))}
+          </ol>
+        </section>
+      )}
       {query.described && <p role="status">Description approved.</p>}
       {query.looked && (
         <p role="status">

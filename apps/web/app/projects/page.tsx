@@ -33,7 +33,26 @@ export default async function Projects({
           ))}
         </ul>
       ) : (
-        <p>You are not in any paper yet. Start one below, or open an invitation link.</p>
+        <section aria-labelledby="welcome">
+          <h2 id="welcome">Start your first paper</h2>
+          <p>
+            A paper here is a LaTeX project you write with others. There are three ways to begin:
+          </p>
+          <ul className="report">
+            <li>
+              <strong>From a template.</strong> A short, complete paper of its kind that builds as
+              it is. Give it a name and choose one under &quot;Start from&quot;.
+            </li>
+            <li>
+              <strong>From a ZIP.</strong> A project from Overleaf or your own machine. You get a
+              report of what was found and what can be edited visually.
+            </li>
+            <li>
+              <strong>From nothing.</strong> An empty paper, to which you add files.
+            </li>
+          </ul>
+          <p>If someone has invited you to their paper, open the link in their email instead.</p>
+        </section>
       )}
       <form action={createAction}>
         <label>

@@ -97,7 +97,12 @@ test('a chart is drawn from approved data and is out of date once the data chang
     'Line chart of latency (ms) against day.',
   );
   await box.getByRole('button', { name: 'Insert' }).click();
-  await expect(box).toBeHidden();
+  // The editor gives the server eight seconds to answer. If the edit is refused, the window
+  // says why, and so does this.
+  await expect(async () => {
+    expect(await box.getByRole('alert').allTextContents()).toEqual([]);
+    await expect(box).toBeHidden({ timeout: 1000 });
+  }).toPass({ timeout: 15_000 });
   // The editor shows the chart, though what the paper includes is the PDF.
   const figure = page.locator(VISUAL).getByRole('group', { name: 'Figure' });
   await expect(figure.locator('img')).toHaveAttribute(
@@ -133,7 +138,10 @@ test('a chart is drawn from approved data and is out of date once the data chang
   await page.getByRole('button', { name: 'Approve this description' }).click();
   // Not before the approval has landed: leaving the page at once would cut it short.
   await expect(page.getByRole('status')).toHaveText('Description approved.');
+  // What was approved is what was there before, with one more row: the columns are as they were.
+  await expect(data).toContainText('day (date), latency (ms) in ms (number), site (text)');
   await page.goto(chart);
+  await expect(page.getByRole('combobox', { name: 'Up the side' })).toHaveValue('latency (ms)');
   await page.getByRole('button', { name: 'Draw it again' }).click();
   // Drawn again from the new version: the row that was added is among those drawn.
   // Checked against the whole page, so that a failure here shows what the page said instead.

@@ -50,6 +50,36 @@ export const baseUrl = () => need('BETTER_AUTH_URL').replace(/\/$/, '');
 export const sameOrigin = (request: Request) =>
   request.headers.get('origin') === new URL(baseUrl()).origin;
 
+/**
+ * The request with its body read, or null if the body is larger than `max` bytes. Reading stops
+ * as soon as it is too large, whatever the request said its length was.
+ */
+export async function bounded(request: Request, max: number): Promise<Request | null> {
+  const reader = request.body?.getReader();
+  if (!reader) return request;
+  const chunks: Uint8Array[] = [];
+  let size = 0;
+  for (;;) {
+    const { done, value } = await reader.read();
+    if (done) break;
+    size += value.length;
+    if (size > max) {
+      await reader.cancel().catch(() => {});
+      return null;
+    }
+    chunks.push(value);
+  }
+  return new Request(request.url, {
+    method: request.method,
+    headers: request.headers,
+    body: Buffer.concat(chunks),
+  });
+}
+
+/** A small JSON body, or null if it is not JSON or is larger than anything this site sends. */
+export const readJson = async (request: Request, max = 200_000) =>
+  (await bounded(request, max))?.json().catch(() => null) ?? null;
+
 /** Only ever send people to a path on this site. */
 export const safePath = (next: unknown, fallback = '/projects') =>
   typeof next === 'string' && /^\/(?!\/)/.test(next) && !next.includes('\\') ? next : fallback;

@@ -1,7 +1,7 @@
 // Add a file to a paper: an empty text file, or an upload. A route handler, not a form action,
 // because uploads are larger than a form action may be.
 import { AppError, createFile, LIMITS } from '@paperweave/server';
-import { blobs, currentUser, db, sameOrigin } from '../../../../lib/server';
+import { blobs, bounded, currentUser, db, sameOrigin } from '../../../../lib/server';
 
 const to = (request: Request, path: string) => Response.redirect(new URL(path, request.url), 303);
 
@@ -14,7 +14,10 @@ export async function POST(request: Request, { params }: { params: Promise<{ id:
   // Refuse an oversized upload before reading it. The file itself is checked again inside.
   if (Number(request.headers.get('content-length') ?? 0) > LIMITS.fileBytes + 1_000_000)
     return failed('That file is too large.');
-  const form = await request.formData().catch(() => null);
+  // And while reading it: the length a request claims is only a claim.
+  const body = await bounded(request, LIMITS.fileBytes + 1_000_000);
+  if (!body) return failed('That file is too large.');
+  const form = await body.formData().catch(() => null);
   const upload = form?.get('file');
   const file = upload instanceof File && upload.size ? upload : null;
   const path = String(form?.get('path') ?? '').trim() || file?.name;
