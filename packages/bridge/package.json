@@ -1,0 +1,12 @@
+{
+  "name": "@paperweave/bridge",
+  "private": true,
+  "type": "module",
+  "exports": "./src/index.ts",
+  "dependencies": {
+    "@paperweave/latex": "workspace:*",
+    "@tiptap/core": "^3.34.0",
+    "@tiptap/pm": "^3.34.0",
+    "yjs": "^13.6.33"
+  }
+}

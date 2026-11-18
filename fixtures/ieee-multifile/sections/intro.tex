@@ -1,0 +1,17 @@
+\section{Introduction}
+\label{sec:intro}
+
+Authors of technical papers move between a visual view and the source many times
+an hour~\cite{knuth1984}. When the visual view owns the document, the source that
+comes back is often reformatted: comments move, macros expand, and whitespace
+changes. % This is the problem statement; keep it short.
+Reviewers then see a diff that hides the real change.
+
+\sys takes the opposite approach. The source buffer is the only stored document,
+and the visual view is \emph{derived} from it. An edit in the visual view becomes
+a splice of a few characters, \eg replacing one word.
+
+\todo{cite a second system here}
+
+The rest of the paper is organised as follows. Section~\ref{sec:method} gives the
+design, and Section~\ref{sec:results} reports what we measured.

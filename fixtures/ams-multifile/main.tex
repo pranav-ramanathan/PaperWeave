@@ -1,0 +1,36 @@
+% Synthetic fixture: a multi-file amsart paper with biblatex.
+\documentclass{amsart}
+\usepackage{amsthm}
+\usepackage[backend=biber,style=numeric]{biblatex}
+\addbibresource{refs.bib}
+
+\newtheorem{theorem}{Theorem}[section]
+\newtheorem{lemma}[theorem]{Lemma}
+\theoremstyle{definition}
+\newtheorem{definition}[theorem]{Definition}
+
+\newcommand{\Seq}{\mathcal{S}}
+\DeclareMathOperator{\len}{len}
+
+\title{Convergence of Splice Sequences}
+\author{A. Mathematician}
+\address{Department of Examples, Example University}
+\email{a.mathematician@example.org}
+\subjclass[2020]{68W32}
+\keywords{splices, convergence}
+
+\begin{document}
+
+\begin{abstract}
+We prove that any two replicas applying the same set of splices reach the same
+sequence, regardless of delivery order.
+\end{abstract}
+
+\maketitle
+
+\input{sections/prelim}
+\input{sections/main-result}
+
+\printbibliography
+
+\end{document}

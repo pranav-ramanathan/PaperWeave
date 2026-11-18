@@ -1,0 +1,44 @@
+% Synthetic fixture: a multi-file conference paper on the IEEEtran class.
+\documentclass[conference]{IEEEtran}
+\usepackage{amsmath,amssymb}
+\usepackage{cite}
+\usepackage{booktabs}
+\input{macros}
+
+\begin{document}
+
+\title{Byte-Preserving Visual Editing\\of Structured Source}
+
+\author{\IEEEauthorblockN{First Author}
+\IEEEauthorblockA{Department of Examples\\
+Example University\\
+first@example.org}
+\and
+\IEEEauthorblockN{Second Author}
+\IEEEauthorblockA{Example Labs\\
+second@example.org}}
+
+\maketitle
+
+\begin{abstract}
+Visual editors for structured source usually rewrite the whole file on save.
+We describe \sys, which edits only the bytes an author touched, and we show that
+it preserves \emph{every} untouched byte across \num{10000} generated edits.
+\end{abstract}
+
+\begin{IEEEkeywords}
+collaborative editing, source fidelity, structured documents
+\end{IEEEkeywords}
+
+\input{sections/intro}
+\input{sections/method}
+\input{sections/results}
+
+\section{Conclusion}
+We showed that a derived visual view can coexist with an authoritative source
+buffer. Future work includes tables and figures.
+
+\bibliographystyle{IEEEtran}
+\bibliography{refs}
+
+\end{document}

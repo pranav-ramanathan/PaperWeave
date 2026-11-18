@@ -1,0 +1,72 @@
+% Synthetic fixture: a short single-file article.
+\documentclass[11pt]{article}
+\usepackage[utf8]{inputenc}
+\usepackage{amsmath}
+\newcommand{\method}{\textsc{Weave}}
+\title{A Small Study of Merge Latency}
+\author{A. Researcher \and B. Colleague}
+\date{}
+
+\begin{document}
+\maketitle
+
+\begin{abstract}
+We measure how long concurrent edits take to converge in a shared document.
+Latency stays below 40~ms for 95\% of edits, and \emph{no acknowledged edit is lost}.
+\end{abstract}
+
+\section{Introduction}
+\label{sec:intro}
+
+Collaborative editors must merge concurrent changes without losing work~\cite{shapiro2011}.
+Earlier systems used a central transform server; later ones use replicated data
+types \cite{nicolaescu2016,shapiro2011}. % TODO: add a third citation
+We call our prototype \method{} and describe it in Section~\ref{sec:method}.
+
+Our contributions are:
+\begin{itemize}
+  \item a merge protocol that acknowledges an edit only after it is durable;
+  \item a measurement of latency under \textbf{three} concurrent writers;
+  \item an open fixture set, described in Section~\ref{sec:results}.
+\end{itemize}
+
+\section{Method}
+\label{sec:method}
+
+Each replica holds a sequence $s = (c_1, \dots, c_n)$ of characters. An edit is a
+pair $(p, \delta)$ where $p$ is a position and $\delta$ the inserted text.
+The expected latency is
+\begin{equation}
+  \label{eq:latency}
+  L = t_{\text{persist}} + t_{\text{ack}} + t_{\text{broadcast}} .
+\end{equation}
+Equation~\eqref{eq:latency} ignores client rendering, which we measure separately.
+
+\subsection{Setup}
+
+We ran every trial on one machine -- no network hops -- with a 2~GHz budget
+per replica. The ``slow path'' covers retries \& reconnects.
+
+\section{Results}
+\label{sec:results}
+
+Table~\ref{tab:latency} reports the median and tail latency.
+
+\begin{table}[h]
+  \centering
+  \begin{tabular}{lrr}
+    Writers & Median (ms) & p95 (ms) \\
+    \hline
+    1 & 4 & 9 \\
+    3 & 11 & 38 \\
+  \end{tabular}
+  \caption{Merge latency by number of concurrent writers.}
+  \label{tab:latency}
+\end{table}
+
+Latency grows with the number of writers but stays under our 40~ms target.
+
+\bibliographystyle{plain}
+\bibliography{refs}
+
+\end{document}

@@ -1,0 +1,24 @@
+\section{Design}
+\label{sec:method}
+
+\subsection{Lossless parsing}
+The parser assigns every character of a file to exactly one node. Constructs it
+does not understand become \textit{raw} nodes that are shown but never rewritten.
+
+Let $T$ be the source text and $\pi(T)$ its projection. An edit $e$ in the
+visual view is translated to a splice $\sigma(e)$ such that
+\begin{align}
+  \pi(\sigma(e)(T)) &= e(\pi(T)), \label{eq:commute} \\
+  |\sigma(e)| &\le |e| + c . \label{eq:minimal}
+\end{align}
+Property~\eqref{eq:commute} says the two views agree; \eqref{eq:minimal} bounds
+the size of the change.
+
+\subsection{Concurrent edits}
+Two authors may edit the same paragraph at once:
+\begin{enumerate}
+  \item the first types in the visual view;
+  \item the second types in the source view;
+  \item both edits arrive at every replica, in any order.
+\end{enumerate}
+The merged text is parsed again and the visual view is updated in place.
