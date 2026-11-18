@@ -1,13 +1,8 @@
-import Link from 'next/link';
+import { redirect } from 'next/navigation';
+import { currentUser } from '../lib/server';
 
-export default function Home() {
-  return (
-    <main className="home">
-      <h1>PaperWeave</h1>
-      <p>
-        The product is not built yet. The <Link href="/spike">editor spike</Link> shows the visual
-        editor and the source editor working on one shared LaTeX file.
-      </p>
-    </main>
-  );
+export const dynamic = 'force-dynamic';
+
+export default async function Home() {
+  redirect((await currentUser()) ? '/projects' : '/sign-in');
 }

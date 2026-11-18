@@ -2,7 +2,7 @@
 import { randomBytes } from 'node:crypto';
 import pg from 'pg';
 import { createAuth } from './auth.ts';
-import { migrate } from './db.ts';
+import { migrate } from './migrate.ts';
 
 /** Defaults match infra/compose.yaml; the environment overrides them. */
 export const TEST_ENV = {
@@ -55,7 +55,15 @@ export async function testDb() {
     url: url.href,
     async close() {
       await pool.end();
-      await admin.query(`drop database ${name} with (force)`);
+      // The pool's sockets may still be closing: wait for them rather than cutting them off.
+      for (let i = 0; ; i++) {
+        const dropped = await admin.query(`drop database ${name}`).then(
+          () => true,
+          (err) => (i < 100 ? false : Promise.reject(err)),
+        );
+        if (dropped) break;
+        await new Promise((r) => setTimeout(r, 50));
+      }
       await admin.end();
     },
   };

@@ -8,6 +8,9 @@ Read this first. Update it in every pull request.
 - **Fixtures.** `fixtures/`: article, IEEE and AMS multi-file papers, encoding variants, a
   shell-escape probe. `fixtures/digests.json` pins their bytes; run `node fixtures/digest.mjs`
   after changing one on purpose.
+- **C1: accounts and papers.** `packages/server` (migrations, sign-in through Better Auth,
+  `authorize()`, projects, members, invitations, blob store) and the web pages that use it. Web
+  forms are server actions that call `packages/server` directly; there is no separate JSON API.
 - **Phase B spike.** Gate report: `docs/phase-b-gate.md`. Recommendation: go.
   - `packages/latex`: lossless block parser, incremental reparse, include graph, encoding round
     trip, coverage.
@@ -17,12 +20,12 @@ Read this first. Update it in every pull request.
 
 ## Next
 
-C1 is half done: `packages/server` has the migration runner, sign-in (magic links through Better
-Auth), the permission table (`authz.ts`), projects, members, invitations and the blob store. The
-other half is the web side: sign-in page, project pages and the HTTP routes that call these
-functions.
+C1 is done: sign-in by emailed link, papers, people, invitations and the permission table, in
+`packages/server` and in the web app (`/sign-in`, `/projects`, `/invitations/<token>`).
 
-After that, C2 (import) to C5 at single-user depth give the first end-to-end slice.
+Next is C2 (import): upload a ZIP, check it, find the root file and compiler, store the files as
+blobs, and report what is visually editable. Then C3 to C5 at single-user depth give the first
+end-to-end slice.
 
 The Phase A replays are waiting on a person with accounts: `docs/rea/matrix.md`. The Prism one is
 optional: its export was researched from public sources (`docs/rea/prism.md`) and is a plain LaTeX
@@ -55,4 +58,6 @@ See "What I need from you" in `docs/plan.md`. None blocks C1.
 - Browser tests run against a production build on port 3100. The dev server reloads the page when
   any file in the repo changes, test output included.
 - Never log manuscript text. Log IDs and counts.
+- The web app reads its settings from `apps/web/.env.local` (copy `.env.example`). Email goes to
+  the local mail catcher at http://localhost:8025; browser tests read sign-in links from it.
 - The ponytail skill in `.claude/skills/` applies to all work here: the smallest complete change.

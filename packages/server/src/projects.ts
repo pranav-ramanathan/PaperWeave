@@ -84,6 +84,17 @@ export async function invite(
   return { token, email: email.toLowerCase(), role };
 }
 
+/** What a still-valid invitation offers, for showing before it is accepted. */
+export async function findInvitation(db: Db, token: unknown) {
+  if (typeof token !== 'string') return null;
+  const { rows } = await db.query(
+    `select p.name as project, i.role, i.email from invitations i join projects p on p.id = i.project_id
+     where i.token_hash = $1 and i.accepted_at is null and i.expires_at > now()`,
+    [hash(token)],
+  );
+  return (rows[0] as { project: string; role: Role; email: string } | undefined) ?? null;
+}
+
 /** Join the project an invitation was for. Only the invited address may use it, and only once. */
 export async function acceptInvitation(
   pool: pg.Pool,

@@ -10,7 +10,16 @@ export default defineConfig({
   webServer: {
     // A production build: the dev server reloads the page whenever a file in the repo changes,
     // test output included.
-    command: 'pnpm --filter @paperweave/web build && pnpm --filter @paperweave/web start',
+    command:
+      'pnpm --filter @paperweave/server migrate && pnpm --filter @paperweave/web build && pnpm --filter @paperweave/web start',
+    // The services in infra/compose.yaml. The environment overrides these.
+    env: {
+      DATABASE_URL: 'postgres://paperweave:paperweave@localhost:5432/paperweave',
+      BETTER_AUTH_SECRET: 'local-tests-only-3kq9Zr7mVx2Lp8Tn5Wc1Yd4Hb6Jf0Gs',
+      BETTER_AUTH_URL: 'http://localhost:3100',
+      SMTP_URL: 'smtp://localhost:1025',
+      ...(process.env as Record<string, string>),
+    },
     url: 'http://localhost:3100/spike',
     reuseExistingServer: !process.env.CI,
     timeout: 300_000,

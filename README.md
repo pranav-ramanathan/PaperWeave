@@ -13,11 +13,27 @@ pnpm install
 pnpm lint && pnpm typecheck && pnpm test
 ```
 
-The editor spike runs at http://localhost:3000/spike:
+Run the app at http://localhost:3000. It needs the local services, a migrated database and its
+settings:
+
+```bash
+docker compose -f infra/compose.yaml up -d --wait
+```
+
+```bash
+cp .env.example apps/web/.env.local
+```
+
+```bash
+pnpm --filter @paperweave/server migrate
+```
 
 ```bash
 pnpm dev
 ```
+
+Sign-in links are emailed; locally they arrive at http://localhost:8025. The editor spike is at
+`/spike` and needs none of this.
 
 Compiling, the database and the object store need Docker:
 
