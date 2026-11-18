@@ -17,6 +17,7 @@ export * from './sync.ts';
 export * from './templates.ts';
 export * from './threads.ts';
 export * from './builds.ts';
+export * from './reviewdata.ts';
 export * from './revisions.ts';
 export * from './textdiff.ts';
 export * from './charts.ts';

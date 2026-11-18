@@ -196,7 +196,10 @@ export default async function Project({
             Root file: <code>{project.root ?? 'none'}</code>. Compiler:{' '}
             <code>{project.compiler}</code>.{' '}
             {can(project.role, 'project.export') && (
-              <a href={`/projects/${id}/export`}>Download ZIP</a>
+              <>
+                <a href={`/projects/${id}/export`}>Download ZIP</a>{' '}
+                <a href={`/projects/${id}/export?review`}>ZIP with review data</a>
+              </>
             )}{' '}
             <Link href={`/projects/${id}/submit`}>Check before submitting</Link>
           </p>
@@ -282,6 +285,19 @@ export default async function Project({
           <ul className="report">
             {report.notes.map((n) => (
               <li key={n}>{n}</li>
+            ))}
+            {report.review && (
+              <li>
+                Review data came with the archive: {report.review.threads}{' '}
+                {report.review.threads === 1 ? 'thread' : 'threads'} and {report.review.proposals}{' '}
+                proposed {report.review.proposals === 1 ? 'change' : 'changes'} were brought in
+                {report.review.detached > 0 &&
+                  `, ${report.review.detached} of the threads about text that is no longer in the paper`}
+                . See Review below.
+              </li>
+            )}
+            {report.review?.missing.map((m) => (
+              <li key={m}>Not brought in: {m}</li>
             ))}
             {report.otherRoots.length > 0 && (
               <li>

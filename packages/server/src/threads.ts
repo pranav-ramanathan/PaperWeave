@@ -256,7 +256,8 @@ export async function listThreads(
   await authorize(pool, userId, id(projectId), 'project.read');
   const { rows } = await pool.query(
     `select t.id, t.file_id, f.path, t.anchor_from, t.anchor_to, t.excerpt, t.context_before,
-            t.context_after, t.fingerprint, t.status, t.created_at, u.email
+            t.context_after, t.fingerprint, t.status, t.created_at,
+            coalesce(u.email, t.imported_author) as email
      from threads t join files f on f.id = t.file_id left join "user" u on u.id = t.created_by
      where t.project_id = $1 and ($2::uuid is null or t.file_id = $2)
      order by t.created_at, t.id`,
@@ -264,7 +265,8 @@ export async function listThreads(
   );
   const comments = (
     await pool.query(
-      `select c.id, c.thread_id, c.body, c.created_at, u.email,
+      `select c.id, c.thread_id, c.body, c.created_at,
+              coalesce(u.email, c.imported_author) as email,
               array(select m.email from "user" m where m.id = any(c.mentions) order by m.email) as mentions
        from thread_comments c left join "user" u on u.id = c.author
        where c.thread_id = any($1) order by c.created_at, c.id`,

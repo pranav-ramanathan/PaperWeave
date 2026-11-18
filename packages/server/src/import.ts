@@ -17,6 +17,7 @@ import { type Db, transaction } from './db.ts';
 import { AppError } from './errors.ts';
 import { TEXT_FILE } from './files.ts';
 import { id, type Project } from './projects.ts';
+import { importReview, REVIEW_FILE, type ReviewImport, exportReview } from './reviewdata.ts';
 import { cutRevision, exportRevision } from './revisions.ts';
 
 const MAX_PROJECTS = 50;
@@ -41,6 +42,8 @@ export type ImportReport = {
   dynamic: { from: string; target: string }[];
   cycles: string[][];
   notes: string[];
+  /** What was brought in of the review data the archive held, if it held any. */
+  review?: ReviewImport;
 };
 export type ProjectFile = {
   id: string;
@@ -94,6 +97,7 @@ function papers(entries: Entry[], skipped: Skipped[]) {
   for (const e of outside)
     skipped.push({ path: e.path, reason: 'outside every paper in the archive' });
   return tops.map((dir) => ({
+    dir,
     name: dir.replace(/\/$/, '').split('/').pop() ?? '',
     entries: entries
       .filter((e) => e.path.startsWith(dir))
@@ -187,7 +191,7 @@ export async function importZip(
   fallbackName: string,
   limits: Limits = LIMITS,
 ): Promise<Project[]> {
-  const { entries, skipped } = await readZip(zip, limits);
+  const { entries, skipped, review } = await readZip(zip, limits);
   const found = papers(entries, skipped).map((p) => ({
     ...p,
     ...describeImport(p.entries, p.skipped),
@@ -195,7 +199,7 @@ export async function importZip(
   // Blobs first: they are content-addressed, so a failure later leaves nothing that matters behind.
   const digests = new Map<Uint8Array, string>();
   for (const p of found) for (const e of p.entries) digests.set(e.bytes, await store.put(e.bytes));
-  return transaction(pool, async (db) => {
+  const made = await transaction(pool, async (db) => {
     const created: Project[] = [];
     for (const p of found) {
       const name = (p.name || fallbackName || 'Imported paper').slice(0, 200);
@@ -239,6 +243,24 @@ export async function importZip(
     }
     return created;
   });
+  // Review data that came with a paper is brought in once the paper is there to place it in.
+  for (const [i, p] of found.entries()) {
+    const data = review.find((r) => r.path === `${p.dir}${REVIEW_FILE}`);
+    if (!data) continue;
+    let parsed: unknown = null;
+    try {
+      parsed = JSON.parse(Buffer.from(data.bytes).toString('utf8'));
+    } catch {
+      // Reported by importReview as unreadable.
+    }
+    const brought = await importReview(pool, store, made[i].id, parsed);
+    await pool.query(
+      `update import_reports set report = jsonb_set(report, '{review}', $2::jsonb)
+       where project_id = $1`,
+      [made[i].id, JSON.stringify(brought)],
+    );
+  }
+  return made;
 }
 
 export async function listFiles(db: Db, userId: string, projectId: string): Promise<ProjectFile[]> {
@@ -272,8 +294,20 @@ export async function exportZip(
   store: BlobStore,
   userId: string,
   projectId: string,
+  /** Also put the paper's threads and proposed changes in, as a file of their own. */
+  opts: { review?: boolean } = {},
 ): Promise<Uint8Array> {
   await authorize(pool, userId, id(projectId), 'project.export');
   const revision = await cutRevision(pool, store, userId, projectId);
-  return (await exportRevision(pool, store, userId, projectId, revision.id)).zip;
+  const extra = opts.review
+    ? [
+        {
+          path: REVIEW_FILE,
+          bytes: Buffer.from(
+            JSON.stringify(await exportReview(pool, store, userId, projectId), null, 2) + '\n',
+          ),
+        },
+      ]
+    : [];
+  return (await exportRevision(pool, store, userId, projectId, revision.id, false, extra)).zip;
 }

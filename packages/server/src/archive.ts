@@ -45,7 +45,7 @@ export function checkPath(path: unknown, limits: Limits = LIMITS): string {
 export function readZip(
   zip: Uint8Array,
   limits: Limits = LIMITS,
-): Promise<{ entries: Entry[]; skipped: Skipped[] }> {
+): Promise<{ entries: Entry[]; skipped: Skipped[]; review: Entry[] }> {
   if (zip.length > limits.archiveBytes) throw bad('it is too large');
   return new Promise((resolve, reject) => {
     // yauzl refuses absolute paths and ".." itself, and checks each entry's real size against
@@ -54,6 +54,8 @@ export function readZip(
       if (err) return reject(bad('it is not a readable ZIP file'));
       const entries: Entry[] = [];
       const skipped: Skipped[] = [];
+      // Review data exported with a paper: not a file of the paper, but read all the same.
+      const review: Entry[] = [];
       const seen = new Set<string>();
       let total = 0;
       const fail = (message: string) => {
@@ -61,7 +63,7 @@ export function readZip(
         reject(bad(message));
       };
       file.on('error', () => reject(bad('it is damaged or not what it claims to be')));
-      file.on('end', () => resolve({ entries, skipped }));
+      file.on('end', () => resolve({ entries, skipped, review }));
       file.on('entry', (entry: yauzl.Entry) => {
         const path = entry.fileName;
         if (path.endsWith('/')) return file.readEntry();
@@ -80,13 +82,16 @@ export function readZip(
         if (total > limits.totalBytes) return fail('it unpacks to too much data');
 
         if (SYSTEM.test(path)) return file.readEntry();
-        const reason = BUILD.test(path)
-          ? 'build output, made again on compile'
-          : /(^|\/)\.?latexmkrc$/.test(path)
-            ? 'build script, never run'
-            : !WANTED.test(path)
-              ? 'not a file type a paper uses'
-              : '';
+        const isReview = /(^|\/)paperweave-review\.json$/.test(path);
+        const reason = isReview
+          ? ''
+          : BUILD.test(path)
+            ? 'build output, made again on compile'
+            : /(^|\/)\.?latexmkrc$/.test(path)
+              ? 'build script, never run'
+              : !WANTED.test(path)
+                ? 'not a file type a paper uses'
+                : '';
         if (reason) {
           skipped.push({ path, reason });
           return file.readEntry();
@@ -103,7 +108,7 @@ export function readZip(
           });
           stream.on('error', () => fail('it is damaged or not what it claims to be'));
           stream.on('end', () => {
-            entries.push({ path, bytes: Buffer.concat(chunks) });
+            (isReview ? review : entries).push({ path, bytes: Buffer.concat(chunks) });
             file.readEntry();
           });
         });

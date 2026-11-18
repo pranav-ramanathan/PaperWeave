@@ -446,6 +446,24 @@ Read this first. Update it in every pull request.
     confirms retention defaults. The tests supply the model's answer themselves.
   - Not yet: approved figure captions and selected evidence from a chosen revision as context
     for the model; a setting for the provider's retention; deleting what was sent.
+- **E5: review data.** With this Phase E is done.
+  - "ZIP with review data", beside "Download ZIP" on the paper's page puts the paper's threads and proposed
+    changes into the archive as `paperweave-review.json` (`exportReview` in
+    `packages/server/src/reviewdata.ts`). The plain download is unchanged and has none.
+  - Importing an archive that has that file beside a paper brings the review in with it. Yjs
+    positions belong to one copy's edit history and do not travel, so each item goes out with
+    its words and 80 characters either side, and is placed by them: where the words are, or,
+    if they are there more than once, where the surroundings match (`locateQuote`).
+  - A thread whose words are not in the paper arrives detached, with its words. A proposal that
+    cannot be placed is left out. The import report says how many of each came in and lists
+    what did not, with the reason. Review data that cannot be read is reported and never stops
+    the paper itself coming in.
+  - The people named in the data may have no account here: they are kept as names
+    (`imported_author`, migration 0019), and shown where an author is shown.
+  - A service test exports a paper with two threads and four proposals (resolved, detached,
+    accepted, rejected, on words that occur twice), imports it as someone else, and holds that
+    everything but this copy's IDs is equal.
+  - Not carried: who decided a proposal, and whom a comment mentioned.
 - **A failed ticket fetch is not a refusal.** Found by a browser test failing once under load.
   Coming back online, the editor asks the web app for a ticket to connect with. If that request
   failed for a moment, the editor treated it as being refused and locked itself with "You no
@@ -476,10 +494,10 @@ nothing, edit it together, build it, and download a ZIP and a PDF that belong to
 
 Next, in this order:
 
-1. **E5.** Review metadata: an explicit export of threads and proposals with a paper, and
-   bringing them back in from an archive that has them, with a report of what is missing.
-2. **Phase F**, as in the plan: accessibility, benchmarks, a restore drill, product metrics,
-   a security review, the Tectonic comparison.
+1. **Phase F.** Beta readiness. In this order: accessibility (keyboard, screen reader, IME,
+   status that does not depend on colour, a text layer for the PDF); performance benchmarks; a
+   real restore drill; product metrics (imports and exports per template, two-author
+   activation, useful-suggestion rate); a security review; the Tectonic comparison.
 
 The Phase A replays are waiting on a person with accounts: `docs/rea/matrix.md`. The Prism one is
 optional: its export was researched from public sources (`docs/rea/prism.md`) and is a plain LaTeX
