@@ -23,6 +23,7 @@ import { Decoration, DecorationSet } from '@tiptap/pm/view';
 import katex from 'katex';
 import * as Y from 'yjs';
 import { bibliography, onBibliography } from './bibliography';
+import { pageNonce } from './nonce';
 import { numbers, onNumbers } from './numbers';
 
 const ENV = /^\\begin\{(\w+)\*?\}([\s\S]*)\\end\{\1\*?\}$/;
@@ -550,6 +551,7 @@ export function createVisual(opts: {
   let marked: { from: number; to: number; kind: 'thread' | 'proposal' | 'finding' }[] = [];
   const editor: Editor = new Editor({
     element: opts.element,
+    injectNonce: pageNonce(),
     editable: opts.editable,
     enableInputRules: false,
     enablePasteRules: false,

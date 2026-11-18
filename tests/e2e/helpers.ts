@@ -29,6 +29,19 @@ export async function signIn(page: Page, email: string) {
   await page.goto(await emailedLink(email, '/magic-link/verify'));
 }
 
+/**
+ * A page that is refused something by its own content policy is broken or under attack, and
+ * neither should pass quietly: thrown from here, it fails the test that was running.
+ */
+export function refusals(context: BrowserContext) {
+  context.on('console', (said) => {
+    // Why an edit was not made is said in the console, and belongs in a failing test's output.
+    if (said.text().startsWith('edit not made:')) console.log(said.text());
+    if (said.type() === 'error' && said.text().includes('Content Security Policy'))
+      throw new Error(`${said.page()?.url()}: ${said.text()}`);
+  });
+}
+
 let people = 0;
 /** The test now running, and the browser windows it has opened through `person`. */
 let running = '';
@@ -45,14 +58,7 @@ export async function person(browser: Browser, who: string) {
   // a different client, so each gets an address of their own, as a proxy in front would report.
   const ip = `10.${Math.floor(Math.random() * 250)}.${Math.floor(Math.random() * 250)}.${++people}`;
   const context = await browser.newContext({ extraHTTPHeaders: { 'x-forwarded-for': ip } });
-  // A page that is refused something by its own content policy is broken or under attack, and
-  // neither should pass quietly: thrown from here, it fails the test that was running.
-  context.on('console', (said) => {
-    // Why an edit was not made is said in the console, and belongs in a failing test's output.
-    if (said.text().startsWith('edit not made:')) console.log(said.text());
-    if (said.type() === 'error' && said.text().includes('Content Security Policy'))
-      throw new Error(`${said.page()?.url()}: ${said.text()}`);
-  });
+  refusals(context);
   opened.push(context);
   const page = await context.newPage();
   return { page, email: address(who) };

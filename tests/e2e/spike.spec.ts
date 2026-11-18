@@ -1,5 +1,6 @@
 // The Phase B spike in a real browser: real key events, real editors, two authors.
 import { expect, type Page, test } from '@playwright/test';
+import { refusals } from './helpers';
 import { mkdirSync, writeFileSync } from 'node:fs';
 import type { Session } from '../../apps/web/app/spike/session';
 
@@ -11,6 +12,7 @@ declare global {
 }
 
 async function open(page: Page, query = '') {
+  refusals(page.context());
   await page.goto('/spike' + query);
   await page.waitForFunction(() => !!window.__spike?.A.editor.state.doc.childCount);
 }

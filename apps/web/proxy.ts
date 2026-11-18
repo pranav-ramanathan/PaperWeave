@@ -9,8 +9,13 @@ export function pagePolicy(nonce: string, sync: string, dev: boolean) {
     "default-src 'self'",
     // React needs eval in development only, to show server errors in the browser.
     `script-src 'self' 'nonce-${nonce}' 'strict-dynamic'${dev ? " 'unsafe-eval'" : ''}`,
-    // The editors and the maths renderer set styles on elements as they draw. shortcut: styles
-    // are not held to the number; a strict style policy needs each of those libraries to take it.
+    // Style sheets are held to the number too: an injected one could read what is on the page
+    // and send it away. Styles set on single elements are not, because the editors and the
+    // maths renderer set them as they draw; those cannot select or send anything.
+    // (In development the framework's own tools add style sheets without the number.)
+    dev ? "style-src-elem 'self' 'unsafe-inline'" : `style-src-elem 'self' 'nonce-${nonce}'`,
+    "style-src-attr 'unsafe-inline'",
+    // For a browser that knows neither of the two above.
     "style-src 'self' 'unsafe-inline'",
     "img-src 'self' data: blob:",
     "font-src 'self' data:",
@@ -32,6 +37,8 @@ export function proxy(request: NextRequest) {
   // On the request, for the page being rendered to read; on the answer, for the browser.
   const headers = new Headers(request.headers);
   headers.set('Content-Security-Policy', policy);
+  // The same number, where a page can read it to hand to its editors.
+  headers.set('x-nonce', nonce);
   const response = NextResponse.next({ request: { headers } });
   response.headers.set('Content-Security-Policy', policy);
   return response;
