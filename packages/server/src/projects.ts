@@ -1,6 +1,7 @@
 // Projects, members and invitations. Every function takes the acting user and checks first.
 import { createHash, randomBytes } from 'node:crypto';
 import type pg from 'pg';
+import { LIMITS } from './archive.ts';
 import { authorize, type Role, ROLES } from './authz.ts';
 import { type Db, transaction } from './db.ts';
 import { AppError } from './errors.ts';
@@ -19,13 +20,39 @@ export type Project = { id: string; name: string; role: Role };
 export type ProjectDetail = Project & { compiler: string; root: string | null };
 export type Member = { userId: string; email: string; name: string; role: Role };
 
+/**
+ * Refuses when starting this many more papers would take the person past what one person may
+ * start in an hour. Each paper can hold 300 MB, so this is what bounds how fast one account
+ * can fill the store.
+ */
+export async function mayStartPapers(
+  db: Db,
+  userId: string,
+  more = 1,
+  perHour = LIMITS.papersPerHour,
+) {
+  const { rows } = await db.query(
+    `select count(*)::int as n from projects p
+     join project_members m on m.project_id = p.id and m.user_id = $1 and m.role = 'owner'
+     where p.created_at > now() - interval '1 hour'`,
+    [userId],
+  );
+  if (rows[0].n + more > perHour)
+    throw new AppError(
+      'conflict',
+      `One person can start ${perHour} papers in an hour, and you have started ${rows[0].n}. Try again in a little while.`,
+    );
+}
+
 export async function createProject(
   pool: pg.Pool,
   userId: string,
   name: unknown,
+  perHour = LIMITS.papersPerHour,
 ): Promise<Project> {
   if (typeof name !== 'string' || !name.trim() || name.length > 200)
     throw new AppError('invalid_input', 'A project needs a name of at most 200 characters.');
+  await mayStartPapers(pool, userId, 1, perHour);
   return transaction(pool, async (db) => {
     const { rows } = await db.query('insert into projects (name) values ($1) returning id, name', [
       name.trim(),

@@ -10,6 +10,8 @@ export const LIMITS = {
   fileBytes: 50_000_000,
   totalBytes: 300_000_000,
   pathLength: 255,
+  /** Papers one person may start in an hour: by hand, from a template, or out of archives. */
+  papersPerHour: 100,
 };
 export type Limits = typeof LIMITS;
 

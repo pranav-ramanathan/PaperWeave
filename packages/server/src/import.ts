@@ -16,7 +16,7 @@ import type { BlobStore } from './blobs.ts';
 import { type Db, transaction } from './db.ts';
 import { AppError } from './errors.ts';
 import { TEXT_FILE } from './files.ts';
-import { id, type Project } from './projects.ts';
+import { id, mayStartPapers, type Project } from './projects.ts';
 import { importReview, REVIEW_FILE, type ReviewImport, exportReview } from './reviewdata.ts';
 import { cutRevision, exportRevision } from './revisions.ts';
 
@@ -196,6 +196,7 @@ export async function importZip(
     ...p,
     ...describeImport(p.entries, p.skipped),
   }));
+  await mayStartPapers(pool, userId, found.length, limits.papersPerHour);
   // Blobs first: they are content-addressed, so a failure later leaves nothing that matters behind.
   const digests = new Map<Uint8Array, string>();
   for (const p of found) for (const e of p.entries) digests.set(e.bytes, await store.put(e.bytes));
