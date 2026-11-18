@@ -43,6 +43,8 @@ export default async function Project({
     deleted?: string;
     in?: string;
     root?: string;
+    relabelled?: string;
+    places?: string;
   }>;
 }) {
   const { id } = await params;
@@ -113,6 +115,12 @@ export default async function Project({
         </p>
       )}
       {root && <p role="status">Root file changed.</p>}
+      {query.relabelled && (
+        <p role="status">
+          Renamed to <code>{query.relabelled}</code> in {query.places}{' '}
+          {query.places === '1' ? 'place' : 'places'}.
+        </p>
+      )}
 
       <h2>Files</h2>
       {files.length > 0 && (
@@ -240,7 +248,7 @@ export default async function Project({
 
       {(labels.labels.length > 0 || labels.undefined.length > 0) && (
         <>
-          <h2>Labels and references</h2>
+          <h2 id="labels">Labels and references</h2>
           <p>
             {labels.labels.length} {labels.labels.length === 1 ? 'label' : 'labels'}.{' '}
             {labels.undefined.length + labels.duplicates.length === 0
@@ -277,6 +285,22 @@ export default async function Project({
                 </li>
               ))}
             </ul>
+          )}
+          {canWrite && labels.labels.length > 0 && (
+            <form action={`/projects/${id}/labels/rename`} className="inline">
+              <label>
+                Rename the label{' '}
+                <select name="from">
+                  {[...new Set(labels.labels.map((l) => l.key))].sort().map((key) => (
+                    <option key={key}>{key}</option>
+                  ))}
+                </select>
+              </label>{' '}
+              <label>
+                to <input name="to" required maxLength={200} />
+              </label>{' '}
+              <button type="submit">See what would change</button>
+            </form>
           )}
         </>
       )}

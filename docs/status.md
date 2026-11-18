@@ -133,6 +133,13 @@ Read this first. Update it in every pull request.
     each with its file and line (`labelReport`).
   - Not numbered: equations and sections without a label (LaTeX records numbers only for
     labels), and maths that uses the paper's own macros, which still shows as source.
+- **D1, second part: renaming a label.** On the paper's page: choose a label and a new name.
+  A page then lists every line that would change, in every file, and nothing has changed yet.
+  Confirming changes them all in one transaction, or none.
+  - If the text has changed since the list was made so that the list would differ, the rename
+    is refused and the list is shown again (`proposeLabelRename`, `renameLabel`).
+  - A name already used by another label is refused, as is one LaTeX could not use.
+  - Open editors get the new name without a reload.
 - **Phase B spike.** Gate report: `docs/phase-b-gate.md`. Recommendation: go.
   - `packages/latex`: lossless block parser, incremental reparse, include graph, encoding round
     trip, coverage.
@@ -147,10 +154,10 @@ nothing, edit it together, build it, and download a ZIP and a PDF that belong to
 
 Next, in this order:
 
-1. **D1, the rest.** Rename a label with the reference updates shown first (the same for a
-   renamed file and its `\input` lines); insert a reference or an equation from the toolbar,
-   the keyboard and the context menu; edit an equation's LaTeX in place with a live preview;
-   teach the in-browser renderer the paper's own macros.
+1. **D1, the rest.** The same "show the changes first" for a renamed file and the `\input`
+   lines that name it; insert a reference or an equation from the toolbar, the keyboard and
+   the context menu; edit an equation's LaTeX in place with a live preview; teach the
+   in-browser renderer the paper's own macros.
 2. **D2** onward, as in the plan.
 
 The Phase A replays are waiting on a person with accounts: `docs/rea/matrix.md`. The Prism one is
