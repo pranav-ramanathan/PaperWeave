@@ -6,6 +6,7 @@ import {
   getProject,
   importReport,
   labelReport,
+  listDatasets,
   listFiles,
   listMembers,
   listRevisions,
@@ -51,6 +52,7 @@ export default async function Project({
     relabelled?: string;
     moved?: string;
     looked?: string;
+    described?: string;
     checked?: string;
     places?: string;
   }>;
@@ -66,12 +68,14 @@ export default async function Project({
     labelReport(db(), blobs(), user.id, id),
     citationReport(db(), blobs(), user.id, id),
     citationChecks(db(), blobs(), user.id, id),
+    listDatasets(db(), blobs(), user.id, id),
   ]).catch((err) => {
     // Not a member, or no such paper: the two look the same from outside.
     if (err instanceof AppError && err.code === 'not_found') notFound();
     throw err;
   });
-  const [project, members, files, report, revisions, labels, cited, checks] = loaded;
+  const [project, members, files, report, revisions, labels, cited, checks, datasets] = loaded;
+  const dataFiles = files.filter((f) => /\.(csv|tsv)$/i.test(f.path) && !f.readonly);
   const reviewer = can(project.role, 'comment.write');
   const day = (iso: string) => iso.slice(0, 10);
   const writer = can(project.role, 'revision.write');
@@ -127,6 +131,7 @@ export default async function Project({
         </p>
       )}
       {root && <p role="status">Root file changed.</p>}
+      {query.described && <p role="status">Description approved.</p>}
       {query.looked && (
         <p role="status">
           Looked up <code>{query.looked}</code>. The result is beside it below.
@@ -529,6 +534,48 @@ export default async function Project({
               </table>
             </>
           )}
+        </>
+      )}
+
+      {dataFiles.length > 0 && (
+        <>
+          <h2 id="data">Data</h2>
+          <p>
+            A CSV file becomes data once someone has said what its columns hold. Charts are drawn
+            only from a file as it was when its description was approved.
+          </p>
+          <ul className="report">
+            {dataFiles.map((f) => {
+              const d = datasets.find((x) => x.fileId === f.id);
+              return (
+                <li key={f.id}>
+                  <code>{f.path}</code>:{' '}
+                  {!d ? (
+                    'not described yet. '
+                  ) : (
+                    <>
+                      {d.columns
+                        .map((c) => `${c.name}${c.unit ? ` in ${c.unit}` : ''} (${c.type})`)
+                        .join(', ')}
+                      . Approved {d.approvedAt.slice(0, 10)}
+                      {d.approvedBy ? ` by ${d.approvedBy}` : ''}.{' '}
+                      {d.exported ? 'Included in downloads. ' : 'Not included in downloads. '}
+                      {d.changed && (
+                        <strong>The file has changed since: its charts are out of date. </strong>
+                      )}
+                    </>
+                  )}
+                  <Link href={`/projects/${id}/data/${f.id}`}>
+                    {d
+                      ? d.changed
+                        ? 'Look at it again'
+                        : 'See or change its description'
+                      : 'Describe it'}
+                  </Link>
+                </li>
+              );
+            })}
+          </ul>
         </>
       )}
 

@@ -9,7 +9,7 @@ import { type Db, transaction } from './db.ts';
 import { AppError } from './errors.ts';
 import { removeFile } from './files.ts';
 import { id } from './projects.ts';
-import { currentBytes, editFile, openFile } from './sync.ts';
+import { currentBytes, editLocked, openFile } from './sync.ts';
 import { type DiffLine, diffLines } from './textdiff.ts';
 
 export type Revision = {
@@ -36,8 +36,19 @@ export function cutRevision(
   projectId: string,
   opts: { name?: string; kind?: Revision['kind']; restoredFrom?: string } = {},
 ): Promise<{ id: string; number: number }> {
+  return transaction(pool, (db) => cut(db, store, userId, projectId, opts));
+}
+
+/** The same as one step of a larger transaction. */
+async function cut(
+  db: Db,
+  store: BlobStore,
+  userId: string | null,
+  projectId: string,
+  opts: { name?: string; kind?: Revision['kind']; restoredFrom?: string } = {},
+): Promise<{ id: string; number: number }> {
   const kind = opts.kind ?? 'auto';
-  return transaction(pool, async (db) => {
+  {
     // Locking the file rows holds back new edits for the moment it takes to read them, so every
     // file is captured at the same point. It also keeps two cuts from running at once.
     const files = (
@@ -106,7 +117,7 @@ export function cutRevision(
       ],
     );
     return made;
-  });
+  }
 }
 
 /** Save the paper as it is now under a name. */
@@ -180,8 +191,18 @@ export async function exportRevision(
 ): Promise<{ zip: Uint8Array; paper: string; number: number }> {
   await authorize(db, userId, id(projectId), 'project.export');
   const { revision, files } = await load(db, projectId, revisionId);
+  // Data goes into a download only if its author has said so. A CSV file nobody has described
+  // as data is a file like any other.
+  const held = new Set(
+    (
+      await db.query('select file_id from datasets where project_id = $1 and not exported', [
+        projectId,
+      ])
+    ).rows.map((r) => r.file_id),
+  );
+  const shared = files.filter((f) => !held.has(f.file_id));
   const entries: Entry[] = [];
-  for (const f of files) entries.push({ path: f.path, bytes: await blob(store, f.digest) });
+  for (const f of shared) entries.push({ path: f.path, bytes: await blob(store, f.digest) });
   if (manifest) {
     const built = (
       await db.query(
@@ -205,7 +226,7 @@ export async function exportRevision(
         // PDF timestamps are set from this, so a rebuild gives the same bytes.
         sourceDateEpoch: epoch,
         command: `SOURCE_DATE_EPOCH=${epoch} latexmk -norc ${engine} -no-shell-escape -interaction=nonstopmode ${revision.root}`,
-        files: Object.fromEntries(files.map((f) => [f.path, `sha256:${f.digest}`])),
+        files: Object.fromEntries(shared.map((f) => [f.path, `sha256:${f.digest}`])),
       },
       null,
       2,
@@ -320,62 +341,72 @@ export async function restoreRevision(
 ): Promise<{ id: string; number: number }> {
   await authorize(pool, userId, id(projectId), 'revision.write');
   const { revision, files } = await load(pool, projectId, revisionId);
-  // Files deleted since come back as the same files, edit history and all. They wait under a
-  // placeholder name until the names they had are free.
-  await pool.query(
-    `update all_files set deleted_at = null, path = id::text || '.renaming'
+  // All or nothing, with every file held from here on, so no edit lands between keeping the paper
+  // as it stands and replacing it. Typing waits for the moment this takes.
+  return transaction(pool, async (db) => {
+    await db.query('select 1 from all_files where project_id = $1 order by path for update', [
+      projectId,
+    ]);
+    // What is about to be replaced is kept as a revision first, so a restore erases nothing: not
+    // even what someone typed a moment ago.
+    await cut(db, store, userId, projectId);
+    // Files deleted since come back as the same files, edit history and all. They wait under a
+    // placeholder name until the names they had are free.
+    await db.query(
+      `update all_files set deleted_at = null, path = id::text || '.renaming'
      where project_id = $1 and deleted_at is not null and id = any($2::uuid[])`,
-    [projectId, files.map((t) => t.file_id)],
-  );
-  const live = (
-    await pool.query('select id, path, digest, eol from files where project_id = $1', [projectId])
-  ).rows;
-  // Files added since the revision go.
-  for (const extra of live)
-    if (!files.some((t) => t.file_id === extra.id)) await removeFile(pool, projectId, extra.id);
-  // Files whose name must change step aside first, so that two files can swap names.
-  const moving = live.filter((f) => files.some((t) => t.file_id === f.id && t.path !== f.path));
-  await pool.query("update files set path = id::text || '.renaming' where id = any($1::uuid[])", [
-    moving.map((f) => f.id),
-  ]);
-  for (const target of files) {
-    const file = live.find((f) => f.id === target.file_id);
-    if (!file) throw new Error(`file ${target.file_id} of revision ${revisionId} is gone`);
-    if (file.path !== target.path)
-      await pool.query('update files set path = $2 where id = $1', [file.id, target.path]);
-    const bytes = await blob(store, target.digest);
-    const decoded = file.eol ? decodeFile(bytes) : null;
-    if (decoded?.editable) {
-      const want = decoded.text;
-      await editFile(pool, store, file.id, userId, (text) => {
-        const have = text.toString();
-        // Replace only the part that differs, so people editing elsewhere are not disturbed.
-        let p = 0;
-        while (p < have.length && p < want.length && have[p] === want[p]) p++;
-        let s = 0;
-        while (s < have.length - p && s < want.length - p && have.at(-1 - s) === want.at(-1 - s))
-          s++;
-        // Whole lines only. An edit made offline before the restore is merged in at an edge of
-        // the replaced part; this way it lands between two lines, never inside one.
-        while (p > 0 && have[p - 1] !== '\n') p--;
-        while (s > 0 && have[have.length - s - 1] !== '\n') s--;
-        text.delete(p, have.length - p - s);
-        text.insert(p, want.slice(p, want.length - s));
-      });
-    } else if (file.digest !== target.digest)
-      await pool.query('update files set digest = $2, size = $3 where id = $1', [
-        file.id,
-        target.digest,
-        bytes.length,
-      ]);
-  }
-  await pool.query(
-    `update projects set compiler = $2, manifest_version = manifest_version + 1,
+      [projectId, files.map((t) => t.file_id)],
+    );
+    const live = (
+      await db.query('select id, path, digest, eol from files where project_id = $1', [projectId])
+    ).rows;
+    // Files added since the revision go.
+    for (const extra of live)
+      if (!files.some((t) => t.file_id === extra.id)) await removeFile(db, projectId, extra.id);
+    // Files whose name must change step aside first, so that two files can swap names.
+    const moving = live.filter((f) => files.some((t) => t.file_id === f.id && t.path !== f.path));
+    await db.query("update files set path = id::text || '.renaming' where id = any($1::uuid[])", [
+      moving.map((f) => f.id),
+    ]);
+    for (const target of files) {
+      const file = live.find((f) => f.id === target.file_id);
+      if (!file) throw new Error(`file ${target.file_id} of revision ${revisionId} is gone`);
+      if (file.path !== target.path)
+        await db.query('update files set path = $2 where id = $1', [file.id, target.path]);
+      const bytes = await blob(store, target.digest);
+      const decoded = file.eol ? decodeFile(bytes) : null;
+      if (decoded?.editable) {
+        const want = decoded.text;
+        await editLocked(db, store, file.id, userId, (text) => {
+          const have = text.toString();
+          // Replace only the part that differs, so people editing elsewhere are not disturbed.
+          let p = 0;
+          while (p < have.length && p < want.length && have[p] === want[p]) p++;
+          let s = 0;
+          while (s < have.length - p && s < want.length - p && have.at(-1 - s) === want.at(-1 - s))
+            s++;
+          // Whole lines only. An edit made offline before the restore is merged in at an edge of
+          // the replaced part; this way it lands between two lines, never inside one.
+          while (p > 0 && have[p - 1] !== '\n') p--;
+          while (s > 0 && have[have.length - s - 1] !== '\n') s--;
+          text.delete(p, have.length - p - s);
+          text.insert(p, want.slice(p, want.length - s));
+        });
+      } else if (file.digest !== target.digest)
+        await db.query('update files set digest = $2, size = $3 where id = $1', [
+          file.id,
+          target.digest,
+          bytes.length,
+        ]);
+    }
+    await db.query(
+      `update projects set compiler = $2, manifest_version = manifest_version + 1,
        root_file_id = (select id from files where project_id = $1 and path = $3)
      where id = $1`,
-    [projectId, revision.compiler, revision.root],
-  );
-  return cutRevision(pool, store, userId, projectId, { kind: 'restore', restoredFrom: revisionId });
+      [projectId, revision.compiler, revision.root],
+    );
+    return cut(db, store, userId, projectId, { kind: 'restore', restoredFrom: revisionId });
+  });
 }
 
 /**

@@ -207,6 +207,24 @@ test('restoring puts the paper back as a new revision and erases nothing', async
   expect(regretted['moved.tex']).toContain('also regretted');
 });
 
+test('a restore first keeps the paper as it stood, unsaved edits included', async () => {
+  const p = await paper();
+  const good = await saveRevision(t.pool, store, owner.id, p.id, 'Good');
+  // Typed since the last revision, and in no revision yet.
+  await replace(p.main, 'Hello.', 'Typed a moment ago.');
+  await restoreRevision(t.pool, store, owner.id, p.id, good.id);
+  expect((await files(await exportZip(t.pool, store, owner.id, p.id)))['main.tex']).toBe(MAIN);
+
+  const all = await listRevisions(t.pool, owner.id, p.id);
+  expect(all.map((r) => [r.number, r.kind, r.restoredFrom])).toEqual([
+    [3, 'restore', 1],
+    [2, 'auto', null],
+    [1, 'named', null],
+  ]);
+  const kept = await files((await exportRevision(t.pool, store, owner.id, p.id, all[1].id)).zip);
+  expect(kept['main.tex']).toContain('Typed a moment ago.');
+});
+
 test('a file can be renamed to a usable name and keeps its identity', async () => {
   const p = await paper();
   await renameFile(t.pool, owner.id, p.id, p.main, 'paper.tex');
