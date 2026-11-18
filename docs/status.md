@@ -222,6 +222,21 @@ Read this first. Update it in every pull request.
   - If the table changes under an open field, the person is told, with the text they had typed.
   - A table that is not a plain grid (`\multicolumn`, `\multirow`, a nested table, rows of
     different lengths) is shown as source, with "Edit in source".
+- **D3, second part: figures, and inserting figures and tables.**
+  - A figure in the visual view shows its picture, found as LaTeX finds it (against the root
+    file's folder, with the extension added if it was left off, upper case included). PNG and
+    JPEG are shown; a PDF or EPS figure says it is in the PDF.
+  - Each picture has a description for people who cannot see it: `alt={...}` in the picture's
+    options. One that is missing is said to be missing, and is added in place. The pinned
+    toolchain accepts the option; a test builds a paper that uses it.
+  - "Figure" and "Table" on the toolbar, Alt+G and Alt+T, and the menu, insert a new one where
+    the caret is: a figure with a picture chosen from the paper's files, its description and
+    caption; a table of a chosen size with a caption. Each gets a label made from its caption
+    that the paper does not already use.
+  - A build that fails outright (a picture the engine cannot read) now reports why. Such errors
+    have no file and line and were dropped before.
+  - The editor reads the selection in the text before acting even when a toolbar button has
+    the keyboard.
 - **Phase B spike.** Gate report: `docs/phase-b-gate.md`. Recommendation: go.
   - `packages/latex`: lossless block parser, incremental reparse, include graph, encoding round
     trip, coverage.
@@ -236,8 +251,7 @@ nothing, edit it together, build it, and download a ZIP and a PDF that belong to
 
 Next, in this order:
 
-1. **D3, the rest.** Figures: show the picture, give it a description (alt text), and insert
-   a figure or a table from the toolbar. Adding and removing table rows and columns.
+1. **D3, the rest.** Adding and removing table rows and columns.
 2. **D4** onward, as in the plan.
 
 The Phase A replays are waiting on a person with accounts: `docs/rea/matrix.md`. The Prism one is

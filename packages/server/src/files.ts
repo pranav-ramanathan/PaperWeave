@@ -234,3 +234,53 @@ export async function renameFileAndReferences(
     return { places: await applySplices(db, userId, plan.splices) };
   });
 }
+
+/** Pictures a browser can show as they are. A PDF or EPS figure is real, but not showable here. */
+const SHOWN: Record<string, string> = {
+  png: 'image/png',
+  jpg: 'image/jpeg',
+  jpeg: 'image/jpeg',
+};
+
+/**
+ * The picture an `\\includegraphics` names, as LaTeX would find it: against the root file's
+ * folder, with the extension added if it was left off. For showing in the editor.
+ */
+export async function picture(
+  db: Db,
+  store: BlobStore,
+  userId: string,
+  projectId: string,
+  target: string,
+): Promise<{ bytes: Uint8Array; type: string; path: string }> {
+  await authorize(db, userId, id(projectId), 'project.read');
+  const { rows } = await db.query(
+    `select f.path, f.digest, p.root_file_id = f.id as root from files f
+     join projects p on p.id = f.project_id where f.project_id = $1`,
+    [projectId],
+  );
+  const dir = rootDir(rows.find((f) => f.root)?.path ?? '');
+  const path = resolveInclude(
+    { kind: 'graphics', target, dynamic: /[\\#]/.test(target), at: 0, targetAt: 0 },
+    dir,
+    new Set<string>(rows.map((f) => f.path)),
+  );
+  const type = SHOWN[path?.split('.').pop()?.toLowerCase() ?? ''];
+  const bytes = type && (await store.get(rows.find((f) => f.path === path).digest));
+  if (!path || !bytes) throw new AppError('not_found', 'No picture of that name can be shown.');
+  return { bytes, type, path };
+}
+
+/** The paper's pictures, each as an `\\includegraphics` in it would name it. */
+export async function pictures(db: Db, userId: string, projectId: string) {
+  await authorize(db, userId, id(projectId), 'project.read');
+  const { rows } = await db.query(
+    `select f.path, p.root_file_id = f.id as root from files f
+     join projects p on p.id = f.project_id where f.project_id = $1 order by f.path`,
+    [projectId],
+  );
+  const dir = rootDir(rows.find((f) => f.root)?.path ?? '');
+  return rows
+    .filter((f) => /\.(png|jpe?g|pdf|eps)$/i.test(f.path) && !f.root)
+    .map((f) => ({ path: f.path as string, target: relativeTo(dir, f.path) }));
+}

@@ -5,6 +5,8 @@ import { blobStore } from './blobs.ts';
 import {
   createFile,
   deleteFile,
+  picture,
+  pictures,
   proposeFileRename,
   renameFileAndReferences,
   setRootFile,
@@ -305,4 +307,47 @@ test('a file rename is refused whole when the lines have changed, and can leave 
   const after = await content(p.id);
   expect(after['intro.tex']).toBe('Intro.\n');
   expect(after['main.tex']).toBe(before['main.tex']);
+});
+
+// A small valid PNG: a black square on white.
+const PNG = Buffer.from(
+  'iVBORw0KGgoAAAANSUhEUgAAAAgAAAAICAAAAADhZOFXAAAAFklEQVR4nGP4DwUMSAwGBgYGQgw0XQC54i/RD0GiIwAAAABJRU5ErkJggg==',
+  'base64',
+);
+
+test('a picture is served as LaTeX would find it, and only if a browser can show it', async () => {
+  const zip = await writeZip([
+    { path: 'paper/main.tex', bytes: Buffer.from(MAIN) },
+    { path: 'paper/figures/dot.png', bytes: PNG },
+    { path: 'paper/figures/plot.pdf', bytes: Buffer.from('%PDF-1.4') },
+    { path: 'paper/photo.JPG', bytes: Buffer.from([0xff, 0xd8, 0xff]) },
+  ]);
+  const [project] = await importZip(t.pool, store, owner.id, zip, 'Pictures');
+  const get = (who: string, target: string) => picture(t.pool, store, who, project.id, target);
+  // With or without its extension, as \includegraphics allows.
+  for (const target of ['figures/dot', 'figures/dot.png', './figures/dot']) {
+    const found = await get(owner.id, target);
+    expect(found.type, target).toBe('image/png');
+    expect(Buffer.from(found.bytes).equals(PNG), target).toBe(true);
+  }
+  expect((await get(owner.id, 'photo')).type).toBe('image/jpeg');
+  // A PDF figure is real, but not something to hand a browser as a picture. Nor is anything
+  // that is not a picture, or not there, or outside the paper.
+  for (const target of [
+    'figures/plot',
+    'figures/plot.pdf',
+    'main.tex',
+    'nothing',
+    '../../etc/passwd',
+    '\\figs/dot',
+  ])
+    expect(await code(get(owner.id, target)), target).toBe('not_found');
+  expect(await code(get(outsider.id, 'figures/dot'))).toBe('not_found');
+
+  expect(await pictures(t.pool, owner.id, project.id)).toEqual([
+    { path: 'figures/dot.png', target: 'figures/dot.png' },
+    { path: 'figures/plot.pdf', target: 'figures/plot.pdf' },
+    { path: 'photo.JPG', target: 'photo.JPG' },
+  ]);
+  expect(await code(pictures(t.pool, outsider.id, project.id))).toBe('not_found');
 });
