@@ -71,6 +71,23 @@ test('a chart is drawn from approved data and is out of date once the data chang
   const listed = page.getByRole('listitem').filter({ hasText: 'Line chart of latency' });
   await expect(listed).toContainText('Drawn 20');
 
+  // One of them is deleted by hand. The chart does not go on saying it is drawn and showing a
+  // picture that is not there: it says its files have gone, and drawing it again brings them back.
+  await page.getByRole('button', { name: 'Delete charts/latency.png' }).click();
+  await expect(page.getByRole('status')).toContainText('Deleted charts/latency.png.');
+  await expect(listed).toContainText('Its files are no longer in the paper: draw it again.');
+  await page.goto(chart);
+  await expect(page.getByRole('status')).toContainText('Not in the paper.');
+  await expect(picture).toHaveCount(0);
+  await page.getByRole('button', { name: 'Draw it again' }).click();
+  await expect(page.getByText('Not in the paper.')).toHaveCount(0, { timeout: 30_000 });
+  await expect
+    .poll(() => picture.evaluate((img: HTMLImageElement) => img.complete && img.naturalWidth))
+    .toBeGreaterThan(300);
+  await page.goto(paper);
+  await expect(page.getByText('charts/latency.png')).toBeVisible();
+  await expect(listed).toContainText('Drawn 20');
+
   // Its author gives it a caption. The record of how it was made is on its page.
   await page.goto(chart);
   await page.getByLabel(/^Caption/).fill('Latency over four days.');

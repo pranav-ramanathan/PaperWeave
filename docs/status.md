@@ -725,6 +725,10 @@ Two things about tests, found on the way and not about the product:
   in about four minutes, and then nobody can build the paper until the hour is up.
 - **Whom it reached.** Anyone who opened a second file of a paper that had already been
   built, with "Compile automatically" on, which it is unless turned off.
+- **It also kept a paper from being ready to submit.** The checks before submitting call a
+  paper that has changed since its build a problem. Run on the old code: after a second file
+  was opened, two more builds each came back behind and the checks still said "The paper has
+  changed since it was last built." An edit to the paper got out of it, since that makes a new revision.
 - **Now**, in three places:
   - a file's first log entry is not counted as an edit (`COLUMNS` in
     `packages/server/src/builds.ts`);
@@ -754,6 +758,25 @@ Two things about tests, found on the way and not about the product:
 - **Not held by a test:** the pane's own rule, since after the other two changes nothing is
   known that brings a build back behind. If the request for a build fails, the pane does
   not try again by itself; the message and "Compile now" are there.
+
+## A chart whose files have left the paper
+
+- **What was wrong.** A drawn chart is two files of the paper. If one was deleted by hand, or
+  the paper was put back to a revision from before the chart was drawn, the chart still said
+  "Drawn" on the paper's page, and its own page showed a picture that was not there.
+- **Now** it says its files are no longer in the paper and that drawing it again puts them
+  back (`missing` in `listCharts`, `packages/server/src/charts.ts`). Drawing again already
+  worked; nothing said to do it.
+- **Held by** a service test (`charts.sandbox.test`: a file deleted, and a restore) and a step
+  in the browser test (`charts.spec`).
+- **Found by** trying the second of things after the build fault: restores and renames done
+  twice, a file deleted and made again and then restored both ways, restores across a chart's
+  drawing and across a change to its data. Only this turned up.
+- **Seen there and left as it is.** After a restore to a revision whose data is older than
+  the chart's last drawing, the chart says "out of date" although the files that came back
+  are of that older data, and it cannot be drawn again until the data is described again. The
+  record of what a chart was drawn from is one row, not one for each revision. It errs towards
+  asking a person to look.
 
 ## A paper's size, and what a sync ticket opens
 

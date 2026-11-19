@@ -53,7 +53,14 @@ export default async function ChartPage({
       {error && <p role="alert">{error}</p>}
       {chart?.status === 'queued' && <p role="status">Waiting to be drawn…</p>}
       {chart?.status === 'failed' && <p role="alert">Could not be drawn: {chart.problem}</p>}
-      {chart?.drawnAt && (
+      {chart?.missing && (
+        <p role="status">
+          <strong>Not in the paper.</strong> This chart was drawn, but its files are no longer in
+          the paper: they were deleted, or the paper was put back to how it was before the chart was
+          drawn. Draw the chart again to put them back.
+        </p>
+      )}
+      {chart?.drawnAt && !chart.missing && (
         <>
           <img
             className="chart"
