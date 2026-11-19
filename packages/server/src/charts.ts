@@ -61,6 +61,26 @@ export type ChartDraw = {
 
 const NAME = /^[a-z0-9][a-z0-9-]{0,39}$/;
 const MAX_GROUPS = 8;
+/**
+ * The colours of a chart's groups, in the order they are used. A chart is printed on white, so
+ * each is dark enough against white to be made out (3 to 1, what WCAG asks of graphics): three
+ * of the eight used before were not, the second among them.
+ *
+ * The first seven are from Paul Tol's "muted" scheme, chosen to stay apart for colour-blind
+ * readers. The eighth is his teal made darker. That they stay apart was checked by simulating
+ * colour-blind vision, not by people. Groups are told apart without colour too: by the shape of
+ * a point, the dashes of a line, the place of a bar.
+ */
+export const CHART_COLOURS = [
+  '#332288',
+  '#CC6677',
+  '#117733',
+  '#999933',
+  '#AA4499',
+  '#882255',
+  '#000000',
+  '#44A0A4',
+];
 /** Drawings of one paper's charts in an hour. */
 export const CHART_DRAWS_PER_HOUR = 120;
 const bad = (why: string) => new AppError('invalid_input', why);
@@ -209,20 +229,8 @@ export function vegaLite(spec: ChartSpec, table: Table) {
     config: {
       // The one font family in the image that draws the chart.
       font: 'DejaVu Sans',
-      mark: { color: '#0072B2' },
-      // Colours that stay distinct for colour-blind readers (Okabe and Ito).
-      range: {
-        category: [
-          '#0072B2',
-          '#E69F00',
-          '#009E73',
-          '#CC79A7',
-          '#56B4E9',
-          '#D55E00',
-          '#F0E442',
-          '#000000',
-        ],
-      },
+      mark: { color: CHART_COLOURS[0] },
+      range: { category: CHART_COLOURS },
     },
   };
   return { vl, leftOut: table.rows.length - values.length };

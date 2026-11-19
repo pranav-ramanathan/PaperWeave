@@ -30,6 +30,17 @@ Where this stands, what holds it there, and what nobody has checked yet.
   - It is coarser than a double-click, which picks a word: it picks what is nearest the middle
     of the pane. On a page with two columns it cannot say which column is meant.
 
+- **The colours of a drawn chart** (`charts.test`). A chart is printed on white, and each of
+  its eight colours is dark enough against white to be made out: at least 3 to 1.
+  - Three of the eight used before were not: an orange at 2.3 to 1, a light blue at 2.3 and a
+    yellow at 1.3. The orange was the second colour, so any chart with two groups had it.
+  - The new ones are from a published scheme made for colour-blind readers (Paul Tol's
+    "muted"), keeping those dark enough for white. In a simulation of the three kinds of
+    colour-blindness the closest two are a little closer than the old set's closest two were
+    (14 against 16 on the measure used), which is the price of every colour being dark enough.
+  - Groups are also told apart without colour: by the shape of a point, the dashes of a line,
+    the place of a bar.
+
 Other browser tests hold narrower things: composing text with an input method while someone
 else edits the same paragraph (`spike.spec`), switching views with the selection kept
 (`visual.spec`), and the equation, reference, citation, figure and table windows opened from
@@ -70,4 +81,7 @@ the keyboard (`insert.spec`).
   the page being zoomed, wider spacing between letters and lines, and a narrow window on the
   pages the test does not visit (the differences between two revisions, renaming, a chart
   that has been drawn).
-- **Contrast of drawn charts and of formulas.** The audit checks the page's own text.
+- **Formulas.** The audit checks the page's own text. A formula is drawn in the page's ink
+  colour, so it should pass where the text around it does; that has not been measured.
+- **Whether a chart's colours stay apart for colour-blind readers, in people's eyes.** It was
+  checked by simulating colour-blind vision (see above).
