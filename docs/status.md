@@ -577,6 +577,12 @@ What is left is not code that can be written here:
    forbid automated access to its site**: `overleaf.md` says what was read before that was
    noticed, and whether to keep that file is the owner's call.
 
+That list was written before the fault under "A PDF that stayed behind the text" was found,
+and that one was in code, reached by anyone with a paper of two files. It was found by making
+a test do the second of something: open a second file. Several tests still do only the first
+(draw a chart once, restore once, rename once). Making them do the second is the cheapest
+place left to look.
+
 If more is to be built before those are settled, the candidates are in the code as
 `shortcut:` comments (seven of them, each saying when it stops being good enough) and in the
 "Open" list of `docs/security-review.md`.
@@ -733,6 +739,18 @@ Two things about tests, found on the way and not about the product:
   and made again was not run against the old code.
 - **How it was found.** By the narrow-window test, when it was made to edit a second file and
   then wait for the PDF. No test had opened a second file and looked at the PDF's state.
+- **The opposite fault, found by asking what else the rule missed.** A build said "up to
+  date" after three changes that are not typing, and so the pane did not build:
+  - a file that is not text replaced whole, as a chart is when it is drawn again;
+  - a file deleted;
+  - another file made the root.
+- **The rule now sees all three**, and a compiler changed by a restore.
+  - The mark the pane watches to see that the paper is still (`edits` from `latestBuilds`)
+    moved only with typing. It now moves with these too, or the pane's once-for-each-state
+    rule would have kept it from building after them.
+  - A service test holds the three; it failed on each before. The browser test deletes a
+    file in another window and sees the pane build; that step was not run against the old
+    code.
 - **Not held by a test:** the pane's own rule, since after the other two changes nothing is
   known that brings a build back behind. If the request for a build fails, the pane does
   not try again by itself; the message and "Compile now" are there.

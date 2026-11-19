@@ -6,7 +6,7 @@ import { type Numbers, setNumbers } from '../../../../../lib/numbers';
 import { onShow, showInEditor } from '../../../../../lib/pdfsync';
 import PdfView, { type Mark } from './PdfView';
 
-type Builds = { latest: Build | null; lastGood: Build | null; edits: number };
+type Builds = { latest: Build | null; lastGood: Build | null; edits: string };
 
 const time = (iso: string) =>
   new Date(iso).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
@@ -22,10 +22,10 @@ export default function BuildPane({
   const [auto, setAuto] = useState(true);
   const [problem, setProblem] = useState('');
   const url = `/projects/${projectId}/builds`;
-  // How far edits had got at the last poll, to see that typing has paused.
-  const seen = useRef<number | null>(null);
-  // How far edits had got when this pane last asked for a build by itself.
-  const asked = useRef<number | null>(null);
+  // The paper's mark at the last poll, to see that it has been still since.
+  const seen = useRef<string | null>(null);
+  // The paper's mark when this pane last asked for a build by itself.
+  const asked = useRef<string | null>(null);
 
   const compile = useCallback(async () => {
     const res = await fetch(url, { method: 'POST' });
@@ -43,12 +43,12 @@ export default function BuildPane({
       if (stop || !res?.ok) return;
       const next: Builds = await res.json();
       setBuilds(next);
-      // Build by itself once the text has been still for one poll and differs from what was built.
+      // Build by itself once the paper has been still for one poll and differs from what was built.
       const idle = seen.current === next.edits;
       seen.current = next.edits;
       const behind = !next.latest || (next.latest.status !== 'queued' && next.latest.stale);
-      // Once for each state of the text. A build that comes back still behind is not asked
-      // for again until something is edited: asked for every two seconds, a paper would use
+      // Once for each state of the paper. A build that comes back still behind is not asked
+      // for again until something changes: asked for every two seconds, a paper would use
       // up its builds for the hour.
       if (auto && canBuild && idle && behind && asked.current !== next.edits) {
         asked.current = next.edits;

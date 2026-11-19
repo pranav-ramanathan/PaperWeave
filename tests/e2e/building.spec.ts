@@ -104,7 +104,7 @@ test('the PDF builds by itself, a broken edit says where, and the last good PDF 
   ).toBe(403);
 });
 
-test('opening another file of a built paper leaves the PDF up to date and asks for no build', async ({
+test('the PDF is behind only when the paper has changed, and is built once for each change', async ({
   browser,
 }) => {
   test.setTimeout(120_000);
@@ -143,4 +143,13 @@ test('opening another file of a built paper leaves the PDF up to date and asks f
   await page.waitForTimeout(9000);
   await expect(buildStatus(page)).toHaveText('The PDF is up to date.');
   expect(asked.length).toBeLessThanOrEqual(2);
+
+  // The paper changes with nothing typed: in another window, a file it reads is deleted. The
+  // PDF is no longer of this paper, and the pane finds that out and builds by itself.
+  const other = await page.context().newPage();
+  await other.goto(page.url().split('/files/')[0]);
+  await other.getByRole('button', { name: 'Delete tables/ablation.tex' }).click();
+  await expect(other.getByRole('status')).toContainText('Deleted tables/ablation.tex.');
+  await expect(buildStatus(page)).toHaveText('The latest build failed.', { timeout: 30_000 });
+  await expect(build(page)).toContainText('before the latest edits');
 });
