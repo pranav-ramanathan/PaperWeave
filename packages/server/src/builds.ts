@@ -25,7 +25,8 @@ export type Build = {
   timedOut: boolean;
   cached: boolean;
   hasPdf: boolean;
-  /** True if any file has been edited since this build read it. */
+  /** True if the paper is no longer what this build read: an edit, a file added, replaced,
+   * renamed or deleted, another root. */
   stale: boolean;
   /** The revision it is of. Null until the worker has taken it. */
   revisionId: string | null;
@@ -35,13 +36,28 @@ const COLUMNS = `b.id, b.status, b.created_at as "createdAt", b.finished_at as "
   coalesce(b.diagnostics, '[]'::jsonb) as diagnostics, coalesce(b.timed_out, false) as "timedOut",
   b.cached_from is not null as cached, b.pdf_digest is not null as "hasPdf",
   b.revision_id as "revisionId",
-  b.revision_id is not null and exists (
-    select 1 from files f left join revision_files rf on rf.revision_id = b.revision_id and rf.file_id = f.id
-    where f.project_id = b.project_id and (
-      rf.file_id is null or rf.path is distinct from f.path
-      -- A file's log starts at nothing and gets its first entry, the upload itself, the first
-      -- time the file is opened. Neither is an edit.
-      or greatest(rf.seq, 1) <> greatest(f.head_seq, 1)
+  b.revision_id is not null and (
+    exists (
+      select 1 from files f left join revision_files rf on rf.revision_id = b.revision_id and rf.file_id = f.id
+      where f.project_id = b.project_id and (
+        rf.file_id is null or rf.path is distinct from f.path
+        -- A file's log starts at nothing and gets its first entry, the upload itself, the first
+        -- time the file is opened. Neither is an edit.
+        or greatest(rf.seq, 1) <> greatest(f.head_seq, 1)
+        -- A file that is not text has no log: it is replaced whole, as a chart is when drawn again.
+        or (f.eol is null and rf.digest <> f.digest)
+      )
+    )
+    -- A file the build read has since been deleted.
+    or exists (
+      select 1 from revision_files rf where rf.revision_id = b.revision_id
+        and not exists (select 1 from files f where f.id = rf.file_id)
+    )
+    -- The paper is now built from another file, or with another compiler.
+    or exists (
+      select 1 from revisions r join projects p on p.id = r.project_id
+        left join files root on root.id = p.root_file_id
+      where r.id = b.revision_id and (r.root is distinct from root.path or r.compiler <> p.compiler)
     )
   ) as stale`;
 
@@ -98,12 +114,15 @@ export async function requestBuild(
   return buildId;
 }
 
-/** The newest build, the newest one that produced a PDF, and how far the paper's edits have got. */
+/**
+ * The newest build, the newest one that produced a PDF, and a mark that moves whenever the paper
+ * changes: by typing, or by a file being added, replaced, renamed or deleted.
+ */
 export async function latestBuilds(
   db: Db,
   userId: string,
   projectId: string,
-): Promise<{ latest: Build | null; lastGood: Build | null; edits: number }> {
+): Promise<{ latest: Build | null; lastGood: Build | null; edits: string }> {
   await authorize(db, userId, id(projectId), 'project.read');
   const latest = await db.query(
     `select ${COLUMNS} from builds b where b.project_id = $1 order by b.created_at desc limit 1`,
@@ -114,12 +133,18 @@ export async function latestBuilds(
      order by b.created_at desc limit 1`,
     [projectId],
   );
-  // A number that moves whenever any file is edited: lets a client see that typing has paused.
+  // Lets a client see that the paper has been still since it last looked.
   const edits = await db.query(
-    'select coalesce(sum(head_seq), 0)::float as n from files where project_id = $1',
+    `select p.manifest_version || '.' || coalesce(sum(f.head_seq), 0) as mark
+     from projects p left join files f on f.project_id = p.id where p.id = $1
+     group by p.manifest_version`,
     [projectId],
   );
-  return { latest: latest.rows[0] ?? null, lastGood: good.rows[0] ?? null, edits: edits.rows[0].n };
+  return {
+    latest: latest.rows[0] ?? null,
+    lastGood: good.rows[0] ?? null,
+    edits: edits.rows[0].mark,
+  };
 }
 
 /** One output of a build. The build must belong to a paper the user is on. */

@@ -19,6 +19,8 @@ import {
   TEXT,
   writeZip,
   pdfToSource,
+  putFile,
+  setRootFile,
   sourceToPdf,
 } from '@paperweave/server';
 import pg from 'pg';
@@ -154,6 +156,43 @@ test('a build is up to date with a paper whose text it has, however the log has 
   expect(third.revisionId).not.toBe(after.revisionId);
   expect(await sourceToPdf(t.pool, store, owner.id, project, third.id, remade, 4)).toMatchObject({
     page: expect.any(Number),
+  });
+});
+
+test('a build is behind a paper that has changed without anything being typed', async () => {
+  const { project, main } = await paper('ieee-multifile');
+  const table = (await listFiles(t.pool, owner.id, project)).find(
+    (f) => f.path === 'tables/ablation.tex',
+  )!;
+  const intro = (await listFiles(t.pool, owner.id, project)).find(
+    (f) => f.path === 'sections/intro.tex',
+  )!;
+  await createFile(t.pool, store, owner.id, project, 'figures/dot.png', Buffer.from([0, 1, 2]));
+  const stale = async () => (await latestBuilds(t.pool, owner.id, project)).latest!.stale;
+  expect(await build(project)).toMatchObject({ status: 'succeeded', stale: false });
+  const seen: Record<string, boolean> = {};
+
+  // A file that is not text is replaced whole, as a chart is when it is drawn again.
+  await putFile(t.pool, store, project, 'figures/dot.png', Buffer.from([3, 4, 5]));
+  seen.replaced = await stale();
+  seen.thenBuilt = (await build(project)).stale;
+
+  // Another file is made the one the paper is built from, and then the first one again.
+  await setRootFile(t.pool, owner.id, project, intro.id);
+  seen.otherRoot = await stale();
+  await setRootFile(t.pool, owner.id, project, main);
+  seen.rootBack = await stale();
+
+  // A file is deleted.
+  await deleteFile(t.pool, store, owner.id, project, table.id);
+  seen.deleted = await stale();
+
+  expect(seen).toEqual({
+    replaced: true,
+    thenBuilt: false,
+    otherRoot: true,
+    rootBack: false,
+    deleted: true,
   });
 });
 
