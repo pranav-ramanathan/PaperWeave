@@ -26,7 +26,14 @@ export const authOptions = (pool: pg.Pool, sendLink: SendLink, env: Env = proces
             throw new APIError('TOO_MANY_REQUESTS', {
               message: 'Too many sign-in links have been sent to this address. Try again later.',
             });
-          await sendLink({ email, url });
+          try {
+            await sendLink({ email, url });
+          } catch (err) {
+            // Not sent, so not counted: someone trying again while the mail is down should
+            // not find themselves shut out for an hour once it is back.
+            await forgetSignInLink(pool, email);
+            throw err;
+          }
         },
       }),
     ],
@@ -45,12 +52,25 @@ export const SIGN_IN_LINKS_PER_HOUR = 10;
  * address is written to, whoever asks, so that the service cannot be used to fill someone's
  * inbox. Only a hash of the address is kept, and only for a day.
  */
+const addressHash = (email: string) =>
+  createHash('sha256').update(email.trim().toLowerCase()).digest('hex');
+
+/** Take the newest sign-in link off the record for an address: it was not sent after all. */
+export async function forgetSignInLink(pool: pg.Pool, email: string): Promise<void> {
+  await pool.query(
+    `delete from sign_in_links where ctid = (
+       select ctid from sign_in_links where email_hash = $1 order by sent_at desc limit 1
+     )`,
+    [addressHash(email)],
+  );
+}
+
 export async function maySendSignInLink(
   pool: pg.Pool,
   email: string,
   perHour = SIGN_IN_LINKS_PER_HOUR,
 ): Promise<boolean> {
-  const hash = createHash('sha256').update(email.trim().toLowerCase()).digest('hex');
+  const hash = addressHash(email);
   await pool.query("delete from sign_in_links where sent_at < now() - interval '1 day'");
   const { rowCount } = await pool.query(
     `insert into sign_in_links (email_hash)

@@ -135,6 +135,17 @@ export async function invite(
   return { token, email: email.toLowerCase(), role };
 }
 
+/**
+ * Take back an invitation that was just made and could not be delivered. Its link exists only
+ * in the email: unsent, it is no use to anyone, and it would count against how many its
+ * sender may send. Nothing is done to one that has been accepted.
+ */
+export async function withdrawInvitation(db: Db, token: string): Promise<void> {
+  await db.query('delete from invitations where token_hash = $1 and accepted_at is null', [
+    hash(token),
+  ]);
+}
+
 /** What a still-valid invitation offers, for showing before it is accepted. */
 export async function findInvitation(db: Db, token: unknown) {
   if (typeof token !== 'string') return null;
