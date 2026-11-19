@@ -578,7 +578,7 @@ What is left is not code that can be written here:
    noticed, and whether to keep that file is the owner's call.
 
 That list was written before a run of faults that were all in code, and each reached by
-ordinary use. Eight ways of looking found them, and each is cheap to do again:
+ordinary use. Nine ways of looking found them, and each is cheap to do again:
 
 1. **Do the second of something.** Open a second file, redraw a chart, build an older
    revision, restore across a chart. Found: a PDF that stayed "behind" for ever and used up
@@ -603,12 +603,16 @@ ordinary use. Eight ways of looking found them, and each is cheap to do again:
    an error page that the pages' own content policy refused; and a sync server that a
    database restart ended.
 7. **Run two of a service.** Found: two sync servers on one database quietly showed people
-   different text. Two workers were fine, and are now held by a test. Two web apps behind a
-   proxy sent a posted form to an address no browser could reach.
+   different text. Two workers were fine, and are now held by a test. Two web apps behind
+   a proxy were fine too, once a fault that any proxy brings out was fixed (see 9).
 
 8. **Change a thing while someone is part-way through working on it.** Resolve the thread
    they are replying to; decide the proposal they are changing. Found: both forms went, with
    what was written in them, at the next look at the server and without a word.
+
+9. **Run it as it would be deployed, and read what each answer tells the browser.** Two
+   copies of the web app behind a proxy; how long each answer may be kept. Found: forms
+   that sent the browser to an inner address; a PDF handed over after signing out.
 
 Tried the same way and nothing found: thirty connections typing into one file at once (kept
 as a test in `sync.sandbox.test`); 400 threads and 400 proposals on one file, on the server
@@ -865,18 +869,24 @@ Two things about tests, found on the way and not about the product:
   keep their connections until they drop, and then find themselves signed out. The sync
   server checks a person's role on every edit, not whether they are still signed in.
 
-## What the browser keeps after a sign-out
+## What the browser keeps of a paper
 
-- **What was wrong.** A paper's PDF and the like are kept by the browser for an hour. After
-  "Sign out", asking for one again at its address gave the browser's own copy, with the
-  server never asked. Seen with a probe: the PDF came back whole after signing out, while
-  the server itself answered that nobody was signed in.
-- **Now** signing out tells the browser to forget what it has kept of the site. The same
-  probe then got the server's refusal.
+- **What was wrong.** A paper's PDF and the like were kept by the browser to be used unasked
+  for an hour. After "Sign out", asking for one again at its address gave the browser's own
+  copy, with the server never asked. Seen with a probe: the PDF came back whole after
+  signing out, while the server itself answered that nobody was signed in. The same would
+  go for a sign-in that had run out, and for someone taken off the paper.
+- **Now, two things.**
+  - The browser keeps these answers and asks before each use; the server says who may have
+    them, and says "as you have it" without sending them again (`askedForEachTime` in
+    `apps/web/lib/server.ts`, on a build's PDF, log, label numbers and places, a revision's
+    PDF, pictures and chart pictures).
+  - Signing out tells the browser to forget what it has kept of the site.
+- **What it costs.** One short request each time a kept answer is used, where there was
+  none within the hour. The server reads the file again to answer it, though it does not
+  send it. A picture no longer comes over the wire again each minute.
 - **Held by** a browser test (`recover.spec`: "what the browser kept of a paper is not handed
-  to whoever uses it after a sign-out"), which failed on the old code.
-- **Not covered:** a sign-in that runs out or is ended from another device, and browsers
-  that do not act on the header. See `docs/security-review.md`.
+  to whoever uses it after a sign-out"), which failed on the code before each change.
 - **Found by** reading how each route tells browsers to keep its answers, after measuring
   what a file of many figures fetched.
 
@@ -1463,6 +1473,27 @@ Changed on the way, and worth keeping:
   anything accepts connections there, so the next one will say whether the server was up.
   On the machine this was run on, only the database listens anywhere in the range these
   tests take their ports from, and it is outside what this test can pick.
+
+### A service test that ended other tests' connections
+
+- **What happened.** On 19 November, in one run of the whole service suite, two test files
+  failed before any of their tests ran: "Connection terminated unexpectedly" while each was
+  setting up its database. Every run before it that day had passed.
+- **Why.** The test of only one server doing a job (`db.sandbox.test`, added that day) ends
+  the connection that holds the job's lock, to see the job taken back. It picked its victims
+  as every connection holding a lock of that kind, on the whole database server. Setting up
+  a test database holds one too. Test files run side by side, so now and then another file
+  was setting up at that moment.
+- **Now** it ends only connections in its own database. Shown directly: a connection holding
+  such a lock in another database is matched by the old query and not by the new one, and
+  lived. Three whole runs then passed, which says little by itself, since most runs passed
+  before.
+- **It would also have reached past the tests.** Run on a machine where the real services
+  were up, the old query would have ended the sync server's hold on its job. Not seen
+  happening.
+- **It does not explain the two failures below.** The sync test's came before this test
+  existed, and the browser test's was in a run of the browser suite, where no service test
+  runs alongside.
 
 ### A browser test that failed once and is not explained
 
