@@ -9,6 +9,7 @@ import {
   blobStore,
   chartDraws,
   chartPng,
+  deleteFile,
   editFile,
   exportRevision,
   exportZip,
@@ -22,6 +23,7 @@ import {
   readZip,
   removeChart,
   requestBuild,
+  restoreRevision,
   saveChart,
   saveRevision,
   writeZip,
@@ -174,6 +176,42 @@ test('a chart is out of date once its data changes, and is not redrawn from data
   await saveChart(t.pool, store, users.owner.id, p.id, { ...LINE, id });
   expect(await drawNext(t.pool, store, image)).toBe(true);
   expect(await charts(p)).toMatchObject([{ status: 'drawn', stale: false, leftOut: 1 }]);
+}, 120_000);
+
+test('a chart whose files have left the paper says so, and drawing it again puts them back', async () => {
+  const p = await paper();
+  const before = await saveRevision(t.pool, store, users.owner.id, p.id, 'Before the chart');
+  await approve(p);
+  const id = await saveChart(t.pool, store, users.owner.id, p.id, {
+    ...LINE,
+    name: 'latency',
+    dataset: p.csv,
+  });
+  expect(await charts(p)).toMatchObject([{ status: 'queued', missing: false }]);
+  await drawNext(t.pool, store, image);
+  expect(await charts(p)).toMatchObject([{ status: 'drawn', missing: false }]);
+  const redraw = async () => {
+    await saveChart(t.pool, store, users.owner.id, p.id, { ...LINE, id });
+    // Still missing while it waits to be drawn: there is no picture to show yet.
+    expect(await charts(p)).toMatchObject([{ status: 'queued', missing: true }]);
+    expect(await drawNext(t.pool, store, image)).toBe(true);
+    expect(await charts(p)).toMatchObject([{ status: 'drawn', missing: false, stale: false }]);
+    await chartPng(t.pool, store, users.viewer.id, p.id, id);
+  };
+
+  // One of its two files is deleted by hand.
+  const pdf = (await listFiles(t.pool, users.owner.id, p.id)).find(
+    (f) => f.path === 'charts/latency.pdf',
+  )!;
+  await deleteFile(t.pool, store, users.owner.id, p.id, pdf.id);
+  expect(await charts(p)).toMatchObject([{ status: 'drawn', missing: true, stale: false }]);
+  await redraw();
+
+  // The paper is put back to how it was before the chart was drawn: both files go.
+  await restoreRevision(t.pool, store, users.owner.id, p.id, before.id);
+  expect(await charts(p)).toMatchObject([{ status: 'drawn', missing: true }]);
+  expect(await code(chartPng(t.pool, store, users.viewer.id, p.id, id))).toBe('not_found');
+  await redraw();
 }, 120_000);
 
 test('a chart carries its caption, its description and the record of how it was made', async () => {

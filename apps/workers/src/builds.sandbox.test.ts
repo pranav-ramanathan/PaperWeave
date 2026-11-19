@@ -22,6 +22,7 @@ import {
   putFile,
   setRootFile,
   sourceToPdf,
+  submissionChecks,
 } from '@paperweave/server';
 import pg from 'pg';
 import { afterAll, beforeAll, expect, test } from 'vitest';
@@ -134,6 +135,10 @@ test('a build is up to date with a paper whose text it has, however the log has 
   // paper that was built.
   await loadUpdates(t.pool, store, intro.id);
   expect((await latestBuilds(t.pool, owner.id, project)).latest).toMatchObject({ stale: false });
+  // Nor do the checks before submitting say the paper has changed since it was built. They
+  // did, and no build could put it right.
+  const checks = await submissionChecks(t.pool, store, owner.id, project);
+  expect(checks.findings.filter((f) => f.kind === 'build')).toEqual([]);
 
   // Something is typed and taken back. The log has moved; the text has not. The build that
   // follows is of the same text, and is up to date with it, not behind it for ever.
