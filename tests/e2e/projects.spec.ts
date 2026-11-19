@@ -123,6 +123,25 @@ test('every answer says how it may be used: not in a frame, not guessed at, not 
   for (const script of scripts) expect(script).toContain(`nonce="${sent}"`);
 });
 
+test('a form posted to the site is answered with a path, not with an address', async ({
+  request,
+}) => {
+  // Where a posted form sends the browser next must not be an address the server made up from
+  // its own: behind a proxy that is the machine's inner address, which no browser can reach,
+  // and which the pages' own policy forbids a form to lead to. A path is right wherever the
+  // service is reached from.
+  const form = { headers: { origin: 'http://localhost:3100' }, maxRedirects: 0 };
+  const paper = '/projects/00000000-0000-4000-8000-000000000000';
+  for (const [to, sent, next] of [
+    ['/api/projects/import', { zip: 'x' }, '/sign-in?next=%2Fprojects'],
+    [`${paper}/files`, { path: 'a.tex' }, `/sign-in?next=${encodeURIComponent(paper)}`],
+  ] as const) {
+    const answer = await request.post(to, { ...form, multipart: sent });
+    expect(answer.status(), to).toBe(303);
+    expect(answer.headers().location, to).toBe(next);
+  }
+});
+
 test('one address is sent only so many sign-in links in an hour, whoever asks for them', async ({
   browser,
 }) => {

@@ -601,8 +601,8 @@ ordinary use. Seven ways of looking found them, and each is cheap to do again:
    an error page that the pages' own content policy refused; and a sync server that a
    database restart ended.
 7. **Run two of a service.** Found: two sync servers on one database quietly showed people
-   different text. Two workers were fine, and are now held by a test. Two web apps were not
-   tried.
+   different text. Two workers were fine, and are now held by a test. Two web apps behind a
+   proxy sent a posted form to an address no browser could reach.
 
 Tried the same way and nothing found: thirty connections typing into one file at once (kept
 as a test in `sync.sandbox.test`); 400 threads and 400 proposals on one file (both lists
@@ -1091,6 +1091,34 @@ faults found by taking a service away.
 - **Not built:** two sync servers serving together. The notes said only that structural edits
   would need work for that. Ordinary typing and presence would too.
 
+## Two web apps behind a proxy
+
+- **How it was tried.** Two copies of the web app were started on two ports, with a small
+  proxy in front that gave each request to the other copy in turn and passed every header as
+  it came. The whole browser suite was run through the proxy.
+- **What was wrong.** Importing a ZIP and adding a file to a paper are forms posted to a
+  route. Each answered by sending the browser on to an address made from the request's own,
+  and behind a proxy that is the address the copy listens on, not the one people use. The
+  ZIP was imported and the file was added, but the browser was sent to
+  `http://localhost:3102/…`, which the pages' own policy refuses a form to lead to. The
+  person saw nothing happen. Thirty-six of the suite's tests failed on it. It had not shown
+  before because with one copy and no proxy the two addresses are the same. Any deployment
+  has a proxy.
+- **Now** those routes send the path alone (`seeOther` in `apps/web/lib/server.ts`), which is
+  right wherever the service is reached from.
+- **Held by** a browser test that posts to both routes and reads where it is sent
+  (`projects.spec`: "a form posted to the site is answered with a path"). It failed on the old code through the proxy, and would have without it: the old answer was a whole address either way.
+- **With that fixed, the whole browser suite passed through the proxy**, once: 52 tests and
+  some two thousand requests, shared evenly between the copies. So signing in on one copy and carrying on at the other,
+  a form drawn by one and posted to the other, and a build asked of one and shown by the
+  other all work. The proxy is not in the repository and no test runs this way.
+- **A proxy that does not pass the host on breaks every button.** Tried with the same proxy
+  changed to put the copy's own address in `Host`, as some do unless told otherwise: each button tried gave the service's "This page could not be shown", and the web app's log
+  said "`x-forwarded-host` header … does not match `origin` header … Aborting the action".
+  That is the framework refusing a form it cannot tell came from its own page, and it is
+  right to. With the outer host passed in `X-Forwarded-Host` the same eight tests passed (signing in, starting and importing a paper, adding files).
+  `docs/settings.md` says what the proxy must do.
+
 ## What a paper keeps for ever
 
 Nothing is ever removed. That was the plan's promise for what people write, and it also
@@ -1150,6 +1178,7 @@ Built after the security review, which had it as its first open item.
 
 Four browser tests failed once or twice in a full run and passed when run again. Two faults
 in the editor were behind them. Both are fixed, and each has a test that fails without its fix.
+A fifth, later, was a third fault: the menu below.
 
 ### An editor dropped its first connection a second after making it
 
@@ -1214,6 +1243,20 @@ Changed on the way, and worth keeping:
 - **Now.** Both editors take no typing until the file has arrived. A browser test holds the
   connection back and checks that nothing typed early gets in. `charts.spec` and `data.spec`
   wait for the file before they type.
+
+### A menu that went back to its first item
+
+- **What happened.** In the visual view, the menu that opens on a right click can be worked
+  with the arrow keys. Whenever the editor drew itself again while the menu was open, the
+  first item took the keyboard back. From the code, the editor draws itself again when
+  anyone in the file arrives, leaves or moves their caret, so with a second person at work
+  it could happen at any moment. Seen when the same person opened the file a second time and closed it; with someone typing alongside it was not tried.
+- **Why.** The menu took the keyboard in an effect that ran again each time it was handed a
+  new function for closing, and the editor hands it a new one every time it draws.
+- **How it showed.** The browser test of the menu presses the down arrow and looks at the
+  second item. Once, in a full run on 19 November, the editor drew itself again in between.
+- **Now** the menu takes the keyboard when it opens and at no other time (`EditorMenu` in
+  `Tools.tsx`). The test opens the file a second time while the menu is open, which failed on the old code.
 
 ### Looked at and ruled out
 

@@ -51,6 +51,16 @@ export const sameOrigin = (request: Request) =>
   request.headers.get('origin') === new URL(baseUrl()).origin;
 
 /**
+ * Send the browser on to a path of this site after a form is posted to a route handler. The
+ * path goes out as it is. An address made from the request's own would be the one this
+ * process listens on, which behind a proxy is not the one people use: the browser would be
+ * sent to a machine it cannot reach, and the pages' own policy refuses a form that leads off
+ * the site.
+ */
+export const seeOther = (path: string) =>
+  new Response(null, { status: 303, headers: { Location: path } });
+
+/**
  * The request with its body read, or null if the body is larger than `max` bytes. Reading stops
  * as soon as it is too large, whatever the request said its length was.
  */

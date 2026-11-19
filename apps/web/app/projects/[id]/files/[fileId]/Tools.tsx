@@ -506,9 +506,15 @@ export function EditorMenu(props: {
 }) {
   const { at, onClose } = props;
   const menu = useRef<HTMLUListElement>(null);
+  // The first item takes the keyboard when the menu opens, and only then. The editor draws
+  // itself again whenever anyone arrives, moves or types, and hands this a new `onClose` each
+  // time: taking the keyboard again on those would throw someone working down the menu with
+  // the arrow keys back to the top.
+  useEffect(() => {
+    if (at) menu.current?.querySelector('button')?.focus();
+  }, [at]);
   useEffect(() => {
     if (!at) return;
-    menu.current?.querySelector('button')?.focus();
     // A click anywhere else puts the menu away.
     const away = (e: MouseEvent) => !menu.current?.contains(e.target as Node) && onClose();
     document.addEventListener('mousedown', away);
