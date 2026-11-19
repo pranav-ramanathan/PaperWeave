@@ -1,4 +1,5 @@
 // Shared by the browser tests that need a signed-in person.
+import AxeBuilder from '@axe-core/playwright';
 import { type Browser, type BrowserContext, expect, type Page, test } from '@playwright/test';
 
 export const MAIL = process.env.MAILPIT_URL ?? 'http://localhost:8025';
@@ -157,4 +158,16 @@ export async function clickAfter(page: Page, within: string, word: string) {
   );
   if (!at) throw new Error(`"${word}" is not shown in ${within}`);
   await page.mouse.click(at.x, at.y);
+}
+
+/** Everything axe can check against WCAG 2.1 A and AA on the page as it stands. */
+export async function audit(page: Page, what: string) {
+  const { violations } = await new AxeBuilder({ page })
+    .withTags(['wcag2a', 'wcag2aa', 'wcag21a', 'wcag21aa'])
+    .analyze();
+  expect(
+    violations.map(
+      (v) => `${what}: ${v.id} (${v.help}) at ${v.nodes.map((n) => n.target).join('; ')}`,
+    ),
+  ).toEqual([]);
 }

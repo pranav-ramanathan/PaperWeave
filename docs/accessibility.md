@@ -10,6 +10,9 @@ Where this stands, what holds it there, and what nobody has checked yet.
   paper's page, a data file's page, the new-chart page, the checks before submitting, and the
   editor in both views with a spelling finding, a thread, a proposed change and the PDF showing,
   and the page for an address that leads nowhere. No failures.
+- **The same audit of the editor when it has stopped** (`recover.spec`): its person signed out,
+  their role lowered, an edit too large to save, edits held after a restore, and both views
+  for someone who can only read, on a file long enough to scroll.
 - **One flow with the keyboard alone**: Tab into the visual editor, select words with Shift and
   the arrow keys, Tab to the comments, start a thread on the selection, go back to the toolbar,
   show the caret's line in the PDF, and Tab to the PDF itself.
@@ -59,6 +62,13 @@ the keyboard (`insert.spec`).
 - Selecting with the keyboard and then tabbing away could lose the end of the selection: a
   comment was started on "Lat" when "Latency" was selected. Comments, proposed changes and
   "Show in PDF" now read the selection as it is on the screen.
+
+- A source editor that had stopped taking edits could not be reached from the keyboard at
+  all, so it could only be scrolled with a mouse. That is every state in which someone is
+  told to read or copy what is there: a person who can only read, a role lowered, an edit too
+  large to save ("copy what you need"). It now takes the keyboard, and a test moves through a
+  long file in it with keys alone. Found by running the audit in those states, which the
+  first audit did not visit.
 
 ## Status without colour
 

@@ -931,7 +931,9 @@ caret had been put where no text can go.
   is the rest of the paragraph, so typing carries on after the equation. At the end of a
   paragraph it is the start of the next one: there is no place for text between the equation
   and the blank line, short of starting a new paragraph for the person.
-- **Held by** a test in `insert.spec` that reads the source afterwards.
+- **Held by** a test in `insert.spec` that reads the source afterwards: an equation in the
+  middle of a paragraph, one at the end of a paragraph, and a table that ends up last in the
+  paper, where the caret has to go back before it.
 
 ## A button pressed twice
 

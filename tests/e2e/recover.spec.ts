@@ -5,7 +5,7 @@ import { mkdtempSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { writeZip } from '../../packages/server/src/archive';
-import { clickAfter, emailedLink, person, run, showSource, signIn } from './helpers';
+import { audit, clickAfter, emailedLink, person, run, showSource, signIn } from './helpers';
 
 const MAIN = '\\documentclass{article}\n\\begin{document}\nHello.\n\\end{document}\n';
 const source = (page: Page) => page.locator('.editor .cm-content');
@@ -82,6 +82,7 @@ test('edits made offline across a restore are held until their author decides', 
   await expect(status(editor.page)).toContainText('not saved');
   await expect(source(editor.page)).toHaveAttribute('contenteditable', 'false');
   await expect(source(watch)).not.toContainText('% typed offline');
+  await audit(editor.page, 'an editor holding edits made before a restore');
   // Applying them merges them into the restored text.
   await choice(/Apply my edits/).click();
   await expect(status(editor.page)).toHaveText('All edits saved.', { timeout: 30_000 });
@@ -153,6 +154,7 @@ test('an edit too large to save stops the editor, which says so and lets it be d
   // More than two megabytes: the server reads the edit and refuses it.
   await paste(30_000);
   await expect(status(page)).toContainText('too large to save', { timeout: 30_000 });
+  await audit(page, 'an editor holding an edit too large to save');
   await expect(source(page)).toHaveAttribute('contenteditable', 'false');
   // Nobody else got it, and it is not sent again.
   await typeAtStart(watch, 'Still fine. ');
@@ -323,6 +325,7 @@ test('an editor whose sign-in has ended says so, keeps what is typed, and carrie
   );
   await expect(source(page)).toHaveAttribute('contenteditable', 'true');
   await expect(source(page)).toContainText('% typed while signed out');
+  await audit(page, 'an editor whose person is signed out');
   const link = page
     .getByRole('region', { name: /^Editor for/ })
     .getByRole('link', { name: 'Sign in (opens a new tab)' });
@@ -392,7 +395,13 @@ test('someone whose role changes while a file is open is told, and does not type
   const owner = await person(browser, 'rec-role-owner');
   const editor = await person(browser, 'rec-role-editor');
   const zip = join(mkdtempSync(join(tmpdir(), 'paperweave-e2e-')), `Roles ${run}.zip`);
-  writeFileSync(zip, await writeZip([{ path: 'main.tex', bytes: Buffer.from(MAIN) }]));
+  // Long enough to need scrolling, so that the checks below see whether someone who cannot
+  // edit can still get about in it.
+  const long = MAIN.replace(
+    'Hello.',
+    Array.from({ length: 120 }, (_, i) => `Paragraph ${i} of a long paper.\n`).join('\n'),
+  );
+  writeFileSync(zip, await writeZip([{ path: 'main.tex', bytes: Buffer.from(long) }]));
   await owner.page.goto('/sign-in');
   await signIn(owner.page, owner.email);
   await owner.page.getByLabel('Or import a ZIP of a LaTeX project').setInputFiles(zip);
@@ -425,6 +434,7 @@ test('someone whose role changes while a file is open is told, and does not type
     'You are now a viewer on this paper and can no longer edit. Reload the page to carry on.',
   );
   await expect(source(page)).toHaveAttribute('contenteditable', 'false');
+  await audit(page, 'an editor whose person can no longer edit');
   // Given back what they had: the page carries on as it was.
   await make('editor');
   await expect(status(page)).toHaveText('All edits saved.');
@@ -446,8 +456,19 @@ test('someone whose role changes while a file is open is told, and does not type
     .getByRole('region', { name: /^Editor for/ })
     .getByRole('button', { name: 'Reload the page' })
     .click();
-  await showSource(page);
+  // Someone who can only read: in the view they arrive in, and in the source.
   await expect(status(page)).toHaveText('Read only. You can read along but not edit.');
+  await audit(page, 'the visual view for someone who cannot edit');
+  await showSource(page);
+  await audit(page, 'the source view for someone who cannot edit');
+  // The source can be reached and moved through with the keyboard alone.
+  await source(page).focus();
+  await expect(source(page)).toBeFocused();
+  const scroller = page.locator('.editor .cm-scroller');
+  const before = await scroller.evaluate((el) => el.scrollTop);
+  await page.keyboard.press('ControlOrMeta+End');
+  await expect.poll(() => scroller.evaluate((el) => el.scrollTop)).toBeGreaterThan(before);
+  await page.keyboard.press('ControlOrMeta+Home');
   await expect(source(page)).toContainText('% typed as an editor again');
   await expect(source(page)).not.toContainText('% typed offline');
 
