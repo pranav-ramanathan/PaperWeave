@@ -52,13 +52,23 @@ the services in `infra/compose.yaml`.
 - **Any number of workers.** Each build and each chart is taken by one worker. A test has two
   workers reach for one build at the same moment, and then build two papers side by side
   (`builds.sandbox.test`).
-- **Any number of web apps, with two things to know.** Two at once were not tried here.
-  - Every web app must be the same build. The buttons on a paper's page are forms whose
-    arguments the framework encrypts with a key it makes at each build, so a form drawn by one
-    build cannot be read by another: the person gets an error and has to load the page again.
-    That also happens for a moment whenever a new version replaces an old one. The framework
-    reads a key of your choosing from `NEXT_SERVER_ACTIONS_ENCRYPTION_KEY` at build time, if
-    builds must differ; its own guide to self-hosting says how.
+- **Any number of web apps, with two things to know.** Two at once were not tried here; one
+  replacing another was.
+  - Every web app must be the same build, or built with the same key. The buttons on a paper's
+    page are forms whose arguments the framework encrypts with a key it makes at each build
+    and keeps in that build's cache.
+    - Tried by hand: with a page open, the web app was built again without the kept key and
+      started in the old one's place. A button pressed on the open page did nothing, and the
+      person saw the service's "This page could not be shown". "Try again" loaded the page
+      from the new build, and the button then worked.
+    - Built again on the same machine with its cache, the key is kept and the open page's
+      button simply worked. So one machine replacing its own build does not show this; builds
+      made on fresh machines do, each time a new version replaces an old one.
+    - The framework reads a key of your choosing from `NEXT_SERVER_ACTIONS_ENCRYPTION_KEY` at
+      build time; its own guide to self-hosting says how. With that set the same for every
+      build, a page from the old version keeps working across the change. That was not tried,
+      and nor was the framework's `deploymentId`, its own way of telling an old page that the
+      version has changed.
   - The sign-in library counts how often a client has asked in each web app's own memory, so
     its limit (five links a minute for a client) is that many times looser. The limit of ten
     an hour for an address is counted in the database, and is not.
