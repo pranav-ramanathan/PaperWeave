@@ -25,7 +25,16 @@ export async function emailedLink(to: string, containing: string): Promise<strin
 /** Ask for a sign-in link on the page that is showing the form, then follow it. */
 export async function signIn(page: Page, email: string) {
   await page.getByLabel('Email address').fill(email);
-  await page.getByRole('button', { name: 'Email me a sign-in link' }).click();
+  const [answer] = await Promise.all([
+    page.waitForResponse((r) => r.url().endsWith('/api/auth/sign-in/magic-link')),
+    page.getByRole('button', { name: 'Email me a sign-in link' }).click(),
+  ]);
+  // Looked at here so that, if the link was not sent, the failure says what the server said.
+  // The page itself says only that it could not be sent.
+  expect(
+    `${answer.status()} ${answer.ok() ? '' : await answer.text().catch(() => '')}`.trim(),
+    'the answer to asking for a sign-in link',
+  ).toBe('200');
   await expect(page.getByRole('status')).toContainText('Check');
   await page.goto(await emailedLink(email, '/magic-link/verify'));
 }

@@ -40,6 +40,16 @@ the services in `infra/compose.yaml`.
   network.
 - `/metrics` is on the sync server. Keep it off the public address or behind the token.
 
+## How many of each
+
+- **One sync server for a database, and no more.** Each keeps the files people have open in
+  its own memory. With two, what is typed through one is saved and never reaches the people
+  on the other: they would see different text until they loaded the page again. So a sync
+  server takes a lock in the database before it serves, and a second one started against the
+  same database waits, saying so in its log, until the first has stopped. That is also how a
+  new version takes over from an old one.
+- **Any number of web apps and workers.** Each build and each chart is taken by one worker.
+
 ## When something is away
 
 What people see, and what recovers by itself, when one of these stops and comes back. Each

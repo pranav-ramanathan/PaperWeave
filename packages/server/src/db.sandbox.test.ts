@@ -1,6 +1,6 @@
 // Needs the services in infra/compose.yaml. Run: pnpm test:sandbox
 import { afterAll, beforeAll, expect, test } from 'vitest';
-import { listen, transaction } from './db.ts';
+import { listen, onlyOne, transaction } from './db.ts';
 import { testDb } from './testing.ts';
 
 let t: Awaited<ReturnType<typeof testDb>>;
@@ -72,4 +72,52 @@ test('what is announced is heard again after the listening connection is lost', 
   await new Promise((r) => setTimeout(r, 400));
   expect(heard).toEqual(['test_news:before', 'test_news:after']);
   expect(again).toBe(1);
+});
+
+test('only one process does a job at a time, and the next takes over when it stops', async () => {
+  const said: string[] = [];
+  const first = await onlyOne(t.url, 'the job', () => void said.push('first displaced'));
+  // A second one waits, and says that it is waiting.
+  let second: (() => Promise<void>) | undefined;
+  const waitingForIt = onlyOne(
+    t.url,
+    'the job',
+    () => void said.push('second displaced'),
+    () => void said.push('second waiting'),
+  ).then((stop) => void (second = stop));
+  await until('the second to say it is waiting', () => said.includes('second waiting'));
+  await new Promise((r) => setTimeout(r, 300));
+  expect(second).toBeUndefined();
+  // Another job is nobody's business: it is given at once.
+  await (
+    await onlyOne(t.url, 'another job', () => {})
+  )();
+
+  // The first stops: the second has the job.
+  await first();
+  await waitingForIt;
+  expect(second).toBeDefined();
+
+  // The holder loses its connection, as when the database is restarted. With nobody else
+  // asking, it takes the job back and carries on.
+  const kill = () =>
+    t.pool.query(
+      `select pg_terminate_backend(l.pid) from pg_locks l
+       where l.locktype = 'advisory' and l.granted and l.pid <> pg_backend_pid()`,
+    );
+  await kill();
+  await new Promise((r) => setTimeout(r, 600));
+  expect(said).toEqual(['second waiting']);
+  // With someone else waiting for it, the one who lost it is told it has been displaced.
+  let third: (() => Promise<void>) | undefined;
+  const thirdWaiting = onlyOne(t.url, 'the job', () => void said.push('third displaced')).then(
+    (stop) => void (third = stop),
+  );
+  await new Promise((r) => setTimeout(r, 300));
+  expect(third).toBeUndefined();
+  await kill();
+  await thirdWaiting;
+  await until('the second to learn it was displaced', () => said.includes('second displaced'));
+  await second!();
+  await third!();
 });

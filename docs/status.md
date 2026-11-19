@@ -1071,6 +1071,22 @@ faults found by taking a service away.
   While it is away the server's log fills with one line for every question it could not
   answer, about one a second for each open editor.
 
+## Two sync servers on one database
+
+- **What would have happened.** Nothing stopped a second sync server being started against
+  the same database, to carry more people, say. A probe did it: what was typed through one
+  server was saved and never reached the person on the other, in either direction. Both saw
+  "All edits saved". They would have gone on seeing different text until one loaded the page
+  again.
+- **Now** a sync server takes a lock in the database before it serves (`onlyOne` in
+  `packages/server/src/db.ts`). A second one waits and says so. If the connection holding the
+  lock is lost, the server asks for the lock again; if another server got it first, this one
+  stops.
+- **Held by** a test of the lock itself (`db.sandbox.test`), and tried once by hand with two
+  servers: the second said it was waiting, and began to serve when the first stopped.
+- **Not built:** two sync servers serving together. The notes said only that structural edits
+  would need work for that. Ordinary typing and presence would too.
+
 ## What a paper keeps for ever
 
 Nothing is ever removed. That was the plan's promise for what people write, and it also
@@ -1240,6 +1256,20 @@ Changed on the way, and worth keeping:
   On the machine this was run on, only the database listens anywhere in the range these
   tests take their ports from, and it is outside what this test can pick.
 
+### A browser test that failed once and is not explained
+
+- On 19 November, in one of four runs of the whole browser suite on the branch that made a
+  second sync server wait, "an editor whose sign-in has ended says so…" failed where its
+  person signs in again: the form said the link could not be sent. Four runs of that test
+  alone and two more of the whole suite passed.
+- The server logged nothing, which rules out the mail and the database: both are logged. It
+  leaves a refusal for asking too often, by the sign-in library (five a minute for a client)
+  or by the limit of ten an hour for an address. That person had asked twice.
+- In two whole runs with every refused sign-in request printed, the only ones were the two
+  that the test of the hourly limit expects.
+- The sign-in step of the browser tests now fails with the server's own answer, status and
+  words, if a link is not sent. The page says only that it could not be sent.
+
 ## Decisions waiting on the owner
 
 See "What I need from you" in `docs/plan.md`. None blocks C1.
@@ -1281,8 +1311,11 @@ One more, found since:
   browser warns first. Keeping them on the device (IndexedDB) would survive that, at the cost of
   leaving manuscript text on shared computers: an owner decision, not yet made.
 - Names shown for other people in a file come from each client and are not verified.
-- Commands asked for over the live connection reach other editors through the one sync server
-  that ran them. Running more than one sync server needs that delivery to go through Postgres.
+- One sync server to a database. Everything typed or done over the live connection reaches
+  other editors through the one sync server that took it, which holds each open file in its
+  own memory. A second server started against the same database waits for the first to stop
+  (`onlyOne`, called in `apps/sync/src/main.ts`). Running two at once would need every edit,
+  and who is where in a file, to go between them.
 - A resent edit can be stored twice. That is harmless to the text and goes at the next compaction.
 - The editor says "Offline" as soon as the browser does. It does not wait for the socket, which
   can take many seconds to notice.
