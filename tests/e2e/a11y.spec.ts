@@ -54,6 +54,12 @@ test('the main pages have no accessibility failures a machine can find', async (
   await audit(page, 'sign-in');
   await signIn(page, email);
   await audit(page, 'papers');
+  // An address that leads nowhere, which is also what a paper that is not yours looks like.
+  await page.goto('/no-such-page');
+  await expect(page.getByRole('heading', { name: 'Nothing here' })).toBeVisible();
+  await audit(page, 'nothing here');
+  await page.getByRole('link', { name: 'All papers' }).click();
+  await expect(page.getByRole('heading', { name: 'Your papers' })).toBeVisible();
 
   const zip = join(mkdtempSync(join(tmpdir(), 'paperweave-e2e-')), `Audit ${run}.zip`);
   writeFileSync(
@@ -179,4 +185,84 @@ test('a thread is started and a line is shown in the PDF with the keyboard alone
   // The PDF itself can be reached and scrolled from the keyboard.
   await tabTo('Pages of the PDF');
   await expect(page.getByRole('region', { name: 'Pages of the PDF' })).toBeFocused();
+});
+
+/**
+ * What sticks out past the right edge of a narrow window, so that the page has to be scrolled
+ * sideways to read it. Things that scroll sideways within themselves are allowed to: a wide
+ * table, a line of source, a page of the PDF.
+ */
+const sticksOut = (page: Page) =>
+  page.evaluate(() => {
+    const wide = document.documentElement.scrollWidth - window.innerWidth;
+    if (wide <= 1) return [];
+    const inScroller = (el: Element) => {
+      for (let p = el.parentElement; p; p = p.parentElement) {
+        const o = getComputedStyle(p).overflowX;
+        if (o === 'auto' || o === 'scroll' || o === 'hidden') return true;
+      }
+      return false;
+    };
+    const out: string[] = [`the page is ${wide}px wider than the window`];
+    for (const el of document.querySelectorAll('body *')) {
+      const r = el.getBoundingClientRect();
+      if (r.width === 0 || r.right <= window.innerWidth + 1 || inScroller(el)) continue;
+      // The outermost culprits only.
+      if ([...out].some((o) => o.includes(`<${el.parentElement?.tagName.toLowerCase()}`))) continue;
+      out.push(
+        `<${el.tagName.toLowerCase()}${el.className && typeof el.className === 'string' ? `.${el.className.split(' ')[0]}` : ''}> reaches ${Math.round(r.right)}px: "${(el.textContent ?? '').trim().slice(0, 40)}"`,
+      );
+      if (out.length > 6) break;
+    }
+    return out;
+  });
+
+test('the main pages can be read in a narrow window without scrolling sideways', async ({
+  browser,
+}) => {
+  test.setTimeout(180_000);
+  // 320 CSS pixels wide: what a 1280-pixel window becomes at 400% zoom.
+  const { page, email } = await person(browser, 'a11y-narrow');
+  await page.setViewportSize({ width: 320, height: 800 });
+  const found: string[] = [];
+  const look = async (what: string) =>
+    void found.push(...(await sticksOut(page)).map((s) => `${what}: ${s}`));
+
+  await page.goto('/sign-in');
+  await look('sign-in');
+  await signIn(page, email);
+  await look('papers');
+  const zip = join(mkdtempSync(join(tmpdir(), 'paperweave-e2e-')), `Narrow ${run}.zip`);
+  writeFileSync(
+    zip,
+    await writeZip([
+      { path: 'main.tex', bytes: Buffer.from(MAIN) },
+      { path: 'refs.bib', bytes: Buffer.from(BIB) },
+      { path: 'data/latency.csv', bytes: Buffer.from(CSV) },
+    ]),
+  );
+  await page.getByLabel('Or import a ZIP of a LaTeX project').setInputFiles(zip);
+  await page.getByRole('button', { name: 'Import ZIP' }).click();
+  await expect(page.getByRole('heading', { name: 'Language' })).toBeVisible();
+  const paper = page.url();
+  await look('paper');
+  await page.getByRole('link', { name: 'Describe it' }).click();
+  await expect(page.getByRole('button', { name: 'Approve this description' })).toBeVisible();
+  await look('data file');
+  await page.getByRole('button', { name: 'Approve this description' }).click();
+  await page.getByRole('link', { name: /New chart from/ }).click();
+  await expect(page.getByRole('heading', { name: 'New chart' })).toBeVisible();
+  await look('new chart');
+  await page.goto(`${paper}/submit`);
+  await expect(page.getByRole('heading', { name: /before submitting/ })).toBeVisible();
+  await look('checks before submitting');
+  await page.goto(paper);
+  await page.getByRole('link', { name: 'main.tex' }).first().click();
+  await expect(page.locator('.build').getByRole('status')).toHaveText('The PDF is up to date.', {
+    timeout: 90_000,
+  });
+  await look('editor, visual view');
+  await showSource(page);
+  await look('editor, source view');
+  expect(found).toEqual([]);
 });

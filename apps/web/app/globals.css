@@ -386,6 +386,22 @@ div.pw-frozen strong {
   gap: 1rem;
   align-items: start;
 }
+/* A narrow window, or a wide one zoomed far in: the files, the editor and the PDF one under
+   another, so that nothing has to be scrolled sideways to be read. */
+@media (max-width: 60rem) {
+  .workspace {
+    grid-template-columns: minmax(0, 1fr);
+  }
+}
+/* A table wider than the window scrolls sideways by itself, not the page with it. */
+.wide {
+  overflow-x: auto;
+  max-width: 100%;
+}
+.wide:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 2px;
+}
 .workspace nav ul {
   list-style: none;
   margin: 0;

@@ -1,3 +1,4 @@
+import { Wide } from '../../../../Wide';
 import { AppError, can, COLUMN_TYPES, datasetProposal, getProject } from '@paperweave/server';
 import Link from 'next/link';
 import { notFound } from 'next/navigation';
@@ -66,55 +67,57 @@ export default async function Describe({
       )}
       <form action={approveDatasetAction.bind(null, id, fileId)}>
         <input type="hidden" name="version" value={version} />
-        <table>
-          <thead>
-            <tr>
-              <th scope="col">Column</th>
-              <th scope="col">First values</th>
-              <th scope="col">With no value</th>
-              <th scope="col">Holds</th>
-              <th scope="col">Unit</th>
-            </tr>
-          </thead>
-          <tbody>
-            {guess.columns.map((c, i) => (
-              <tr key={c.name}>
-                <th scope="row">
-                  <code>{c.name}</code>
-                  <input type="hidden" name="name" value={c.name} />
-                </th>
-                <td>{c.examples.join(', ') || 'none'}</td>
-                <td>{c.missing}</td>
-                <td>
-                  <select
-                    name="type"
-                    defaultValue={start(c.name).type}
-                    aria-label={`What ${c.name} holds`}
-                    disabled={!writer}
-                  >
-                    {COLUMN_TYPES.map((t) => (
-                      <option key={t} value={t}>
-                        {HOLDS[t]}
-                      </option>
-                    ))}
-                  </select>
-                </td>
-                <td>
-                  <input
-                    name="unit"
-                    defaultValue={start(c.name).unit}
-                    maxLength={40}
-                    size={8}
-                    aria-label={`Unit of ${c.name}`}
-                    disabled={!writer}
-                    // One per column, in order: an empty one must still be sent.
-                    data-column={i}
-                  />
-                </td>
+        <Wide label="Table of columns">
+          <table>
+            <thead>
+              <tr>
+                <th scope="col">Column</th>
+                <th scope="col">First values</th>
+                <th scope="col">With no value</th>
+                <th scope="col">Holds</th>
+                <th scope="col">Unit</th>
               </tr>
-            ))}
-          </tbody>
-        </table>
+            </thead>
+            <tbody>
+              {guess.columns.map((c, i) => (
+                <tr key={c.name}>
+                  <th scope="row">
+                    <code>{c.name}</code>
+                    <input type="hidden" name="name" value={c.name} />
+                  </th>
+                  <td>{c.examples.join(', ') || 'none'}</td>
+                  <td>{c.missing}</td>
+                  <td>
+                    <select
+                      name="type"
+                      defaultValue={start(c.name).type}
+                      aria-label={`What ${c.name} holds`}
+                      disabled={!writer}
+                    >
+                      {COLUMN_TYPES.map((t) => (
+                        <option key={t} value={t}>
+                          {HOLDS[t]}
+                        </option>
+                      ))}
+                    </select>
+                  </td>
+                  <td>
+                    <input
+                      name="unit"
+                      defaultValue={start(c.name).unit}
+                      maxLength={40}
+                      size={8}
+                      aria-label={`Unit of ${c.name}`}
+                      disabled={!writer}
+                      // One per column, in order: an empty one must still be sent.
+                      data-column={i}
+                    />
+                  </td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </Wide>
         <fieldset>
           <legend>Spellings that mean &quot;no value&quot;</legend>
           {spellings.map((m) => (

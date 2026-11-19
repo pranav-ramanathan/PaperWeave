@@ -8,11 +8,20 @@ Where this stands, what holds it there, and what nobody has checked yet.
 
 - **An automated audit** (axe, WCAG 2.1 A and AA rules) of the sign-in page, the list of papers, a
   paper's page, a data file's page, the new-chart page, the checks before submitting, and the
-  editor in both views with a spelling finding, a thread, a proposed change and the PDF showing.
-  No failures.
+  editor in both views with a spelling finding, a thread, a proposed change and the PDF showing,
+  and the page for an address that leads nowhere. No failures.
 - **One flow with the keyboard alone**: Tab into the visual editor, select words with Shift and
   the arrow keys, Tab to the comments, start a thread on the selection, go back to the toolbar,
   show the caret's line in the PDF, and Tab to the PDF itself.
+
+- **A narrow window.** The same pages at 320 CSS pixels wide, which is what a 1280-pixel window
+  becomes at 400% zoom: none has to be scrolled sideways to be read. A wide table scrolls
+  sideways inside itself, and can be reached and scrolled from the keyboard.
+  - This found three pages that did need sideways scrolling: a paper's page, a data file's
+    page and the editor. On the editor's page the files, the editor and the PDF now sit one
+    under another in a narrow window.
+  - It checks that nothing sticks out. It does not check that what is there is comfortable to
+    use at that size; two of the pages were looked at by eye and read well.
 
 Other browser tests hold narrower things: composing text with an input method while someone
 else edits the same paragraph (`spike.spec`), switching views with the selection kept
@@ -52,6 +61,8 @@ the keyboard (`insert.spec`).
   Japanese, Chinese or Korean input method has been typed with.
 - **Going from the PDF to the text without a pointer.** It needs a double-click on a page.
   Going from the text to the PDF works from the keyboard.
-- **Zoom and reflow.** The pages have not been checked at 200% or 400% zoom, or on a narrow
-  window.
+- **Zoom, beyond the narrow-window test above.** Not checked: text enlarged by itself without
+  the page being zoomed, wider spacing between letters and lines, and a narrow window on the
+  pages the test does not visit (the differences between two revisions, renaming, a chart
+  that has been drawn).
 - **Contrast of drawn charts and of formulas.** The audit checks the page's own text.
