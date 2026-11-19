@@ -47,8 +47,9 @@ export async function createFile(
   if (problem) throw new AppError('invalid_input', `That name cannot be used: ${problem}.`);
   if (bytes.length > limits.fileBytes)
     throw new AppError('invalid_input', 'That file is too large.');
-  // The same limits as an imported paper: how many files, and what they add up to. Sizes are
-  // those of the files as they were added; text typed since is held to its own limit.
+  // The same limits as an imported paper: how many files, and what they add up to. A file's
+  // size is what it was added with, or for text edited since, what it came to at the paper's
+  // newest revision; text typed since then is held to its own limit.
   const held = (
     await db.query(
       'select count(*)::int as n, coalesce(sum(size), 0)::float8 as bytes from files where project_id = $1',

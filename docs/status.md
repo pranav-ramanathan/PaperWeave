@@ -943,6 +943,26 @@ Two things about tests, found on the way and not about the product:
   "Your text was not put in:" and gives the text back (`tables.spec`).
 - **Also right:** someone made a viewer while writing a comment. Tried once with a probe: the form stayed with its words, and sending it said "A viewer cannot do that."
 
+## A file that said "0 B"
+
+- **What was wrong.** The paper's page lists each file with its size, and the size was the
+  one the file was added with. A file started blank and written in the editor said "0 B" for
+  good; an imported one said what it was on the day it came. Seen while trying odd names for
+  papers and files, which themselves went through everything tried (below).
+- **Now** a revision, which works out every edited file's bytes anyway, records how many
+  there were (`cut` in `packages/server/src/revisions.ts`). Every build cuts a revision, so
+  the page is right as of the last build or save. Text typed since then is not counted until
+  the next one.
+- **Held by** a service test (`revisions.sandbox.test`: "a file says how large it is now")
+  and a line in the browser test that starts a paper from nothing. The service test failed
+  on the old code.
+- **What a paper may hold** (300 MB) is counted from the same sizes, so it now follows what
+  the files have become and not only what they were added as.
+- **Odd names, tried once with a probe and not kept:** a paper named with angle brackets,
+  quotes, an ampersand, Japanese, an emoji, `%41` and 180 more characters; a file named
+  `sec tions/é ü's "x" & 日本 #1 %20.tex`. Created, opened, typed into, built, listed and
+  downloaded: the names came back as given, and the ZIP's own name had only plain characters.
+
 ## Pages fetched before anyone asked for them
 
 - **What was wrong.** The framework fetches the page behind every link in view unless the
@@ -1197,7 +1217,8 @@ Two more of the security review's items.
 
 - **A paper's added files** are held to what an imported paper already was: 2,000 files and
   300 MB in all (`LIMITS` in `packages/server/src/archive.ts`). The count was already checked
-  when a file was added; the total was not. Sizes are those of files as they were added.
+  when a file was added; the total was not. A file's size is what it was added with or, for
+  text edited since, what it came to at the paper's newest revision (below).
 - **A sync ticket names its file.** `/api/sync-ticket` must be asked with `?file=`, and the
   sync server refuses the ticket for any other file.
 
