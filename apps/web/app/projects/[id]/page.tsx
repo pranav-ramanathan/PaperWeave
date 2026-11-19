@@ -15,6 +15,8 @@ import {
   listMembers,
   listProposals,
   listRevisions,
+  olderAutoRevisions,
+  REVISIONS_SHOWN,
   listThreads,
   modelProcessing,
 } from '@paperweave/server';
@@ -60,6 +62,7 @@ export default async function Project({
     root?: string;
     relabelled?: string;
     moved?: string;
+    before?: string;
     looked?: string;
     described?: string;
     language?: string;
@@ -70,12 +73,15 @@ export default async function Project({
 }) {
   const { id } = await params;
   const user = await requireUser(`/projects/${id}`);
+  // "Older revisions" asks for those below a number.
+  const asked = Number((await searchParams).before);
+  const olderThan = Number.isInteger(asked) && asked > 0 ? asked : undefined;
   const loaded = await Promise.all([
     getProject(db(), user.id, id),
     listMembers(db(), user.id, id),
     listFiles(db(), user.id, id),
     importReport(db(), user.id, id),
-    listRevisions(db(), user.id, id),
+    listRevisions(db(), user.id, id, { autos: REVISIONS_SHOWN, before: olderThan }),
     labelReport(db(), blobs(), user.id, id),
     citationReport(db(), blobs(), user.id, id),
     citationChecks(db(), blobs(), user.id, id),
@@ -108,6 +114,9 @@ export default async function Project({
     allowModel,
     steps,
   ] = loaded;
+  // The oldest automatic revision shown, and how many there are before it.
+  const oldestAuto = revisions.findLast((r) => r.kind === 'auto')?.number;
+  const olderAutos = oldestAuto ? await olderAutoRevisions(db(), user.id, id, oldestAuto) : 0;
   const openThreads = threads.filter((t) => t.status === 'open');
   const openProposals = proposals.filter((p) => p.status === 'open');
   const dataFiles = files.filter((f) => /\.(csv|tsv)$/i.test(f.path) && !f.readonly);
@@ -892,6 +901,21 @@ export default async function Project({
             </tbody>
           </table>
         </Wide>
+      )}
+      {(olderAutos > 0 || olderThan) && (
+        <p>
+          {olderThan
+            ? `These are revisions from before revision ${olderThan}. `
+            : `Every revision that was named or restored is listed, and the newest ${REVISIONS_SHOWN} made automatically. `}
+          {olderAutos > 0 && (
+            <Link href={`/projects/${id}?before=${oldestAuto}#revisions`}>
+              {olderAutos === 1
+                ? 'One older automatic revision'
+                : `${olderAutos} older automatic revisions`}
+            </Link>
+          )}{' '}
+          {olderThan && <Link href={`/projects/${id}#revisions`}>Back to the newest</Link>}
+        </p>
       )}
 
       <h2>People</h2>

@@ -187,10 +187,19 @@ export async function saveRevision(
   return cutRevision(pool, store, userId, projectId, { name: name.trim(), kind: 'named' });
 }
 
+/** How many automatic revisions a list shows at once. A paper being written gets one at every build. */
+export const REVISIONS_SHOWN = 50;
+
+/**
+ * A paper's revisions, newest first: every one that a person named and every restore, and the
+ * newest `autos` automatic ones (all of them, if not given). With `before`, only revisions with
+ * a lower number, which is how the older ones are reached.
+ */
 export async function listRevisions(
   db: Db,
   userId: string,
   projectId: string,
+  opts: { autos?: number; before?: number } = {},
 ): Promise<Revision[]> {
   await authorize(db, userId, id(projectId), 'project.read');
   const { rows } = await db.query(
@@ -199,10 +208,30 @@ export async function listRevisions(
             exists (select 1 from builds b where b.revision_id = r.id and b.pdf_digest is not null) as "hasPdf"
      from revisions r left join "user" u on u.id = r.created_by
      left join revisions f on f.id = r.restored_from
-     where r.project_id = $1 order by r.number desc`,
-    [projectId],
+     where r.project_id = $1 and ($2::int is null or r.number < $2)
+       and (r.kind <> 'auto' or $3::int is null or r.number in (
+         select number from revisions where project_id = $1 and kind = 'auto'
+           and ($2::int is null or number < $2) order by number desc limit $3
+       ))
+     order by r.number desc`,
+    [projectId, opts.before ?? null, opts.autos ?? null],
   );
   return rows;
+}
+
+/** How many automatic revisions a paper has with a number below `before`. */
+export async function olderAutoRevisions(
+  db: Db,
+  userId: string,
+  projectId: string,
+  before: number,
+): Promise<number> {
+  await authorize(db, userId, id(projectId), 'project.read');
+  const { rows } = await db.query(
+    "select count(*)::int as n from revisions where project_id = $1 and kind = 'auto' and number < $2",
+    [projectId, before],
+  );
+  return rows[0].n;
 }
 
 /** A revision of this paper and its files, or `not_found`. */

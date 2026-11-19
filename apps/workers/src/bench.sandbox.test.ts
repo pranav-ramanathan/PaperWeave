@@ -17,8 +17,10 @@ import {
   importZip,
   latestBuilds,
   listFiles,
+  listRevisions,
   loadUpdates,
   requestBuild,
+  REVISIONS_SHOWN,
   saveChart,
   TEXT,
   writeZip,
@@ -155,6 +157,33 @@ test('the things people wait for, measured', async () => {
   });
   took('Build it again, nothing changed', await ms(build), 'ms', 5000);
 
+  // A paper that has been written in for months: a revision at every build, thousands of each.
+  await t.pool.query(
+    `insert into revisions (project_id, number, kind, root, compiler, content_key)
+     select $1, g, 'auto', 'main.tex', 'pdflatex', md5(g::text)
+     from generate_series((select max(number) + 1 from revisions where project_id = $1), 5000) g`,
+    [paper],
+  );
+  await t.pool.query(
+    `insert into builds (project_id, status, cache_key, pdf_digest, revision_id, finished_at, created_at)
+     select $1, 'succeeded', md5(r.number::text || g::text), repeat('a', 64), r.id, now(),
+            now() - make_interval(mins => 6000 - r.number)
+     from revisions r, generate_series(1, 2) g where r.project_id = $1 and r.kind = 'auto'`,
+    [paper],
+  );
+  took(
+    "List a paper's revisions, of 5,000",
+    await median(5, () => listRevisions(t.pool, owner.id, paper, { autos: REVISIONS_SHOWN })),
+    'ms',
+    2000,
+  );
+  took(
+    "Read how a paper's builds stand, after 10,000",
+    await median(5, () => latestBuilds(t.pool, owner.id, paper)),
+    'ms',
+    2000,
+  );
+
   // Spelling and grammar on a section. The first time a text is asked about, and the second.
   const method = files.find((f) => f.path === 'sections/method.tex')!.id;
   const check = () =>
@@ -231,6 +260,10 @@ test('the things people wait for, measured', async () => {
       'source text within 40 ms and the screen within 150 ms at the 95th percentile, and another',
       "person's edit is on screen within 250 ms. Those are that test's limits; it prints what it",
       'measured on each run.',
+      '',
+      "A paper's page with 5,000 revisions, in a browser, measured once by hand: 183 KB and a",
+      'quarter of a second. Before the list of revisions was limited to the newest fifty automatic',
+      'ones and those people named: 15.8 MB and 8.4 s (1.6 MB and 0.9 s with 500).',
       '',
       '## Not measured',
       '',

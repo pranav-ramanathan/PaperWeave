@@ -10,24 +10,30 @@ large slowdown trips it.
 
 | What | Took | Ceiling |
 | --- | --- | --- |
-| Parse a 150 KB file | 9.80 ms | 500 ms |
+| Parse a 150 KB file | 10.8 ms | 500 ms |
 | Parse it again after one keystroke | 0.08 ms | 100 ms |
-| Import a six-file paper | 71.2 ms | 5000 ms |
-| Import a paper of 2,000 files | 3.02 s | 60 s |
-| Download it as a ZIP | 34.0 ms | 5000 ms |
-| Save one keystroke | 1.69 ms | 50 ms |
-| Open a file with 1,000 edits in its log | 2.45 ms | 2000 ms |
-| Compact that log | 27.2 ms | 5000 ms |
-| Build the paper to a PDF | 1.05 s | 120 s |
-| Build it again, nothing changed | 14.2 ms | 5000 ms |
-| Check the spelling and grammar of a section | 47.2 ms | 20000 ms |
-| Check it again, nothing changed | 3.41 ms | 2000 ms |
+| Import a six-file paper | 72.8 ms | 5000 ms |
+| Import a paper of 2,000 files | 3.24 s | 60 s |
+| Download it as a ZIP | 38.2 ms | 5000 ms |
+| Save one keystroke | 1.52 ms | 50 ms |
+| Open a file with 1,000 edits in its log | 2.00 ms | 2000 ms |
+| Compact that log | 25.2 ms | 5000 ms |
+| Build the paper to a PDF | 1.16 s | 120 s |
+| Build it again, nothing changed | 21.3 ms | 5000 ms |
+| List a paper's revisions, of 5,000 | 45.0 ms | 2000 ms |
+| Read how a paper's builds stand, after 10,000 | 8.99 ms | 2000 ms |
+| Check the spelling and grammar of a section | 56.6 ms | 20000 ms |
+| Check it again, nothing changed | 3.73 ms | 2000 ms |
 | Draw a chart of 200 points to PDF and PNG | 0.77 s | 60 s |
 
 In the browser, from `tests/e2e/spike.spec.ts` on a 150 KB file: a keystroke reaches the
 source text within 40 ms and the screen within 150 ms at the 95th percentile, and another
 person's edit is on screen within 250 ms. Those are that test's limits; it prints what it
 measured on each run.
+
+A paper's page with 5,000 revisions, in a browser, measured once by hand: 183 KB and a
+quarter of a second. Before the list of revisions was limited to the newest fifty automatic
+ones and those people named: 15.8 MB and 8.4 s (1.6 MB and 0.9 s with 500).
 
 ## Not measured
 
