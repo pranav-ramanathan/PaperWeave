@@ -12,12 +12,8 @@ const build = (page: Page) => page.locator('.build');
 const buildStatus = (page: Page) => build(page).getByRole('status');
 const source = (page: Page) => page.locator('.editor .cm-content');
 
-test('the PDF builds by itself, a broken edit says where, and the last good PDF stays', async ({
-  browser,
-}) => {
-  test.setTimeout(180_000);
-  const owner = await person(browser, 'build-owner');
-  const viewer = await person(browser, 'build-viewer');
+/** A ZIP of the fixture, named for this run. */
+async function fixtureZip(name: string) {
   const files: { path: string; bytes: Buffer }[] = [];
   const walk = (dir: string) => {
     for (const f of readdirSync(dir).sort()) {
@@ -27,8 +23,18 @@ test('the PDF builds by itself, a broken edit says where, and the last good PDF 
     }
   };
   walk(FIXTURE);
-  const zip = join(mkdtempSync(join(tmpdir(), 'paperweave-e2e-')), `Build ${run}.zip`);
+  const zip = join(mkdtempSync(join(tmpdir(), 'paperweave-e2e-')), `${name} ${run}.zip`);
   writeFileSync(zip, await writeZip(files));
+  return zip;
+}
+
+test('the PDF builds by itself, a broken edit says where, and the last good PDF stays', async ({
+  browser,
+}) => {
+  test.setTimeout(180_000);
+  const owner = await person(browser, 'build-owner');
+  const viewer = await person(browser, 'build-viewer');
+  const zip = await fixtureZip('Build');
 
   await owner.page.goto('/sign-in');
   await signIn(owner.page, owner.email);
@@ -96,4 +102,45 @@ test('the PDF builds by itself, a broken edit says where, and the last good PDF 
       })
     ).status(),
   ).toBe(403);
+});
+
+test('opening another file of a built paper leaves the PDF up to date and asks for no build', async ({
+  browser,
+}) => {
+  test.setTimeout(120_000);
+  const { page, email } = await person(browser, 'build-second');
+  await page.goto('/sign-in');
+  await signIn(page, email);
+  await page
+    .getByLabel('Or import a ZIP of a LaTeX project')
+    .setInputFiles(await fixtureZip('Second'));
+  await page.getByRole('button', { name: 'Import ZIP' }).click();
+  await page.getByRole('link', { name: 'main.tex' }).first().click();
+  await expect(buildStatus(page)).toHaveText('The PDF is up to date.', { timeout: 60_000 });
+
+  // Opening a file writes the first entry of its log. That is not an edit: the PDF is still of
+  // this text, and the pane, which builds whenever the PDF is behind, has nothing to ask for.
+  const asked: string[] = [];
+  page.on('request', (r) => {
+    if (r.method() === 'POST' && r.url().endsWith('/builds')) asked.push(r.url());
+  });
+  await page.getByRole('link', { name: 'sections/intro.tex' }).click();
+  await expect(page.getByRole('region', { name: /^Editor for/ }).getByRole('status')).toHaveText(
+    'All edits saved.',
+  );
+  await expect(buildStatus(page)).toHaveText('The PDF is up to date.');
+  // Long enough for the pane to have looked several times.
+  await page.waitForTimeout(9000);
+  await expect(buildStatus(page)).toHaveText('The PDF is up to date.');
+  expect(asked).toEqual([]);
+
+  // Typed and taken back: the log has moved and the text has not. One build puts it right.
+  await showSource(page);
+  await source(page).click();
+  await page.keyboard.type('x');
+  await page.keyboard.press('Backspace');
+  await expect(buildStatus(page)).toHaveText('The PDF is up to date.', { timeout: 30_000 });
+  await page.waitForTimeout(9000);
+  await expect(buildStatus(page)).toHaveText('The PDF is up to date.');
+  expect(asked.length).toBeLessThanOrEqual(2);
 });

@@ -8,6 +8,8 @@ import {
   blobStore,
   buildLabels,
   buildOutput,
+  createFile,
+  deleteFile,
   importZip,
   invite,
   latestBuilds,
@@ -117,6 +119,42 @@ test('a paper builds to a PDF, and the same inputs are never built twice', async
   expect(await build(project)).toMatchObject({ status: 'succeeded', cached: false });
   await t.pool.query("update projects set compiler = 'lualatex' where id = $1", [project]);
   expect(await build(project)).toMatchObject({ status: 'succeeded', cached: false });
+});
+
+test('a build is up to date with a paper whose text it has, however the log has moved', async () => {
+  const { project, main } = await paper('ieee-multifile');
+  const intro = (await listFiles(t.pool, owner.id, project)).find(
+    (f) => f.path === 'sections/intro.tex',
+  )!;
+  expect(await build(project)).toMatchObject({ status: 'succeeded', stale: false });
+
+  // A file is opened in the editor for the first time. Nothing is typed: the paper is the
+  // paper that was built.
+  await loadUpdates(t.pool, store, intro.id);
+  expect((await latestBuilds(t.pool, owner.id, project)).latest).toMatchObject({ stale: false });
+
+  // Something is typed and taken back. The log has moved; the text has not. The build that
+  // follows is of the same text, and is up to date with it, not behind it for ever.
+  await edit(main, (text) => text.insert(0, 'x'));
+  await edit(main, (text) => text.delete(0, 1));
+  const before = (await latestBuilds(t.pool, owner.id, project)).latest!;
+  expect(before.stale).toBe(true);
+  const after = await build(project);
+  expect(after).toMatchObject({ status: 'succeeded', stale: false, revisionId: before.revisionId });
+  // And nothing more is asked for: the pane beside the editor builds whenever it is behind.
+  expect((await latestBuilds(t.pool, owner.id, project)).latest!.id).toBe(after.id);
+
+  // A file is deleted and one with the same bytes is made under its name. The text is the
+  // same, but the file is another one: the build is of a revision that knows it by its new id.
+  await deleteFile(t.pool, store, owner.id, project, intro.id);
+  const bytes = readFileSync(join(FIXTURES, 'ieee-multifile', 'sections/intro.tex'));
+  const remade = await createFile(t.pool, store, owner.id, project, 'sections/intro.tex', bytes);
+  const third = await build(project);
+  expect(third).toMatchObject({ status: 'succeeded', stale: false, cached: true });
+  expect(third.revisionId).not.toBe(after.revisionId);
+  expect(await sourceToPdf(t.pool, store, owner.id, project, third.id, remade, 4)).toMatchObject({
+    page: expect.any(Number),
+  });
 });
 
 test('a burst of requests is one build, and a paper cannot build without limit', async () => {

@@ -253,6 +253,35 @@ test('the main pages can be read in a narrow window without scrolling sideways',
   await page.getByRole('link', { name: /New chart from/ }).click();
   await expect(page.getByRole('heading', { name: 'New chart' })).toBeVisible();
   await look('new chart');
+  // A chart once it has been drawn, with its picture and the record of how it was made.
+  await page.getByLabel('Name', { exact: true }).fill('latency');
+  await page.getByRole('combobox', { name: 'Kind', exact: true }).selectOption('line');
+  await page.getByRole('button', { name: 'Draw the chart' }).click();
+  await expect(page.getByRole('img', { name: /^Line chart of/ })).toBeVisible({ timeout: 30_000 });
+  await look('a drawn chart');
+  // The differences between two revisions.
+  await page.goto(paper);
+  await page.getByLabel('Name for the paper as it is now').fill('First');
+  await page.getByRole('button', { name: 'Save revision' }).click();
+  await expect(page.getByRole('status')).toHaveText('Saved as revision 1.');
+  await page.getByRole('link', { name: 'refs.bib' }).first().click();
+  await expect(page.getByRole('region', { name: /^Editor for/ }).getByRole('status')).toHaveText(
+    'All edits saved.',
+  );
+  await page.locator('.editor .cm-content').click();
+  await page.keyboard.press('ControlOrMeta+End');
+  await page.keyboard.type(
+    '% a line long enough that it would not fit across a narrow window without wrapping or scrolling\n',
+  );
+  await expect(page.getByRole('region', { name: /^Editor for/ }).getByRole('status')).toHaveText(
+    'All edits saved.',
+  );
+  await page.goto(paper);
+  await page.getByLabel('Name for the paper as it is now').fill('Second');
+  await page.getByRole('button', { name: 'Save revision' }).click();
+  await page.getByRole('link', { name: 'Changes since 1' }).click();
+  await expect(page.getByRole('heading', { name: 'Revision 1 to revision 2' })).toBeVisible();
+  await look('differences between revisions');
   await page.goto(`${paper}/submit`);
   await expect(page.getByRole('heading', { name: /before submitting/ })).toBeVisible();
   await look('checks before submitting');

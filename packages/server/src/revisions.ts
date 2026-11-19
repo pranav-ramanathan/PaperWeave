@@ -121,7 +121,26 @@ async function cut(
         [projectId],
       )
     ).rows[0];
-    if (kind === 'auto' && last?.content_key === key) return { id: last.id, number: last.number };
+    if (kind === 'auto' && last?.content_key === key) {
+      // The same text as the latest revision, though the logs may have moved on: a file opened
+      // for the first time, something typed and taken back. The revision is this text too, so
+      // it is told where the logs now stand. Otherwise a build of it would look behind the
+      // text for ever, and be asked for again and again.
+      const same = await db.query(
+        `update revision_files rf set seq = c.seq
+         from unnest($2::uuid[], $3::text[], $4::bigint[]) as c(id, path, seq)
+         where rf.revision_id = $1 and rf.file_id = c.id and rf.path = c.path`,
+        [
+          last.id,
+          captured.map((c) => c.id),
+          captured.map((c) => c.path),
+          captured.map((c) => c.seq),
+        ],
+      );
+      // Unless a file was deleted and made again under its name: that is another file, and
+      // gets a revision that says so.
+      if (same.rowCount === captured.length) return { id: last.id, number: last.number };
+    }
     const made = (
       await db.query(
         `insert into revisions (project_id, number, name, kind, restored_from, root, compiler, content_key, created_by)
