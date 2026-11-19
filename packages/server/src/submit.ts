@@ -31,6 +31,9 @@ export type Submission = {
   building: boolean;
 };
 
+/** How long a build may wait before it is taken not to be being built. */
+export const BUILD_STUCK_MS = 120_000;
+
 export async function submissionChecks(
   pool: pg.Pool,
   store: BlobStore,
@@ -130,11 +133,21 @@ export async function submissionChecks(
     warning('review', `${count(waiting.threads, 'thread is', 'threads are')} still open.`);
 
   const { latest } = await latestBuilds(pool, userId, projectId);
-  const building = latest?.status === 'queued';
+  const queued = latest?.status === 'queued';
+  // A build takes a minute at most once it starts. One that has waited twice that is not
+  // being built: the page stops looking again by itself, and says so.
+  const stuck =
+    !!latest && queued && Date.now() - new Date(latest.createdAt).getTime() > BUILD_STUCK_MS;
+  const building = queued && !stuck;
   if (!latest) problem('build', 'The paper has not been built yet.');
+  else if (stuck)
+    problem(
+      'build',
+      'A build of the paper has been waiting for more than two minutes. The build service may be busy or not running.',
+    );
   else if (building) problem('build', 'The paper is being built. Look again in a moment.');
   else if (latest.stale) problem('build', 'The paper has changed since it was last built.');
-  if (latest && !building) {
+  if (latest && !queued) {
     const fileOf = (path?: string) => files.find((f) => f.path === path)?.id;
     for (const d of latest.diagnostics) {
       const where = { path: d.file, line: d.line, fileId: fileOf(d.file) };

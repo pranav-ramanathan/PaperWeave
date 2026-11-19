@@ -160,6 +160,18 @@ test('the checks before submitting find what is wrong, and give the files once n
   expect(await drawNext(t.pool, store, image)).toBe(true);
   await requestBuild(t.pool, users.owner.id, project.id);
   expect(await checks()).toMatchObject({ ready: false, building: true });
+  // Nothing builds it for five minutes. The page that shows these checks looks again by
+  // itself while a build is on its way; it must not go on doing that for ever.
+  // (Every build of the paper is moved back together, so that this one is still the newest.)
+  await t.pool.query(
+    "update builds set created_at = created_at - interval '5 minutes' where project_id = $1",
+    [project.id],
+  );
+  const stuck = await checks();
+  expect(stuck).toMatchObject({ ready: false, building: false });
+  expect(stuck.findings.filter((f) => f.kind === 'build').map((f) => f.message)).toEqual([
+    'A build of the paper has been waiting for more than two minutes. The build service may be busy or not running.',
+  ]);
   expect(await buildNext(t.pool, store, image)).toBe(true);
 
   // Ready: what is left is for the author to weigh, and the revision is the one that was built.
