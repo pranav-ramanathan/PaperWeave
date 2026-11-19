@@ -5,7 +5,8 @@ import { expect, type Page, test } from '@playwright/test';
 import { mkdtempSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { person, run, showSource, signIn } from './helpers';
+import { writeZip } from '../../packages/server/src/archive';
+import { person, run, selectWord, showSource, signIn, typingSaved } from './helpers';
 
 const source = (page: Page) => page.locator('.editor .cm-content');
 const editorStatus = (page: Page) =>
@@ -95,4 +96,93 @@ test('a paper is started from nothing, and a deleted file comes back by restorin
   await showSource(page);
   await expect(source(page)).toContainText('Uploaded words.');
   await expect(source(page)).toContainText('Typed before the delete.');
+});
+
+test('a page come back to says what is so now', async ({ browser }) => {
+  test.setTimeout(180_000);
+  const owner = await person(browser, 'files-back');
+  const page = owner.page;
+  const zip = join(mkdtempSync(join(tmpdir(), 'paperweave-e2e-')), `Back ${run}.zip`);
+  const main = [
+    '\\documentclass{article}',
+    '\\begin{document}',
+    'Latency stays below forty milliseconds for most edits.',
+    '',
+    '\\input{body}',
+    '\\end{document}',
+    '',
+  ].join('\n');
+  writeFileSync(
+    zip,
+    await writeZip([
+      { path: 'main.tex', bytes: Buffer.from(main) },
+      { path: 'body.tex', bytes: Buffer.from('Nothing else is claimed here.\n') },
+    ]),
+  );
+  await page.goto('/sign-in');
+  await signIn(page, owner.email);
+  await page.getByLabel('Or import a ZIP of a LaTeX project').setInputFiles(zip);
+  await page.getByRole('button', { name: 'Import ZIP' }).click();
+  await page.waitForURL(/\/projects\/[0-9a-f-]{36}/);
+
+  // A thread started meanwhile is listed on the paper's page reached with Back.
+  await page.getByRole('link', { name: 'main.tex' }).first().click();
+  await page.waitForURL(/\/files\//);
+  const comments = page.getByRole('region', { name: 'Comments' });
+  await selectWord(page, '.editor .visual .ProseMirror', 'forty');
+  await comments.getByRole('button', { name: 'Comment on the selected text' }).click();
+  await comments.getByLabel('Comment', { exact: true }).fill('Is that the median?');
+  await comments.getByRole('button', { name: 'Start thread' }).click();
+  await expect(page.getByRole('article', { name: 'Thread on “forty”' })).toHaveCount(1);
+  await page.goBack();
+  await expect(page.getByRole('listitem').filter({ hasText: 'the latest by' })).toContainText(
+    'main.tex: forty.',
+  );
+
+  // A file deleted meanwhile is gone from the page reached with Back.
+  await page.getByRole('button', { name: 'Delete body.tex' }).click();
+  await expect(page.getByRole('status')).toContainText('Deleted body.tex');
+  await page.goBack();
+  await expect(page.getByRole('link', { name: 'body.tex', exact: true })).toHaveCount(0);
+
+  // Words typed with no connection, then Back and Forward: the editor is the same one, and the
+  // words are saved when the connection returns.
+  await page.getByRole('link', { name: 'main.tex' }).first().click();
+  await page.waitForURL(/\/files\//);
+  await showSource(page);
+  await expect(editorStatus(page)).toHaveText('All edits saved.');
+  await expect(source(page)).toContainText('forty');
+  await source(page).click();
+  await page.context().setOffline(true);
+  await expect(editorStatus(page)).toContainText('Offline.');
+  await page.keyboard.press('ControlOrMeta+Home');
+  await page.keyboard.type('offlineword ');
+  await expect(editorStatus(page)).toContainText('waiting to be saved');
+  // Leaving the file's page and coming back starts its editor afresh, refresh or none, so Back
+  // here is a step in the page's own history.
+  await page.evaluate(() => history.pushState(null, '', '#again'));
+  await page.goBack();
+  await page.goForward();
+  await page.context().setOffline(false);
+  await expect(source(page)).toContainText('offlineword');
+  await typingSaved(page);
+  await expect(source(page)).toContainText('offlineword');
+  // Back on its page with the connection returned, the editor has not been asked for again.
+  await page.evaluate(() => history.pushState(null, '', '#once-more'));
+  await page.goBack();
+  await expect(source(page)).toContainText('offlineword');
+  await expect(editorStatus(page)).toHaveText('All edits saved.');
+
+  // A document that has never held an editor, taken to another page and brought back with Back:
+  // the refresh gives the layout a new number, and the editor opened next must still be allowed.
+  const paperPage = page.url().replace(/\/files\/.*$/, '');
+  const fresh = await page.context().newPage();
+  await fresh.goto(paperPage);
+  await fresh.getByRole('link', { name: 'All papers' }).click();
+  await fresh.waitForURL(/\/projects$/);
+  await fresh.goBack();
+  await fresh.waitForTimeout(1000);
+  await fresh.getByRole('link', { name: 'main.tex' }).first().click();
+  await showSource(fresh);
+  await expect(editorStatus(fresh)).toHaveText('All edits saved.');
 });
