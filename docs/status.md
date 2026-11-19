@@ -914,8 +914,13 @@ Two things about tests, found on the way and not about the product:
 - **A chart that is not being drawn says so too.** Its page loaded itself again every two
   seconds for as long as the chart waited. After two minutes it now stops, and says the
   service that draws charts may be busy or not running. A chart says since when it has been
-  waiting (`waitingSince`, held by a service test). The page's own two lines were not run
-  with a stopped worker: nothing here can stop one in a browser test.
+  waiting (`waitingSince`, held by a service test). The page was checked once by hand: a
+  chart put back to waiting as if asked for five minutes ago, and held so that the worker
+  passed it by, showed the message and loaded once in six seconds. No test is kept for it.
+- **The page of checks before submitting stops too.** It loaded itself again every two
+  seconds while a build was waiting, and each load runs every check. After two minutes it
+  says the build has been waiting and stops (`BUILD_STUCK_MS` in
+  `packages/server/src/submit.ts`). A service test holds it.
 - **An editor nobody is looking at asks for nothing.** Each open editor asked how the builds
   stood every two seconds, and for the threads and the proposals every five, for as long as
   its tab was open, in front or not. They now wait while the tab is hidden and ask at once
