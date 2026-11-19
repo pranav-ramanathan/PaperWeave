@@ -5,7 +5,7 @@ import { mkdtempSync, readdirSync, readFileSync, statSync, writeFileSync } from 
 import { tmpdir } from 'node:os';
 import { join, relative } from 'node:path';
 import { readZip, writeZip } from '../../packages/server/src/archive';
-import { clickAfter, emailedLink, person, run, showSource, signIn } from './helpers';
+import { clickAfter, dropOn, emailedLink, person, run, showSource, signIn } from './helpers';
 
 const FIXTURE = join(import.meta.dirname, '../../fixtures/ieee-multifile');
 const VISUAL = '.editor .visual .ProseMirror';
@@ -247,4 +247,108 @@ test('something pasted into the visual view goes in as its words', async ({ brow
   await expect.poll(source).toContain('50\\% of R\\&D cost \\$5 for item\\_1 \\#2');
   await paste({ text: '50% & more\n\nand $x$ too' });
   await expect.poll(source).toContain('\\#250\\% \\& more\n\nand \\$x\\$ too');
+});
+
+test('something dropped on the visual view goes in as its words, and the source view takes no file', async ({
+  browser,
+}) => {
+  const { page, email } = await person(browser, 'vis-drop');
+  const main = [
+    '\\documentclass{article}',
+    '\\begin{document}',
+    'Latency stays below forty milliseconds for most edits.',
+    '',
+    'Nothing else is claimed here.',
+    '\\end{document}',
+    '',
+  ].join('\n');
+  const zip = join(mkdtempSync(join(tmpdir(), 'paperweave-e2e-')), `Drop ${run}.zip`);
+  writeFileSync(zip, await writeZip([{ path: 'main.tex', bytes: Buffer.from(main) }]));
+  await page.goto('/sign-in');
+  await signIn(page, email);
+  await page.getByLabel('Or import a ZIP of a LaTeX project').setInputFiles(zip);
+  await page.getByRole('button', { name: 'Import ZIP' }).click();
+  await page.getByRole('link', { name: 'main.tex' }).first().click();
+  await expect(status(page)).toHaveText('All edits saved.');
+
+  const png = { name: 'p.png', type: 'image/png', base64: PNG };
+  const bib = {
+    name: 'refs.bib',
+    type: 'text/plain',
+    base64: Buffer.from('@article{key,\n  title={T},\n  year={2020}\n}\n').toString('base64'),
+  };
+  const note = page.locator('.editor .toolbar .note');
+  const paragraph = page.locator(VISUAL).locator('p', { hasText: 'Nothing else is claimed' });
+  const source = async () => {
+    await showSource(page);
+    const text = (await page.locator(`${SOURCE} .cm-line`).allInnerTexts())
+      .join('\n')
+      .replace(/\n{2,}/g, '\n\n');
+    await view(page, 'Visual').click();
+    await expect(page.locator(VISUAL)).toBeVisible();
+    return text;
+  };
+
+  // A picture is not opened in the tab, and cannot go into the text: that is said.
+  const before = await source();
+  const dropped = await dropOn(paragraph, { file: png });
+  expect(dropped.over, 'the dragover of a picture was cancelled').toBe(true);
+  expect(dropped.drop, 'the drop of a picture was cancelled').toBe(true);
+  await expect(note).toContainText('A picture or file cannot be dropped into the text.');
+  expect(await source()).toBe(before);
+
+  // Several paragraphs go in as paragraphs, where they were dropped.
+  await dropOn(paragraph, { text: 'First para.\n\nSecond para.' });
+  await expect(page.locator(VISUAL)).toContainText('Second para.');
+  await expect(status(page)).toHaveText('All edits saved.');
+  await expect.poll(source).toContain('First para.\n\nSecond para.');
+
+  // What is dragged along with a list is only its words.
+  await dropOn(paragraph, { html: '<ul><li>a</li><li>b</li></ul>', text: 'a\nb' });
+  await expect.poll(source).toContain('a b');
+
+  // Characters LaTeX reads are escaped, as when typing.
+  await dropOn(paragraph, { text: '50% of R&D' });
+  await expect.poll(source).toContain('50\\% of R\\&D');
+
+  // The source view takes no file either: it is not opened in the tab, and nothing goes in.
+  const text = await source();
+  await showSource(page);
+  const inSource = await dropOn(page.locator(SOURCE), { file: bib });
+  expect(inSource.drop, 'the drop of a file on the source was cancelled').toBe(true);
+  await expect(note).toContainText('A picture or file cannot be dropped into the text.');
+  await expect(page.locator(`${SOURCE} .cm-line`).first()).toBeVisible();
+  await view(page, 'Visual').click();
+  expect(await source()).toBe(text);
+});
+
+test('a caret at the end of the source is kept in the visual view', async ({ browser }) => {
+  const { page, email } = await person(browser, 'vis-caret');
+  const main = [
+    '\\documentclass{article}',
+    '\\begin{document}',
+    'Latency stays below forty milliseconds for most edits.',
+    '\\end{document}',
+    '',
+  ].join('\n');
+  const zip = join(mkdtempSync(join(tmpdir(), 'paperweave-e2e-')), `Caret ${run}.zip`);
+  writeFileSync(zip, await writeZip([{ path: 'main.tex', bytes: Buffer.from(main) }]));
+  await page.goto('/sign-in');
+  await signIn(page, email);
+  await page.getByLabel('Or import a ZIP of a LaTeX project').setInputFiles(zip);
+  await page.getByRole('button', { name: 'Import ZIP' }).click();
+  await page.getByRole('link', { name: 'main.tex' }).first().click();
+  await expect(status(page)).toHaveText('All edits saved.');
+
+  // After \end{document} no text can go. The visual view used to put the caret there all the
+  // same, where it is not drawn, and the editor's library warned of it (`person` refuses such
+  // warnings). Now it goes to the nearest place that can take text.
+  await showSource(page);
+  await page.locator(SOURCE).click();
+  await page.keyboard.press('ControlOrMeta+End');
+  await view(page, 'Visual').click();
+  await expect(page.locator(VISUAL)).toBeVisible();
+  await page.waitForTimeout(1000);
+  await page.keyboard.type('Z');
+  await expect(page.locator(VISUAL)).toContainText('Z');
 });

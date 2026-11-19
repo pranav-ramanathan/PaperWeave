@@ -588,6 +588,49 @@ export function createVisual(opts: {
       return result;
     };
   };
+  /**
+   * Put text that was pasted or dropped where the caret is, as its words, as if typed: a
+   * clipboard's formatting is not LaTeX. False if there was nothing to take.
+   */
+  const take = (text: string, files: number, verb = 'pasted'): boolean => {
+    if (!opts.editable) return true;
+    const { view } = editor;
+    const act = verb === 'pasted' ? 'paste' : 'drop';
+    if (!text.trim()) {
+      if (!files) return false;
+      say(
+        `A picture or file cannot be ${verb} into the text. Add it to the paper on its page, then insert it as a figure.`,
+      );
+      return true;
+    }
+    const normal = text.replace(/\r\n?/g, '\n');
+    const paragraphs = normal
+      .split(/\n\s*\n/)
+      .map((p) => p.replace(/[\t\n]+/g, ' ').trim())
+      .filter(Boolean);
+    if (paragraphs.length === 1) {
+      // Kept as it was, spaces around it included, as the browser's own paste would.
+      view.dispatch(view.state.tr.insertText(normal.replace(/[\t\n]+/g, ' ')).scrollIntoView());
+      return true;
+    }
+    if (!view.state.selection.empty) {
+      say(`Put the caret where the paragraphs should go, with nothing selected, then ${act}.`);
+      return true;
+    }
+    const put = insertion();
+    if (!put) {
+      say(
+        `Several paragraphs cannot be ${verb} here. ${act[0]!.toUpperCase() + act.slice(1)} them one at a time, or in the source.`,
+      );
+      return true;
+    }
+    void put(paragraphs.map(escape).join('\n\n')).then(
+      (result) =>
+        result === 'conflict' && say('That text changed before the edit arrived. Try again.'),
+      () => say('That edit could not be made. Check the connection and try again.'),
+    );
+    return true;
+  };
   const editor: Editor = new Editor({
     element: opts.element,
     injectNonce: pageNonce(),
@@ -659,44 +702,20 @@ export function createVisual(opts: {
     editorProps: {
       attributes: { 'aria-label': opts.label, role: 'textbox', 'aria-multiline': 'true' },
       // What is pasted goes in as its words, as if typed: the clipboard's formatting is not LaTeX.
-      handlePaste: (view, event) => {
-        if (!opts.editable) return true;
+      handlePaste: (_view, event) => {
         const data = event.clipboardData;
+        return take(data?.getData('text/plain') ?? '', data?.files.length ?? 0);
+      },
+      // What is dropped goes in as its words, where it is dropped, as pasted text does.
+      handleDrop: (view, event, _slice, moved) => {
+        if (moved) return false; // a drag within the text: as before
+        const data = event.dataTransfer;
         const text = data?.getData('text/plain') ?? '';
-        if (!text.trim()) {
-          if (!data?.files.length) return false;
-          say(
-            'A picture or file cannot be pasted into the text. Add it to the paper on its page, then insert it as a figure.',
-          );
-          return true;
-        }
-        const normal = text.replace(/\r\n?/g, '\n');
-        const paragraphs = normal
-          .split(/\n\s*\n/)
-          .map((p) => p.replace(/[\t\n]+/g, ' ').trim())
-          .filter(Boolean);
-        if (paragraphs.length === 1) {
-          // Kept as it was, spaces around it included, as the browser's own paste would.
-          view.dispatch(view.state.tr.insertText(normal.replace(/[\t\n]+/g, ' ')).scrollIntoView());
-          return true;
-        }
-        if (!view.state.selection.empty) {
-          say('Put the caret where the paragraphs should go, with nothing selected, then paste.');
-          return true;
-        }
-        const put = insertion();
-        if (!put) {
-          say(
-            'Several paragraphs cannot be pasted here. Paste them one at a time, or in the source.',
-          );
-          return true;
-        }
-        void put(paragraphs.map(escape).join('\n\n')).then(
-          (result) =>
-            result === 'conflict' && say('That text changed before the edit arrived. Try again.'),
-          () => say('That edit could not be made. Check the connection and try again.'),
-        );
-        return true;
+        if (!text.trim() && !data?.files.length) return false;
+        event.preventDefault();
+        const hit = view.posAtCoords({ left: event.clientX, top: event.clientY });
+        if (hit) selectAt(hit.pos); // empty selection, so several paragraphs go in
+        return take(text, data?.files.length ?? 0, 'dropped');
       },
     },
   });
@@ -780,12 +799,9 @@ export function createVisual(opts: {
     /** Select, in the visual document, the stretch between two places in the source text. */
     select(from: number, to: number) {
       const at = (off: number) => fromSrc(bridge.model, editor.state.doc, off);
-      editor
-        .chain()
-        .focus()
-        .setTextSelection({ from: at(from), to: at(to) })
-        .scrollIntoView()
-        .run();
+      editor.view.focus();
+      selectAt(at(from), at(to));
+      editor.view.dispatch(editor.state.tr.scrollIntoView());
     },
     destroy() {
       editor.view.dom.removeEventListener('contextmenu', onMenu);

@@ -6,7 +6,7 @@ import { mkdtempSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { writeZip } from '../../packages/server/src/archive';
-import { person, run, selectWord, showSource, signIn, typingSaved } from './helpers';
+import { dropOn, person, run, selectWord, showSource, signIn, typingSaved } from './helpers';
 
 const source = (page: Page) => page.locator('.editor .cm-content');
 const editorStatus = (page: Page) =>
@@ -39,6 +39,20 @@ test('a paper is started from nothing, and a deleted file comes back by restorin
   await page.getByLabel(/^A file to upload/).setInputFiles(join(dir, 'intro.tex'));
   await page.getByRole('button', { name: 'Add file' }).click();
   await expect(page.getByRole('status')).toHaveText('Added sections/intro.tex.');
+
+  // A file dropped on the page is not opened in its place, which would leave the app. The one
+  // field for choosing a file takes a dropped file itself, so that is left alone.
+  const picture = {
+    name: 'p.png',
+    type: 'image/png',
+    base64:
+      'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mP8z8BQDwAEhQGAhKmMIQAAAABJRU5ErkJggg==',
+  };
+  expect(await dropOn(page.locator('main').first(), { file: picture })).toEqual({
+    over: true,
+    drop: true,
+  });
+  expect((await dropOn(page.getByLabel(/^A file to upload/), { file: picture })).drop).toBe(false);
 
   // Names that would escape the paper, and names already taken, are refused with a reason.
   await page.getByLabel('Name, with folders if you like').fill('../outside.tex');

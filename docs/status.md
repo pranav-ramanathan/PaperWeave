@@ -618,8 +618,10 @@ ordinary use. Ten ways of looking found them, and each is cheap to do again:
 10. **Go back and forward.** Found: pages that showed what was no longer so, a removed
     member and a lost role among them.
 
-11. **Bring something in from outside.** Paste into the visual view. Found: two paragraphs,
-    a list and a picture each pasted to nothing, without a word.
+11. **Bring something in from outside.** Paste into the visual view, and drop onto a page.
+    Found: two paragraphs, a list and a picture each pasted to nothing, without a word; a file
+    dropped on almost any page left to the browser, which opens it in place of the app; a
+    `.bib` dropped on the source put into the text without a word.
 
 Tried the same way and nothing found: thirty connections typing into one file at once (kept
 as a test in `sync.sandbox.test`); 400 threads and 400 proposals on one file, on the server
@@ -652,8 +654,7 @@ and harmless at this size: the 380 decided proposals are drawn inside their clos
 unpacked (16 KB over the wire). The bar for changing code was a median key over 50 ms or an
 idle long task over 100 ms; neither came near. Noticed while planning this: the next section.
 
-Not yet tried: a second browser; a file dragged onto the page; the editor's view (visual or
-source) not remembered.
+Not yet tried: a second browser; the editor's view (visual or source) not remembered.
 
 If more is to be built before those are settled, the candidates are in the code as
 `shortcut:` comments (seven of them, each saying when it stops being good enough) and in the
@@ -1321,6 +1322,51 @@ second one.
   words come in and the LaTeX for the rest is written in the source. A picture is not added
   to the paper by pasting. The source view pastes as before, exactly what was copied.
 - **How it was made.** Probed and planned by one agent, written by another, checked here.
+
+## Something dropped onto a page
+
+- **What was tried**, with a probe: a picture, a `.bib` file, and text dropped onto the visual
+  view, the source view, the paper's page, the list of papers, the editor's other panes, the
+  field for choosing a file, and a table cell being edited. A test cannot make a real drag
+  from the desktop, and a drop made by a script never opens anything; what decides whether
+  the browser opens a dropped file in place of the page is whether the page cancels the drop,
+  and that is what was read.
+
+| Dropped                | Onto                                 | Before                                  | Now                   |
+| ---------------------- | ------------------------------------ | --------------------------------------- | --------------------- |
+| A picture, or a `.bib` | the visual view                      | **left to the browser**, no word        | refused, and said     |
+| A picture              | the source view                      | refused without a word                  | refused, and said     |
+| A `.bib`               | the source view                      | **its text put into the file, no word** | refused, and said     |
+| A picture              | the paper's page, the list of papers | **left to the browser**                 | refused               |
+| A picture              | the editor's PDF and comment panes   | **left to the browser**                 | refused               |
+| A picture              | a table cell being edited            | **left to the browser**                 | refused               |
+| A picture              | the field for choosing a file        | taken by the field                      | the same              |
+| Two paragraphs; a list | the visual view                      | **refused** as an edit across LaTeX     | put in as for a paste |
+| `50% of R&D`           | the visual view                      | escaped, as typed                       | the same              |
+
+- **What was wrong.** No page said what to do with a dropped file, so the browser did its
+  own thing: open the file in the tab, the paper's page or the editor gone. Text dropped on
+  the visual view took the editor's own way in, which could not write paragraphs or a list.
+- **Now** a file dropped anywhere but on a field for choosing one is refused (`Dropped` in
+  `apps/web/app/Dropped.tsx`, in the root layout); the visual and source views say where
+  files are added. Text dropped on the visual view goes in where it was dropped, by the same
+  rule as a paste (`take` and `handleDrop` in `apps/web/lib/visual.ts`). Text dropped on the
+  source view goes in as before.
+- **A caret that was not drawn**, found while looking at this. With the caret where the visual
+  view has no text (after `\end{document}`, on `\begin{document}`, in a formula or a table's
+  source), switching to the visual view put the caret there anyway, not drawn, with a warning
+  from the editor's library. All five places warned; none does now: the switch takes the
+  nearest place that holds text, as clicking does (`select` in `visual.ts`).
+- **Held by** browser tests: `visual.spec` "something dropped on the visual view goes in as
+  its words, and the source view takes no file" (a picture, two paragraphs, a list, escaping,
+  a `.bib` on the source); `visual.spec` "a caret at the end of the source is kept in the
+  visual view"; and `files.spec`, a picture dropped on the paper's page, and the field for
+  choosing a file still taking one. Each failed on the old code, with its part of the fix
+  taken out.
+- **Not changed:** a dropped file is refused, not added to the paper; adding it would be a
+  new feature. A word dragged within the visual view was tried with the mouse and nothing
+  changed, but whether the browser began a drag at all was not seen.
+- **How it was made.** Planned by one agent, probed and written by others, checked here.
 
 ## When an email cannot be sent
 

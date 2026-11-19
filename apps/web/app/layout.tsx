@@ -3,6 +3,7 @@ import { connection } from 'next/server';
 import type { ReactNode } from 'react';
 import 'katex/dist/katex.min.css';
 import './globals.css';
+import Dropped from './Dropped';
 import Fresh from './Fresh';
 
 export const metadata = { title: 'PaperWeave' };
@@ -20,6 +21,7 @@ export default async function Layout({ children }: { children: ReactNode }) {
       </head>
       <body>
         <Fresh />
+        <Dropped />
         {children}
       </body>
     </html>

@@ -385,6 +385,16 @@ export default function FileEditor(props: {
       state: EditorState.create({
         extensions: [
           EditorView.cspNonce.of(pageNonce()),
+          EditorView.domEventHandlers({
+            drop: (e) => {
+              if (!e.dataTransfer?.files.length) return false; // dragged text goes in as before
+              e.preventDefault();
+              setNote(
+                'A picture or file cannot be dropped into the text. Add it to the paper on its page.',
+              );
+              return true;
+            },
+          }),
           lineNumbers(),
           EditorView.lineWrapping,
           EditorView.contentAttributes.of({ 'aria-label': `LaTeX source of ${props.path}` }),
