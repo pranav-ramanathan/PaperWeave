@@ -59,6 +59,8 @@ const TEXT = 'source';
 const NO_ACCESS = 'no-access';
 /** The sync server's word for an edit it will not take for its size. */
 const TOO_LARGE = 'too-large';
+/** Its word, when a connection is turned away, for "not now" as against "no". */
+const TRY_AGAIN = 'try-again';
 /** Its word for closing a connection whose sign-in has ended. */
 const SIGNED_OUT = 'signed-out';
 // Presence colours, chosen to stay readable on white. People are told apart by name as well.
@@ -281,9 +283,11 @@ export default function FileEditor(props: {
         // Back in touch: find out whether what was typed meanwhile has arrived.
         saving.reconnected();
       },
-      onAuthenticationFailed: () => {
+      onAuthenticationFailed: ({ reason }) => {
         if (restoreHeld !== null || oversized) return;
-        if (!stumbled) return refuse();
+        // "Try again" is the server saying it could not find out yet whether this person may
+        // open the file, not that they may not: its database did not answer.
+        if (!stumbled && reason !== TRY_AGAIN) return refuse();
         stumbled = false;
         // Closing the connection is what makes the next attempt: see onStatus.
         setTimeout(() => {

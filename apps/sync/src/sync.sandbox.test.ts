@@ -5,11 +5,14 @@ import {
   acceptInvitation,
   blobStore,
   compactFile,
+  createFile,
   deleteFile,
+  editFile,
   exportZip,
   importZip,
   invite,
   listFiles,
+  listRevisions,
   readZip,
   removeMember,
   requestBuild,
@@ -17,8 +20,6 @@ import {
   runCommand,
   saveRevision,
   setRole,
-  createFile,
-  listRevisions,
   syncTicket,
   writeZip,
 } from '@paperweave/server';
@@ -276,6 +277,45 @@ test('taking away write access stops writes at once; removal ends the connection
   await saved(owner);
   await new Promise((r) => setTimeout(r, 300));
   expect(editor.text.toString()).not.toContain('SECRET');
+});
+
+test('every connection to the database is lost at once, and the server carries on', async () => {
+  const { project, file } = await paper();
+  const owner = client(users.owner, file);
+  const editor = client(users.editor, file);
+  await saved(owner, editor);
+  const told = (c: Client) => c.state.replies.filter((r) => r.role).map((r) => r.role);
+
+  // What a restart of the database looks like from here: every connection there was is gone,
+  // the one the server listens on included. This once ended the server's process.
+  await t.pool.query(
+    `select pg_terminate_backend(pid) from pg_stat_activity
+     where datname = current_database() and pid <> pg_backend_pid()`,
+  );
+  // Two things happen before the server can be listening again, so it is not told of either:
+  // an edit is made on the server, and the editor's role is lowered.
+  await editFile(t.pool, store, file, users.owner.id, (text) =>
+    text.insert(0, '% made on the server\n'),
+  );
+  await setRole(t.pool, users.owner.id, project, users.editor.id, 'viewer');
+
+  // It finds both out for itself once it is listening again.
+  await until('the edit to reach the people in the file', () =>
+    [owner, editor].every((c) => c.text.toString().includes('% made on the server')),
+  );
+  await until('the editor to be told of the lowered role', () => told(editor).at(-1) === 'viewer');
+  // And it is listening again: what is announced from now on is heard.
+  await setRole(t.pool, users.owner.id, project, users.editor.id, 'editor');
+  await until(
+    'the editor to be told of the role given back',
+    () => told(editor).at(-1) === 'editor',
+  );
+  // Nobody was disconnected, and typing is saved as before.
+  expect(owner.state.closed + editor.state.closed).toBe(0);
+  editor.text.insert(0, '% typed afterwards\n');
+  await saved(editor);
+  expect(await stored(project)).toContain('% typed afterwards');
+  expect(await stored(project)).toContain('% made on the server');
 });
 
 test('restoring a revision reaches people who have the file open, without a reload', async () => {

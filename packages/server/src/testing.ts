@@ -1,4 +1,5 @@
 // Helpers for tests that need the services in infra/compose.yaml.
+import { connect } from './db.ts';
 import { randomBytes } from 'node:crypto';
 import pg from 'pg';
 import { createAuth } from './auth.ts';
@@ -24,7 +25,8 @@ export async function testDb() {
   await admin.query(`create database ${name}`);
   const url = new URL(TEST_ENV.DATABASE_URL);
   url.pathname = '/' + name;
-  const pool = new pg.Pool({ connectionString: url.href });
+  // Made the way the services make theirs, so that it too survives a connection being lost.
+  const pool = connect(url.href);
   await migrate(pool);
   const links: { email: string; url: string }[] = [];
   const auth = createAuth(pool, async (link) => void links.push(link), TEST_ENV);
