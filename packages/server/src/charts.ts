@@ -284,10 +284,12 @@ export async function saveChart(
   const words = (v: unknown) => (typeof v === 'string' ? v.replace(/\s+/g, ' ').trim() : '');
   // Both go into LaTeX as they are when the chart is put into the paper.
   const caption = words(input.caption);
-  if (caption.length > 500 || !cellText(caption))
+  if (caption.length > 500) throw bad('The caption is too long.');
+  if (!cellText(caption))
     throw bad('A caption cannot hold an unescaped & or %, and its braces must match.');
   const given = words(input.alt);
-  if (given.length > 300 || /[{}%#\\\]]/.test(given))
+  if (given.length > 300) throw bad('The description is too long.');
+  if (/[{}%#\\\]]/.test(given))
     throw bad('A description cannot hold { } % # ] or a backslash. Say it in plain words.');
   // Left empty, or left as we wrote it for the chart as it was: our own sentence for this chart.
   const ours = existing && describeChart(existing.spec, table.columns);

@@ -2,10 +2,11 @@
 // delete a file someone has open, and bring it back.
 // Needs Docker, the TeX image, the services, the sync server and the build worker.
 import { expect, type Page, test } from '@playwright/test';
+import { createHash, randomBytes } from 'node:crypto';
 import { mkdtempSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { writeZip } from '../../packages/server/src/archive';
+import { readZip, writeZip } from '../../packages/server/src/archive';
 import { dropOn, person, run, selectWord, showSource, signIn, typingSaved } from './helpers';
 
 const source = (page: Page) => page.locator('.editor .cm-content');
@@ -199,4 +200,39 @@ test('a page come back to says what is so now', async ({ browser }) => {
   await fresh.getByRole('link', { name: 'main.tex' }).first().click();
   await showSource(fresh);
   await expect(editorStatus(fresh)).toHaveText('All edits saved.');
+});
+
+test('a file larger than the proxy keeps can be added', async ({ browser }) => {
+  test.setTimeout(180_000);
+  const owner = await person(browser, 'files-large');
+  const page = owner.page;
+  await page.goto('/sign-in');
+  await signIn(page, owner.email);
+  await page.getByLabel('Name of a new paper').fill(`Large ${run}`);
+  await page.getByRole('button', { name: 'Create paper' }).click();
+  await page.waitForURL(/\/projects\/[0-9a-f-]{36}$/);
+  const id = /\/projects\/([0-9a-f-]{36})/.exec(page.url())![1];
+
+  // Random bytes behind a PNG header: more than the 10 MB the proxy would hand on.
+  const bytes = Buffer.concat([
+    Buffer.from('89504e470d0a1a0a', 'hex'),
+    randomBytes(11_000_000 - 8),
+  ]);
+  await page.getByLabel('Name, with folders if you like').fill('img/big.png');
+  await page.getByLabel(/^A file to upload/).setInputFiles({
+    name: 'big.png',
+    mimeType: 'image/png',
+    buffer: bytes,
+  });
+  await page.getByRole('button', { name: 'Add file' }).click();
+  await expect(page.getByRole('status')).toHaveText('Added img/big.png.', { timeout: 60_000 });
+
+  // It comes back from the paper whole.
+  const res = await page.request.get(`/projects/${id}/export`, { timeout: 60_000 });
+  expect(res.ok()).toBe(true);
+  const { entries } = await readZip(await res.body());
+  const back = entries.find((e) => e.path === 'img/big.png')!;
+  expect(back.bytes.length).toBe(bytes.length);
+  const sha = (b: Uint8Array) => createHash('sha256').update(b).digest('hex');
+  expect(sha(back.bytes)).toBe(sha(bytes));
 });

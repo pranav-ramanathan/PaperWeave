@@ -623,6 +623,11 @@ ordinary use. Ten ways of looking found them, and each is cheap to do again:
     dropped on almost any page left to the browser, which opens it in place of the app; a
     `.bib` dropped on the source put into the text without a word.
 
+12. **Go to each limit the app states: one under, exactly at it, one over.** Found: a file
+    over 10 MB could not be added at all, though the stated limit is 50 MB, and was refused
+    with a sentence about something else; a note with line breaks refused at a length its
+    field allowed; a caption too long told it held the wrong characters.
+
 Tried the same way and nothing found: thirty connections typing into one file at once (kept
 as a test in `sync.sandbox.test`); 400 threads and 400 proposals on one file, on the server
 (both lists took about 20 ms; not kept); and each tool of the visual view worked slowly
@@ -1392,6 +1397,52 @@ second one.
   source has no test of its own.
 - **How it was made.** Planned by one agent, written by another, checked here.
 
+## At each limit, and one past it
+
+- **What was tried**, with a probe: every limit the app states, one under it, exactly at it,
+  and one over, through the pages a person uses (with a field's own length limit taken off in
+  the browser for "one over"). Files were read back through the app and compared byte for
+  byte.
+
+| Limit                                         | At it                        | One over                                 |
+| --------------------------------------------- | ---------------------------- | ---------------------------------------- |
+| A file added on the paper's page, 50 MB       | **refused above 10 MB**      | **refused with the wrong sentence**      |
+| A ZIP imported, 100 MB; a file in it, 50 MB   | imported whole (95 MB)       | refused, the file named                  |
+| Files in a paper, 2,000 (ZIP, and by hand)    | taken                        | refused                                  |
+| Paper name, revision name, 200                | saved (also 100 emoji)       | refused                                  |
+| File path, on adding and renaming, 255        | saved                        | refused                                  |
+| A claim checked, its note, 2,000              | saved, line breaks included  | refused                                  |
+| Where a dataset came from, 2,000              | **refused with line breaks** | refused                                  |
+| Chart title 120, caption 500, description 300 | saved                        | **caption, description: wrong sentence** |
+| A comment, 5,000; mentions, 20                | saved                        | refused beside the field, text kept      |
+| A proposed change 20,000, its reason 1,000    | saved                        | refused beside the field, text kept      |
+
+- **What was wrong.**
+  - **A file over 10 MB could not be added.** The upload passed through the proxy that sets
+    each page's script policy, and the framework keeps only the first 10 MB of what passes
+    through it. The rest was dropped, the form arrived without its name or its file, and the
+    person read "Give the file a name, or choose a file to upload." Nothing was stored, cut
+    short or otherwise. ZIP import never passed through the proxy and was not affected.
+  - **Line breaks counted twice.** A browser counts a line break as one character in a field
+    and sends it as two, so a note on where a dataset came from was refused at a length its
+    field had allowed. The claim was not affected: it is stored as one line.
+  - **Two sentences for one check.** A caption or a description one character too long was
+    told it held the wrong characters.
+- **Now** an upload does not pass through the proxy (`apps/web/proxy.ts`): the route draws no
+  page and needs no script policy. A file of exactly 50 MB is added whole; one byte more is
+  told "That file is too large." Line breaks sent by a form are read as one character
+  (`text` in `apps/web/app/projects/actions.ts`). A caption or description too long is told
+  so (`saveChart` in `packages/server/src/charts.ts`).
+- **Held by** browser tests, each failed on the old code: `files.spec` "a file larger than the
+  proxy keeps can be added" (11 MB, read back byte for byte from the export); `data.spec`, a
+  note of 2,000 characters with ten line breaks approved and read back; `charts.spec`, a
+  caption and a description one over, each told it is too long.
+- **Not changed:** after a refusal, a form sent to the server comes back empty, as before; the
+  comment and proposal forms keep what was typed. The hourly limits are held by their own
+  tests ("How often the expensive things can be asked for"). A 49 MB file was added by the
+  probe, not by a kept test.
+- **How it was made.** Planned by one agent, probed and written by others, checked here.
+
 ## When an email cannot be sent
 
 - **An invitation** whose email could not be sent ended in an error page, and left an
@@ -1572,7 +1623,9 @@ Built after the security review, which had it as its first open item.
   layout writes). A new library that adds a style sheet of its own will be refused until it is
   given the number too; the browser tests fail when that happens, the workbench's included.
 - Styles set on a single element are still allowed, and PDFs and ZIPs asked for by address
-  keep the plain policy in `next.config.ts`. `docs/security-review.md` says why.
+  keep the plain policy in `next.config.ts`. `docs/security-review.md` says why. A file being
+  uploaded skips the proxy too ("At each limit, and one past it"): the proxy would cut it at
+  10 MB, and the route draws no page.
 - `apps/web/app/not-found.tsx` is the app's own page for an address that leads nowhere or a
   paper that is not the person's to see. The framework's own page brings an inline style sheet.
 - In development the policy also allows `eval`, which React uses there to show server errors,

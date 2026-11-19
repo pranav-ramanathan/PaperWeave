@@ -72,6 +72,16 @@ test('a data file is described by its author, and leaves with the paper only if 
   await expect(page.getByLabel('Where the data came from')).toHaveValue(
     'Measured by us, March 2024.',
   );
+  // A note of 2000 characters, ten of them line breaks, is as long as the field allows: the
+  // browser sends each break as two characters, and the server must not count them so.
+  const long = Array.from({ length: 11 }, (_, i) => 'x'.repeat(i < 10 ? 181 : 180)).join('\n');
+  expect(long).toHaveLength(2000);
+  await page.getByLabel('Where the data came from').fill(long);
+  await page.getByRole('button', { name: 'Approve this description' }).click();
+  await expect(page.getByRole('status')).toHaveText('Description approved.');
+  await page.getByRole('link', { name: 'See or change its description' }).click();
+  expect(await page.getByLabel('Where the data came from').inputValue()).toBe(long);
+  await page.getByLabel('Where the data came from').fill('Measured by us, March 2024.');
   await page.getByRole('checkbox', { name: /Include this file in downloads/ }).check();
   await page.getByRole('button', { name: 'Approve this description' }).click();
   await expect(listed).toContainText('Included in downloads.');
