@@ -112,7 +112,10 @@ export default async function ChartPage({
                     name="name"
                     required
                     maxLength={40}
-                    pattern="[a-z0-9][a-z0-9-]*"
+                    // The hyphen is escaped: browsers read a pattern in a mode where a bare
+                    // one inside brackets is an error, and then ignore the whole pattern.
+                    pattern="[a-z0-9][a-z0-9\-]*"
+                    title="Lower-case letters, digits and hyphens"
                     placeholder="latency-by-day"
                     aria-describedby="name-help"
                   />

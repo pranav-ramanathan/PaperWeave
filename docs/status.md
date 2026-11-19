@@ -874,6 +874,23 @@ Two things about tests, found on the way and not about the product:
   lists every file with its buttons. Papers that size are rare (the limit is 2,000) and the
   list was left as it is.
 
+## What the browser tests now refuse
+
+Every browser test fails if a page it opens does any of these (`refusals` in
+`tests/e2e/helpers.ts`):
+
+- is refused something by its own content policy;
+- fetches another page before anyone asks for it;
+- throws something nobody catches;
+- says in its console that something is wrong with it. A request that failed says so there
+  too, and tests make requests fail on purpose, so those are left alone.
+
+The last two were added by first only collecting what the whole suite said. Nothing was
+thrown uncaught anywhere. One thing was wrong: the field for a new chart's name had a pattern
+that current browsers cannot read (a bare hyphen inside brackets), so they ignored it and any
+name was sent to the server, which refused it with a message. The pattern is fixed and a step
+of `charts.spec` holds that a bad name is caught in the form.
+
 ## What a paper keeps for ever
 
 Nothing is ever removed. That was the plan's promise for what people write, and it also
