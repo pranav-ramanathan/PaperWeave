@@ -660,6 +660,11 @@ Built after the security review, which had it as its second open item.
   (`INVITATIONS_PER_HOUR` in `packages/server/src/projects.ts`). Each is an email to an
   address its sender chose; before this, anyone with an account could have the service write
   to any number of strangers. Found by pressing "Send invitation" twice to see what happened.
+- **Sign-in links: 10 an hour to one address**, whoever asks (`maySendSignInLink` in
+  `packages/server/src/auth.ts`, migration 0024). The sign-in library already limited how
+  often one client may ask (five a minute); nothing limited how often one address was written
+  to, so a few clients together, or one patient one, could fill someone's inbox. Only a hash
+  of the address is kept, for a day. Past the limit the form says the link could not be sent.
 - The numbers are guesses at "far more than anyone means to do". Nothing measured them.
 - Not limited: reading pages, checking grammar, typing. See `docs/security-review.md`.
 

@@ -1,7 +1,7 @@
 // Shared by the browser tests that need a signed-in person.
 import { type Browser, type BrowserContext, expect, type Page, test } from '@playwright/test';
 
-const MAIL = process.env.MAILPIT_URL ?? 'http://localhost:8025';
+export const MAIL = process.env.MAILPIT_URL ?? 'http://localhost:8025';
 export const run = Date.now().toString(36);
 export const address = (who: string) => `${who}-${run}@example.org`;
 
