@@ -171,3 +171,33 @@ export async function audit(page: Page, what: string) {
     ),
   ).toEqual([]);
 }
+
+/**
+ * What sticks out past the right edge of a narrow window, so that the page has to be scrolled
+ * sideways to read it. Things that scroll sideways within themselves are allowed to: a wide
+ * table, a line of source, a page of the PDF.
+ */
+export const sticksOut = (page: Page) =>
+  page.evaluate(() => {
+    const wide = document.documentElement.scrollWidth - window.innerWidth;
+    if (wide <= 1) return [];
+    const inScroller = (el: Element) => {
+      for (let p = el.parentElement; p; p = p.parentElement) {
+        const o = getComputedStyle(p).overflowX;
+        if (o === 'auto' || o === 'scroll' || o === 'hidden') return true;
+      }
+      return false;
+    };
+    const out: string[] = [`the page is ${wide}px wider than the window`];
+    for (const el of document.querySelectorAll('body *')) {
+      const r = el.getBoundingClientRect();
+      if (r.width === 0 || r.right <= window.innerWidth + 1 || inScroller(el)) continue;
+      // The outermost culprits only.
+      if ([...out].some((o) => o.includes(`<${el.parentElement?.tagName.toLowerCase()}`))) continue;
+      out.push(
+        `<${el.tagName.toLowerCase()}${el.className && typeof el.className === 'string' ? `.${el.className.split(' ')[0]}` : ''}> reaches ${Math.round(r.right)}px: "${(el.textContent ?? '').trim().slice(0, 40)}"`,
+      );
+      if (out.length > 6) break;
+    }
+    return out;
+  });

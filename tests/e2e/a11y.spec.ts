@@ -1,12 +1,12 @@
 // An automated accessibility audit of the pages people spend their time on. It finds what a
 // machine can find (names, roles, contrast, structure); it does not replace trying the pages
 // with a keyboard and a screen reader. Needs the services, the sync server and the worker.
-import { expect, type Page, test } from '@playwright/test';
+import { expect, test } from '@playwright/test';
 import { mkdtempSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { writeZip } from '../../packages/server/src/archive';
-import { audit, person, run, selectWord, showSource, signIn } from './helpers';
+import { audit, person, run, selectWord, showSource, signIn, sticksOut } from './helpers';
 
 const MAIN = [
   '\\documentclass{article}',
@@ -173,36 +173,6 @@ test('a thread is started and a line is shown in the PDF with the keyboard alone
   await tabTo('Pages of the PDF');
   await expect(page.getByRole('region', { name: 'Pages of the PDF' })).toBeFocused();
 });
-
-/**
- * What sticks out past the right edge of a narrow window, so that the page has to be scrolled
- * sideways to read it. Things that scroll sideways within themselves are allowed to: a wide
- * table, a line of source, a page of the PDF.
- */
-const sticksOut = (page: Page) =>
-  page.evaluate(() => {
-    const wide = document.documentElement.scrollWidth - window.innerWidth;
-    if (wide <= 1) return [];
-    const inScroller = (el: Element) => {
-      for (let p = el.parentElement; p; p = p.parentElement) {
-        const o = getComputedStyle(p).overflowX;
-        if (o === 'auto' || o === 'scroll' || o === 'hidden') return true;
-      }
-      return false;
-    };
-    const out: string[] = [`the page is ${wide}px wider than the window`];
-    for (const el of document.querySelectorAll('body *')) {
-      const r = el.getBoundingClientRect();
-      if (r.width === 0 || r.right <= window.innerWidth + 1 || inScroller(el)) continue;
-      // The outermost culprits only.
-      if ([...out].some((o) => o.includes(`<${el.parentElement?.tagName.toLowerCase()}`))) continue;
-      out.push(
-        `<${el.tagName.toLowerCase()}${el.className && typeof el.className === 'string' ? `.${el.className.split(' ')[0]}` : ''}> reaches ${Math.round(r.right)}px: "${(el.textContent ?? '').trim().slice(0, 40)}"`,
-      );
-      if (out.length > 6) break;
-    }
-    return out;
-  });
 
 test('the main pages can be read in a narrow window without scrolling sideways', async ({
   browser,

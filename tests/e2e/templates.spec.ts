@@ -1,7 +1,7 @@
 // A paper started from a template is a whole paper: its files, its root, a PDF. Needs the
 // services, the sync server and the worker.
 import { expect, test } from '@playwright/test';
-import { person, run, signIn } from './helpers';
+import { audit, person, run, signIn } from './helpers';
 
 test('a paper is started from a template, opens in the visual editor and builds', async ({
   browser,
@@ -12,6 +12,7 @@ test('a paper is started from a template, opens in the visual editor and builds'
   await signIn(page, email);
   // Someone with no papers is told how to begin.
   await expect(page.getByRole('heading', { name: 'Start your first paper' })).toBeVisible();
+  await audit(page, 'the first page a new person sees');
   await page.getByLabel('Name of a new paper').fill(`From IEEE ${run}`);
   await page.getByLabel('Start from').selectOption({ label: 'IEEE conference paper' });
   await page.getByRole('button', { name: 'Create paper' }).click();

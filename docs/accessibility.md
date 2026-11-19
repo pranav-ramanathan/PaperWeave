@@ -10,6 +10,10 @@ Where this stands, what holds it there, and what nobody has checked yet.
   paper's page, a data file's page, the new-chart page, the checks before submitting, and the
   editor in both views with a spelling finding, a thread, a proposed change and the PDF showing,
   and the page for an address that leads nowhere. No failures.
+- **The same audit on pages the first one did not visit**, run from the tests that already go
+  there: the differences between two revisions, the lines a file rename or a label rename
+  would change, an invitation and one that is no longer valid, a chart whose files have gone,
+  and the first page a new person sees. No failures.
 - **The same audit of the editor when it has stopped** (`recover.spec`): its person signed out,
   their role lowered, an edit too large to save, edits held after a restore, and both views
   for someone who can only read, on a file long enough to scroll.
@@ -67,7 +71,7 @@ the keyboard (`insert.spec`).
   all, so it could only be scrolled with a mouse. That is every state in which someone is
   told to read or copy what is there: a person who can only read, a role lowered, an edit too
   large to save ("copy what you need"). It now takes the keyboard, and a test moves through a
-  long file in it with keys alone. Found by running the audit in those states, which the
+  long file in it, and selects from it, with keys alone. Found by running the audit in those states, which the
   first audit did not visit.
 
 ## Status without colour

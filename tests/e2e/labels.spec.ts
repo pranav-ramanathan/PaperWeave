@@ -5,7 +5,7 @@ import { mkdtempSync, readdirSync, readFileSync, statSync, writeFileSync } from 
 import { tmpdir } from 'node:os';
 import { join, relative } from 'node:path';
 import { writeZip } from '../../packages/server/src/archive';
-import { person, run, showSource, signIn } from './helpers';
+import { audit, person, run, showSource, signIn } from './helpers';
 
 const FIXTURE = join(import.meta.dirname, '../../fixtures/ieee-multifile');
 const source = (page: Page) => page.locator('.editor .cm-content');
@@ -57,6 +57,7 @@ test('a label is renamed with every reference, after the changes have been shown
     page.getByRole('heading', { name: 'Rename sec:method to sec:design' }),
   ).toBeVisible();
   await expect(page.getByText('This would change 2 lines in 2 files')).toBeVisible();
+  await audit(page, 'the lines a label rename would change');
   const intro = page.getByRole('region', { name: 'sections/intro.tex' });
   await expect(intro).toContainText(
     '- 16: The rest of the paper is organised as follows. Section~\\ref{sec:method} gives the',

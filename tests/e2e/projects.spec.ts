@@ -1,7 +1,7 @@
 // Sign-in, papers, people and invitations, through the real pages and real emails.
 // Needs the services in infra/compose.yaml; email is read back from the local mail catcher.
 import { expect, test } from '@playwright/test';
-import { address, emailedLink, MAIL, person, run, signIn } from './helpers';
+import { address, audit, emailedLink, MAIL, person, run, signIn } from './helpers';
 
 test('sign in, create a paper, invite people, and keep outsiders out', async ({ browser }) => {
   const owner = await person(browser, 'owner');
@@ -35,6 +35,7 @@ test('sign in, create a paper, invite people, and keep outsiders out', async ({ 
   await expect(
     reviewer.page.getByRole('heading', { name: `Join “Merge latency ${run}”` }),
   ).toBeVisible();
+  await audit(reviewer.page, 'an invitation');
   await reviewer.page.getByRole('button', { name: 'Join this paper' }).click();
   await expect(reviewer.page.getByText('You are a reviewer')).toBeVisible();
   // A reviewer sees who is on the paper but cannot manage them.
@@ -50,6 +51,7 @@ test('sign in, create a paper, invite people, and keep outsiders out', async ({ 
   await expect(outsider.page.getByRole('heading', { name: 'Nothing here' })).toBeVisible();
   await outsider.page.goto(invitation);
   await expect(outsider.page.getByRole('heading', { name: 'not valid any more' })).toBeVisible();
+  await audit(outsider.page, 'an invitation that is no longer valid');
 
   await owner.page.getByLabel('Their email address').fill(address('someone-else'));
   await owner.page.getByRole('button', { name: 'Send invitation' }).click();
