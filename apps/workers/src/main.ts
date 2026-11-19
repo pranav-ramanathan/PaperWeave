@@ -1,18 +1,15 @@
 // The worker: builds and draws whatever is queued, then waits to be told there is more.
-import { blobStore, connect } from '@paperweave/server';
-import pg from 'pg';
+import { blobStore, connect, listen } from '@paperweave/server';
 import { buildNext, imageId } from './builder.ts';
 import { drawNext } from './charts.ts';
 
 const pool = connect();
 const store = blobStore();
 const image = imageId();
-const listener = new pg.Client({ connectionString: process.env.DATABASE_URL });
-await listener.connect();
-await listener.query('listen builds');
-await listener.query('listen charts');
 let wake: () => void = () => {};
-listener.on('notification', () => wake());
+// Told at once when there is something to build or draw. If the connection that listens is
+// lost it is made again; the timer below finds whatever was announced meanwhile.
+await listen(process.env.DATABASE_URL, ['builds', 'charts'], () => wake());
 console.log(`build worker ready, toolchain ${image.slice(0, 19)}`);
 
 for (;;) {

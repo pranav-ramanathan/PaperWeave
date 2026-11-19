@@ -7,6 +7,7 @@ import {
   type BlobStore,
   compactFile,
   holds,
+  listen,
   loadUpdates,
   openFile,
   MAX_EDIT_BYTES,
@@ -26,6 +27,8 @@ type Context = { userId: string; projectId: string; sessionId: string | null; ro
 const SYNC_STEP_1 = 0;
 /** An update with no inserts and no deletes is two zero bytes. */
 const isEmpty = (update: Uint8Array) => update.length <= 2;
+/** What an editor is told when the server cannot say yet whether it may connect. */
+const TRY_AGAIN = 'try-again';
 /** Why the server closes a connection whose edit it will not take. The editor knows the word. */
 export const TOO_LARGE = 'too-large';
 
@@ -79,7 +82,13 @@ export async function startSync(opts: {
         if (!ticket) throw new Error('unauthorized');
         const { userId, sessionId } = ticket;
         // Throws for anyone who is not on the paper: the connection is refused.
-        const file = await openFile(pool, userId, documentName);
+        const file = await openFile(pool, userId, documentName).catch((err) => {
+          if (err instanceof AppError) throw err;
+          // The database did not answer. That is not a refusal, which an editor takes as
+          // final: it is told to try again.
+          console.error(`could not look up who may open ${documentName}:`, err.message);
+          throw Object.assign(new Error('unavailable'), { reason: TRY_AGAIN });
+        });
         connectionConfig.readOnly = !file.canWrite;
         counts.connections++;
         return { userId, projectId: file.projectId, sessionId, role: file.role };
@@ -216,33 +225,11 @@ export async function startSync(opts: {
     },
   });
 
-  // When someone's role changes or they are removed, re-check their open connections at once.
-  const listener = new pg.Client({ connectionString: opts.databaseUrl });
-  await listener.connect();
-  await listener.query('listen acl');
-  await listener.query('listen file_edits');
-  await listener.query('listen session_ended');
-  listener.on('notification', async ({ channel, payload }) => {
-    if (channel === 'session_ended') {
-      // Signed out: the editors opened under that sign-in are closed. Not for good, as far as
-      // this server knows: each asks for a new ticket, and gets one only if still signed in.
-      for (const document of server.hocuspocus.documents.values())
-        for (const connection of document.getConnections() as Connection<Context>[])
-          if (connection.context.sessionId === payload)
-            connection.close({ code: 4401, reason: 'signed-out' });
-      return;
-    }
-    if (channel === 'file_edits') {
-      // An edit made on the server (a restore, say): it is already in the log, so it only needs
-      // to reach the people who have the file open.
-      const [fileId, seq] = (payload ?? '').split(':');
-      await catchUp(fileId, Number(seq));
-      return;
-    }
-    const projectId = payload;
+  /** Look again at what each connection to a paper's files may do, or to every paper's. */
+  const recheck = async (projectId?: string) => {
     for (const [name, document] of server.hocuspocus.documents) {
       for (const connection of document.getConnections() as Connection<Context>[]) {
-        if (connection.context.projectId !== projectId) continue;
+        if (projectId && connection.context.projectId !== projectId) continue;
         try {
           const file = await openFile(pool, connection.context.userId, name);
           connection.readOnly = !file.canWrite;
@@ -257,7 +244,52 @@ export async function startSync(opts: {
         }
       }
     }
-  });
+  };
+  /** Close the editors opened under sign-ins that have ended: these, or any that are gone. */
+  const signedOut = async (ended?: string) => {
+    const open = [...server.hocuspocus.documents.values()].flatMap(
+      (document) => document.getConnections() as Connection<Context>[],
+    );
+    let gone = new Set(ended ? [ended] : []);
+    if (!ended) {
+      const ids = [...new Set(open.map((c) => c.context.sessionId).filter((id) => id !== null))];
+      if (!ids.length) return;
+      const { rows } = await pool.query('select id::text from session where id::text = any($1)', [
+        ids,
+      ]);
+      const still = new Set(rows.map((r) => r.id));
+      gone = new Set(ids.filter((id) => !still.has(id)));
+    }
+    // Not for good, as far as this server knows: each asks for a new ticket, and gets one only
+    // if still signed in.
+    for (const connection of open)
+      if (connection.context.sessionId !== null && gone.has(connection.context.sessionId))
+        connection.close({ code: 4401, reason: 'signed-out' });
+  };
+  // Told at once when someone's role changes or they are removed, when an edit is made on the
+  // server, and when someone signs out.
+  const stopListening = await listen(
+    opts.databaseUrl,
+    ['acl', 'file_edits', 'session_ended'],
+    async (channel, payload) => {
+      if (channel === 'session_ended') return signedOut(payload);
+      if (channel === 'file_edits') {
+        // An edit made on the server (a restore, say): it is already in the log, so it only
+        // needs to reach the people who have the file open.
+        const [fileId, seq] = payload.split(':');
+        return catchUp(fileId, Number(seq));
+      }
+      await recheck(payload);
+    },
+    // The connection that listens was lost and made again. Whatever was announced meanwhile
+    // was not heard, so everything it could have said is looked up: who may do what, who is
+    // still signed in, and what each open file's log now holds.
+    async () => {
+      await recheck();
+      await signedOut();
+      for (const name of server.hocuspocus.documents.keys()) await catchUp(name, 1);
+    },
+  );
 
   // When this process is kept from running (by its own work, or by the machine), everyone's
   // editing waits and nothing else says why. A clock that should tick every half second says so.
@@ -274,7 +306,7 @@ export async function startSync(opts: {
     port: opts.port,
     async stop() {
       clearInterval(clock);
-      await listener.end();
+      await stopListening();
       await server.destroy();
     },
   };

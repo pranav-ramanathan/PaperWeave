@@ -598,9 +598,10 @@ ordinary use. Six ways of looking found them, and each is cheap to do again:
    flow. Found: invitations and sign-in links with no limit on how many one address is sent;
    two revisions from one save; a stopped editor the keyboard could not reach.
 
-6. **Take a service away.** The build worker, the mail, the object store. Found: "Compiling"
-   for ever; an invitation left behind when its email could not be sent; an error page that
-   the pages' own content policy refused.
+6. **Take a service away.** The build worker, the mail, the object store, the database.
+   Found: "Compiling" for ever; an invitation left behind when its email could not be sent;
+   an error page that the pages' own content policy refused; and a sync server that a
+   database restart ended.
 
 Tried the same way and nothing found: thirty connections typing into one file at once (kept
 as a test in `sync.sandbox.test`); 400 threads and 400 proposals on one file (both lists
@@ -1024,8 +1025,39 @@ Found by stopping the object store under a running service, by hand.
 - **Checked once by hand**, the audit and the narrow-window check included. No test is kept:
   nothing in the product fails on request, and stopping a service under the other tests is
   not something a kept test should do.
-- **Not tried:** the database stopped, or the sync server stopped while pages are open (the
-  editor says "Offline" for that, which the recovery tests cover from the browser's side).
+- **Not tried:** the sync server stopped while pages are open (the editor says "Offline" for
+  that, which the recovery tests cover from the browser's side). The database stopped is the
+  next section.
+
+## When the database is lost for a while
+
+Found by restarting the database under a running service, by hand. This was the worst of the
+faults found by taking a service away.
+
+- **What was wrong.** The sync server and the build worker each keep one connection open to
+  the database to be told things at once. Neither had anything listening for that connection
+  failing, and in Node a failure nobody listens for ends the process. So a restart of the
+  database, or anything between that cut a quiet connection, **ended the sync server**. Every
+  open editor then said "Offline" until someone started it again. The same went for a pooled
+  connection lost while idle, in every process.
+- **Now** (`listen` and `connect` in `packages/server/src/db.ts`):
+  - a lost connection is logged, not fatal; the pool makes a new one when next needed;
+  - the connection that listens is made again, and then the sync server looks up everything
+    it could have been told meanwhile: what each person on each open file may do, which
+    sign-ins have ended, and what each open file's log now holds.
+- **A second fault behind the first.** An editor that reconnected while the database was away
+  was told it could not connect, and an editor takes that as final: "You no longer have
+  access". The server now tells it to try again (`TRY_AGAIN`), and the editor does.
+- **What a person sees now**, from a database stopped and started by hand: while it is away,
+  "Saving your edits…" and the editor still takes typing; about half a minute after it is
+  back, "All edits saved" with nothing lost; a role changed afterwards reaches the open
+  editor as before.
+- **Held by** a sync test that drops every connection to the database at once, makes an edit
+  on the server and lowers a role before the server can be listening again, and sees both
+  arrive, nobody disconnected and typing saved. The stop-and-start by hand is not kept.
+- **Not looked at:** half a minute is the sync library's own waiting between attempts, which
+  grows each time one fails. The web app's pages fail with the service's error page while the
+  database is away, as they should; whether every one of them recovers was not gone through.
 
 ## What a paper keeps for ever
 
