@@ -4,6 +4,7 @@ import {
   Bridge,
   type Command,
   type CommandResult,
+  escape,
   extensions,
   fromSrc,
   toSrc,
@@ -563,6 +564,30 @@ export function createVisual(opts: {
   };
   /** Stretches of the source to mark in the text: those with a thread of comments. */
   let marked: { from: number; to: number; kind: 'thread' | 'proposal' | 'finding' }[] = [];
+  /**
+   * Get ready to insert LaTeX where the caret is now. Returns the function that inserts it, by
+   * way of the server, or null if the caret is not in running text.
+   */
+  const insertion = (): ((latex: string) => Promise<CommandResult>) | null => {
+    catchUp();
+    const c = bridge.insertCommand(editor.state, '');
+    if (!c) return null;
+    resume = { from: editor.state.selection.from, to: editor.state.selection.to };
+    return async (latex) => {
+      const result = await opts.run({ ...c, key: crypto.randomUUID(), replacement: latex });
+      // The caret goes just after what was inserted, so that typing carries on from there
+      // rather than over a selection that now reaches across it. The place was named by the
+      // character after it, which is now the character after the insertion.
+      const after = Y.createAbsolutePositionFromRelativePosition(c.to, opts.ytext.doc!)?.index;
+      if (result !== 'conflict' && after != null) {
+        const caret = fromSrc(bridge.model, editor.state.doc, after);
+        selectAt(caret);
+        const { from, to } = editor.state.selection;
+        resume = { from, to };
+      }
+      return result;
+    };
+  };
   const editor: Editor = new Editor({
     element: opts.element,
     injectNonce: pageNonce(),
@@ -633,6 +658,46 @@ export function createVisual(opts: {
     ],
     editorProps: {
       attributes: { 'aria-label': opts.label, role: 'textbox', 'aria-multiline': 'true' },
+      // What is pasted goes in as its words, as if typed: the clipboard's formatting is not LaTeX.
+      handlePaste: (view, event) => {
+        if (!opts.editable) return true;
+        const data = event.clipboardData;
+        const text = data?.getData('text/plain') ?? '';
+        if (!text.trim()) {
+          if (!data?.files.length) return false;
+          say(
+            'A picture or file cannot be pasted into the text. Add it to the paper on its page, then insert it as a figure.',
+          );
+          return true;
+        }
+        const normal = text.replace(/\r\n?/g, '\n');
+        const paragraphs = normal
+          .split(/\n\s*\n/)
+          .map((p) => p.replace(/[\t\n]+/g, ' ').trim())
+          .filter(Boolean);
+        if (paragraphs.length === 1) {
+          // Kept as it was, spaces around it included, as the browser's own paste would.
+          view.dispatch(view.state.tr.insertText(normal.replace(/[\t\n]+/g, ' ')).scrollIntoView());
+          return true;
+        }
+        if (!view.state.selection.empty) {
+          say('Put the caret where the paragraphs should go, with nothing selected, then paste.');
+          return true;
+        }
+        const put = insertion();
+        if (!put) {
+          say(
+            'Several paragraphs cannot be pasted here. Paste them one at a time, or in the source.',
+          );
+          return true;
+        }
+        void put(paragraphs.map(escape).join('\n\n')).then(
+          (result) =>
+            result === 'conflict' && say('That text changed before the edit arrived. Try again.'),
+          () => say('That edit could not be made. Check the connection and try again.'),
+        );
+        return true;
+      },
     },
   });
   bridge = new Bridge(opts.ytext, editor.schema, { sourceOnly: opts.sourceOnly });
@@ -691,30 +756,7 @@ export function createVisual(opts: {
     editor,
     bridge,
     emph,
-    /**
-     * Get ready to insert LaTeX where the caret is now. Returns the function that inserts it, by
-     * way of the server, or null if the caret is not in running text.
-     */
-    insertion(): ((latex: string) => Promise<CommandResult>) | null {
-      catchUp();
-      const c = bridge.insertCommand(editor.state, '');
-      if (!c) return null;
-      resume = { from: editor.state.selection.from, to: editor.state.selection.to };
-      return async (latex) => {
-        const result = await opts.run({ ...c, key: crypto.randomUUID(), replacement: latex });
-        // The caret goes just after what was inserted, so that typing carries on from there
-        // rather than over a selection that now reaches across it. The place was named by the
-        // character after it, which is now the character after the insertion.
-        const after = Y.createAbsolutePositionFromRelativePosition(c.to, opts.ytext.doc!)?.index;
-        if (result !== 'conflict' && after != null) {
-          const caret = fromSrc(bridge.model, editor.state.doc, after);
-          selectAt(caret);
-          const { from, to } = editor.state.selection;
-          resume = { from, to };
-        }
-        return result;
-      };
-    },
+    insertion,
     /** Put the keyboard back in the visual view, with the caret where it should be. */
     focus() {
       const { from, to } = resume ?? editor.state.selection;

@@ -618,6 +618,9 @@ ordinary use. Ten ways of looking found them, and each is cheap to do again:
 10. **Go back and forward.** Found: pages that showed what was no longer so, a removed
     member and a lost role among them.
 
+11. **Bring something in from outside.** Paste into the visual view. Found: two paragraphs,
+    a list and a picture each pasted to nothing, without a word.
+
 Tried the same way and nothing found: thirty connections typing into one file at once (kept
 as a test in `sync.sandbox.test`); 400 threads and 400 proposals on one file, on the server
 (both lists took about 20 ms; not kept); and each tool of the visual view worked slowly
@@ -649,7 +652,8 @@ and harmless at this size: the 380 decided proposals are drawn inside their clos
 unpacked (16 KB over the wire). The bar for changing code was a median key over 50 ms or an
 idle long task over 100 ms; neither came near. Noticed while planning this: the next section.
 
-Not yet tried: a second browser.
+Not yet tried: a second browser; a file dragged onto the page; the editor's view (visual or
+source) not remembered.
 
 If more is to be built before those are settled, the candidates are in the code as
 `shortcut:` comments (seven of them, each saying when it stops being good enough) and in the
@@ -1276,6 +1280,47 @@ second one.
   view, whichever view was in use.
 - **How it was made.** Planned and its fault judged by one agent, written by another, checked
   here.
+
+## Something pasted into the visual view
+
+- **What was tried**, with a probe: ten kinds of paste into running text in the visual view,
+  each as the browser hands it over (plain text, and the HTML a web page or Word puts beside
+  it), then the source read and, for three, the paper built.
+
+| Pasted                                      | Before                        | Now                  |
+| ------------------------------------------- | ----------------------------- | -------------------- |
+| One plain sentence                          | its words                     | the same             |
+| `50% of R&D cost $5 for item_1 #2`          | escaped, as typed; built      | the same             |
+| Two paragraphs                              | **nothing, and no word said** | two paragraphs       |
+| Bold, italic and a link from a web page     | the words, without formatting | the same             |
+| A list (`<ul>`)                             | **nothing, and no word said** | `a b`                |
+| A table                                     | **`1234`**                    | `1 2 3 4`            |
+| A paragraph from Word                       | the words                     | the same             |
+| `\section{Pasted} and \cite{x}`             | escaped, as typed; built      | the same             |
+| A picture alone                             | **nothing, and no word said** | said it cannot go in |
+| Into a table cell or a caption being edited | see below                     | not changed          |
+
+- **What was wrong.** The paste was left to the editor's own handling. Whatever made a new
+  paragraph or a list item never reached the source, and the view showed nothing of it; a
+  table's cells were joined with nothing between them.
+- **Now** the visual view pastes the plain text and nothing else (`handlePaste` in
+  `apps/web/lib/visual.ts`). A blank line starts a new paragraph; a single line break or a
+  tab is a space. One paragraph goes in as typing does. Several go in as one edit through the
+  server, as an inserted formula does, escaped by the same rule as typing (`escape` in
+  `packages/bridge/src/translate.ts`). Several paragraphs over a selection, or where the caret
+  is not in running text, are refused with a sentence that says what to do. A picture is
+  refused with a sentence saying where pictures are added.
+- **Held by** a browser test (`visual.spec`: "something pasted into the visual view goes in
+  as its words"): two paragraphs, a list, a table, a picture, and the escaping of one
+  paragraph and of several. It failed on the old code at the first step.
+- **Into a table cell or a caption.** The probe's paste left the field unchanged, which is how
+  a paste made by a script behaves in a text field, not a fault found. A warning in the
+  browser's console after pressing Enter there was looked for again, by opening a cell and a
+  caption and pressing Enter without a change, then typing: it did not come back. Not changed.
+- **Not changed:** formatting is not carried over (bold, italic, links, lists, tables); the
+  words come in and the LaTeX for the rest is written in the source. A picture is not added
+  to the paper by pasting. The source view pastes as before, exactly what was copied.
+- **How it was made.** Probed and planned by one agent, written by another, checked here.
 
 ## When an email cannot be sent
 

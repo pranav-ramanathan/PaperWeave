@@ -5,7 +5,7 @@ import { mkdtempSync, readdirSync, readFileSync, statSync, writeFileSync } from 
 import { tmpdir } from 'node:os';
 import { join, relative } from 'node:path';
 import { readZip, writeZip } from '../../packages/server/src/archive';
-import { emailedLink, person, run, showSource, signIn } from './helpers';
+import { clickAfter, emailedLink, person, run, showSource, signIn } from './helpers';
 
 const FIXTURE = join(import.meta.dirname, '../../fixtures/ieee-multifile');
 const VISUAL = '.editor .visual .ProseMirror';
@@ -14,6 +14,9 @@ const status = (page: Page) =>
   page.getByRole('region', { name: /^Editor for/ }).getByRole('status');
 const view = (page: Page, name: string) =>
   page.getByRole('group', { name: 'View' }).getByRole('button', { name });
+// A one-pixel picture, as base64.
+const PNG =
+  'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mP8z8BQDwAEhQGAhKmMIQAAAABJRU5ErkJggg==';
 const selected = (page: Page) => page.evaluate(() => getSelection()!.toString());
 
 /** Double-click a word in an editor, as a person would to select it. */
@@ -164,4 +167,84 @@ test('visual edits reach the source through the server, byte for byte', async ({
   );
   for (const f of files)
     if (f.path !== 'sections/intro.tex') expect(bytes(f.path).equals(f.bytes), f.path).toBe(true);
+});
+
+test('something pasted into the visual view goes in as its words', async ({ browser }) => {
+  const { page, email } = await person(browser, 'vis-paste');
+  const main = [
+    '\\documentclass{article}',
+    '\\begin{document}',
+    'Latency stays below forty milliseconds for most edits.',
+    '',
+    'Nothing else is claimed here.',
+    '\\end{document}',
+    '',
+  ].join('\n');
+  const zip = join(mkdtempSync(join(tmpdir(), 'paperweave-e2e-')), `Paste ${run}.zip`);
+  writeFileSync(zip, await writeZip([{ path: 'main.tex', bytes: Buffer.from(main) }]));
+  await page.goto('/sign-in');
+  await signIn(page, email);
+  await page.getByLabel('Or import a ZIP of a LaTeX project').setInputFiles(zip);
+  await page.getByRole('button', { name: 'Import ZIP' }).click();
+  await page.getByRole('link', { name: 'main.tex' }).first().click();
+  await expect(status(page)).toHaveText('All edits saved.');
+
+  // A paste as the browser makes it: the clipboard's several forms, and any files.
+  const paste = (clip: { text: string; html?: string; png?: boolean }) =>
+    page.locator(VISUAL).evaluate(
+      (el, c) => {
+        const data = new DataTransfer();
+        if (c.html) data.setData('text/html', c.html);
+        if (c.text) data.setData('text/plain', c.text);
+        if (c.png) {
+          const bytes = Uint8Array.from(atob(c.png), (ch) => ch.charCodeAt(0));
+          data.items.add(new File([bytes], 'p.png', { type: 'image/png' }));
+        }
+        el.dispatchEvent(
+          new ClipboardEvent('paste', { clipboardData: data, bubbles: true, cancelable: true }),
+        );
+      },
+      { ...clip, png: clip.png ? PNG : '' },
+    );
+  const note = page.locator('.editor .toolbar .note');
+  const source = async () => {
+    await showSource(page);
+    const text = (await page.locator(`${SOURCE} .cm-line`).allInnerTexts())
+      .join('\n')
+      .replace(/\n{2,}/g, '\n\n');
+    await view(page, 'Visual').click();
+    await expect(page.locator(VISUAL)).toBeVisible();
+    return text;
+  };
+
+  // Paragraphs go in as paragraphs.
+  await clickAfter(page, VISUAL, 'claimed here.');
+  await paste({ text: 'First para.\n\nSecond para.' });
+  await expect(page.locator(VISUAL)).toContainText('Second para.');
+  await expect(status(page)).toHaveText('All edits saved.');
+  await expect(page.locator(VISUAL).locator('p', { hasText: 'First para.' })).toHaveCount(1);
+  await expect(page.locator(VISUAL).locator('p', { hasText: /^Second para\.$/ })).toHaveCount(1);
+  await expect.poll(source).toContain('First para.\n\nSecond para.');
+
+  // What the clipboard says about lists and tables is not LaTeX: only the words go in.
+  await clickAfter(page, VISUAL, 'Second para.');
+  await paste({ html: '<ul><li>a</li><li>b</li></ul>', text: 'a\nb' });
+  await expect.poll(source).toContain('Second para.a b');
+  await paste({
+    html: '<table><tr><td>1</td><td>2</td></tr><tr><td>3</td><td>4</td></tr></table>',
+    text: '1\t2\n3\t4',
+  });
+  await expect.poll(source).toContain('Second para.a b1 2 3 4');
+
+  // A picture cannot go into the text: that is said, and nothing changes.
+  const before = await source();
+  await paste({ text: '', png: true });
+  await expect(note).toContainText('A picture or file cannot be pasted into the text.');
+  expect(await source()).toBe(before);
+
+  // Characters LaTeX reads are escaped, as when typing, in one paragraph or several.
+  await paste({ text: '50% of R&D cost $5 for item_1 #2' });
+  await expect.poll(source).toContain('50\\% of R\\&D cost \\$5 for item\\_1 \\#2');
+  await paste({ text: '50% & more\n\nand $x$ too' });
+  await expect.poll(source).toContain('\\#250\\% \\& more\n\nand \\$x\\$ too');
 });
