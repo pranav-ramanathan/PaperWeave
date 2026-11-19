@@ -5,7 +5,7 @@ import { mkdtempSync, readdirSync, readFileSync, statSync, writeFileSync } from 
 import { tmpdir } from 'node:os';
 import { join, relative } from 'node:path';
 import { readZip, writeZip } from '../../packages/server/src/archive';
-import { person, run, showSource, signIn } from './helpers';
+import { person, run, showSource, showVisual, signIn } from './helpers';
 
 const FIXTURE = join(import.meta.dirname, '../../fixtures/ieee-multifile');
 const VISUAL = '.editor .visual .ProseMirror';
@@ -72,6 +72,8 @@ test('a formula is edited in place, with a preview, and without overwriting anyo
   // definition has been saved.
   await expect(async () => {
     await page.reload();
+    // The other tab chose the source view, which this browser now opens files in.
+    await showVisual(page);
     await expect(inline.locator('.katex')).toBeVisible({ timeout: 3000 });
   }).toPass({ timeout: 30_000 });
   await expect(inline).not.toHaveClass(/pw-raw/);

@@ -5,7 +5,7 @@ import { mkdtempSync, readdirSync, readFileSync, statSync, writeFileSync } from 
 import { tmpdir } from 'node:os';
 import { join, relative } from 'node:path';
 import { readZip, writeZip } from '../../packages/server/src/archive';
-import { person, run, selectWord, showSource, signIn, typingSaved } from './helpers';
+import { person, run, selectWord, showSource, showVisual, signIn, typingSaved } from './helpers';
 
 const FIXTURE = join(import.meta.dirname, '../../fixtures/ieee-multifile');
 const VISUAL = '.editor .visual .ProseMirror';
@@ -120,6 +120,8 @@ test('a table cell and a caption are edited in place, byte for byte', async ({ b
   );
   // And a figure's, in another file.
   await page.getByRole('link', { name: 'sections/results.tex' }).click();
+  // The other tab chose the source view, which this browser now opens files in.
+  await showVisual(page);
   const figure = page.locator(VISUAL).getByRole('group', { name: 'Figure' });
   await figure.getByRole('button', { name: /^Caption:/ }).click();
   await figure.getByLabel('Caption', { exact: true }).fill('Latency, to be measured.');

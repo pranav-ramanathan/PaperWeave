@@ -112,9 +112,13 @@ export const caretLine = (page: Page) =>
     return line ? [...line.parentElement!.children].indexOf(line) + 1 : 0;
   });
 
-/** On a file's page, switch to the LaTeX source view. A .tex file opens in the visual view. */
+/** On a file's page, switch to the LaTeX source view. The choice is remembered by the browser. */
 export const showSource = (page: Page) =>
   page.getByRole('group', { name: 'View' }).getByRole('button', { name: 'Source' }).click();
+
+/** On a file's page, switch to the visual view. */
+export const showVisual = (page: Page) =>
+  page.getByRole('group', { name: 'View' }).getByRole('button', { name: 'Visual' }).click();
 
 /**
  * Wait until what was just typed into a file has been saved. The status says "Saving" for a

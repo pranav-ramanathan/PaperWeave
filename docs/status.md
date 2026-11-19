@@ -74,8 +74,8 @@ Read this first. Update it in every pull request.
   - `compactFile` rewrites a file's log as one entry holding the same document. The sync server
     does it each time a file's log has grown by 500 edits. Who typed each edit is not kept past
     a compaction.
-- **C7: the visual editor in the app.** A .tex file opens in the visual view, with a switch to
-  the source view. Both are views of the same text (`FileEditor.tsx`, `apps/web/lib/visual.ts`,
+- **C7: the visual editor in the app.** A .tex file opens in the visual view, or in the source
+  view if that was the last one chosen in this browser, with a switch between them. Both are views of the same text (`FileEditor.tsx`, `apps/web/lib/visual.ts`,
   which `/spike` now shares).
   - Switching views carries the selection across. Undo is one history per person for both views.
   - Emphasis is a structural edit. The editor asks the sync server over its live connection; the
@@ -654,7 +654,7 @@ and harmless at this size: the 380 decided proposals are drawn inside their clos
 unpacked (16 KB over the wire). The bar for changing code was a median key over 50 ms or an
 idle long task over 100 ms; neither came near. Noticed while planning this: the next section.
 
-Not yet tried: a second browser; the editor's view (visual or source) not remembered.
+Not yet tried: a second browser.
 
 If more is to be built before those are settled, the candidates are in the code as
 `shortcut:` comments (seven of them, each saying when it stops being good enough) and in the
@@ -1277,8 +1277,8 @@ second one.
 - **Not changed:** a page left open without navigating still shows what it showed, a role
   included (only the editor's panels ask again). The offline check knows only the network
   interface: with the server down, asking again fails and the browser loads the page afresh,
-  which on these pages loses nothing. After Back and Forward the editor opens in the visual
-  view, whichever view was in use.
+  which on these pages loses nothing. After Back and Forward the editor opens in the view last
+  chosen (see "The view a file opens in").
 - **How it was made.** Planned and its fault judged by one agent, written by another, checked
   here.
 
@@ -1367,6 +1367,30 @@ second one.
   new feature. A word dragged within the visual view was tried with the mouse and nothing
   changed, but whether the browser began a drag at all was not seen.
 - **How it was made.** Planned by one agent, probed and written by others, checked here.
+
+## The view a file opens in
+
+- **What was wrong.** A .tex file always opened in the visual view. Someone who works in the
+  source chose it again for every file opened, every reload, and every Back and Forward.
+- **Now** the view last chosen with the View buttons is kept in the browser, and a file opens
+  in it (`chosenView` and `rememberView` in `FileEditor.tsx`, key `paperweave.view`). It is
+  read after the page is first drawn, since the server draws the page without knowing it: the
+  visual view may show for a moment first. A switch the page makes itself ("Edit in source"
+  on a block, a jump to a line) is not kept. A file with no visual view opens in the source as
+  before and leaves the choice as it was. It holds no text of any paper.
+- **Held by** a browser test (`editing.spec`: "a file opens in the view its person last
+  chose"): the source kept across a reload and onto another file, which failed on the old code
+  at the reload; the visual view kept likewise; a switch made by "Edit in source" not kept; a
+  `.bib` file leaving the choice alone; and someone else's browser starting in the visual view.
+- **Tests changed.** Two tests used two tabs of one browser, one of which chose the source,
+  and then expected the other to open a file in the visual view: `maths.spec` ("a formula is
+  edited in place…") and `tables.spec` ("a table cell and a caption…"). Each now chooses the
+  visual view where it needs it (`showVisual` in `tests/e2e/helpers.ts`).
+- **Not changed:** the choice is the browser's, not the person's: shared by everyone who signs
+  in on that browser, and not carried to another. With the browser's storage shut, nothing is
+  kept and files open in the visual view. A jump to a line (`?line=`) in a file opened in the
+  source has no test of its own.
+- **How it was made.** Planned by one agent, written by another, checked here.
 
 ## When an email cannot be sent
 
