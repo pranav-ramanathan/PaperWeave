@@ -413,7 +413,7 @@ test('what the browser kept of a paper is not handed to whoever uses it after a 
   await expect(page.locator('.build').getByRole('status')).toHaveText('The PDF is up to date.', {
     timeout: 60_000,
   });
-  // The PDF, which the browser keeps for an hour so as not to fetch it twice.
+  // The PDF, which the browser keeps so as not to fetch it twice.
   const fetched = () =>
     page.evaluate(
       () =>
@@ -424,15 +424,44 @@ test('what the browser kept of a paper is not handed to whoever uses it after a 
     );
   await expect.poll(fetched).not.toBe('');
   const pdf = await fetched();
-  const asked = () => page.evaluate(async (url) => (await fetch(url)).status, pdf);
-  expect(await asked()).toBe(200);
+  /** Ask for it as any page would: the answer's number, how much came over the wire, and how much it is. */
+  const asked = () =>
+    page.evaluate(async (url) => {
+      const answer = await fetch(url);
+      // Read to the end, as a page showing it would: a copy is only kept of what was read.
+      await answer.arrayBuffer();
+      const status = answer.status;
+      const last = performance.getEntriesByName(url).pop() as PerformanceResourceTiming;
+      return { status, sent: last.transferSize, size: last.decodedBodySize };
+    }, pdf);
+  expect((await asked()).status).toBe(200);
+  // Asked for again, the server is asked, sees who it is, and says "as you have it": the PDF
+  // is not sent a second time.
+  const again = await asked();
+  expect(again.status).toBe(200);
+  expect(again.size).toBeGreaterThan(5000);
+  expect(again.sent).toBeGreaterThan(0);
+  expect(again.sent).toBeLessThan(again.size / 2);
 
+  // The sign-in goes without "Sign out" being pressed, as when it runs out or is ended from
+  // somewhere else. The browser still has its copy, and must not hand it over: before, it did,
+  // for an hour, to whoever asked at this address.
+  const context = page.context();
+  const signedIn = await context.cookies();
+  await context.clearCookies();
+  expect((await asked()).status).toBe(401);
+  await context.addCookies(signedIn);
+  expect((await asked()).status).toBe(200);
+
+  // "Sign out" also tells the browser to throw its copies away.
   await page.goto('/projects');
-  await page.getByRole('button', { name: 'Sign out' }).click();
+  const [answer] = await Promise.all([
+    page.waitForResponse((r) => r.url().endsWith('/api/auth/sign-out')),
+    page.getByRole('button', { name: 'Sign out' }).click(),
+  ]);
+  expect(await answer.headerValue('clear-site-data')).toBe('"cache"');
   await page.waitForURL(/\/sign-in/);
-  // Signed out, the browser no longer has it, and the server says no. Before, the browser
-  // went on handing over its own copy to anyone who asked at this address.
-  expect(await asked()).toBe(401);
+  expect((await asked()).status).toBe(401);
 });
 
 test('someone whose role changes while a file is open is told, and does not type into nothing', async ({

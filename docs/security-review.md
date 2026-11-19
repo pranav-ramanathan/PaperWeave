@@ -96,17 +96,22 @@ What it found is fixed in the same change, or listed under "Open" with what to d
   is deleted. A sign-in that merely runs out is not covered: see "An editor whose sign-in has
   ended" in `docs/status.md`.
 
-- **After a sign-out the browser still handed over a paper's PDF.** A build's PDF, its log
-  and what goes with them are kept by the browser for up to an hour so as not to be fetched
-  twice; pictures for a minute. Asked for again at the same address, they came from the
-  browser's own copy without the server being asked, whoever was at the browser by then. On
-  a shared computer that is the next person, if they have the address, which the browser's
-  history may hold. The answer to signing out now tells the browser to forget what it has
-  kept of the site (`Clear-Site-Data: "cache"`, in `apps/web/app/api/auth/[...all]/route.ts`).
-  A browser test holds it: before, the PDF came back; now the server is asked and says no.
-  Two limits. It covers pressing "Sign out" in that browser: a sign-in that runs out, or is
-  ended from elsewhere, leaves the copies until their hour is up. And it rests on the
-  browser honouring the header, which was tried in Chromium only.
+- **The browser handed over a paper's PDF without asking the server.** A build's PDF, its
+  log and what goes with them were kept by the browser to be used unasked for an hour;
+  pictures for a minute. Asked for again at the same address, they came from the browser's
+  own copy, whoever was at the browser by then: after "Sign out", after the sign-in had run
+  out, after the person had been taken off the paper. On a shared computer that is the next
+  person, if they have the address, which the browser's history may hold. Two changes.
+  - The browser may still keep these answers, and must now ask before each use
+    (`private, no-cache` with an `ETag`; `askedForEachTime` in `apps/web/lib/server.ts`). The
+    server sees who is asking and either refuses or says "as you have it", without sending
+    the bytes again. This does not depend on how the sign-in ended.
+  - The answer to signing out also tells the browser to throw its copies away
+    (`Clear-Site-Data: "cache"`, in `apps/web/app/api/auth/[...all]/route.ts`). That part
+    rests on the browser acting on the header, and was tried in Chromium only.
+  - A browser test holds both: a second request is answered without the PDF being sent again;
+    with the sign-in gone and "Sign out" not pressed, the server refuses; and the answer to
+    signing out carries the header. It failed on the code before each change.
 
 - **Nothing limited invitations.** Each one is an email from the service to an address the
   sender chose, and anyone can make an account and a paper. One person can now send 30 in an

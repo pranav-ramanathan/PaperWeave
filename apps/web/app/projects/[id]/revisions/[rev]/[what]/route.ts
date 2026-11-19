@@ -1,6 +1,6 @@
 // A revision's files as a ZIP, or the PDF built from exactly that revision.
 import { AppError, exportRevision, revisionPdf } from '@paperweave/server';
-import { blobs, currentUser, db } from '../../../../../../lib/server';
+import { askedForEachTime, blobs, currentUser, db } from '../../../../../../lib/server';
 
 export async function GET(
   request: Request,
@@ -12,9 +12,7 @@ export async function GET(
   try {
     if (what === 'pdf') {
       const pdf = await revisionPdf(db(), blobs(), user.id, id, rev);
-      return new Response(pdf as BodyInit, {
-        headers: { 'content-type': 'application/pdf', 'cache-control': 'private, max-age=3600' },
-      });
+      return askedForEachTime(request, pdf, { 'content-type': 'application/pdf' });
     }
     if (what !== 'zip') return new Response('Not found.', { status: 404 });
     const manifest = new URL(request.url).searchParams.has('manifest');

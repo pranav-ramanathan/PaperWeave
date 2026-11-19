@@ -100,10 +100,14 @@ test('only one process does a job at a time, and the next takes over when it sto
 
   // The holder loses its connection, as when the database is restarted. With nobody else
   // asking, it takes the job back and carries on.
+  // Only holders in this test's own database. Without that it ended every such connection on
+  // the server: among them other tests' while they set up their databases, which hold a lock
+  // of this kind to do it, and failed now and then with "Connection terminated unexpectedly".
   const kill = () =>
     t.pool.query(
       `select pg_terminate_backend(l.pid) from pg_locks l
-       where l.locktype = 'advisory' and l.granted and l.pid <> pg_backend_pid()`,
+       where l.locktype = 'advisory' and l.granted and l.pid <> pg_backend_pid()
+         and l.database = (select oid from pg_database where datname = current_database())`,
     );
   await kill();
   await new Promise((r) => setTimeout(r, 600));

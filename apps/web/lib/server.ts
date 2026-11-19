@@ -9,6 +9,7 @@ import {
   type Auth,
 } from '@paperweave/server';
 import { headers } from 'next/headers';
+import { createHash } from 'node:crypto';
 import { notFound, redirect } from 'next/navigation';
 import nodemailer from 'nodemailer';
 
@@ -49,6 +50,25 @@ export const baseUrl = () => need('BETTER_AUTH_URL').replace(/\/$/, '');
 /** A form posted to a route handler must come from this site's own pages. */
 export const sameOrigin = (request: Request) =>
   request.headers.get('origin') === new URL(baseUrl()).origin;
+
+/**
+ * An answer that is private to the people on a paper and worth the browser's keeping: a PDF,
+ * a picture. The browser may keep it, and must ask before each use. The server then sees who
+ * is asking, and says "as you have it" without sending it again. Kept to be used unasked for
+ * an hour, as these once were, it was handed to whoever sat at the browser next, signed in
+ * or not.
+ */
+export function askedForEachTime(
+  request: Request,
+  body: Uint8Array | string,
+  headers: Record<string, string>,
+) {
+  const etag = `"${createHash('sha256').update(body).digest('base64url')}"`;
+  const all = { ...headers, etag, 'cache-control': 'private, no-cache' };
+  return request.headers.get('if-none-match') === etag
+    ? new Response(null, { status: 304, headers: all })
+    : new Response(body as BodyInit, { headers: all });
+}
 
 /**
  * Send the browser on to a path of this site after a form is posted to a route handler. The
