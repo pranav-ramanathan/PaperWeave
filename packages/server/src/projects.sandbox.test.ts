@@ -1,6 +1,7 @@
 // Needs the services in infra/compose.yaml. Run: pnpm test:sandbox
 import { afterAll, beforeAll, expect, test } from 'vitest';
 import { type Action, ACTIONS, authorize, type Role, ROLES } from './authz.ts';
+import { maySendSignInLink } from './auth.ts';
 import { migrate } from './migrate.ts';
 import {
   acceptInvitation,
@@ -44,6 +45,28 @@ test('migrating twice changes nothing the second time', async () => {
 test('a magic link signs a person in', () => {
   expect(users.owner.cookie).toContain('session_token=');
   expect(t.links.every((l) => l.url.includes('/api/auth/magic-link/verify?token='))).toBe(true);
+});
+
+test('one address is sent only so many sign-in links in an hour, whoever asks', async () => {
+  const sends = async (email: string) => maySendSignInLink(t.pool, email, 3);
+  expect([await sends('Victim@Example.org'), await sends('victim@example.org')]).toEqual([
+    true,
+    true,
+  ]);
+  expect(await sends(' victim@example.org ')).toBe(true);
+  // The fourth is not sent, however the address is written. Someone else's still is.
+  expect(await sends('VICTIM@example.org')).toBe(false);
+  expect(await sends('someone-else@example.org')).toBe(true);
+  // The address is not kept, only a hash of it.
+  const kept = await t.pool.query('select email_hash from sign_in_links');
+  expect(kept.rows.every((r) => /^[0-9a-f]{64}$/.test(r.email_hash))).toBe(true);
+  expect(JSON.stringify(kept.rows)).not.toContain('victim');
+  // An hour on there is room again, and after a day the record is gone.
+  await t.pool.query("update sign_in_links set sent_at = sent_at - interval '61 minutes'");
+  expect(await sends('victim@example.org')).toBe(true);
+  await t.pool.query("update sign_in_links set sent_at = sent_at - interval '25 hours'");
+  expect(await sends('victim@example.org')).toBe(true);
+  expect((await t.pool.query('select 1 from sign_in_links')).rowCount).toBe(1);
 });
 
 test('every role against every action', async () => {

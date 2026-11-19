@@ -40,7 +40,11 @@ export default function SignInForm({ next }: { next: string }) {
         {state === 'sending' ? 'Sending…' : 'Email me a sign-in link'}
       </button>
       {state === 'failed' && (
-        <p role="alert">The link could not be sent. Check the address and try again in a minute.</p>
+        <p role="alert">
+          The link could not be sent. Check the address and try again in a minute. Only so many
+          links are sent to one address in an hour: if you have asked several times, use the newest
+          one you were sent, or wait.
+        </p>
       )}
     </form>
   );

@@ -1,7 +1,7 @@
 // Sign-in, papers, people and invitations, through the real pages and real emails.
 // Needs the services in infra/compose.yaml; email is read back from the local mail catcher.
 import { expect, test } from '@playwright/test';
-import { address, emailedLink, person, run, signIn } from './helpers';
+import { address, emailedLink, MAIL, person, run, signIn } from './helpers';
 
 test('sign in, create a paper, invite people, and keep outsiders out', async ({ browser }) => {
   const owner = await person(browser, 'owner');
@@ -119,4 +119,34 @@ test('every answer says how it may be used: not in a frame, not guessed at, not 
   const scripts = (await answer.text()).match(/<script[^>]*>/g) ?? [];
   expect(scripts.length).toBeGreaterThan(0);
   for (const script of scripts) expect(script).toContain(`nonce="${sent}"`);
+});
+
+test('one address is sent only so many sign-in links in an hour, whoever asks for them', async ({
+  browser,
+}) => {
+  // Three people, each asking a few times for a link to be sent to someone else. None of them
+  // asks often enough to be stopped for that; together they pass what one address is sent.
+  const inbox = address('inbox');
+  let sent = 0;
+  let refused = 0;
+  for (const who of ['asks-a', 'asks-b', 'asks-c']) {
+    const { page } = await person(browser, who);
+    for (let i = 0; i < 4; i++) {
+      await page.goto('/sign-in');
+      await page.getByLabel('Email address').fill(inbox);
+      await page.getByRole('button', { name: 'Email me a sign-in link' }).click();
+      const said = page.getByRole('status').or(page.locator('main [role=alert]'));
+      await expect(said).toBeVisible();
+      if ((await said.getAttribute('role')) === 'status') sent++;
+      else {
+        refused++;
+        await expect(said).toContainText('Only so many links are sent to one address');
+      }
+    }
+  }
+  expect({ sent, refused }).toEqual({ sent: 10, refused: 2 });
+  const mail = await (
+    await fetch(`${MAIL}/api/v1/search?query=${encodeURIComponent(`to:${inbox}`)}`)
+  ).json();
+  expect(mail.messages).toHaveLength(10);
 });

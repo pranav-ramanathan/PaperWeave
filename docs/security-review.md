@@ -101,18 +101,25 @@ What it found is fixed in the same change, or listed under "Open" with what to d
   hour, over all their papers. The email names the inviter's address and nothing else of
   theirs: not the paper's name.
 
+- **Nothing limited how many sign-in links one address was sent.** The sign-in library limits
+  how often one client may ask (five a minute). That is 300 an hour to one inbox from one
+  client, and more from several. One address is now sent at most 10 an hour, whoever asks. A
+  browser test asks from three clients, each under its own limit, and sees ten emails arrive
+  and the rest refused.
+
 ## Open
 
 In rough order of how much they matter.
 
 1. **Limits on requests in general.** What costs most is limited: sign-in links (five a
-   minute for an address), builds (120 an hour for a paper), chart drawings (120 an hour for a
-   paper), model reviews (30 an hour for a paper), invitations (30 an hour for a person), and
-   papers started (100 an hour for a person, which with 300 MB a paper is what bounds how fast
-   one account can fill the store). Reading pages, checking grammar, uploading within a paper's limit and typing are not, beyond
-   needing to be signed in. A proxy in front should limit requests per person. There is no
-   limit on what one person's papers add up to over time: that is a decision about accounts,
-   not made here.
+   minute for a client, ten an hour to an address), builds (120 an hour for a paper), chart
+   drawings (120 an hour for a paper), model reviews (30 an hour for a paper), invitations
+   (30 an hour for a person), and papers started (100 an hour for a person, which with 300
+   MB a paper is what bounds how fast one account can fill the store). Reading pages,
+   checking grammar, uploading within a paper's limit and typing are not, beyond needing to
+   be signed in. A proxy in front should limit requests per person. There is no limit on
+   what one person's papers add up to over time: that is a decision about accounts, not made
+   here.
 2. **One advisory in a development tool.** `pnpm audit` on 18 November 2026 reports nothing in
    what the service runs (`pnpm audit --prod`), and one moderate advisory overall: `minimatch`,
    through the linter. It is not part of the running service and is given only this
