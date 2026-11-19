@@ -40,6 +40,14 @@ export function refusals(context: BrowserContext) {
     if (said.type() === 'error' && said.text().includes('Content Security Policy'))
       throw new Error(`${said.page()?.url()}: ${said.text()}`);
   });
+  // Nor should a page fetch other pages before anyone asks for them. The framework does that
+  // for every link in view unless the link says not to, and each such fetch draws the whole
+  // page on the server: a paper's page set off its editor, for several files, and all the
+  // checks before submitting.
+  context.on('request', (asked) => {
+    if (asked.headers()['next-router-prefetch'])
+      throw new Error(`${asked.url()} was fetched before anyone asked for it`);
+  });
 }
 
 let people = 0;

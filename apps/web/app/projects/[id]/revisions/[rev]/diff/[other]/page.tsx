@@ -24,7 +24,9 @@ export default async function Diff({
         <h1>
           Revision {diff.from} to revision {diff.to}
         </h1>
-        <Link href={`/projects/${id}`}>Paper overview</Link>
+        <Link prefetch={false} href={`/projects/${id}`}>
+          Paper overview
+        </Link>
       </header>
       {diff.files.length === 0 && <p>Nothing differs between these two revisions.</p>}
       {diff.files.map((f) => (

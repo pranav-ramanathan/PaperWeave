@@ -27,7 +27,9 @@ export default async function Projects({
         <ul className="list">
           {projects.map((p) => (
             <li key={p.id}>
-              <Link href={`/projects/${p.id}`}>{p.name}</Link>{' '}
+              <Link prefetch={false} href={`/projects/${p.id}`}>
+                {p.name}
+              </Link>{' '}
               <span className="role">{p.role}</span>
             </li>
           ))}

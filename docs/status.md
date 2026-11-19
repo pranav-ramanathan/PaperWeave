@@ -851,6 +851,29 @@ Two things about tests, found on the way and not about the product:
 - **"Changes since"** on a row compares with the row below it. With the list thinned, that
   may be an older revision than the one just before. It says which.
 
+## Pages fetched before anyone asked for them
+
+- **What was wrong.** The framework fetches the page behind every link in view unless the
+  link says not to, and for these pages a fetch draws the whole page on the server. Looking
+  at the page of a two-file paper set off sixteen such requests: the editor for each file,
+  the checks before submitting, the list of papers, each more than once. Each reads every
+  LaTeX file of the paper. Nothing was shown slower for it on a small paper; the server did
+  many times the work the person asked for.
+- **Now** every link says not to (`prefetch={false}`), and the browser tests fail if any page
+  is fetched ahead (`refusals` in `tests/e2e/helpers.ts`). Taking the instruction off one
+  link fails a test.
+- **Files are read sixteen at a time**, not one after another, wherever a page needs all the
+  paper's LaTeX files: labels, citations, macros, the checks (`texFiles` in
+  `packages/server/src/labels.ts`). For a paper of 2,000 files that is 4.1 s down to between 1.0 and 1.3 s
+  over two runs (`docs/benchmarks.md`), and in a browser the paper's page went from 7.2 s to 4.0 s; with
+  300 files, from 1.4 s to 0.8 s.
+- **A measurement that misled for a while.** Clicking through to the editor of a 2,000-file
+  paper took 28 s in a browser test. A profile showed the time was the test's own search for
+  the link by its name among thousands. Opened directly, that editor shows in 1.6 s.
+- **Still slow:** the page of a paper with 2,000 files is 7 MB and takes 4 s, because it
+  lists every file with its buttons. Papers that size are rare (the limit is 2,000) and the
+  list was left as it is.
+
 ## What a paper keeps for ever
 
 Nothing is ever removed. That was the plan's promise for what people write, and it also

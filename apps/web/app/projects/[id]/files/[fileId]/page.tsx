@@ -43,7 +43,9 @@ export default async function FilePage({
     <main className="editor">
       <header className="bar">
         <h1>{project.name}</h1>
-        <Link href={`/projects/${id}`}>Paper overview</Link>
+        <Link prefetch={false} href={`/projects/${id}`}>
+          Paper overview
+        </Link>
       </header>
       <div className="workspace">
         <nav aria-label="Files">
@@ -54,6 +56,7 @@ export default async function FilePage({
                   <span title="Cannot be edited as text">{f.path}</span>
                 ) : (
                   <Link
+                    prefetch={false}
                     href={`/projects/${id}/files/${f.id}`}
                     aria-current={f.id === fileId ? 'page' : undefined}
                   >

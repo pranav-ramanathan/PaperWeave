@@ -10,21 +10,22 @@ large slowdown trips it.
 
 | What | Took | Ceiling |
 | --- | --- | --- |
-| Parse a 150 KB file | 10.8 ms | 500 ms |
-| Parse it again after one keystroke | 0.08 ms | 100 ms |
-| Import a six-file paper | 72.8 ms | 5000 ms |
-| Import a paper of 2,000 files | 3.24 s | 60 s |
-| Download it as a ZIP | 38.2 ms | 5000 ms |
-| Save one keystroke | 1.52 ms | 50 ms |
-| Open a file with 1,000 edits in its log | 2.00 ms | 2000 ms |
-| Compact that log | 25.2 ms | 5000 ms |
-| Build the paper to a PDF | 1.16 s | 120 s |
-| Build it again, nothing changed | 21.3 ms | 5000 ms |
-| List a paper's revisions, of 5,000 | 45.0 ms | 2000 ms |
-| Read how a paper's builds stand, after 10,000 | 8.99 ms | 2000 ms |
-| Check the spelling and grammar of a section | 56.6 ms | 20000 ms |
-| Check it again, nothing changed | 3.73 ms | 2000 ms |
-| Draw a chart of 200 points to PDF and PNG | 0.77 s | 60 s |
+| Parse a 150 KB file | 13.6 ms | 500 ms |
+| Parse it again after one keystroke | 0.11 ms | 100 ms |
+| Import a six-file paper | 103 ms | 5000 ms |
+| Import a paper of 2,000 files | 3.57 s | 60 s |
+| Read all its files for their labels | 1.30 s | 30 s |
+| Download it as a ZIP | 34.1 ms | 5000 ms |
+| Save one keystroke | 1.75 ms | 50 ms |
+| Open a file with 1,000 edits in its log | 2.68 ms | 2000 ms |
+| Compact that log | 33.7 ms | 5000 ms |
+| Build the paper to a PDF | 1.19 s | 120 s |
+| Build it again, nothing changed | 22.8 ms | 5000 ms |
+| List a paper's revisions, of 5,000 | 48.5 ms | 2000 ms |
+| Read how a paper's builds stand, after 10,000 | 12.9 ms | 2000 ms |
+| Check the spelling and grammar of a section | 51.1 ms | 20000 ms |
+| Check it again, nothing changed | 4.03 ms | 2000 ms |
+| Draw a chart of 200 points to PDF and PNG | 0.87 s | 60 s |
 
 In the browser, from `tests/e2e/spike.spec.ts` on a 150 KB file: a keystroke reaches the
 source text within 40 ms and the screen within 150 ms at the 95th percentile, and another

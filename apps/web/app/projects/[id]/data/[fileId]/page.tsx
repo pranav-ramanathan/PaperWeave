@@ -27,7 +27,11 @@ export default async function Describe({
     if (err.code === 'not_found') notFound();
     return err.message;
   });
-  const back = <Link href={`/projects/${id}#data`}>Back to the paper</Link>;
+  const back = (
+    <Link prefetch={false} href={`/projects/${id}#data`}>
+      Back to the paper
+    </Link>
+  );
   if (typeof loaded === 'string')
     return (
       <main className="page">

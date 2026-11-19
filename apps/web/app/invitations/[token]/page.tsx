@@ -23,7 +23,9 @@ export default async function Invitation({
         <p>
           It may have been used already or have expired. Ask the paper&rsquo;s owner for a new one.
         </p>
-        <Link href="/projects">Your papers</Link>
+        <Link prefetch={false} href="/projects">
+          Your papers
+        </Link>
       </main>
     );
   return (

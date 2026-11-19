@@ -37,9 +37,15 @@ export default async function ChartPage({
   const draws = chart ? await chartDraws(db(), user.id, id, chart.name) : [];
   const dataset = datasets.find((d) => d.fileId === (chart?.dataFileId ?? data));
   const writer = can(project.role, 'file.write');
-  const back = <Link href={`/projects/${id}#data`}>Back to the paper</Link>;
+  const back = (
+    <Link prefetch={false} href={`/projects/${id}#data`}>
+      Back to the paper
+    </Link>
+  );
   const describe = dataset && (
-    <Link href={`/projects/${id}/data/${dataset.fileId}`}>Look at the data again</Link>
+    <Link prefetch={false} href={`/projects/${id}/data/${dataset.fileId}`}>
+      Look at the data again
+    </Link>
   );
   const spec = chart?.spec;
   return (
