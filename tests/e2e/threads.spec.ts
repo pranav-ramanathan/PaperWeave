@@ -67,7 +67,11 @@ test('a reviewer starts a thread, the owner answers, and it outlives the text it
   // "Show in the text" selects the words the thread is about.
   await thread(owner.page).getByRole('button', { name: 'Show in the text' }).click();
   await expect.poll(() => owner.page.evaluate(() => getSelection()!.toString())).toBe('forty');
+  // Who can be mentioned is listed once a reply is begun, and not under every thread before:
+  // with many threads and many people that was a box for each person under each thread.
+  await expect(thread(owner.page).getByRole('checkbox')).toHaveCount(0);
   await thread(owner.page).getByLabel('Reply about “forty”').fill('The 95th percentile.');
+  await expect(thread(owner.page).getByRole('checkbox', { name: reviewer.email })).toBeVisible();
   await thread(owner.page).getByRole('button', { name: 'Reply' }).click();
   // The reviewer sees the answer without asking.
   await expect(thread(reviewer.page)).toContainText('The 95th percentile.', { timeout: 15_000 });
