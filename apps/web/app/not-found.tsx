@@ -9,7 +9,9 @@ export default function NotFound() {
       <h1>Nothing here</h1>
       <p>There is no such page, or it is not yours to see.</p>
       <p>
-        <Link href="/projects">All papers</Link>
+        <Link prefetch={false} href="/projects">
+          All papers
+        </Link>
       </p>
     </main>
   );

@@ -24,7 +24,11 @@ export default async function RenameFile({
     if (err.code === 'not_found') notFound();
     return err.message;
   });
-  const back = <Link href={`/projects/${id}`}>Back to the paper</Link>;
+  const back = (
+    <Link prefetch={false} href={`/projects/${id}`}>
+      Back to the paper
+    </Link>
+  );
   if (typeof proposal === 'string')
     return (
       <main className="page">

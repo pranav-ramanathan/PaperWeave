@@ -156,7 +156,9 @@ export default async function Project({
               : 'an'}{' '}
           {project.role}
         </span>
-        <Link href="/projects">All papers</Link>
+        <Link prefetch={false} href="/projects">
+          All papers
+        </Link>
       </header>
       {error && <p role="alert">{error}</p>}
       {invited && <p role="status">Invitation sent to {invited}.</p>}
@@ -256,7 +258,9 @@ export default async function Project({
                 <a href={`/projects/${id}/export?review`}>ZIP with review data</a>
               </>
             )}{' '}
-            <Link href={`/projects/${id}/submit`}>Check before submitting</Link>
+            <Link prefetch={false} href={`/projects/${id}/submit`}>
+              Check before submitting
+            </Link>
           </p>
           <Wide label="Table of files">
             <table>
@@ -277,7 +281,7 @@ export default async function Project({
                       {f.readonly ? (
                         <code>{f.path}</code>
                       ) : (
-                        <Link href={`/projects/${id}/files/${f.id}`}>
+                        <Link prefetch={false} href={`/projects/${id}/files/${f.id}`}>
                           <code>{f.path}</code>
                         </Link>
                       )}
@@ -400,7 +404,7 @@ export default async function Project({
             <ul className="report">
               {labels.undefined.map((r) => (
                 <li key={`${r.fileId}:${r.line}:${r.key}`}>
-                  <Link href={`/projects/${id}/files/${r.fileId}`}>
+                  <Link prefetch={false} href={`/projects/${id}/files/${r.fileId}`}>
                     <code>
                       {r.path}:{r.line}
                     </code>
@@ -415,7 +419,7 @@ export default async function Project({
                   {d.places.map((p, i) => (
                     <span key={`${p.fileId}:${p.line}`}>
                       {i > 0 && ', '}
-                      <Link href={`/projects/${id}/files/${p.fileId}`}>
+                      <Link prefetch={false} href={`/projects/${id}/files/${p.fileId}`}>
                         <code>
                           {p.path}:{p.line}
                         </code>
@@ -459,7 +463,7 @@ export default async function Project({
             <ul className="report">
               {cited.missing.map((m) => (
                 <li key={`${m.fileId}:${m.line}:${m.key}`}>
-                  <Link href={`/projects/${id}/files/${m.fileId}`}>
+                  <Link prefetch={false} href={`/projects/${id}/files/${m.fileId}`}>
                     <code>
                       {m.path}:{m.line}
                     </code>
@@ -474,7 +478,7 @@ export default async function Project({
                   {d.places.map((p, i) => (
                     <span key={`${p.fileId}:${p.line}`}>
                       {i > 0 && ', '}
-                      <Link href={`/projects/${id}/files/${p.fileId}`}>
+                      <Link prefetch={false} href={`/projects/${id}/files/${p.fileId}`}>
                         <code>
                           {p.path}:{p.line}
                         </code>
@@ -675,7 +679,7 @@ export default async function Project({
                       )}
                     </>
                   )}
-                  <Link href={`/projects/${id}/data/${f.id}`}>
+                  <Link prefetch={false} href={`/projects/${id}/data/${f.id}`}>
                     {d
                       ? d.changed
                         ? 'Look at it again'
@@ -685,7 +689,7 @@ export default async function Project({
                   {d && !d.changed && canWrite && (
                     <>
                       {' '}
-                      <Link href={`/projects/${id}/charts/new?data=${f.id}`}>
+                      <Link prefetch={false} href={`/projects/${id}/charts/new?data=${f.id}`}>
                         New chart from {f.path}
                       </Link>
                     </>
@@ -700,8 +704,10 @@ export default async function Project({
               <ul className="report">
                 {charts.map((c) => (
                   <li key={c.id}>
-                    <Link href={`/projects/${id}/charts/${c.id}`}>{c.name}</Link>: {c.alt}{' '}
-                    {c.status === 'queued' && 'Waiting to be drawn.'}
+                    <Link prefetch={false} href={`/projects/${id}/charts/${c.id}`}>
+                      {c.name}
+                    </Link>
+                    : {c.alt} {c.status === 'queued' && 'Waiting to be drawn.'}
                     {c.status === 'failed' && <strong>Could not be drawn.</strong>}
                     {c.status === 'drawn' &&
                       (c.missing ? (
@@ -728,8 +734,10 @@ export default async function Project({
           <ul className="report">
             {openProposals.map((p) => (
               <li key={p.id}>
-                <Link href={`/projects/${id}/files/${p.fileId}#proposals`}>{p.path}</Link>:{' '}
-                {p.author ?? 'someone who has left'} proposes{' '}
+                <Link prefetch={false} href={`/projects/${id}/files/${p.fileId}#proposals`}>
+                  {p.path}
+                </Link>
+                : {p.author ?? 'someone who has left'} proposes{' '}
                 {p.expected ? (
                   <>
                     changing <q>{brief(p.expected)}</q> to <q>{brief(p.replacement)}</q>
@@ -744,8 +752,10 @@ export default async function Project({
             ))}
             {openThreads.map((t) => (
               <li key={t.id}>
-                <Link href={`/projects/${id}/files/${t.fileId}#comments`}>{t.path}</Link>:{' '}
-                <q>{brief(t.excerpt)}</q>
+                <Link prefetch={false} href={`/projects/${id}/files/${t.fileId}#comments`}>
+                  {t.path}
+                </Link>
+                : <q>{brief(t.excerpt)}</q>
                 {t.state === 'detached' && <strong> (this text has been deleted)</strong>}.{' '}
                 {t.comments.length} {t.comments.length === 1 ? 'comment' : 'comments'}, the latest
                 by {t.comments.at(-1)?.author ?? 'someone who has left'}.
@@ -884,7 +894,10 @@ export default async function Project({
                   </td>
                   <td>
                     {revisions[i + 1] && (
-                      <Link href={`/projects/${id}/revisions/${r.id}/diff/${revisions[i + 1].id}`}>
+                      <Link
+                        prefetch={false}
+                        href={`/projects/${id}/revisions/${r.id}/diff/${revisions[i + 1].id}`}
+                      >
                         Changes since {revisions[i + 1].number}
                       </Link>
                     )}{' '}
@@ -908,13 +921,17 @@ export default async function Project({
             ? `These are revisions from before revision ${olderThan}. `
             : `Every revision that was named or restored is listed, and the newest ${REVISIONS_SHOWN} made automatically. `}
           {olderAutos > 0 && (
-            <Link href={`/projects/${id}?before=${oldestAuto}#revisions`}>
+            <Link prefetch={false} href={`/projects/${id}?before=${oldestAuto}#revisions`}>
               {olderAutos === 1
                 ? 'One older automatic revision'
                 : `${olderAutos} older automatic revisions`}
             </Link>
           )}{' '}
-          {olderThan && <Link href={`/projects/${id}#revisions`}>Back to the newest</Link>}
+          {olderThan && (
+            <Link prefetch={false} href={`/projects/${id}#revisions`}>
+              Back to the newest
+            </Link>
+          )}
         </p>
       )}
 

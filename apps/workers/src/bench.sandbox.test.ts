@@ -15,6 +15,7 @@ import {
   datasetProposal,
   exportZip,
   importZip,
+  labelReport,
   latestBuilds,
   listFiles,
   listRevisions,
@@ -113,11 +114,21 @@ test('the things people wait for, measured', async () => {
       bytes: Buffer.from(`% ${i}\n${'x'.repeat(2000)}\n`),
     })),
   ]);
+  let large = '';
   took(
     'Import a paper of 2,000 files',
-    (await ms(() => importZip(t.pool, store, owner.id, many, 'Bench of many'))) / 1000,
+    (await ms(async () => {
+      large = (await importZip(t.pool, store, owner.id, many, 'Bench of many'))[0].id;
+    })) / 1000,
     's',
     60,
+  );
+  // Every page of a paper reads all its LaTeX files, for its labels, citations and macros.
+  took(
+    'Read all its files for their labels',
+    (await ms(() => labelReport(t.pool, store, owner.id, large))) / 1000,
+    's',
+    30,
   );
   took(
     'Download it as a ZIP',

@@ -32,7 +32,10 @@ export default async function Submit({
           {f.message}{' '}
           {f.fileId ? (
             // The editor goes to a line it is given.
-            <Link href={`/projects/${id}/files/${f.fileId}${f.line ? `?line=${f.line}` : ''}`}>
+            <Link
+              prefetch={false}
+              href={`/projects/${id}/files/${f.fileId}${f.line ? `?line=${f.line}` : ''}`}
+            >
               {f.path}
               {f.line ? `, line ${f.line}` : ''}
             </Link>
@@ -42,7 +45,11 @@ export default async function Submit({
               {f.line ? `, line ${f.line}` : ''}
             </>
           ) : (
-            f.chartId && <Link href={`/projects/${id}/charts/${f.chartId}`}>See the chart</Link>
+            f.chartId && (
+              <Link prefetch={false} href={`/projects/${id}/charts/${f.chartId}`}>
+                See the chart
+              </Link>
+            )
           )}
         </li>
       ))}
@@ -55,7 +62,9 @@ export default async function Submit({
       {checks.building && <meta httpEquiv="refresh" content="2" />}
       <header className="bar">
         <h1>Check {project.name} before submitting</h1>
-        <Link href={`/projects/${id}`}>Back to the paper</Link>
+        <Link prefetch={false} href={`/projects/${id}`}>
+          Back to the paper
+        </Link>
       </header>
       {error && <p role="alert">{error}</p>}
       {checks.ready ? (

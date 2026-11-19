@@ -38,9 +38,17 @@ export async function texFiles(
     [projectId, ending],
   );
   const files: { id: string; path: string; root: boolean; text: string }[] = [];
-  for (const f of rows) {
-    const decoded = decodeFile(await currentBytes(pool, store, f));
-    if (decoded.editable) files.push({ id: f.id, path: f.path, root: f.root, text: decoded.text });
+  // Sixteen at a time. One after another, a paper of many files waits on the store once for
+  // each, and every page of the paper reads them all.
+  for (let i = 0; i < rows.length; i += 16) {
+    const read = await Promise.all(
+      rows.slice(i, i + 16).map(async (f) => decodeFile(await currentBytes(pool, store, f))),
+    );
+    read.forEach((decoded, n) => {
+      const f = rows[i + n];
+      if (decoded.editable)
+        files.push({ id: f.id, path: f.path, root: f.root, text: decoded.text });
+    });
   }
   return files;
 }
