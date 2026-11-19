@@ -73,6 +73,7 @@ export default async function FilePage({
           sourceOnly={!!report?.files.find((f) => f.path === file.path)?.sourceOnly}
           path={file.path}
           canWrite={file.canWrite}
+          role={project.role}
           canComment={can(project.role, 'comment.write')}
           canReview={canReview}
           members={members

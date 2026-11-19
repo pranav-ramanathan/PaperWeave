@@ -212,7 +212,16 @@ test('taking away write access stops writes at once; removal ends the connection
   await saved(editor);
   expect(await stored(project)).toContain('BEFORE ');
 
+  // An editor is told its person's role when it connects, and again when it changes: its page
+  // was made for the role they had when it loaded.
+  const told = (c: Client) =>
+    c.state.replies.filter((r) => r.role).map((r) => `${r.role} ${r.canWrite}`);
+  expect(told(editor)).toEqual(['editor true']);
+  expect(told(owner)).toEqual(['owner true']);
   await setRole(t.pool, users.owner.id, project, users.editor.id, 'viewer');
+  await until('the editor to be told', () => told(editor).length === 2);
+  expect(told(editor)).toEqual(['editor true', 'viewer false']);
+  expect(told(owner)).toEqual(['owner true']);
   const seq = await headSeq(file);
   editor.text.insert(0, 'AFTER ');
   await new Promise((r) => setTimeout(r, 400));

@@ -816,6 +816,25 @@ Two things about tests, found on the way and not about the product:
   keep their connections until they drop, and then find themselves signed out. The sync
   server checks a person's role on every edit, not whether they are still signed in.
 
+## Someone whose role changes while a file is open
+
+- **What was wrong.** The editor's page is made for the role its person had when it loaded.
+  The sync server stopped taking a lowered person's edits at once, but nothing told the
+  page. Seen on the code before: an editor made a viewer still had an editor that took
+  typing, and twelve seconds after typing it still said "Saving your edits…".
+- **Now** the sync server tells each editor its person's role when it connects and whenever
+  it changes (`tellRole` in `apps/sync/src/server.ts`).
+  - Lowered so that they can no longer edit: the editor stops taking typing and says so. If
+    something typed had not been saved (typed offline, say), it says that too.
+  - Given back the role the page was made for: it carries on.
+  - Any other change, such as a viewer made an editor: it says to load the page again, with
+    a button. The page cannot offer what it was not made with.
+- **Held by** a service test (told on connecting and on change) and a browser test
+  (`recover.spec`: lowered, given back, lowered while offline with something typed, raised).
+- **Not covered:** the panels beside the editor (comments, proposed changes) are also made
+  for the role at load. Their requests are refused by the server with a message; the status
+  line is what says why.
+
 ## A paper's size, and what a sync ticket opens
 
 Two more of the security review's items.

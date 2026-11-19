@@ -78,12 +78,17 @@ type Sync = {
   tooLarge: boolean;
   /** Their sign-in has ended. The page waits for them to sign in again. */
   signedOut: boolean;
+  /** Their role on the paper, if it is no longer the one this page was made for, and whether
+   * with it they have lost the editing this page offers. */
+  role: { now: string; lost: boolean } | null;
 };
 type Mode = 'visual' | 'source';
 /** The sync server's answer to a structural edit. */
 type Reply = { result?: CommandResult; update?: string; error?: string };
 /** Its answer to "do you have all my changes?". */
 type Saved = { n: number; saved: boolean };
+/** What it says, unasked, of the person's role: on connecting, and when it changes. */
+type Role = { role: string; canWrite: boolean };
 
 const toBase64 = (bytes: Uint8Array) =>
   btoa(String.fromCharCode(...bytes))
@@ -102,6 +107,8 @@ export default function FileEditor(props: {
   fileId: string;
   path: string;
   canWrite: boolean;
+  /** Their role on the paper when the page was made. */
+  role: string;
   user: string;
   syncUrl: string;
   /** Whether this file has a visual view at all. */
@@ -214,6 +221,7 @@ export default function FileEditor(props: {
     held: false,
     tooLarge: false,
     signedOut: false,
+    role: null,
   });
   const keepEdits = useRef(() => {});
   const discardEdits = useRef(() => {});
@@ -283,7 +291,8 @@ export default function FileEditor(props: {
         }, 1000);
       },
       onStateless: ({ payload }) => {
-        const reply: (Reply & { key: string }) | Saved = JSON.parse(payload);
+        const reply: (Reply & { key: string }) | Saved | Role = JSON.parse(payload);
+        if ('role' in reply) return roleIs(reply);
         if ('saved' in reply) return saving.answered(reply);
         waiting.get(reply.key)?.(reply);
       },
@@ -527,9 +536,24 @@ export default function FileEditor(props: {
       visual?.editor.setEditable(!on && canWrite);
     };
     // Typing into a file that is no longer served would go nowhere, so it stops.
+    let gone = false;
     const refuse = () => {
+      gone = true;
       update({ refused: true });
       setLocked(true);
+    };
+    // The server says what this person's role is when the editor connects and whenever it
+    // changes. This page shows what they could do when it loaded. If they can no longer edit,
+    // typing would go nowhere, so it stops. Anything else that has changed needs the page
+    // loaded again, and the status says so.
+    let lowered = false;
+    const roleIs = ({ role, canWrite: may }: Role) => {
+      const lost = canWrite && !may;
+      update({ role: role === props.role ? null : { now: role, lost } });
+      if (lost) setLocked(true);
+      // Given back what they had: open again, unless something else is holding it shut.
+      else if (lowered && arrived && !gone && !oversized && restoreHeld === null) setLocked(false);
+      lowered = lost;
     };
     // "Apply my edits": connect again, and the held edits merge into the restored text.
     // "Discard my edits": a fresh page starts from the server's text, without the held edits.
@@ -592,15 +616,17 @@ export default function FileEditor(props: {
         ? 'This paper was restored to an earlier revision while you were offline. Your edits from before that are not saved.'
         : sync.signedOut
           ? `You are signed out. Sign in again in another tab and this page will carry on. ${sync.unsaved ? 'Your edits are kept here until then.' : ''}`.trim()
-          : !sync.loaded
-            ? 'Opening…'
-            : !sync.connected
-              ? `Offline. ${sync.unsaved ? 'Your edits are waiting to be saved.' : 'Nothing is waiting to be saved.'}`
-              : !canWrite
-                ? 'Read only. You can read along but not edit.'
-                : sync.unsaved
-                  ? 'Saving your edits…'
-                  : 'All edits saved.';
+          : sync.role
+            ? `You are now ${/^[aeiou]/.test(sync.role.now) ? 'an' : 'a'} ${sync.role.now} on this paper${sync.role.lost ? ` and can no longer edit. ${sync.unsaved ? 'What you typed last was not saved. ' : ''}` : '. '}Reload the page to carry on.`
+            : !sync.loaded
+              ? 'Opening…'
+              : !sync.connected
+                ? `Offline. ${sync.unsaved ? 'Your edits are waiting to be saved.' : 'Nothing is waiting to be saved.'}`
+                : !canWrite
+                  ? 'Read only. You can read along but not edit.'
+                  : sync.unsaved
+                    ? 'Saving your edits…'
+                    : 'All edits saved.';
   return (
     <section aria-label={`Editor for ${props.path}`}>
       <div className="editor-bar">
@@ -608,6 +634,11 @@ export default function FileEditor(props: {
         <span role="status" aria-live="polite" data-state={sync.connected ? 'online' : 'offline'}>
           {status}
         </span>
+        {sync.role && !sync.refused && !sync.tooLarge && !sync.held && (
+          <button type="button" onClick={() => location.reload()}>
+            Reload the page
+          </button>
+        )}
         {sync.signedOut && !sync.refused && (
           <a href="/sign-in" target="_blank" rel="noreferrer">
             Sign in (opens a new tab)
