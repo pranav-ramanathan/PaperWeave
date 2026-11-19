@@ -1,3 +1,4 @@
+import { Wide } from '../../Wide';
 import {
   AppError,
   can,
@@ -248,66 +249,68 @@ export default async function Project({
             )}{' '}
             <Link href={`/projects/${id}/submit`}>Check before submitting</Link>
           </p>
-          <table>
-            <thead>
-              <tr>
-                <th scope="col">File</th>
-                <th scope="col">Size</th>
-                <th scope="col">In the visual editor</th>
-                <th scope="col">
-                  <span className="sr-only">Actions</span>
-                </th>
-              </tr>
-            </thead>
-            <tbody>
-              {files.map((f) => (
-                <tr key={f.id}>
-                  <th scope="row">
-                    {f.readonly ? (
-                      <code>{f.path}</code>
-                    ) : (
-                      <Link href={`/projects/${id}/files/${f.id}`}>
-                        <code>{f.path}</code>
-                      </Link>
-                    )}
+          <Wide label="Table of files">
+            <table>
+              <thead>
+                <tr>
+                  <th scope="col">File</th>
+                  <th scope="col">Size</th>
+                  <th scope="col">In the visual editor</th>
+                  <th scope="col">
+                    <span className="sr-only">Actions</span>
                   </th>
-                  <td>{f.size < 1024 ? `${f.size} B` : `${Math.round(f.size / 1024)} KB`}</td>
-                  <td>{note(f.path, f.readonly)}</td>
-                  <td>
-                    {f.path === project.root && 'Root file '}
-                    {canWrite && f.path !== project.root && !f.readonly && TEX.test(f.path) && (
-                      <form action={rootAction.bind(null, id, f.id)} className="inline">
-                        <button type="submit" aria-label={`Make ${f.path} the root file`}>
-                          Make root
-                        </button>
-                      </form>
-                    )}{' '}
-                    {canWrite && f.path !== project.root && (
-                      <form action={deleteFileAction.bind(null, id, f.id)} className="inline">
-                        <button type="submit" aria-label={`Delete ${f.path}`}>
-                          Delete
-                        </button>
-                      </form>
-                    )}
-                    {canWrite && (
-                      <details>
-                        <summary>Rename</summary>
-                        <form action={renameAction.bind(null, id, f.id)} className="inline">
-                          <input
-                            name="path"
-                            defaultValue={f.path}
-                            aria-label={`New name for ${f.path}`}
-                            required
-                          />
-                          <button type="submit">Rename</button>
-                        </form>
-                      </details>
-                    )}
-                  </td>
                 </tr>
-              ))}
-            </tbody>
-          </table>
+              </thead>
+              <tbody>
+                {files.map((f) => (
+                  <tr key={f.id}>
+                    <th scope="row">
+                      {f.readonly ? (
+                        <code>{f.path}</code>
+                      ) : (
+                        <Link href={`/projects/${id}/files/${f.id}`}>
+                          <code>{f.path}</code>
+                        </Link>
+                      )}
+                    </th>
+                    <td>{f.size < 1024 ? `${f.size} B` : `${Math.round(f.size / 1024)} KB`}</td>
+                    <td>{note(f.path, f.readonly)}</td>
+                    <td>
+                      {f.path === project.root && 'Root file '}
+                      {canWrite && f.path !== project.root && !f.readonly && TEX.test(f.path) && (
+                        <form action={rootAction.bind(null, id, f.id)} className="inline">
+                          <button type="submit" aria-label={`Make ${f.path} the root file`}>
+                            Make root
+                          </button>
+                        </form>
+                      )}{' '}
+                      {canWrite && f.path !== project.root && (
+                        <form action={deleteFileAction.bind(null, id, f.id)} className="inline">
+                          <button type="submit" aria-label={`Delete ${f.path}`}>
+                            Delete
+                          </button>
+                        </form>
+                      )}
+                      {canWrite && (
+                        <details>
+                          <summary>Rename</summary>
+                          <form action={renameAction.bind(null, id, f.id)} className="inline">
+                            <input
+                              name="path"
+                              defaultValue={f.path}
+                              aria-label={`New name for ${f.path}`}
+                              required
+                            />
+                            <button type="submit">Rename</button>
+                          </form>
+                        </details>
+                      )}
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </Wide>
         </>
       )}
       {canWrite && (
@@ -482,150 +485,154 @@ export default async function Project({
                 Whether the source <strong>supports what the paper says</strong> is a person&apos;s
                 judgement about one claim. One says nothing about the other.
               </p>
-              <table>
-                <thead>
-                  <tr>
-                    <th scope="col">Entry</th>
-                    <th scope="col">Is the entry right?</th>
-                    <th scope="col">Does it support the claim?</th>
-                  </tr>
-                </thead>
-                <tbody>
-                  {cited.entries
-                    .filter((e, i) => cited.entries.findIndex((x) => x.key === e.key) === i)
-                    .map((e) => {
-                      const looked = checks.lookups[e.key];
-                      const evidence = checks.evidence[e.key] ?? [];
-                      const differing = looked?.comparison.filter((c) => !c.same) ?? [];
-                      return (
-                        <tr key={e.key}>
-                          <th scope="row">
-                            <code>{e.key}</code>
-                            <br />
-                            <span className="role">{e.description}</span>
-                          </th>
-                          <td>
-                            {!e.doi && !looked && 'No DOI to look up.'}
-                            {e.doi && !looked && 'Not looked up.'}
-                            {looked && (
-                              <>
-                                {looked.outcome === 'matches' && 'Matches the registry.'}
-                                {looked.outcome === 'not_found' &&
-                                  'The registry has no record of this DOI.'}
-                                {looked.outcome === 'differs' && (
-                                  <>
-                                    Differs from the registry:
-                                    <ul>
-                                      {differing.map((c) => (
-                                        <li key={c.field}>
-                                          {c.field}: the entry says “{c.entry || 'nothing'}”, the
-                                          registry “{c.registry || 'nothing'}”
-                                        </li>
-                                      ))}
-                                    </ul>
-                                  </>
-                                )}{' '}
-                                <span className="role">
-                                  Looked up in{' '}
-                                  {looked.source === 'crossref' ? 'Crossref' : looked.source} on{' '}
-                                  {day(looked.lookedUpAt)}
-                                  {looked.lookedUpBy ? ` by ${looked.lookedUpBy}` : ''}.
-                                </span>
-                                {looked.outOfDate && (
-                                  <>
-                                    {' '}
-                                    <strong>The entry has been changed since.</strong>
-                                  </>
-                                )}
-                              </>
-                            )}
-                            {reviewer && e.doi && (
-                              <form
-                                action={lookUpDoiAction.bind(null, id, e.key)}
-                                className="inline"
-                              >
-                                {' '}
-                                <button type="submit" aria-label={`Look up the DOI of ${e.key}`}>
-                                  {looked ? 'Look up again' : 'Look up DOI'}
-                                </button>
-                              </form>
-                            )}
-                          </td>
-                          <td>
-                            {evidence.length === 0 && 'No claim checked.'}
-                            <ul>
-                              {evidence.map((c) => (
-                                <li key={c.id}>
-                                  <strong>
-                                    {c.verdict === 'supports'
-                                      ? 'Supports'
-                                      : c.verdict === 'partly'
-                                        ? 'Partly supports'
-                                        : 'Does not support'}
-                                  </strong>
-                                  : “{c.claim}”{c.note ? ` (${c.note})` : ''}{' '}
+              <Wide label="Table of references">
+                <table>
+                  <thead>
+                    <tr>
+                      <th scope="col">Entry</th>
+                      <th scope="col">Is the entry right?</th>
+                      <th scope="col">Does it support the claim?</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {cited.entries
+                      .filter((e, i) => cited.entries.findIndex((x) => x.key === e.key) === i)
+                      .map((e) => {
+                        const looked = checks.lookups[e.key];
+                        const evidence = checks.evidence[e.key] ?? [];
+                        const differing = looked?.comparison.filter((c) => !c.same) ?? [];
+                        return (
+                          <tr key={e.key}>
+                            <th scope="row">
+                              <code>{e.key}</code>
+                              <br />
+                              <span className="role">{e.description}</span>
+                            </th>
+                            <td>
+                              {!e.doi && !looked && 'No DOI to look up.'}
+                              {e.doi && !looked && 'Not looked up.'}
+                              {looked && (
+                                <>
+                                  {looked.outcome === 'matches' && 'Matches the registry.'}
+                                  {looked.outcome === 'not_found' &&
+                                    'The registry has no record of this DOI.'}
+                                  {looked.outcome === 'differs' && (
+                                    <>
+                                      Differs from the registry:
+                                      <ul>
+                                        {differing.map((c) => (
+                                          <li key={c.field}>
+                                            {c.field}: the entry says “{c.entry || 'nothing'}”, the
+                                            registry “{c.registry || 'nothing'}”
+                                          </li>
+                                        ))}
+                                      </ul>
+                                    </>
+                                  )}{' '}
                                   <span className="role">
-                                    {c.checkedBy ?? 'Someone'}, {day(c.checkedAt)}.
+                                    Looked up in{' '}
+                                    {looked.source === 'crossref' ? 'Crossref' : looked.source} on{' '}
+                                    {day(looked.lookedUpAt)}
+                                    {looked.lookedUpBy ? ` by ${looked.lookedUpBy}` : ''}.
                                   </span>
-                                  {!c.stillSaid && (
+                                  {looked.outOfDate && (
                                     <>
                                       {' '}
-                                      <strong>The paper no longer says this.</strong>
+                                      <strong>The entry has been changed since.</strong>
                                     </>
                                   )}
-                                  {c.mine && (
-                                    <form
-                                      action={removeEvidenceAction.bind(null, id, c.id)}
-                                      className="inline"
-                                    >
-                                      {' '}
-                                      <button
-                                        type="submit"
-                                        aria-label={`Remove this check of ${e.key}`}
-                                      >
-                                        Remove
-                                      </button>
-                                    </form>
-                                  )}
-                                </li>
-                              ))}
-                            </ul>
-                            {reviewer && (
-                              <details>
-                                <summary>Record a check</summary>
-                                <form action={recordEvidenceAction.bind(null, id, e.key)}>
-                                  <label>
-                                    The claim, quoted from the paper
-                                    <textarea
-                                      name="claim"
-                                      required
-                                      maxLength={2000}
-                                      rows={2}
-                                      aria-label={`The claim that cites ${e.key}`}
-                                    />
-                                  </label>
-                                  <label>
-                                    The source
-                                    <select name="verdict" defaultValue="supports">
-                                      <option value="supports">supports it</option>
-                                      <option value="partly">partly supports it</option>
-                                      <option value="does_not_support">does not support it</option>
-                                    </select>
-                                  </label>
-                                  <label>
-                                    Note, such as where in the source
-                                    <input name="note" maxLength={2000} />
-                                  </label>
-                                  <button type="submit">Record</button>
+                                </>
+                              )}
+                              {reviewer && e.doi && (
+                                <form
+                                  action={lookUpDoiAction.bind(null, id, e.key)}
+                                  className="inline"
+                                >
+                                  {' '}
+                                  <button type="submit" aria-label={`Look up the DOI of ${e.key}`}>
+                                    {looked ? 'Look up again' : 'Look up DOI'}
+                                  </button>
                                 </form>
-                              </details>
-                            )}
-                          </td>
-                        </tr>
-                      );
-                    })}
-                </tbody>
-              </table>
+                              )}
+                            </td>
+                            <td>
+                              {evidence.length === 0 && 'No claim checked.'}
+                              <ul>
+                                {evidence.map((c) => (
+                                  <li key={c.id}>
+                                    <strong>
+                                      {c.verdict === 'supports'
+                                        ? 'Supports'
+                                        : c.verdict === 'partly'
+                                          ? 'Partly supports'
+                                          : 'Does not support'}
+                                    </strong>
+                                    : “{c.claim}”{c.note ? ` (${c.note})` : ''}{' '}
+                                    <span className="role">
+                                      {c.checkedBy ?? 'Someone'}, {day(c.checkedAt)}.
+                                    </span>
+                                    {!c.stillSaid && (
+                                      <>
+                                        {' '}
+                                        <strong>The paper no longer says this.</strong>
+                                      </>
+                                    )}
+                                    {c.mine && (
+                                      <form
+                                        action={removeEvidenceAction.bind(null, id, c.id)}
+                                        className="inline"
+                                      >
+                                        {' '}
+                                        <button
+                                          type="submit"
+                                          aria-label={`Remove this check of ${e.key}`}
+                                        >
+                                          Remove
+                                        </button>
+                                      </form>
+                                    )}
+                                  </li>
+                                ))}
+                              </ul>
+                              {reviewer && (
+                                <details>
+                                  <summary>Record a check</summary>
+                                  <form action={recordEvidenceAction.bind(null, id, e.key)}>
+                                    <label>
+                                      The claim, quoted from the paper
+                                      <textarea
+                                        name="claim"
+                                        required
+                                        maxLength={2000}
+                                        rows={2}
+                                        aria-label={`The claim that cites ${e.key}`}
+                                      />
+                                    </label>
+                                    <label>
+                                      The source
+                                      <select name="verdict" defaultValue="supports">
+                                        <option value="supports">supports it</option>
+                                        <option value="partly">partly supports it</option>
+                                        <option value="does_not_support">
+                                          does not support it
+                                        </option>
+                                      </select>
+                                    </label>
+                                    <label>
+                                      Note, such as where in the source
+                                      <input name="note" maxLength={2000} />
+                                    </label>
+                                    <button type="submit">Record</button>
+                                  </form>
+                                </details>
+                              )}
+                            </td>
+                          </tr>
+                        );
+                      })}
+                  </tbody>
+                </table>
+              </Wide>
             </>
           )}
         </>
@@ -816,60 +823,113 @@ export default async function Project({
         </form>
       )}
       {revisions.length > 0 && (
+        <Wide label="Table of revisions">
+          <table>
+            <thead>
+              <tr>
+                <th scope="col">Revision</th>
+                <th scope="col">Made</th>
+                <th scope="col">Download</th>
+                <th scope="col">
+                  <span className="sr-only">Actions</span>
+                </th>
+              </tr>
+            </thead>
+            <tbody>
+              {revisions.map((r, i) => (
+                <tr key={r.id}>
+                  <th scope="row">
+                    {r.number}.{' '}
+                    {r.name ??
+                      (r.kind === 'restore' ? `Restore of revision ${r.restoredFrom}` : 'Unnamed')}
+                  </th>
+                  <td>
+                    {new Date(r.createdAt).toISOString().slice(0, 16).replace('T', ' ')} UTC
+                    {r.createdBy ? ` by ${r.createdBy}` : ''}
+                  </td>
+                  <td>
+                    {can(project.role, 'project.export') && (
+                      <>
+                        <a href={`/projects/${id}/revisions/${r.id}/zip`}>ZIP</a>{' '}
+                        <a href={`/projects/${id}/revisions/${r.id}/zip?manifest`}>
+                          ZIP with build details
+                        </a>{' '}
+                      </>
+                    )}
+                    {r.hasPdf ? (
+                      <a href={`/projects/${id}/revisions/${r.id}/pdf`}>PDF</a>
+                    ) : (
+                      can(project.role, 'build.run') && (
+                        <form action={buildRevisionAction.bind(null, id, r.id)} className="inline">
+                          <button
+                            type="submit"
+                            aria-label={`Build the PDF for revision ${r.number}`}
+                          >
+                            Build PDF
+                          </button>
+                        </form>
+                      )
+                    )}
+                  </td>
+                  <td>
+                    {revisions[i + 1] && (
+                      <Link href={`/projects/${id}/revisions/${r.id}/diff/${revisions[i + 1].id}`}>
+                        Changes since {revisions[i + 1].number}
+                      </Link>
+                    )}{' '}
+                    {writer && (
+                      <form action={restoreAction.bind(null, id, r.id)} className="inline">
+                        <button type="submit" aria-label={`Restore revision ${r.number}`}>
+                          Restore
+                        </button>
+                      </form>
+                    )}
+                  </td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </Wide>
+      )}
+
+      <h2>People</h2>
+      <Wide label="Table of people">
         <table>
           <thead>
             <tr>
-              <th scope="col">Revision</th>
-              <th scope="col">Made</th>
-              <th scope="col">Download</th>
+              <th scope="col">Email</th>
+              <th scope="col">Role</th>
               <th scope="col">
                 <span className="sr-only">Actions</span>
               </th>
             </tr>
           </thead>
           <tbody>
-            {revisions.map((r, i) => (
-              <tr key={r.id}>
-                <th scope="row">
-                  {r.number}.{' '}
-                  {r.name ??
-                    (r.kind === 'restore' ? `Restore of revision ${r.restoredFrom}` : 'Unnamed')}
-                </th>
+            {members.map((m) => (
+              <tr key={m.userId}>
+                <th scope="row">{m.email}</th>
                 <td>
-                  {new Date(r.createdAt).toISOString().slice(0, 16).replace('T', ' ')} UTC
-                  {r.createdBy ? ` by ${r.createdBy}` : ''}
-                </td>
-                <td>
-                  {can(project.role, 'project.export') && (
-                    <>
-                      <a href={`/projects/${id}/revisions/${r.id}/zip`}>ZIP</a>{' '}
-                      <a href={`/projects/${id}/revisions/${r.id}/zip?manifest`}>
-                        ZIP with build details
-                      </a>{' '}
-                    </>
-                  )}
-                  {r.hasPdf ? (
-                    <a href={`/projects/${id}/revisions/${r.id}/pdf`}>PDF</a>
+                  {owner && m.role !== 'owner' ? (
+                    <form action={roleAction.bind(null, id, m.userId)} className="inline">
+                      <select name="role" defaultValue={m.role} aria-label={`Role of ${m.email}`}>
+                        {INVITABLE.map((r) => (
+                          <option key={r}>{r}</option>
+                        ))}
+                      </select>
+                      <button type="submit">Change</button>
+                    </form>
                   ) : (
-                    can(project.role, 'build.run') && (
-                      <form action={buildRevisionAction.bind(null, id, r.id)} className="inline">
-                        <button type="submit" aria-label={`Build the PDF for revision ${r.number}`}>
-                          Build PDF
-                        </button>
-                      </form>
-                    )
+                    m.role
                   )}
                 </td>
                 <td>
-                  {revisions[i + 1] && (
-                    <Link href={`/projects/${id}/revisions/${r.id}/diff/${revisions[i + 1].id}`}>
-                      Changes since {revisions[i + 1].number}
-                    </Link>
-                  )}{' '}
-                  {writer && (
-                    <form action={restoreAction.bind(null, id, r.id)} className="inline">
-                      <button type="submit" aria-label={`Restore revision ${r.number}`}>
-                        Restore
+                  {m.role !== 'owner' && (owner || m.userId === user.id) && (
+                    <form action={removeAction.bind(null, id, m.userId)} className="inline">
+                      <button
+                        type="submit"
+                        aria-label={m.userId === user.id ? 'Leave this paper' : `Remove ${m.email}`}
+                      >
+                        {m.userId === user.id ? 'Leave' : 'Remove'}
                       </button>
                     </form>
                   )}
@@ -878,53 +938,7 @@ export default async function Project({
             ))}
           </tbody>
         </table>
-      )}
-
-      <h2>People</h2>
-      <table>
-        <thead>
-          <tr>
-            <th scope="col">Email</th>
-            <th scope="col">Role</th>
-            <th scope="col">
-              <span className="sr-only">Actions</span>
-            </th>
-          </tr>
-        </thead>
-        <tbody>
-          {members.map((m) => (
-            <tr key={m.userId}>
-              <th scope="row">{m.email}</th>
-              <td>
-                {owner && m.role !== 'owner' ? (
-                  <form action={roleAction.bind(null, id, m.userId)} className="inline">
-                    <select name="role" defaultValue={m.role} aria-label={`Role of ${m.email}`}>
-                      {INVITABLE.map((r) => (
-                        <option key={r}>{r}</option>
-                      ))}
-                    </select>
-                    <button type="submit">Change</button>
-                  </form>
-                ) : (
-                  m.role
-                )}
-              </td>
-              <td>
-                {m.role !== 'owner' && (owner || m.userId === user.id) && (
-                  <form action={removeAction.bind(null, id, m.userId)} className="inline">
-                    <button
-                      type="submit"
-                      aria-label={m.userId === user.id ? 'Leave this paper' : `Remove ${m.email}`}
-                    >
-                      {m.userId === user.id ? 'Leave' : 'Remove'}
-                    </button>
-                  </form>
-                )}
-              </td>
-            </tr>
-          ))}
-        </tbody>
-      </table>
+      </Wide>
 
       {owner && (
         <>

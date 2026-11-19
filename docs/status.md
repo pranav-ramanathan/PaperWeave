@@ -566,7 +566,8 @@ What is left is not code that can be written here:
    a deployment can settle: TLS, the production sandbox, where the store and backups live, a
    proxy that limits requests, who may read the metrics.
 3. **What each document says was not checked.** A real screen reader, browsers other than
-   Chromium and real input methods (`docs/accessibility.md`); losing the object store
+   Chromium (only Chromium is installed where this was built) and real input methods
+   (`docs/accessibility.md`); losing the object store
    (`docs/restore-drill.md`); real manuscripts for the grammar benchmark and the claim
    challenge set, which are synthetic today.
 4. **The Phase A replays**, which need a person with accounts: `docs/rea/matrix.md`. What the
@@ -661,7 +662,8 @@ about once in twenty-five runs on a busy machine.
   change the next person never gets the text (two runs of three), with it they do. The seed
   that failed: 0 of 30 after. Fresh seeds on a busy machine: 0 of 26 after.
 - **Not changed:** the library still drops the connection early. This works around it. It
-  would be worth reporting to the library's authors; that has not been done.
+  has not been reported to the library's authors. `docs/upstream.md` has it written up ready
+  to file, with two other things in the library that this project works around.
 
 A second failure of the fault suite, found while looking, was the suite's own mistake: it
 recorded what a saved revision held from the text a moment before saving, and an edit still
