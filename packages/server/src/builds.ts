@@ -37,7 +37,12 @@ const COLUMNS = `b.id, b.status, b.created_at as "createdAt", b.finished_at as "
   b.revision_id as "revisionId",
   b.revision_id is not null and exists (
     select 1 from files f left join revision_files rf on rf.revision_id = b.revision_id and rf.file_id = f.id
-    where f.project_id = b.project_id and (rf.seq is distinct from f.head_seq or rf.path is distinct from f.path)
+    where f.project_id = b.project_id and (
+      rf.file_id is null or rf.path is distinct from f.path
+      -- A file's log starts at nothing and gets its first entry, the upload itself, the first
+      -- time the file is opened. Neither is an edit.
+      or greatest(rf.seq, 1) <> greatest(f.head_seq, 1)
+    )
   ) as stale`;
 
 /**

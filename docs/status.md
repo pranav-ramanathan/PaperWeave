@@ -703,6 +703,40 @@ Two things about tests, found on the way and not about the product:
   the second half of a restore, which stores what it has just put back; and the first time a
   file is opened for editing, which reads its upload. All short or rare, none removed.
 
+## A PDF that stayed "behind the text", and used up the paper's builds
+
+- **What was wrong.** A build is behind when any file's log of edits has moved past where the
+  built revision recorded it. Two things move a log without changing the text:
+  - opening a file in the editor for the first time, which writes the upload as the log's
+    first entry;
+  - typing something and taking it back.
+- A build asked for after either found the text the same as the latest revision, and used
+  that revision again, with the old places in the logs. So it came back behind too. The pane
+  beside the editor builds whenever the PDF is behind and typing has paused, so it asked
+  again, about every two seconds. Run against the old code, the browser test below saw five
+  more builds of the same revision within fifteen seconds of a second file being opened. It
+  was not left running to the end: at that rate the paper's 120 builds for the hour are gone
+  in about four minutes, and then nobody can build the paper until the hour is up.
+- **Whom it reached.** Anyone who opened a second file of a paper that had already been
+  built, with "Compile automatically" on, which it is unless turned off.
+- **Now**, in three places:
+  - a file's first log entry is not counted as an edit (`COLUMNS` in
+    `packages/server/src/builds.ts`);
+  - a build of the same text tells the revision where the logs now stand (`cut` in
+    `packages/server/src/revisions.ts`). If a file was deleted and made again under its name
+    the text is the same but the file is another one, and a new revision is cut;
+  - the pane asks once for each state of the text. A build that comes back behind is not
+    asked for again until something is edited (`BuildPane.tsx`).
+- **Tests hold the first two.** A service test (`builds.sandbox.test`) and a browser test
+  (`building.spec`), which opens a second file and sees the PDF stay up to date with no build
+  asked for. Both failed on the old code. The part of the service test about a file deleted
+  and made again was not run against the old code.
+- **How it was found.** By the narrow-window test, when it was made to edit a second file and
+  then wait for the PDF. No test had opened a second file and looked at the PDF's state.
+- **Not held by a test:** the pane's own rule, since after the other two changes nothing is
+  known that brings a build back behind. If the request for a build fails, the pane does
+  not try again by itself; the message and "Compile now" are there.
+
 ## A paper's size, and what a sync ticket opens
 
 Two more of the security review's items.

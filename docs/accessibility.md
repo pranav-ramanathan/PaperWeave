@@ -14,8 +14,9 @@ Where this stands, what holds it there, and what nobody has checked yet.
   the arrow keys, Tab to the comments, start a thread on the selection, go back to the toolbar,
   show the caret's line in the PDF, and Tab to the PDF itself.
 
-- **A narrow window.** The same pages at 320 CSS pixels wide, which is what a 1280-pixel window
-  becomes at 400% zoom: none has to be scrolled sideways to be read. A wide table scrolls
+- **A narrow window.** The same pages, and a drawn chart and the differences between two
+  revisions, at 320 CSS pixels wide, which is what a 1280-pixel window becomes at 400% zoom:
+  none has to be scrolled sideways to be read. A wide table scrolls
   sideways inside itself, and can be reached and scrolled from the keyboard.
   - This found three pages that did need sideways scrolling: a paper's page, a data file's
     page and the editor. On the editor's page the files, the editor and the PDF now sit one
@@ -79,8 +80,7 @@ the keyboard (`insert.spec`).
   Japanese, Chinese or Korean input method has been typed with.
 - **Zoom, beyond the narrow-window test above.** Not checked: text enlarged by itself without
   the page being zoomed, wider spacing between letters and lines, and a narrow window on the
-  pages the test does not visit (the differences between two revisions, renaming, a chart
-  that has been drawn).
+  pages the test does not visit (renaming a file, the windows for inserting things).
 - **Formulas.** The audit checks the page's own text. A formula is drawn in the page's ink
   colour, so it should pass where the text around it does; that has not been measured.
 - **Whether a chart's colours stay apart for colour-blind readers, in people's eyes.** It was

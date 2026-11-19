@@ -24,6 +24,8 @@ export default function BuildPane({
   const url = `/projects/${projectId}/builds`;
   // How far edits had got at the last poll, to see that typing has paused.
   const seen = useRef<number | null>(null);
+  // How far edits had got when this pane last asked for a build by itself.
+  const asked = useRef<number | null>(null);
 
   const compile = useCallback(async () => {
     const res = await fetch(url, { method: 'POST' });
@@ -45,7 +47,13 @@ export default function BuildPane({
       const idle = seen.current === next.edits;
       seen.current = next.edits;
       const behind = !next.latest || (next.latest.status !== 'queued' && next.latest.stale);
-      if (auto && canBuild && idle && behind) void compile();
+      // Once for each state of the text. A build that comes back still behind is not asked
+      // for again until something is edited: asked for every two seconds, a paper would use
+      // up its builds for the hour.
+      if (auto && canBuild && idle && behind && asked.current !== next.edits) {
+        asked.current = next.edits;
+        void compile();
+      }
     };
     void poll();
     const timer = setInterval(poll, 2000);
