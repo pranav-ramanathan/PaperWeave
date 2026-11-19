@@ -40,20 +40,36 @@ const sign = (secret: string, body: string) =>
 
 /**
  * A short-lived proof of who is connecting and to which file, handed to the sync server instead
- * of a cookie. It opens nothing else: taken from one file's page, it is no use on another.
+ * of a cookie. It opens nothing else: taken from one file's page, it is no use on another. It
+ * names the sign-in it was given under, so that the connection can be closed when that ends.
  */
-export function syncTicket(secret: string, userId: string, fileId: string, seconds = 60) {
+export function syncTicket(
+  secret: string,
+  userId: string,
+  fileId: string,
+  seconds = 60,
+  sessionId?: string,
+) {
   const body = Buffer.from(
-    JSON.stringify({ u: userId, f: fileId, e: Math.floor(Date.now() / 1000) + seconds }),
+    JSON.stringify({
+      u: userId,
+      f: fileId,
+      e: Math.floor(Date.now() / 1000) + seconds,
+      s: sessionId,
+    }),
   ).toString('base64url');
   return `${body}.${sign(secret, body)}`;
 }
 
 /**
- * The user a ticket was issued to, or null if it is forged, malformed, expired or for another
- * file.
+ * The user a ticket was issued to and the sign-in it was issued under, or null if it is forged,
+ * malformed, expired or for another file.
  */
-export function verifyTicket(secret: string, ticket: unknown, fileId: string): string | null {
+export function verifyTicket(
+  secret: string,
+  ticket: unknown,
+  fileId: string,
+): { userId: string; sessionId: string | null } | null {
   if (typeof ticket !== 'string') return null;
   const [body, mac] = ticket.split('.');
   if (!body || !mac) return null;
@@ -61,9 +77,9 @@ export function verifyTicket(secret: string, ticket: unknown, fileId: string): s
   const got = Buffer.from(mac);
   if (want.length !== got.length || !timingSafeEqual(want, got)) return null;
   try {
-    const { u, f, e } = JSON.parse(Buffer.from(body, 'base64url').toString());
+    const { u, f, e, s } = JSON.parse(Buffer.from(body, 'base64url').toString());
     return typeof u === 'string' && f === fileId && typeof e === 'number' && e >= Date.now() / 1000
-      ? u
+      ? { userId: u, sessionId: typeof s === 'string' ? s : null }
       : null;
   } catch {
     return null;

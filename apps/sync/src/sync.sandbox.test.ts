@@ -170,6 +170,39 @@ test('someone not on the paper, or with a bad ticket, cannot connect', async () 
   }
 });
 
+test('signing out closes the editors opened under that sign-in, and no others', async () => {
+  const { file } = await paper();
+  // The same person, signed in twice: on this browser and on another.
+  await t.signIn(users.second.email);
+  await t.signIn(users.second.email);
+  const [here, elsewhere]: string[] = (
+    await t.pool.query(
+      'select id from session where "userId" = $1 order by "createdAt" desc limit 2',
+      [users.second.id],
+    )
+  ).rows.map((r) => r.id);
+  const ticket = (session?: string) => syncTicket(SECRET, users.second.id, file, 60, session);
+  const first = client(users.second, file, sync.port, () => ticket(here));
+  const other = client(users.second, file, sync.port, () => ticket(elsewhere));
+  // A ticket that names no sign-in, as the server's own tests make them.
+  const unnamed = client(users.second, file);
+  for (const c of [first, other, unnamed])
+    await until('the file to arrive', () => c.text.toString().includes('Hello.'));
+
+  await t.pool.query('delete from session where id = $1', [here]);
+  await until('the connection to be closed', () =>
+    first.state.reasons.some((r) => r.endsWith('signed-out')),
+  );
+  // (What the editor does next, ask for a ticket and find itself signed out, is a browser test.)
+  // The same person's other sign-in is untouched, and goes on editing.
+  expect(other.state.reasons).toEqual([]);
+  expect(unnamed.state.reasons).toEqual([]);
+  other.text.insert(0, '% still here\n');
+  await saved(other);
+  expect(unnamed.text.toString()).toContain('% still here');
+  expect(first.text.toString()).not.toContain('% still here');
+});
+
 test('taking away write access stops writes at once; removal ends the connection', async () => {
   const { project, file } = await paper();
   const owner = client(users.owner, file);

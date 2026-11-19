@@ -802,9 +802,19 @@ Two things about tests, found on the way and not about the product:
   `docs/security-review.md`.
 - **Two browser tests hold it** (`recover.spec`). The second fails without the check on whom
   the ticket is for: the first person's typing is saved as the second's.
-- **Not changed:** a page that still has its connection when its person signs out elsewhere
-  keeps it until the connection drops. The sync server checks the person's role on every
-  edit, not whether they are still signed in.
+- **Signing out ends the editors opened under that sign-in, at once.** Before, a page kept
+  its connection, and went on saving as its person, until the connection happened to drop.
+  - A ticket now names the sign-in it was given under. A trigger on the sign-in library's
+    session table (migration 0023) tells the sync server when a session is deleted, and the
+    server closes the connections made under it.
+  - The same person signed in on another browser is not disturbed: a service test holds that
+    (`sync.sandbox.test`). The browser tests above sign out without losing the connection.
+  - The library's client goes on calling itself connected after the server has closed its
+    file this way. The editor has to drop the connection itself to find out where it stands;
+    without that it sat at "All edits saved" while nothing it typed was being taken.
+- **Not covered:** a sign-in that runs out is not deleted, so nothing is told. Its editors
+  keep their connections until they drop, and then find themselves signed out. The sync
+  server checks a person's role on every edit, not whether they are still signed in.
 
 ## A paper's size, and what a sync ticket opens
 

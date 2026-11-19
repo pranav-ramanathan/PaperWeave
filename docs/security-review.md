@@ -90,6 +90,12 @@ What it found is fixed in the same change, or listed under "Open" with what to d
   second person signs in, then the page reconnects. That exact order was not run. It needs
   both people to be on the same paper and the page to be left open.
 
+- **Signing out did not end open editors.** An editor kept its connection to the sync server
+  after its person signed out, and went on saving as them until the connection dropped. A
+  ticket now names its sign-in, and the sync server closes that sign-in's connections when it
+  is deleted. A sign-in that merely runs out is not covered: see "An editor whose sign-in has
+  ended" in `docs/status.md`.
+
 ## Open
 
 In rough order of how much they matter.

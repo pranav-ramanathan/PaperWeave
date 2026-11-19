@@ -3,16 +3,19 @@
 // says when that file's paper was last restored, so that a client coming back online can tell
 // that the text it was editing has been replaced.
 import { AppError, lastRestore, syncTicket } from '@paperweave/server';
-import { currentUser, db } from '../../../lib/server';
+import { headers } from 'next/headers';
+import { auth, db } from '../../../lib/server';
 
 export const dynamic = 'force-dynamic';
 
 export async function GET(request: Request) {
-  const user = await currentUser();
-  if (!user) return Response.json({ error: 'Sign in first.' }, { status: 401 });
+  const signedIn = await auth().api.getSession({ headers: await headers() });
+  if (!signedIn) return Response.json({ error: 'Sign in first.' }, { status: 401 });
+  const { user, session } = signedIn;
   const file = new URL(request.url).searchParams.get('file');
   if (!file) return Response.json({ error: 'Say which file.' }, { status: 400 });
-  const ticket = syncTicket(process.env.BETTER_AUTH_SECRET!, user.id, file);
+  // The ticket names the sign-in it is given under: when that ends, so do its connections.
+  const ticket = syncTicket(process.env.BETTER_AUTH_SECRET!, user.id, file, 60, session.id);
   const restored = await lastRestore(db(), user.id, file).catch((err) => {
     // Not their file: the sync server will refuse the connection itself.
     if (err instanceof AppError) return null;
