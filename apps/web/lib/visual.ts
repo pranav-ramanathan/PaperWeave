@@ -18,7 +18,7 @@ import {
 } from '@paperweave/latex';
 import { Editor, Extension, type Node } from '@tiptap/core';
 import type { Node as PMNode } from '@tiptap/pm/model';
-import { Plugin } from '@tiptap/pm/state';
+import { Plugin, TextSelection } from '@tiptap/pm/state';
 import { Decoration, DecorationSet } from '@tiptap/pm/view';
 import katex from 'katex';
 import * as Y from 'yjs';
@@ -123,6 +123,17 @@ export function createVisual(opts: {
   const { undo, say } = opts;
   // eslint-disable-next-line prefer-const -- the editor's plugins need the bridge, which needs the editor's schema
   let bridge: Bridge;
+  /**
+   * Put the caret, or a selection, at a place in the document. Between two blocks no text can
+   * go: just after an equation on a line of its own, say. Asked for such a place, this takes
+   * the nearest one after it that can take text, or failing that the nearest before it. (A
+   * caret left between blocks is not drawn, and what is typed next lands before the equation.)
+   */
+  const selectAt = (from: number, to = from) => {
+    const { doc, tr } = editor.state;
+    const at = (pos: number) => doc.resolve(Math.max(0, Math.min(pos, doc.content.size)));
+    editor.view.dispatch(tr.setSelection(TextSelection.between(at(from), at(to), 1)));
+  };
   /**
    * Bring the editor's idea of the selection up to date with the browser's. The editor hears of
    * a moved caret a moment after it moves; a shortcut pressed in that moment would otherwise
@@ -646,7 +657,7 @@ export function createVisual(opts: {
       ? () => openMath(pos, node.attrs.src)
       : undefined;
     // The caret goes where the click was, so that what is inserted goes there too.
-    if (hit && !formula) editor.commands.setTextSelection(hit.pos);
+    if (hit && !formula) selectAt(hit.pos);
     opts.menu({ ...at, formula });
   };
   editor.view.dom.addEventListener('contextmenu', onMenu);
@@ -694,8 +705,9 @@ export function createVisual(opts: {
         const after = Y.createAbsolutePositionFromRelativePosition(c.to, opts.ytext.doc!)?.index;
         if (result !== 'conflict' && after != null) {
           const caret = fromSrc(bridge.model, editor.state.doc, after);
-          resume = { from: caret, to: caret };
-          editor.commands.setTextSelection(caret);
+          selectAt(caret);
+          const { from, to } = editor.state.selection;
+          resume = { from, to };
         }
         return result;
       };
@@ -705,8 +717,7 @@ export function createVisual(opts: {
       const { from, to } = resume ?? editor.state.selection;
       resume = null;
       editor.view.focus();
-      const size = editor.state.doc.content.size;
-      editor.commands.setTextSelection({ from: Math.min(from, size), to: Math.min(to, size) });
+      selectAt(from, to);
     },
     /**
      * Take the selection as it is on the screen. The editor's own record of it can be a few

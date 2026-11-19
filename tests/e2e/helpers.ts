@@ -58,6 +58,10 @@ export function refusals(context: BrowserContext) {
   context.on('console', (said) => {
     if (said.type() === 'error' && !said.text().startsWith('Failed to load resource'))
       throw new Error(`${said.page()?.url()}: ${said.text()}`);
+    // One warning is refused too: the visual editor's library saying a caret was put where no
+    // text can go. Such a caret is not drawn, and typing lands somewhere else.
+    if (said.text().startsWith('TextSelection endpoint not pointing into a node'))
+      throw new Error(`${said.page()?.url()}: ${said.text()}`);
   });
 }
 

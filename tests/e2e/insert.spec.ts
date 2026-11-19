@@ -5,7 +5,7 @@ import { mkdtempSync, readdirSync, readFileSync, statSync, writeFileSync } from 
 import { tmpdir } from 'node:os';
 import { join, relative } from 'node:path';
 import { readZip, writeZip } from '../../packages/server/src/archive';
-import { person, run, signIn } from './helpers';
+import { clickAfter, person, run, showSource, signIn } from './helpers';
 
 const FIXTURE = join(import.meta.dirname, '../../fixtures/ieee-multifile');
 const VISUAL = '.editor .visual .ProseMirror';
@@ -171,4 +171,58 @@ test('references and equations are inserted from the toolbar, the keyboard and t
       .replace('characters', 'characters$n \\le 3$')
       .replace('organised', 'organised\n\\begin{equation}\n  a^2 + b^2 = c^2\n\\end{equation}\n'),
   );
+});
+
+test('after an equation is put on a line of its own, typing carries on after it', async ({
+  browser,
+}) => {
+  const { page, email } = await person(browser, 'insert-caret');
+  const zip = join(mkdtempSync(join(tmpdir(), 'paperweave-e2e-')), `Caret ${run}.zip`);
+  const main =
+    '\\documentclass{article}\n\\begin{document}\nHello world here.\n\nSecond paragraph.\n\\end{document}\n';
+  writeFileSync(zip, await writeZip([{ path: 'main.tex', bytes: Buffer.from(main) }]));
+  await page.goto('/sign-in');
+  await signIn(page, email);
+  await page.getByLabel('Or import a ZIP of a LaTeX project').setInputFiles(zip);
+  await page.getByRole('button', { name: 'Import ZIP' }).click();
+  await page.getByRole('link', { name: 'main.tex' }).first().click();
+  const status = page.getByRole('region', { name: /^Editor for/ }).getByRole('status');
+  await expect(status).toHaveText('All edits saved.');
+  const equation = async (after: string, latex: string) => {
+    await clickAfter(page, VISUAL, after);
+    await page.keyboard.press('Alt+=');
+    const box = page.getByRole('dialog', { name: 'Insert an equation' });
+    await box.getByLabel('On a line of its own, numbered').check();
+    await box.getByLabel('LaTeX').fill(latex);
+    await box.getByRole('button', { name: 'Insert' }).click();
+    await expect(box).toBeHidden();
+    await expect(page.locator(`${VISUAL} div.pw-math .katex`).last()).toBeVisible();
+  };
+
+  // In the middle of a paragraph. Just after the equation is between two blocks, where no text
+  // can go: the caret takes the next place that can, which is the rest of the paragraph. It
+  // once stayed between the blocks, was not drawn, and what was typed landed before the equation.
+  await equation('world', 'a = 1');
+  await page.keyboard.type('AFTER');
+  // At the end of a paragraph: the next place is the start of the paragraph that follows.
+  await equation('here.', 'b = 2');
+  await page.keyboard.type('NEXT');
+  await expect(status).toHaveText('All edits saved.');
+
+  await showSource(page);
+  const lines = await page.locator('.editor .cm-line').allTextContents();
+  expect(lines.filter((l) => l.trim())).toEqual([
+    '\\documentclass{article}',
+    '\\begin{document}',
+    'Hello world',
+    '\\begin{equation}',
+    '  a = 1',
+    '\\end{equation}',
+    ' AFTERhere.',
+    '\\begin{equation}',
+    '  b = 2',
+    '\\end{equation}',
+    'NEXTSecond paragraph.',
+    '\\end{document}',
+  ]);
 });
