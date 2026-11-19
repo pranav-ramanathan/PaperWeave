@@ -18,8 +18,9 @@ import pg from 'pg';
 import * as Y from 'yjs';
 import { metricsText, newCounts, serveMetrics } from './metrics.ts';
 
-/** Who a connection is, on which paper, and under which sign-in (null for a ticket that names none). */
-type Context = { userId: string; projectId: string; sessionId: string | null };
+/** Who a connection is, on which paper, in what role, and under which sign-in (null for a
+ * ticket that names none). */
+type Context = { userId: string; projectId: string; sessionId: string | null; role: string };
 
 /** y-protocols sync message types. Step 1 only asks what the server has; 1 and 2 carry edits. */
 const SYNC_STEP_1 = 0;
@@ -58,6 +59,13 @@ export async function startSync(opts: {
     );
     for (const r of rows) Y.applyUpdate(document, new Uint8Array(r.update));
   };
+  /**
+   * Tell an editor what its person's role is now. Its page shows what they could do when it
+   * loaded: without this, someone whose role was lowered goes on typing into an editor that
+   * says "saving" for ever.
+   */
+  const tellRole = (connection: Connection<Context>, role: string) =>
+    connection.sendStateless(JSON.stringify({ role, canWrite: !connection.readOnly }));
   const server = new Server<Context>({
     port: opts.port,
     quiet: true,
@@ -74,7 +82,7 @@ export async function startSync(opts: {
         const file = await openFile(pool, userId, documentName);
         connectionConfig.readOnly = !file.canWrite;
         counts.connections++;
-        return { userId, projectId: file.projectId, sessionId };
+        return { userId, projectId: file.projectId, sessionId, role: file.role };
       } catch (err) {
         counts.refusedConnections++;
         throw err;
@@ -103,7 +111,9 @@ export async function startSync(opts: {
     // An edit can be saved to a file's log while this copy of the file is being read from it,
     // by a connection that is on its way out (see beforeSync). So the first time someone is
     // let in to a freshly read copy, the log is read once more from where the reading began.
-    async connected({ documentName, connection }) {
+    async connected({ documentName, connection, context }) {
+      // The page was made for the role its person had when it loaded. That may be a while ago.
+      tellRole(connection, context.role);
       if (server.hocuspocus.documents.get(documentName) !== connection.document) {
         // Not seen to happen. If it did, this person would see nobody else's edits.
         console.error(`a connection to ${documentName} is on a copy that is not the open one`);
@@ -234,7 +244,12 @@ export async function startSync(opts: {
       for (const connection of document.getConnections() as Connection<Context>[]) {
         if (connection.context.projectId !== projectId) continue;
         try {
-          connection.readOnly = !(await openFile(pool, connection.context.userId, name)).canWrite;
+          const file = await openFile(pool, connection.context.userId, name);
+          connection.readOnly = !file.canWrite;
+          if (connection.context.role !== file.role) {
+            connection.context.role = file.role;
+            tellRole(connection, file.role);
+          }
         } catch (err) {
           if (!(err instanceof AppError)) throw err;
           // The reason tells the editor this is final, not a dropped connection.

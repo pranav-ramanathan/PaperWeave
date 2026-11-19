@@ -385,3 +385,75 @@ test('a page left open by one person does not carry on as the next person to sig
   await expect(source(tab)).toContainText('Hello.');
   await expect(source(tab)).not.toContainText('typed by the first person');
 });
+
+test('someone whose role changes while a file is open is told, and does not type into nothing', async ({
+  browser,
+}) => {
+  const owner = await person(browser, 'rec-role-owner');
+  const editor = await person(browser, 'rec-role-editor');
+  const zip = join(mkdtempSync(join(tmpdir(), 'paperweave-e2e-')), `Roles ${run}.zip`);
+  writeFileSync(zip, await writeZip([{ path: 'main.tex', bytes: Buffer.from(MAIN) }]));
+  await owner.page.goto('/sign-in');
+  await signIn(owner.page, owner.email);
+  await owner.page.getByLabel('Or import a ZIP of a LaTeX project').setInputFiles(zip);
+  await owner.page.getByRole('button', { name: 'Import ZIP' }).click();
+  await owner.page.getByLabel('Their email address').fill(editor.email);
+  await owner.page.getByLabel('Their role').selectOption('editor');
+  await owner.page.getByRole('button', { name: 'Send invitation' }).click();
+  await expect(owner.page.getByRole('status')).toContainText(editor.email);
+  const { page } = editor;
+  await page.goto(await emailedLink(editor.email, '/invitations/'));
+  await signIn(page, editor.email);
+  await page.getByRole('button', { name: 'Join this paper' }).click();
+  await page.getByRole('link', { name: 'main.tex' }).first().click();
+  await showSource(page);
+  await expect(status(page)).toHaveText('All edits saved.');
+  const make = async (role: string) => {
+    await owner.page.reload();
+    await owner.page.getByLabel(`Role of ${editor.email}`).selectOption(role);
+    await owner.page
+      .getByRole('row', { name: editor.email })
+      .getByRole('button', { name: 'Change' })
+      .click();
+    await expect(owner.page.getByRole('status')).toContainText('Role changed');
+  };
+
+  // Lowered while the file is open. The page was made for an editor: without being told, it
+  // would take typing and say "saving" for ever.
+  await make('viewer');
+  await expect(status(page)).toHaveText(
+    'You are now a viewer on this paper and can no longer edit. Reload the page to carry on.',
+  );
+  await expect(source(page)).toHaveAttribute('contenteditable', 'false');
+  // Given back what they had: the page carries on as it was.
+  await make('editor');
+  await expect(status(page)).toHaveText('All edits saved.');
+  await typeAtStart(page, '% typed as an editor again\n');
+  await expect(status(page)).toHaveText('All edits saved.');
+
+  // Lowered while offline, with something typed meanwhile: told on coming back, and told that
+  // it was not saved.
+  await page.context().setOffline(true);
+  await expect(status(page)).toContainText('Offline.');
+  await typeAtStart(page, '% typed offline\n');
+  await make('reviewer');
+  await page.context().setOffline(false);
+  await expect(status(page)).toHaveText(
+    'You are now a reviewer on this paper and can no longer edit. What you typed last was not saved. Reload the page to carry on.',
+    { timeout: 20_000 },
+  );
+  await page
+    .getByRole('region', { name: /^Editor for/ })
+    .getByRole('button', { name: 'Reload the page' })
+    .click();
+  await showSource(page);
+  await expect(status(page)).toHaveText('Read only. You can read along but not edit.');
+  await expect(source(page)).toContainText('% typed as an editor again');
+  await expect(source(page)).not.toContainText('% typed offline');
+
+  // Raised: the page cannot offer editing without being loaded again, and says so.
+  await make('editor');
+  await expect(status(page)).toHaveText(
+    'You are now an editor on this paper. Reload the page to carry on.',
+  );
+});
