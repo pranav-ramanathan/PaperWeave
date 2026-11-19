@@ -1,3 +1,4 @@
+import Once from '../../Once';
 import { Wide } from '../../Wide';
 import {
   AppError,
@@ -348,7 +349,7 @@ export default async function Project({
             A file to upload. Leave empty to start a blank text file.
             <input type="file" name="file" />
           </label>
-          <button type="submit">Add file</button>
+          <Once>Add file</Once>
         </form>
       )}
       {report && (
@@ -989,12 +990,11 @@ export default async function Project({
                 <td>
                   {m.role !== 'owner' && (owner || m.userId === user.id) && (
                     <form action={removeAction.bind(null, id, m.userId)} className="inline">
-                      <button
-                        type="submit"
+                      <Once
                         aria-label={m.userId === user.id ? 'Leave this paper' : `Remove ${m.email}`}
                       >
                         {m.userId === user.id ? 'Leave' : 'Remove'}
-                      </button>
+                      </Once>
                     </form>
                   )}
                 </td>

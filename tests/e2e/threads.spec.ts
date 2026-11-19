@@ -60,9 +60,14 @@ test('a reviewer starts a thread, the owner answers, and it outlives the text it
   await expect(theirs.locator('blockquote')).toHaveText('forty');
   await theirs.getByLabel('Comment', { exact: true }).fill('Is that the median or the tail?');
   await theirs.getByRole('checkbox', { name: owner.email }).check();
-  await theirs.getByRole('button', { name: 'Start thread' }).click();
+  // Pressed twice at once, it starts one thread.
+  await theirs.getByRole('button', { name: 'Start thread' }).evaluate((b: HTMLButtonElement) => {
+    b.click();
+    b.click();
+  });
   const thread = (page: typeof owner.page) =>
     page.getByRole('article', { name: 'Thread on “forty”' });
+  await expect(thread(reviewer.page)).toHaveCount(1);
   await expect(thread(reviewer.page)).toContainText('Is that the median or the tail?');
   await expect(thread(reviewer.page)).toContainText(`to ${owner.email}`);
 

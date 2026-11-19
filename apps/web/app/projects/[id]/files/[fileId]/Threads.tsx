@@ -25,6 +25,7 @@ function Say(props: {
   const [to, setTo] = useState<string[]>([]);
   const [problem, setProblem] = useState('');
   const [busy, setBusy] = useState(false);
+  const sending = useRef(false);
   // The people who can be mentioned are listed once someone starts on the form, not before.
   // Every open thread has a form for replying, so listing them at once drew a box for each
   // person under each thread: 2,900 of them for thirty people and a hundred threads.
@@ -34,8 +35,12 @@ function Say(props: {
       onFocus={() => setBegun(true)}
       onSubmit={async (e) => {
         e.preventDefault();
+        if (sending.current) return;
+        sending.current = true;
         setBusy(true);
-        const wrong = await props.send(body, to);
+        const wrong = await props.send(body, to).finally(() => {
+          sending.current = false;
+        });
         setBusy(false);
         setProblem(wrong ?? '');
         if (wrong) return;

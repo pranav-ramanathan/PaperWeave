@@ -1,6 +1,7 @@
 import { listProjects, TEMPLATES } from '@paperweave/server';
 import Link from 'next/link';
 import { db, requireUser } from '../../lib/server';
+import Once from '../Once';
 import SignOut from '../SignOut';
 import { createAction } from './actions';
 
@@ -72,7 +73,7 @@ export default async function Projects({
             ))}
           </select>
         </label>
-        <button type="submit">Create paper</button>
+        <Once>Create paper</Once>
         <small id="template-help">{TEMPLATES.map((t) => `${t.name}: ${t.about}`).join(' ')}</small>
       </form>
       <form action="/api/projects/import" method="post" encType="multipart/form-data">
@@ -80,7 +81,7 @@ export default async function Projects({
           Or import a ZIP of a LaTeX project
           <input type="file" name="zip" accept=".zip,application/zip" required />
         </label>
-        <button type="submit">Import ZIP</button>
+        <Once>Import ZIP</Once>
       </form>
     </main>
   );
