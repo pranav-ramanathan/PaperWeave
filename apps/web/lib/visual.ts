@@ -467,6 +467,9 @@ export function createVisual(opts: {
             el('p', 'pw-label', `${file} cannot be shown here. It is in the PDF.`);
           if (opts.picture) {
             const img = el('img', '');
+            // Fetched when it is scrolled near, not when the file opens: a results section of
+            // sixty figures was sixty requests and 12 MB before a word could be read.
+            img.loading = 'lazy';
             img.src = opts.picture(file);
             img.alt = g.alt?.text ?? '';
             // A PDF or EPS figure, or a file that is not there.
