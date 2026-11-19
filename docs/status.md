@@ -587,8 +587,9 @@ ordinary use. Seven ways of looking found them, and each is cheap to do again:
 2. **Change something about a person while their page is open.** Sign them out, lower their
    role. Found: an editor that typed into nothing; a page that carried on as the next person
    to sign in.
-3. **Give a paper many of something.** 5,000 revisions, 2,000 files. Found: a paper's page of
-   16 MB; every file read one after another.
+3. **Give a paper many of something.** 5,000 revisions, 2,000 files, 200 people with 400
+   threads. Found: a paper's page of 16 MB; every file read one after another; a file's
+   page that took two seconds to take a key.
 4. **Make every browser test refuse what no page should do**, after first only collecting it
    over the whole suite. Found: pages fetched before anyone asked; a field's pattern that
    browsers ignored; a caret put where no text can go.
@@ -605,10 +606,13 @@ ordinary use. Seven ways of looking found them, and each is cheap to do again:
    proxy sent a posted form to an address no browser could reach.
 
 Tried the same way and nothing found: thirty connections typing into one file at once (kept
-as a test in `sync.sandbox.test`); 400 threads and 400 proposals on one file (both lists
-took about 20 ms on the server; not kept, and their panels in the browser were not tried).
+as a test in `sync.sandbox.test`); 400 threads and 400 proposals on one file, on the server
+(both lists took about 20 ms; not kept); and each tool of the visual view worked slowly
+while a second tab typed steadily into another paragraph of the same file: a table cell, a
+caption, a formula, the reference picker, the menu, a selection, a comment being written,
+and typing itself. All eight kept their place and their text, three times over (not kept).
 
-Not yet tried: a paper with hundreds of people on it; a second browser.
+Not yet tried: 400 proposals in the browser; a second browser.
 
 If more is to be built before those are settled, the candidates are in the code as
 `shortcut:` comments (seven of them, each saying when it stops being good enough) and in the
@@ -890,6 +894,30 @@ Two things about tests, found on the way and not about the product:
   browser test means writing to the database from it.
 - **"Changes since"** on a row compares with the row below it. With the list thinned, that
   may be an older revision than the one just before. It says which.
+
+## A file's comments on a paper with many people
+
+- **What was wrong.** Every open thread on a file carries a form for replying, and each form
+  listed everyone on the paper who could be mentioned, a box apiece. So the page drew a box for each person under each thread, and typing into the text slowed as they grew: the editor draws its panels again as its saving status changes, which is at every key.
+  Measured in a browser, on one machine, once each:
+
+  | People | Threads | Boxes  | Elements on the page | A key typed, median |
+  | ------ | ------- | ------ | -------------------- | ------------------- |
+  | 1      | 1       | 1      | 174                  | 17 ms               |
+  | 30     | 100     | 2,901  | 7,758                | 49 ms               |
+  | 200    | 400     | 79,601 | 166,558              | 1.8 s               |
+
+- **Now** a form lists who can be mentioned once someone starts on it: when the keyboard
+  first goes into it (`Say` in `Threads.tsx`). The same three papers after the change: 17 ms,
+  17 ms and 34 ms a key; 1,758 elements for the middle one and about 6,500 for the largest.
+- **Held by** a step in the thread test: no boxes under a thread until its reply is begun,
+  and then the people. It failed on the old code. The measurements came from a probe that
+  wrote people and threads straight into the database; it is not kept.
+- **Not changed:** the comments still draw every thread again at each key typed, which is
+  the 17 ms that became 34 with 400 of them. The list is asked for again every five seconds
+  whether or not anything changed (273 KB for 400 threads).
+- **The paper's own page with 200 people** was looked at in the same probe: 804 KB, a third
+  of a second, 405 forms. Slow to no one, and larger than it need be. Not changed.
 
 ## Pages fetched before anyone asked for them
 
@@ -1250,7 +1278,7 @@ Changed on the way, and worth keeping:
   with the arrow keys. Whenever the editor drew itself again while the menu was open, the
   first item took the keyboard back. From the code, the editor draws itself again when
   anyone in the file arrives, leaves or moves their caret, so with a second person at work
-  it could happen at any moment. Seen when the same person opened the file a second time and closed it; with someone typing alongside it was not tried.
+  it could happen at any moment. Seen when the same person opened the file a second time and closed it. With the fix in, the menu was worked with the arrow keys while a second tab typed steadily, three times, and kept its place.
 - **Why.** The menu took the keyboard in an effect that ran again each time it was handed a
   new function for closing, and the editor hands it a new one every time it draws.
 - **How it showed.** The browser test of the menu presses the down arrow and looks at the

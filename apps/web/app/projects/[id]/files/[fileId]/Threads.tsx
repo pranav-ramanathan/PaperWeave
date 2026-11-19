@@ -23,8 +23,13 @@ function Say(props: {
   const [to, setTo] = useState<string[]>([]);
   const [problem, setProblem] = useState('');
   const [busy, setBusy] = useState(false);
+  // The people who can be mentioned are listed once someone starts on the form, not before.
+  // Every open thread has a form for replying, so listing them at once drew a box for each
+  // person under each thread: 2,900 of them for thirty people and a hundred threads.
+  const [begun, setBegun] = useState(false);
   return (
     <form
+      onFocus={() => setBegun(true)}
       onSubmit={async (e) => {
         e.preventDefault();
         setBusy(true);
@@ -34,6 +39,7 @@ function Say(props: {
         if (wrong) return;
         setBody('');
         setTo([]);
+        setBegun(false);
       }}
     >
       <label>
@@ -46,7 +52,7 @@ function Say(props: {
           required
         />
       </label>
-      {props.members.length > 0 && (
+      {begun && props.members.length > 0 && (
         <fieldset>
           <legend>Mention</legend>
           {props.members.map((m) => (
