@@ -578,7 +578,7 @@ What is left is not code that can be written here:
    noticed, and whether to keep that file is the owner's call.
 
 That list was written before a run of faults that were all in code, and each reached by
-ordinary use. Six ways of looking found them, and each is cheap to do again:
+ordinary use. Seven ways of looking found them, and each is cheap to do again:
 
 1. **Do the second of something.** Open a second file, redraw a chart, build an older
    revision, restore across a chart. Found: a PDF that stayed "behind" for ever and used up
@@ -592,16 +592,17 @@ ordinary use. Six ways of looking found them, and each is cheap to do again:
 4. **Make every browser test refuse what no page should do**, after first only collecting it
    over the whole suite. Found: pages fetched before anyone asked; a field's pattern that
    browsers ignored; a caret put where no text can go.
-
 5. **Press things twice, and look where the first look did not go.** Buttons pressed twice;
    the accessibility audit in the editor's stopped states and on pages only reached through a
    flow. Found: invitations and sign-in links with no limit on how many one address is sent;
    two revisions from one save; a stopped editor the keyboard could not reach.
-
 6. **Take a service away.** The build worker, the mail, the object store, the database.
    Found: "Compiling" for ever; an invitation left behind when its email could not be sent;
    an error page that the pages' own content policy refused; and a sync server that a
    database restart ended.
+7. **Run two of a service.** Found: two sync servers on one database quietly showed people
+   different text. Two workers were fine, and are now held by a test. Two web apps were not
+   tried.
 
 Tried the same way and nothing found: thirty connections typing into one file at once (kept
 as a test in `sync.sandbox.test`); 400 threads and 400 proposals on one file (both lists

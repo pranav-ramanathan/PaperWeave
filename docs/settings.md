@@ -48,7 +48,12 @@ the services in `infra/compose.yaml`.
   server takes a lock in the database before it serves, and a second one started against the
   same database waits, saying so in its log, until the first has stopped. That is also how a
   new version takes over from an old one.
-- **Any number of web apps and workers.** Each build and each chart is taken by one worker.
+- **Any number of web apps and workers.** Each build and each chart is taken by one worker. A
+  test has two workers reach for one build at the same moment, and then build two papers
+  side by side (`builds.sandbox.test`). Two web apps at once were not tried. One thing is known to differ with more than one:
+  the sign-in library counts how often a client has asked in each web app's own memory, so
+  its limit (five links a minute for a client) is that many times looser. The limit of ten an
+  hour for an address is counted in the database, and is not.
 
 ## When something is away
 
