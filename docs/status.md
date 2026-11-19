@@ -621,6 +621,14 @@ while a second tab typed steadily into another paragraph of the same file: a tab
 caption, a formula, the reference picker, the menu, a selection, a comment being written,
 and typing itself. All eight kept their place and their text, three times over (not kept).
 
+Also tried and found sound: every page and route under one paper, asked by someone on that
+paper with the ids of another paper they are not on (its file, build, revision, thread and
+proposal), by GET and by POST. Every answer was "not found", an empty list, or a refusal of
+the request's own content, none carried any of the other paper's text, and nothing of the
+other paper changed. Two answers are by design: `/api/sync-ticket` issues a ticket for any
+file, and the sync server refuses the connection (its tests hold that); the rename page
+checks the new name before it looks at the file. One probe, run once, not kept.
+
 Not yet tried: 400 proposals in the browser; a second browser.
 
 If more is to be built before those are settled, the candidates are in the code as
@@ -868,6 +876,20 @@ Two things about tests, found on the way and not about the product:
 - **Not covered:** a sign-in that runs out is not deleted, so nothing is told. Its editors
   keep their connections until they drop, and then find themselves signed out. The sync
   server checks a person's role on every edit, not whether they are still signed in.
+
+## Someone taken off the paper while a file is open
+
+- **What was right already.** The editor says "You no longer have access to this file, or it
+  has been deleted." and stops taking typing. What was typed before is saved and is the
+  owner's to see. Loading the page again gives "not found".
+- **What was wrong.** The build pane, the comments and the proposed changes went on asking the
+  server every two and five seconds for as long as the page stayed open, and were told "not
+  found" each time: five requests in six seconds, without end.
+- **Now** each asks once more, is told "not found", and stops (`notTheirs` and `STOP` in
+  `apps/web/lib/shown.ts`). A signed-out page is not stopped: it carries on once its person
+  signs in again, as it did before.
+- **Held by** a browser test (`recover.spec`: "someone taken off the paper while a file is
+  open"), which failed on the old code.
 
 ## What the browser keeps of a paper
 

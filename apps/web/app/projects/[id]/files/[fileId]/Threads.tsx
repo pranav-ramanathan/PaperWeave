@@ -2,7 +2,7 @@
 
 import type { Thread } from '@paperweave/server';
 import { useCallback, useEffect, useRef, useState } from 'react';
-import { whileShown } from '../../../../../lib/shown';
+import { notTheirs, STOP, whileShown } from '../../../../../lib/shown';
 
 export type Member = { userId: string; email: string };
 /** A stretch of the file as the editor holds it: its two ends, and the words between them. */
@@ -117,12 +117,13 @@ export default function Threads(props: {
 
   const read = useCallback(async () => {
     const res = await fetch(`${url}?file=${fileId}`).catch(() => null);
+    if (notTheirs(res)) return STOP;
     if (!res?.ok) return;
     const found: Thread[] = await res.json();
     setThreads(found);
     told.current(found);
   }, [url, fileId]);
-  useEffect(() => whileShown(() => void read(), 5000), [read]);
+  useEffect(() => whileShown(read, 5000), [read]);
 
   /** Post, read the threads again, and return what went wrong, if anything did. */
   const post = async (to: string, body: object) => {

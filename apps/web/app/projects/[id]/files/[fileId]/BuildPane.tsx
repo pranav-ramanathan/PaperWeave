@@ -4,7 +4,7 @@ import type { Build } from '@paperweave/server';
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { type Numbers, setNumbers } from '../../../../../lib/numbers';
 import { onShow, showInEditor } from '../../../../../lib/pdfsync';
-import { whileShown } from '../../../../../lib/shown';
+import { notTheirs, STOP, whileShown } from '../../../../../lib/shown';
 import PdfView, { type Mark } from './PdfView';
 
 type Builds = { latest: Build | null; lastGood: Build | null; edits: string };
@@ -45,6 +45,7 @@ export default function BuildPane({
     let stop = false;
     const poll = async () => {
       const res = await fetch(url).catch(() => null);
+      if (notTheirs(res)) return STOP;
       if (stop || !res?.ok) return;
       const next: Builds = await res.json();
       setBuilds(next);
@@ -63,7 +64,7 @@ export default function BuildPane({
         void compile();
       }
     };
-    const off = whileShown(() => void poll(), 2000);
+    const off = whileShown(poll, 2000);
     return () => {
       stop = true;
       off();

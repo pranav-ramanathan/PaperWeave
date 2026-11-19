@@ -464,6 +464,61 @@ test('what the browser kept of a paper is not handed to whoever uses it after a 
   expect((await asked()).status).toBe(401);
 });
 
+test('someone taken off the paper while a file is open is told, and the page stops asking', async ({
+  browser,
+}) => {
+  const owner = await person(browser, 'rec-removed-owner');
+  const editor = await person(browser, 'rec-removed-editor');
+  const zip = join(mkdtempSync(join(tmpdir(), 'paperweave-e2e-')), `Removed ${run}.zip`);
+  writeFileSync(zip, await writeZip([{ path: 'main.tex', bytes: Buffer.from(MAIN) }]));
+  await owner.page.goto('/sign-in');
+  await signIn(owner.page, owner.email);
+  await owner.page.getByLabel('Or import a ZIP of a LaTeX project').setInputFiles(zip);
+  await owner.page.getByRole('button', { name: 'Import ZIP' }).click();
+  await owner.page.getByLabel('Their email address').fill(editor.email);
+  await owner.page.getByLabel('Their role').selectOption('editor');
+  await owner.page.getByRole('button', { name: 'Send invitation' }).click();
+  await expect(owner.page.getByRole('status')).toContainText(editor.email);
+  const { page } = editor;
+  await page.goto(await emailedLink(editor.email, '/invitations/'));
+  await signIn(page, editor.email);
+  await page.getByRole('button', { name: 'Join this paper' }).click();
+  await page.getByRole('link', { name: 'main.tex' }).first().click();
+  await showSource(page);
+  await expect(status(page)).toHaveText('All edits saved.');
+  await typeAtStart(page, '% typed before being taken off\n');
+  await expect(status(page)).toHaveText('All edits saved.');
+
+  // The panels beside the text each ask the server again, and are told "not found".
+  const panels = /\/(threads|proposals|builds)(\?|$)/;
+  const told = ['threads', 'proposals', 'builds'].map((what) =>
+    page.waitForResponse(
+      (r) => r.url().includes(`/${what}`) && panels.test(r.url()) && r.status() === 404,
+      { timeout: 30_000 },
+    ),
+  );
+  await owner.page.reload();
+  await owner.page.getByRole('button', { name: `Remove ${editor.email}` }).click();
+  await expect(status(page)).toHaveText(
+    'You no longer have access to this file, or it has been deleted.',
+    { timeout: 20_000 },
+  );
+  await expect(source(page)).toHaveAttribute('contenteditable', 'false');
+  await Promise.all(told);
+  // Then they stop. Before, a page left open went on asking every two and five seconds, for
+  // as long as it stayed open, and was told "not found" each time.
+  let asked = 0;
+  page.on('request', (r) => panels.test(r.url()) && r.method() === 'GET' && asked++);
+  await page.waitForTimeout(6_000);
+  expect(asked).toBe(0);
+
+  // What was typed before is the owner's to see; the page itself is not the editor's now.
+  await owner.page.getByRole('link', { name: 'main.tex' }).first().click();
+  await showSource(owner.page);
+  await expect(source(owner.page)).toContainText('typed before being taken off');
+  expect((await page.reload())?.status()).toBe(404);
+});
+
 test('someone whose role changes while a file is open is told, and does not type into nothing', async ({
   browser,
 }) => {
