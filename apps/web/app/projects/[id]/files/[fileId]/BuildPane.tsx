@@ -9,6 +9,9 @@ import PdfView, { type Mark } from './PdfView';
 
 type Builds = { latest: Build | null; lastGood: Build | null; edits: string };
 
+/** A build takes a minute at most once it starts. Waiting twice that, it has not started. */
+const STUCK_AFTER_MS = 120_000;
+
 const time = (iso: string) =>
   new Date(iso).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
 
@@ -114,10 +117,15 @@ export default function BuildPane({
     showInEditor(place);
   };
   const building = latest?.status === 'queued';
+  // A build that has waited this long is not being built: the worker that builds is busy with
+  // a long queue, or is not running. "Compiling" for ever would say nothing was wrong.
+  const stuck = building && Date.now() - Date.parse(latest.createdAt) > STUCK_AFTER_MS;
   const state = !builds
     ? 'Checking for a PDF…'
     : building
-      ? 'Compiling…'
+      ? stuck
+        ? 'Still waiting to compile after two minutes. The build service may be busy or not running.'
+        : 'Compiling…'
       : !latest
         ? 'Not compiled yet.'
         : latest.status === 'failed'

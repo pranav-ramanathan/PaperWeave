@@ -48,16 +48,30 @@ export default async function ChartPage({
     </Link>
   );
   const spec = chart?.spec;
+  // A drawing takes seconds. One that has waited two minutes is not being drawn, and a page
+  // that went on loading itself every two seconds would do so for as long as it was open.
+  const stuck =
+    chart?.status === 'queued' &&
+    !!chart.waitingSince &&
+    Date.now() - Date.parse(chart.waitingSince) > 120_000;
   return (
     <main className="page">
-      {/* Until it is drawn, look again every two seconds. */}
-      {chart?.status === 'queued' && <meta httpEquiv="refresh" content="2" />}
+      {/* Until it is drawn, look again every two seconds: but not for ever. */}
+      {chart?.status === 'queued' && !stuck && <meta httpEquiv="refresh" content="2" />}
       <header className="bar">
         <h1>{chart ? `Chart ${chart.name}` : 'New chart'}</h1>
         {back}
       </header>
       {error && <p role="alert">{error}</p>}
-      {chart?.status === 'queued' && <p role="status">Waiting to be drawn…</p>}
+      {chart?.status === 'queued' &&
+        (stuck ? (
+          <p role="alert">
+            Still waiting to be drawn after two minutes. The service that draws charts may be busy
+            or not running. Load this page again to look once more.
+          </p>
+        ) : (
+          <p role="status">Waiting to be drawn…</p>
+        ))}
       {chart?.status === 'failed' && <p role="alert">Could not be drawn: {chart.problem}</p>}
       {chart?.missing && (
         <p role="status">

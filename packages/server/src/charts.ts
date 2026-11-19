@@ -40,6 +40,8 @@ export type Chart = {
   drawnAt: string | null;
   /** The data file is no longer the version this was drawn from. */
   stale: boolean;
+  /** While it waits to be drawn: when a drawing was last asked for on this paper. */
+  waitingSince: string | null;
   /** It has been drawn, but a file of it is no longer in the paper: deleted, or the paper was
    * put back to before it was drawn. Drawing it again puts the files back. */
   missing: boolean;
@@ -343,7 +345,8 @@ export async function listCharts(
     `select c.id, c.name, c.dataset_file_id, c.spec, c.status, c.problem, c.left_out, c.drawn_at,
             c.drawn_digest, c.caption, c.alt, f.path, f.digest, f.eol, f.bom, f.head_seq,
             (select count(*) from files k where k.project_id = c.project_id
-               and k.path in ('charts/' || c.name || '.pdf', 'charts/' || c.name || '.png'))::int as kept
+               and k.path in ('charts/' || c.name || '.pdf', 'charts/' || c.name || '.png'))::int as kept,
+            (select max(r.created_at) from chart_requests r where r.project_id = c.project_id) as asked_at
      from charts c left join files f on f.id = c.dataset_file_id
      where c.project_id = $1 order by c.name`,
     [projectId],
@@ -367,6 +370,7 @@ export async function listCharts(
       leftOut: r.left_out,
       drawnAt: r.drawn_at?.toISOString() ?? null,
       stale: r.status === 'drawn' && versions.get(r.dataset_file_id) !== r.drawn_digest,
+      waitingSince: r.status === 'queued' ? (r.asked_at?.toISOString() ?? null) : null,
       missing: r.drawn_at !== null && r.kept < 2,
       alt: r.alt,
       caption: r.caption,

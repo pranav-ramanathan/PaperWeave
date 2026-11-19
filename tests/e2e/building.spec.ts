@@ -216,3 +216,41 @@ test('an editor nobody is looking at asks the server for nothing', async ({ brow
   await expect.poll(() => new Set(asked).size, { timeout: 1500 }).toBe(3);
   await expect(buildStatus(page)).toHaveText('The PDF is up to date.');
 });
+
+test('a build that is not being built says so, and does not say "compiling" for ever', async ({
+  browser,
+}) => {
+  const { page, email } = await person(browser, 'build-stuck');
+  await page.goto('/sign-in');
+  await signIn(page, email);
+  await page
+    .getByLabel('Or import a ZIP of a LaTeX project')
+    .setInputFiles(await fixtureZip('Stuck'));
+  await page.getByRole('button', { name: 'Import ZIP' }).click();
+  await page.getByRole('link', { name: 'main.tex' }).first().click();
+  await expect(buildStatus(page)).toHaveText('The PDF is up to date.', { timeout: 60_000 });
+
+  // The server's answer as it would be with the build worker stopped: the newest build has
+  // been waiting, first for a few seconds and then for five minutes.
+  let since = 5_000;
+  await page.route(/\/projects\/[0-9a-f-]+\/builds$/, async (route) => {
+    if (route.request().method() !== 'GET') return route.fulfill({ status: 200, json: {} });
+    const real = await (await route.fetch()).json();
+    const waiting = {
+      ...real.latest,
+      id: '00000000-0000-4000-8000-000000000000',
+      status: 'queued',
+      createdAt: new Date(Date.now() - since).toISOString(),
+      finishedAt: null,
+      hasPdf: false,
+    };
+    await route.fulfill({ json: { ...real, latest: waiting } });
+  });
+  await expect(buildStatus(page)).toHaveText('Compiling…');
+  since = 5 * 60_000;
+  await expect(buildStatus(page)).toHaveText(
+    'Still waiting to compile after two minutes. The build service may be busy or not running.',
+  );
+  // The last PDF that was built is still shown meanwhile.
+  await expect(build(page).getByRole('group', { name: /^Page 1 of/ })).toBeVisible();
+});

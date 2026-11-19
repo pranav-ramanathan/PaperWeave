@@ -102,6 +102,10 @@ test('a chart is drawn from approved data into files of the paper, which a build
   expect(await charts(p)).toMatchObject([
     { id, name: 'latency', dataPath: 'data/latency.csv', status: 'queued', stale: false },
   ]);
+  // While it waits it says since when, so that a page can tell a wait from a drawing service
+  // that is not running. Once drawn it does not.
+  const since = (await charts(p))[0].waitingSince!;
+  expect(Date.now() - Date.parse(since)).toBeLessThan(60_000);
   expect(await code(chartPng(t.pool, store, users.owner.id, p.id, id))).toBe('not_found');
 
   expect(await drawNext(t.pool, store, image)).toBe(true);
@@ -111,6 +115,7 @@ test('a chart is drawn from approved data into files of the paper, which a build
       status: 'drawn',
       stale: false,
       problem: null,
+      waitingSince: null,
       // The row with no latency.
       leftOut: 1,
       alt: 'Line chart of latency (ms) against day.',

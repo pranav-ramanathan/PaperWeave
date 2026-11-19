@@ -905,6 +905,17 @@ Two things about tests, found on the way and not about the product:
   looked the newest build up twice whenever it was also the newest with a PDF, which is
   nearly always. Once now: 113 ms down to 58 ms for a paper of 2,000 files, 10 ms to 6 ms
   for a small paper with 10,000 builds (`docs/benchmarks.md`).
+- **A build that is not being built says so.** With the build worker stopped, or far behind,
+  a build stays waiting and the pane said "Compiling…" for as long as it did. After two
+  minutes it now says the build is still waiting and that the build service may be busy or
+  not running. (A build takes a minute at most once started.) A browser test holds it by
+  answering the pane as the server would with the worker stopped; the worker itself was not
+  stopped.
+- **A chart that is not being drawn says so too.** Its page loaded itself again every two
+  seconds for as long as the chart waited. After two minutes it now stops, and says the
+  service that draws charts may be busy or not running. A chart says since when it has been
+  waiting (`waitingSince`, held by a service test). The page's own two lines were not run
+  with a stopped worker: nothing here can stop one in a browser test.
 - **An editor nobody is looking at asks for nothing.** Each open editor asked how the builds
   stood every two seconds, and for the threads and the proposals every five, for as long as
   its tab was open, in front or not. They now wait while the tab is hidden and ask at once
