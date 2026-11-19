@@ -74,6 +74,8 @@ type Sync = {
   held: boolean;
   /** The server would not take an edit for its size. Their unsaved edits cannot be kept. */
   tooLarge: boolean;
+  /** Their sign-in has ended. The page waits for them to sign in again. */
+  signedOut: boolean;
 };
 type Mode = 'visual' | 'source';
 /** The sync server's answer to a structural edit. */
@@ -209,6 +211,7 @@ export default function FileEditor(props: {
     refused: false,
     held: false,
     tooLarge: false,
+    signedOut: false,
   });
   const keepEdits = useRef(() => {});
   const discardEdits = useRef(() => {});
@@ -228,15 +231,21 @@ export default function FileEditor(props: {
         // Nothing is asked of the server until they are discarded.
         if (oversized) throw new Error('held until the person discards them');
         // A ticket that cannot be fetched is the network or the server having a bad moment, not
-        // a refusal: the attempt ends here and another is made shortly. (Signed out is an
-        // answer, and comes back without a ticket.)
-        const answer = await fetch(`/api/sync-ticket?file=${fileId}`)
-          .then((res) => (res.ok || res.status === 401 ? res.json() : null))
-          .catch(() => null);
+        // a refusal: the attempt ends here and another is made shortly.
+        const res = await fetch(`/api/sync-ticket?file=${fileId}`).catch(() => null);
+        const answer = res?.ok ? await res.json().catch(() => null) : null;
+        // Signed out is not a refusal either: their sign-in ran out, or they signed out in
+        // another tab. What they have typed stays here, and the page goes on asking, so that it
+        // carries on once they have signed in again.
+        const signedOut = res?.status === 401;
+        update({ signedOut });
         if (!answer) {
           stumbled = true;
-          throw new Error('no ticket this time');
+          throw new Error(signedOut ? 'signed out' : 'no ticket this time');
         }
+        // Someone else has signed in on this browser. This page, and whatever is unsaved in
+        // it, is not theirs: an empty ticket is refused, and the editor stops.
+        if (answer.user !== user) return '';
         const { ticket, restored } = answer;
         // Coming back online to a paper that was restored meanwhile: this person's unsent edits
         // were made to text that is no longer there. They are held until the person decides.
@@ -572,15 +581,17 @@ export default function FileEditor(props: {
       ? 'An edit of yours is too large to save, so your unsaved edits cannot be kept. Copy what you need from them, then discard them. To add a large file to the paper, upload it.'
       : sync.held
         ? 'This paper was restored to an earlier revision while you were offline. Your edits from before that are not saved.'
-        : !sync.loaded
-          ? 'Opening…'
-          : !sync.connected
-            ? `Offline. ${sync.unsaved ? 'Your edits are waiting to be saved.' : 'Nothing is waiting to be saved.'}`
-            : !canWrite
-              ? 'Read only. You can read along but not edit.'
-              : sync.unsaved
-                ? 'Saving your edits…'
-                : 'All edits saved.';
+        : sync.signedOut
+          ? `You are signed out. Sign in again in another tab and this page will carry on. ${sync.unsaved ? 'Your edits are kept here until then.' : ''}`.trim()
+          : !sync.loaded
+            ? 'Opening…'
+            : !sync.connected
+              ? `Offline. ${sync.unsaved ? 'Your edits are waiting to be saved.' : 'Nothing is waiting to be saved.'}`
+              : !canWrite
+                ? 'Read only. You can read along but not edit.'
+                : sync.unsaved
+                  ? 'Saving your edits…'
+                  : 'All edits saved.';
   return (
     <section aria-label={`Editor for ${props.path}`}>
       <div className="editor-bar">
@@ -588,6 +599,11 @@ export default function FileEditor(props: {
         <span role="status" aria-live="polite" data-state={sync.connected ? 'online' : 'offline'}>
           {status}
         </span>
+        {sync.signedOut && !sync.refused && (
+          <a href="/sign-in" target="_blank" rel="noreferrer">
+            Sign in (opens a new tab)
+          </a>
+        )}
         {(sync.held || sync.tooLarge) && (
           <span role="group" aria-label="Your unsaved edits">
             {sync.held && !sync.tooLarge && (

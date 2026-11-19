@@ -80,6 +80,16 @@ What it found is fixed in the same change, or listed under "Open" with what to d
 - **A lost connection could lock the editor as if access had been refused.** Not a hole, but
   it was found the same way: see "A failed ticket fetch is not a refusal" in `docs/status.md`.
 
+- **A page left open by one person could carry on as the next person to sign in.** The editor
+  asks for a fresh ticket each time it connects, and took whoever was signed in on the browser
+  by then. On a shared computer: one person signs out with an editor still open, another signs
+  in, the first one's page loses its connection and makes a new one as the second person, and
+  what the first had typed and not yet saved is saved under the second's name. The ticket's
+  answer now says whom it is for, and a page made for someone else stops. A browser test
+  holds it, and fails with the check taken out. On the code before, the order had to be: the
+  second person signs in, then the page reconnects. That exact order was not run. It needs
+  both people to be on the same paper and the page to be left open.
+
 ## Open
 
 In rough order of how much they matter.
