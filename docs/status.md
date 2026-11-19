@@ -865,6 +865,21 @@ Two things about tests, found on the way and not about the product:
   keep their connections until they drop, and then find themselves signed out. The sync
   server checks a person's role on every edit, not whether they are still signed in.
 
+## What the browser keeps after a sign-out
+
+- **What was wrong.** A paper's PDF and the like are kept by the browser for an hour. After
+  "Sign out", asking for one again at its address gave the browser's own copy, with the
+  server never asked. Seen with a probe: the PDF came back whole after signing out, while
+  the server itself answered that nobody was signed in.
+- **Now** signing out tells the browser to forget what it has kept of the site. The same
+  probe then got the server's refusal.
+- **Held by** a browser test (`recover.spec`: "what the browser kept of a paper is not handed
+  to whoever uses it after a sign-out"), which failed on the old code.
+- **Not covered:** a sign-in that runs out or is ended from another device, and browsers
+  that do not act on the header. See `docs/security-review.md`.
+- **Found by** reading how each route tells browsers to keep its answers, after measuring
+  what a file of many figures fetched.
+
 ## Someone whose role changes while a file is open
 
 - **What was wrong.** The editor's page is made for the role its person had when it loaded.

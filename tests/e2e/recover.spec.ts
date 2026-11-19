@@ -398,6 +398,43 @@ test('a page left open by one person does not carry on as the next person to sig
   await expect(source(tab)).not.toContainText('typed by the first person');
 });
 
+test('what the browser kept of a paper is not handed to whoever uses it after a sign-out', async ({
+  browser,
+}) => {
+  test.setTimeout(120_000);
+  const { page, email } = await person(browser, 'rec-kept');
+  const zip = join(mkdtempSync(join(tmpdir(), 'paperweave-e2e-')), `Kept ${run}.zip`);
+  writeFileSync(zip, await writeZip([{ path: 'main.tex', bytes: Buffer.from(MAIN) }]));
+  await page.goto('/sign-in');
+  await signIn(page, email);
+  await page.getByLabel('Or import a ZIP of a LaTeX project').setInputFiles(zip);
+  await page.getByRole('button', { name: 'Import ZIP' }).click();
+  await page.getByRole('link', { name: 'main.tex' }).first().click();
+  await expect(page.locator('.build').getByRole('status')).toHaveText('The PDF is up to date.', {
+    timeout: 60_000,
+  });
+  // The PDF, which the browser keeps for an hour so as not to fetch it twice.
+  const fetched = () =>
+    page.evaluate(
+      () =>
+        performance
+          .getEntriesByType('resource')
+          .map((r) => r.name)
+          .find((name) => /\/builds\/[0-9a-f-]{36}\/pdf$/.test(name)) ?? '',
+    );
+  await expect.poll(fetched).not.toBe('');
+  const pdf = await fetched();
+  const asked = () => page.evaluate(async (url) => (await fetch(url)).status, pdf);
+  expect(await asked()).toBe(200);
+
+  await page.goto('/projects');
+  await page.getByRole('button', { name: 'Sign out' }).click();
+  await page.waitForURL(/\/sign-in/);
+  // Signed out, the browser no longer has it, and the server says no. Before, the browser
+  // went on handing over its own copy to anyone who asked at this address.
+  expect(await asked()).toBe(401);
+});
+
 test('someone whose role changes while a file is open is told, and does not type into nothing', async ({
   browser,
 }) => {

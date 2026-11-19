@@ -96,6 +96,18 @@ What it found is fixed in the same change, or listed under "Open" with what to d
   is deleted. A sign-in that merely runs out is not covered: see "An editor whose sign-in has
   ended" in `docs/status.md`.
 
+- **After a sign-out the browser still handed over a paper's PDF.** A build's PDF, its log
+  and what goes with them are kept by the browser for up to an hour so as not to be fetched
+  twice; pictures for a minute. Asked for again at the same address, they came from the
+  browser's own copy without the server being asked, whoever was at the browser by then. On
+  a shared computer that is the next person, if they have the address, which the browser's
+  history may hold. The answer to signing out now tells the browser to forget what it has
+  kept of the site (`Clear-Site-Data: "cache"`, in `apps/web/app/api/auth/[...all]/route.ts`).
+  A browser test holds it: before, the PDF came back; now the server is asked and says no.
+  Two limits. It covers pressing "Sign out" in that browser: a sign-in that runs out, or is
+  ended from elsewhere, leaves the copies until their hour is up. And it rests on the
+  browser honouring the header, which was tried in Chromium only.
+
 - **Nothing limited invitations.** Each one is an email from the service to an address the
   sender chose, and anyone can make an account and a paper. One person can now send 30 in an
   hour, over all their papers. The email names the inviter's address and nothing else of
