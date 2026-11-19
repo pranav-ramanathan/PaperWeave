@@ -59,6 +59,8 @@ const TEXT = 'source';
 const NO_ACCESS = 'no-access';
 /** The sync server's word for an edit it will not take for its size. */
 const TOO_LARGE = 'too-large';
+/** Its word for closing a connection whose sign-in has ended. */
+const SIGNED_OUT = 'signed-out';
 // Presence colours, chosen to stay readable on white. People are told apart by name as well.
 const COLOURS = ['#1f5fbf', '#8a4b00', '#1a7f55', '#9b2d86', '#b3261e', '#5b5bd6'];
 const colourFor = (name: string) =>
@@ -290,6 +292,13 @@ export default function FileEditor(props: {
       // (code 1009) is too. Sent again it would be refused again, so the editor stops.
       onClose: ({ event }) => {
         if (event.reason === NO_ACCESS) return refuse();
+        // The sign-in this was opened under has ended, and the server has stopped serving it.
+        // Closing the connection is what makes the next attempt (see onStatus), which asks for
+        // a ticket and finds out whether this person is still signed in.
+        if (event.reason === SIGNED_OUT) {
+          if (wantOpen) provider.configuration.websocketProvider.disconnect();
+          return;
+        }
         if (event.reason !== TOO_LARGE && event.code !== 1009) return;
         oversized = true;
         update({ tooLarge: true });

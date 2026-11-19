@@ -305,23 +305,21 @@ test('an editor whose sign-in has ended says so, keeps what is typed, and carrie
   await showSource(page);
   await expect(status(page)).toHaveText('All edits saved.');
 
-  // Signed out, as from another tab: the page is not told. Then the connection is lost, and
-  // something is typed before it comes back.
+  // Signed out, as from another tab. The editor opened under that sign-in is told at once, with
+  // no need for its connection to drop first. Not "you no longer have access": more can be
+  // typed, it is kept, and there is a way back in.
   const out = await page.request.post('/api/auth/sign-out', {
     headers: { origin: 'http://localhost:3100' },
     data: {},
   });
   expect(out.ok()).toBe(true);
-  await page.context().setOffline(true);
-  await expect(status(page)).toContainText('Offline.');
+  await expect(status(page)).toHaveText(
+    'You are signed out. Sign in again in another tab and this page will carry on.',
+    { timeout: 20_000 },
+  );
   await typeAtStart(page, '% typed while signed out\n');
-  await page.context().setOffline(false);
-
-  // Not "you no longer have access": the edit is kept, more can be typed, and there is a way
-  // back in.
   await expect(status(page)).toHaveText(
     'You are signed out. Sign in again in another tab and this page will carry on. Your edits are kept here until then.',
-    { timeout: 20_000 },
   );
   await expect(source(page)).toHaveAttribute('contenteditable', 'true');
   await expect(source(page)).toContainText('% typed while signed out');
@@ -368,11 +366,9 @@ test('a page left open by one person does not carry on as the next person to sig
     data: {},
   });
   expect(out.ok()).toBe(true);
-  await page.context().setOffline(true);
-  await expect(status(page)).toContainText('Offline.');
-  await typeAtStart(page, '% typed by the first person\n');
-  await page.context().setOffline(false);
   await expect(status(page)).toContainText('You are signed out.', { timeout: 20_000 });
+  await typeAtStart(page, '% typed by the first person\n');
+  await expect(status(page)).toContainText('Your edits are kept here until then.');
 
   // The second person signs in on the same browser.
   const tab = await page.context().newPage();

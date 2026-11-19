@@ -1,6 +1,6 @@
 # To report to the sync library's authors
 
-Three things in `@hocuspocus/server` and `@hocuspocus/provider` (both 4.8.0) that this project
+Four things in `@hocuspocus/server` and `@hocuspocus/provider` (both 4.8.0) that this project
 works around. None has been reported: the session that found them could only write to this
 repository. Each is written so that it can be filed as it stands.
 
@@ -68,3 +68,19 @@ without connecting, and nothing connects later: `connect()` returns at once whil
 is still `connected`, which it is until the close has finished. This project asks again from a `status`
 listener whenever the status becomes `disconnected` and it wants to be connected
 (`FileEditor.tsx`), and its tests wait for the old connection to close before reconnecting.
+
+## 4. After the server closes a document, the provider still says it is connected
+
+**Packages:** both. **Cost here:** an editor that showed "All edits saved" while the server
+had stopped serving it, until this project made the editor drop the connection itself.
+
+This one may be as intended, and then it is the documentation that is missing something.
+`Connection.close()` on the server removes the connection from its document and sends a close
+_message_; the WebSocket stays open, since one socket can carry several documents. The provider
+calls `onClose` with code 1000 and the server's reason, but its socket's status stays
+`connected` and nothing reconnects. An application that shows the status as "connected, and
+so saved" is wrong from then on, and nothing it types is taken.
+
+What would help: say in the documentation of `connection.close()` and of the provider's
+`onClose` that the socket stays up and that the application must act; or give the provider a
+state for "this document was closed by the server".

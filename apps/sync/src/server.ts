@@ -18,7 +18,8 @@ import pg from 'pg';
 import * as Y from 'yjs';
 import { metricsText, newCounts, serveMetrics } from './metrics.ts';
 
-type Context = { userId: string; projectId: string };
+/** Who a connection is, on which paper, and under which sign-in (null for a ticket that names none). */
+type Context = { userId: string; projectId: string; sessionId: string | null };
 
 /** y-protocols sync message types. Step 1 only asks what the server has; 1 and 2 carry edits. */
 const SYNC_STEP_1 = 0;
@@ -66,13 +67,14 @@ export async function startSync(opts: {
 
     async onAuthenticate({ token, documentName, connectionConfig }) {
       try {
-        const userId = verifyTicket(secret, token, documentName);
-        if (!userId) throw new Error('unauthorized');
+        const ticket = verifyTicket(secret, token, documentName);
+        if (!ticket) throw new Error('unauthorized');
+        const { userId, sessionId } = ticket;
         // Throws for anyone who is not on the paper: the connection is refused.
         const file = await openFile(pool, userId, documentName);
         connectionConfig.readOnly = !file.canWrite;
         counts.connections++;
-        return { userId, projectId: file.projectId };
+        return { userId, projectId: file.projectId, sessionId };
       } catch (err) {
         counts.refusedConnections++;
         throw err;
@@ -209,7 +211,17 @@ export async function startSync(opts: {
   await listener.connect();
   await listener.query('listen acl');
   await listener.query('listen file_edits');
+  await listener.query('listen session_ended');
   listener.on('notification', async ({ channel, payload }) => {
+    if (channel === 'session_ended') {
+      // Signed out: the editors opened under that sign-in are closed. Not for good, as far as
+      // this server knows: each asks for a new ticket, and gets one only if still signed in.
+      for (const document of server.hocuspocus.documents.values())
+        for (const connection of document.getConnections() as Connection<Context>[])
+          if (connection.context.sessionId === payload)
+            connection.close({ code: 4401, reason: 'signed-out' });
+      return;
+    }
     if (channel === 'file_edits') {
       // An edit made on the server (a restore, say): it is already in the log, so it only needs
       // to reach the people who have the file open.
