@@ -1,5 +1,5 @@
 import { expect, test } from 'vitest';
-import { checkChart, type ChartSpec, describeChart, vegaLite } from './charts.ts';
+import { CHART_COLOURS, checkChart, describeChart, type ChartSpec, vegaLite } from './charts.ts';
 import type { Column } from './data.ts';
 
 const columns: Column[] = [
@@ -147,4 +147,17 @@ test('a chart that would mislead is refused', () => {
   expect(code(() => draw(grouped, { columns: columns.slice(0, 3), rows: [] }))).toBe(
     'invalid_input',
   );
+});
+
+test('every colour of a chart can be made out against the white it is printed on', () => {
+  // Relative luminance and contrast as WCAG defines them. Graphics need 3 to 1.
+  const part = (c: number) => (c <= 0.04045 ? c / 12.92 : ((c + 0.055) / 1.055) ** 2.4);
+  const luminance = (hex: string) => {
+    const [r, g, b] = [1, 3, 5].map((i) => part(parseInt(hex.slice(i, i + 2), 16) / 255));
+    return 0.2126 * r + 0.7152 * g + 0.0722 * b;
+  };
+  const onWhite = (hex: string) => 1.05 / (luminance(hex) + 0.05);
+  expect(CHART_COLOURS).toHaveLength(8);
+  expect(new Set(CHART_COLOURS).size).toBe(8);
+  for (const colour of CHART_COLOURS) expect(onWhite(colour), colour).toBeGreaterThanOrEqual(3);
 });
