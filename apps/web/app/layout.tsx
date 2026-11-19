@@ -3,6 +3,7 @@ import { connection } from 'next/server';
 import type { ReactNode } from 'react';
 import 'katex/dist/katex.min.css';
 import './globals.css';
+import Fresh from './Fresh';
 
 export const metadata = { title: 'PaperWeave' };
 
@@ -17,7 +18,10 @@ export default async function Layout({ children }: { children: ReactNode }) {
       <head>
         <meta property="csp-nonce" nonce={nonce} />
       </head>
-      <body>{children}</body>
+      <body>
+        <Fresh />
+        {children}
+      </body>
     </html>
   );
 }

@@ -578,7 +578,7 @@ What is left is not code that can be written here:
    noticed, and whether to keep that file is the owner's call.
 
 That list was written before a run of faults that were all in code, and each reached by
-ordinary use. Nine ways of looking found them, and each is cheap to do again:
+ordinary use. Ten ways of looking found them, and each is cheap to do again:
 
 1. **Do the second of something.** Open a second file, redraw a chart, build an older
    revision, restore across a chart. Found: a PDF that stayed "behind" for ever and used up
@@ -614,6 +614,9 @@ ordinary use. Nine ways of looking found them, and each is cheap to do again:
 9. **Run it as it would be deployed, and read what each answer tells the browser.** Two
    copies of the web app behind a proxy; how long each answer may be kept. Found: forms
    that sent the browser to an inner address; a PDF handed over after signing out.
+
+10. **Go back and forward.** Found: pages that showed what was no longer so, a removed
+    member and a lost role among them.
 
 Tried the same way and nothing found: thirty connections typing into one file at once (kept
 as a test in `sync.sandbox.test`); 400 threads and 400 proposals on one file, on the server
@@ -1237,7 +1240,42 @@ second one.
 - **Not changed:** two requests sent without the page still make two; the server does not
   know them apart from two meant presses. Send invitation as above. Propose has no kept test.
 - **How it was made.** Planned by one agent, written by another, checked here.
-- Not tried: forms sent twice by going back and forward.
+- Going back and forward: see the next section.
+
+## A page come back to
+
+- **What was tried**, with a probe: eight cases of a person pressing Back, and Forward, after
+  doing something. Nothing was made twice: a saved revision, a new paper and an imported ZIP
+  each stayed one, since every form answers with a redirect. The editor came back live after
+  Forward, with what was typed.
+- **What was wrong.** The browser's router showed the page it had kept, without asking the
+  server. On the paper's page after Back: a comment thread started meanwhile was missing; a
+  file deleted meanwhile was still listed, with its Delete button; a member removed meanwhile
+  was still listed, and pressing Remove on that row ended on "That person is the owner or is
+  not in the project."; and a member just made a viewer was still told "You are an editor",
+  with the editing buttons, each of which the server refused.
+- **Now** a page come back to is asked for again (`Fresh` in `apps/web/app/Fresh.tsx`, in the
+  root layout). The probe again: the thread is listed, the deleted file and the removed member
+  are gone, the viewer is told so. Not on a file's editor page, which keeps words not yet saved
+  and is kept current by the sync server, and not when the browser says it is offline.
+- **A fault the fix brought, and how it was put right.** Asked for again, the layout carries a
+  new number for the page's scripts and style sheets, while the page keeps the policy it was
+  loaded with. An editor opened afterwards took the new number and its style sheets were
+  refused. The page's number is now read once, as the page's scripts start
+  (`pageNonce` in `apps/web/lib/nonce.ts`, imported by `Fresh` so that it is read on every
+  page). Sending a form does not change the number (checked); only this asking again did.
+- **Held by** a browser test (`files.spec`: "a page come back to says what is so now"): the
+  thread listed and the deleted file gone after Back, which both failed on the old code; the
+  editor keeping words typed offline across Back and Forward; and an editor opened for the
+  first time after Back, which fails with the content-policy refusal if the early read is
+  taken out.
+- **Not changed:** a page left open without navigating still shows what it showed, a role
+  included (only the editor's panels ask again). The offline check knows only the network
+  interface: with the server down, asking again fails and the browser loads the page afresh,
+  which on these pages loses nothing. After Back and Forward the editor opens in the visual
+  view, whichever view was in use.
+- **How it was made.** Planned and its fault judged by one agent, written by another, checked
+  here.
 
 ## When an email cannot be sent
 
