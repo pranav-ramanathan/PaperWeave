@@ -92,6 +92,77 @@ export async function listen(
 }
 
 /**
+ * Be the only process doing a job on a database, for as long as this process runs. If another
+ * is doing it, wait until it stops.
+ *
+ * The database gives the job's lock to one connection at a time and takes it back when that
+ * connection ends, however it ends. If the connection holding it is lost (the database
+ * restarted), the lock is asked for again; if another process got there first, `displaced` is
+ * called, and this process must stop doing the job. Returns how to give the job up.
+ */
+export async function onlyOne(
+  url: string | undefined,
+  job: string,
+  displaced: () => void,
+  waiting: () => void = () => {},
+): Promise<() => Promise<void>> {
+  let stopped = false;
+  let current: pg.Client | null = null;
+  const take = async (wait: boolean): Promise<boolean> => {
+    const client = new pg.Client({ connectionString: url });
+    let held = false;
+    const lost = () => {
+      if (!held) return;
+      held = false;
+      if (current === client) current = null;
+      if (!stopped) void retake();
+    };
+    client.on('error', lost);
+    client.on('end', lost);
+    try {
+      await client.connect();
+      const { rows } = await client.query('select pg_try_advisory_lock(hashtext($1)) as got', [
+        job,
+      ]);
+      if (!rows[0].got) {
+        if (!wait) {
+          await client.end().catch(() => {});
+          return false;
+        }
+        waiting();
+        await client.query('select pg_advisory_lock(hashtext($1))', [job]);
+      }
+    } catch (err) {
+      await client.end().catch(() => {});
+      throw err;
+    }
+    held = true;
+    current = client;
+    return true;
+  };
+  // After losing the connection: take the job back if nobody has it, and say so if someone has.
+  const retake = async () => {
+    for (;;) {
+      if (stopped) return;
+      try {
+        if (!(await take(false))) displaced();
+        return;
+      } catch {
+        // The database is still away. Nobody else can have taken the job from it either.
+        await new Promise((r) => setTimeout(r, 1000));
+      }
+    }
+  };
+  await take(true);
+  return async () => {
+    stopped = true;
+    const client = current;
+    current = null;
+    await client?.end().catch(() => {});
+  };
+}
+
+/**
  * Run `fn` in one transaction: all of its writes happen, or none.
  *
  * While a connection is out of the pool, its failing is its borrower's to hear: the pool only
