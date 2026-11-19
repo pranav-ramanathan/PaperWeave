@@ -10,22 +10,24 @@ large slowdown trips it.
 
 | What | Took | Ceiling |
 | --- | --- | --- |
-| Parse a 150 KB file | 9.25 ms | 500 ms |
-| Parse it again after one keystroke | 0.16 ms | 100 ms |
-| Import a six-file paper | 90.4 ms | 5000 ms |
-| Import a paper of 2,000 files | 3.29 s | 60 s |
-| Read all its files for their labels | 1.14 s | 30 s |
-| Download it as a ZIP | 30.5 ms | 5000 ms |
-| Save one keystroke | 1.59 ms | 50 ms |
-| Open a file with 1,000 edits in its log | 2.24 ms | 2000 ms |
-| Compact that log | 18.7 ms | 5000 ms |
-| Build the paper to a PDF | 1.03 s | 120 s |
-| Build it again, nothing changed | 18.1 ms | 5000 ms |
-| List a paper's revisions, of 5,000 | 57.6 ms | 2000 ms |
-| Read how a paper's builds stand, after 10,000 | 8.04 ms | 2000 ms |
-| Check the spelling and grammar of a section | 57.4 ms | 20000 ms |
-| Check it again, nothing changed | 4.04 ms | 2000 ms |
-| Draw a chart of 200 points to PDF and PNG | 0.80 s | 60 s |
+| Parse a 150 KB file | 9.98 ms | 500 ms |
+| Parse it again after one keystroke | 0.08 ms | 100 ms |
+| Import a six-file paper | 75.5 ms | 5000 ms |
+| Import a paper of 2,000 files | 3.24 s | 60 s |
+| Read all its files for their labels | 1.05 s | 30 s |
+| Save a revision of the 2,000-file paper | 64.2 ms | 30000 ms |
+| Read how its builds stand, as every open editor does every two seconds | 57.7 ms | 2000 ms |
+| Download the six-file paper as a ZIP | 31.0 ms | 5000 ms |
+| Save one keystroke | 1.56 ms | 50 ms |
+| Open a file with 1,000 edits in its log | 2.10 ms | 2000 ms |
+| Compact that log | 19.7 ms | 5000 ms |
+| Build the paper to a PDF | 1.11 s | 120 s |
+| Build it again, nothing changed | 18.0 ms | 5000 ms |
+| List a paper's revisions, of 5,000 | 44.1 ms | 2000 ms |
+| Read how a paper's builds stand, after 10,000 | 5.69 ms | 2000 ms |
+| Check the spelling and grammar of a section | 50.6 ms | 20000 ms |
+| Check it again, nothing changed | 4.19 ms | 2000 ms |
+| Draw a chart of 200 points to PDF and PNG | 0.76 s | 60 s |
 
 In the browser, from `tests/e2e/spike.spec.ts` on a 150 KB file: a keystroke reaches the
 source text within 40 ms and the screen within 150 ms at the 95th percentile, and another

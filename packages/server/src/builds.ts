@@ -128,11 +128,18 @@ export async function latestBuilds(
     `select ${COLUMNS} from builds b where b.project_id = $1 order by b.created_at desc limit 1`,
     [projectId],
   );
-  const good = await db.query(
-    `select ${COLUMNS} from builds b where b.project_id = $1 and b.pdf_digest is not null
-     order by b.created_at desc limit 1`,
-    [projectId],
-  );
+  // Usually the newest build has a PDF, and is then the newest with one: not looked up twice.
+  // Every open editor asks this every two seconds.
+  const newest: Build | null = latest.rows[0] ?? null;
+  const good: Build | null = newest?.hasPdf
+    ? newest
+    : ((
+        await db.query(
+          `select ${COLUMNS} from builds b where b.project_id = $1 and b.pdf_digest is not null
+           order by b.created_at desc limit 1`,
+          [projectId],
+        )
+      ).rows[0] ?? null);
   // Lets a client see that the paper has been still since it last looked.
   const edits = await db.query(
     `select p.manifest_version || '.' || coalesce(sum(f.head_seq), 0) as mark
@@ -141,8 +148,8 @@ export async function latestBuilds(
     [projectId],
   );
   return {
-    latest: latest.rows[0] ?? null,
-    lastGood: good.rows[0] ?? null,
+    latest: newest,
+    lastGood: good,
     edits: edits.rows[0].mark,
   };
 }
