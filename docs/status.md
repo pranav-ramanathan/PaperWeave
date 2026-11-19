@@ -1025,9 +1025,10 @@ Found by stopping the object store under a running service, by hand.
 - **Checked once by hand**, the audit and the narrow-window check included. No test is kept:
   nothing in the product fails on request, and stopping a service under the other tests is
   not something a kept test should do.
-- **Not tried:** the sync server stopped while pages are open (the editor says "Offline" for
-  that, which the recovery tests cover from the browser's side). The database stopped is the
-  next section.
+- **The sync server killed and started again under an open editor**, by hand: "Offline.
+  Nothing is waiting to be saved", then with something typed "Offline. Your edits are waiting
+  to be saved", and "All edits saved" 2.8 seconds after the server was back, with nothing
+  lost. Nothing needed changing. The database stopped is the next section.
 
 ## When the database is lost for a while
 

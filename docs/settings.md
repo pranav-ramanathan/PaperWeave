@@ -40,6 +40,32 @@ the services in `infra/compose.yaml`.
   network.
 - `/metrics` is on the sync server. Keep it off the public address or behind the token.
 
+## When something is away
+
+What people see, and what recovers by itself, when one of these stops and comes back. Each
+was tried by hand on one machine, except where it says otherwise; the details are in `docs/status.md`.
+
+- **The database.** Editors say "Saving your edits…" and go on taking typing. Pages show the
+  service's error page. The sync server and the workers keep running, make their connections
+  again and look up what they missed. Typing is saved within seconds of the database being
+  back.
+- **The object store.** Typing into a file that is already open is still saved. Pages that
+  read the paper's files show the error page; "Try again" works once the store is back.
+- **The sync server.** Editors say "Offline" and keep what is typed. It is saved within
+  seconds of the server being back.
+- **The workers.** Builds and charts wait. After two minutes the pages that show them say the
+  service may be busy or not running, and stop asking. (The workers themselves were not
+  stopped: a waiting build was shown to the page as the server would report it, and a chart
+  was held back from a worker that was running.)
+- **The mail server.** A sign-in link or an invitation that cannot be sent is said to have
+  failed on the page, is not counted against the hourly limits, and leaves nothing behind.
+- **The grammar server.** The editor says "The spelling and grammar checker did not answer"
+  and shows no findings. Typing is saved as usual.
+
+None of the services needs to be started again by hand after any of these. They do need
+something to start them again if their own process ends, which a fault in their own code
+could still cause.
+
 ## Not settings yet
 
 Decisions that will become settings or infrastructure once hosting is chosen:
