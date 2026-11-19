@@ -14,6 +14,7 @@ const FILES = {
     '\\begin{document}',
     '\\emph{Literate programming} treats a program as a work of literature~\\cite{knuth1984}.',
     'LaTeX was first released in 1984~\\cite{lamport1994}.',
+    '\\nocite{nodoi}',
     '\\bibliography{refs}',
     '\\end{document}',
     '',
@@ -22,6 +23,7 @@ const FILES = {
     '@article{knuth1984, author = {Knuth, Donald E.}, title = {Literate {P}rogramming}, journal = {The Computer Journal}, year = {1984}, doi = {10.1093/comjnl/27.2.97}}',
     '@book{lamport1994, author = {Leslie Lamport}, title = {LaTeX: A Document Preparation System}, year = {1993}, doi = {10.5555/lamport}}',
     '@misc{nodoi, title = {No DOI here}}',
+    '@misc{spare, title = {Kept for another paper}}',
     '',
   ].join('\n'),
 };
@@ -72,7 +74,16 @@ test('an entry is checked against the registry, and a claim against its source, 
   await signIn(page, owner.email);
   await page.getByLabel('Or import a ZIP of a LaTeX project').setInputFiles(zip);
   await page.getByRole('button', { name: 'Import ZIP' }).click();
-  await expect(page.getByText('3 entries. Every citation has one.')).toBeVisible();
+  await expect(page.getByText('4 entries. Every citation has one.')).toBeVisible();
+  // The table is of what the paper cites. An entry it never names is counted, not listed: a
+  // .bib file kept for many papers can hold thousands of those. They can be asked for.
+  await expect(
+    page.getByText('One more entry is in the paper’s .bib files and is not cited in it.'),
+  ).toBeVisible();
+  await expect(row(page, 'spare')).toHaveCount(0);
+  await page.getByRole('link', { name: 'List them too' }).click();
+  await expect(row(page, 'spare')).toContainText('No DOI to look up.');
+  await page.goto(page.url().replace(/\?.*$/, ''));
   const paper = page.url();
   await page.getByLabel('Their email address').fill(reviewer.email);
   await page.getByLabel('Their role').selectOption('reviewer');

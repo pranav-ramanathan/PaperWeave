@@ -4,7 +4,7 @@ import { bibEntries, citeIndex, describeEntry, includeGraph } from '@paperweave/
 import type pg from 'pg';
 import { authorize } from './authz.ts';
 import type { BlobStore } from './blobs.ts';
-import { texFiles } from './labels.ts';
+import { lineNumbers, texFiles } from './labels.ts';
 import { id } from './projects.ts';
 
 type Place = { fileId: string; path: string; line: number };
@@ -14,6 +14,8 @@ export type BibliographyEntry = Place & {
   /** "Shapiro et al. 2011. Conflict-Free Replicated Data Types". */
   description: string;
   doi: string | null;
+  /** Whether the paper names this key in a citation, \\nocite included, where its root reaches. */
+  cited: boolean;
 };
 export type CitationReport = {
   entries: BibliographyEntry[];
@@ -32,19 +34,21 @@ export async function citationReport(
   projectId: string,
 ): Promise<CitationReport> {
   await authorize(pool, userId, id(projectId), 'project.read');
-  const line = (text: string, at: number) => text.slice(0, at).split('\n').length;
   const report: CitationReport = { entries: [], missing: [], duplicates: [], command: 'cite' };
-  for (const file of await texFiles(pool, store, projectId, false, '\\.bib$'))
+  for (const file of await texFiles(pool, store, projectId, false, '\\.bib$')) {
+    const line = lineNumbers(file.text);
     for (const e of bibEntries(file.text))
       report.entries.push({
         key: e.key,
         type: e.type,
         description: describeEntry(e),
         doi: e.fields.doi?.replace(/^https?:\/\/(dx\.)?doi\.org\//i, '') || null,
+        cited: false,
         fileId: file.id,
         path: file.path,
-        line: line(file.text, e.at),
+        line: line(e.at),
       });
+  }
   const byKey = new Map<string, BibliographyEntry[]>();
   for (const e of report.entries) byKey.set(e.key, [...(byKey.get(e.key) ?? []), e]);
   for (const [key, entries] of byKey)
@@ -61,20 +65,24 @@ export async function citationReport(
     ? includeGraph(Object.fromEntries(tex.map((f) => [f.path, f.text])), root.path).order
     : tex.map((f) => f.path);
   const uses = new Map<string, number>();
+  const named = new Set<string>();
   for (const path of reached) {
     const file = tex.find((f) => f.path === path);
+    const line = lineNumbers(file?.text ?? '');
     for (const c of file ? citeIndex(file.text) : []) {
       uses.set(c.command, (uses.get(c.command) ?? 0) + 1);
+      named.add(c.key);
       if (!byKey.has(c.key))
         report.missing.push({
           key: c.key,
           command: c.command,
           fileId: file!.id,
           path,
-          line: line(file!.text, c.at),
+          line: line(c.at),
         });
     }
   }
+  for (const e of report.entries) e.cited = named.has(e.key);
   // \nocite puts an entry in the list without citing it in the text: never what to insert.
   uses.delete('nocite');
   report.command = [...uses].sort((a, b) => b[1] - a[1])[0]?.[0] ?? 'cite';

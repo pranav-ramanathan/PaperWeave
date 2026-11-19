@@ -12,6 +12,7 @@ import {
   blobStore,
   checkGrammar,
   compactFile,
+  citationReport,
   datasetProposal,
   exportZip,
   importZip,
@@ -130,6 +131,35 @@ test('the things people wait for, measured', async () => {
     (await ms(() => labelReport(t.pool, store, owner.id, large))) / 1000,
     's',
     30,
+  );
+  // A .bib file kept for many papers. The paper's page and every open editor read it whole.
+  const entries = Array.from(
+    { length: 8000 },
+    (_, i) =>
+      `@article{key${i},\n  author = {Author${i}, Ann and Other, Bo},\n  title = {A study of thing number ${i} and its consequences},\n  journal = {Journal of Things},\n  year = {${1950 + (i % 70)}},\n}\n`,
+  ).join('\n');
+  const cited = (
+    await importZip(
+      t.pool,
+      store,
+      owner.id,
+      await writeZip([
+        {
+          path: 'main.tex',
+          bytes: Buffer.from(
+            '\\documentclass{article}\n\\begin{document}\nx \\cite{key1}\n\\bibliography{refs}\n\\end{document}\n',
+          ),
+        },
+        { path: 'refs.bib', bytes: Buffer.from(entries) },
+      ]),
+      'Bench of citations',
+    )
+  )[0].id;
+  took(
+    'Read a bibliography of 8,000 entries',
+    (await ms(() => citationReport(t.pool, store, owner.id, cited))) / 1000,
+    's',
+    3,
   );
   // Every open editor asks how the paper's builds stand every two seconds, and the answer
   // compares each file with the revision that was built.
@@ -294,6 +324,11 @@ test('the things people wait for, measured', async () => {
       'source text within 40 ms and the screen within 150 ms at the 95th percentile, and another',
       "person's edit is on screen within 250 ms. Those are that test's limits; it prints what it",
       'measured on each run.',
+      '',
+      'A paper whose .bib file holds 8,000 entries and which cites one of them, in a browser,',
+      "measured once by hand: the paper's page is 254 KB and loads in 0.4 s. Before the table of",
+      "references was limited to what the paper cites, and each entry's line was found by reading",
+      'the file from its top: 22.8 MB and 12.1 s (5.9 MB and 1.9 s with 2,000 entries).',
       '',
       "A paper's page with 5,000 revisions, in a browser, measured once by hand: 183 KB and a",
       'quarter of a second. Before the list of revisions was limited to the newest fifty automatic',

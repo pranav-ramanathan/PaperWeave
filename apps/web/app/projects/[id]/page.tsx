@@ -63,6 +63,7 @@ export default async function Project({
     relabelled?: string;
     moved?: string;
     before?: string;
+    entries?: string;
     looked?: string;
     described?: string;
     language?: string;
@@ -140,6 +141,16 @@ export default async function Project({
     return '';
   };
   const query = await searchParams;
+  // The bibliography's table is of what the paper cites, and of anything a check has been
+  // recorded for. A .bib file kept for many papers holds thousands of entries this paper
+  // never names; each row here has forms, and 2,000 of them made a page of 6 MB.
+  const allEntries = query.entries === 'all';
+  const entryKeys = new Set<string>();
+  const oneOfEach = cited.entries.filter((e) => !entryKeys.has(e.key) && entryKeys.add(e.key));
+  const listedEntries = oneOfEach.filter(
+    (e) => allEntries || e.cited || checks.lookups[e.key] || checks.evidence[e.key]?.length,
+  );
+  const unlisted = oneOfEach.length - listedEntries.length;
   const { error, invited, saved, revision, restored, building, added, deleted, root } = query;
   const canWrite = can(project.role, 'file.write');
   const owner = project.role === 'owner';
@@ -498,19 +509,18 @@ export default async function Project({
                 Whether the source <strong>supports what the paper says</strong> is a person&apos;s
                 judgement about one claim. One says nothing about the other.
               </p>
-              <Wide label="Table of references">
-                <table>
-                  <thead>
-                    <tr>
-                      <th scope="col">Entry</th>
-                      <th scope="col">Is the entry right?</th>
-                      <th scope="col">Does it support the claim?</th>
-                    </tr>
-                  </thead>
-                  <tbody>
-                    {cited.entries
-                      .filter((e, i) => cited.entries.findIndex((x) => x.key === e.key) === i)
-                      .map((e) => {
+              {listedEntries.length > 0 && (
+                <Wide label="Table of references">
+                  <table>
+                    <thead>
+                      <tr>
+                        <th scope="col">Entry</th>
+                        <th scope="col">Is the entry right?</th>
+                        <th scope="col">Does it support the claim?</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {listedEntries.map((e) => {
                         const looked = checks.lookups[e.key];
                         const evidence = checks.evidence[e.key] ?? [];
                         const differing = looked?.comparison.filter((c) => !c.same) ?? [];
@@ -643,9 +653,20 @@ export default async function Project({
                           </tr>
                         );
                       })}
-                  </tbody>
-                </table>
-              </Wide>
+                    </tbody>
+                  </table>
+                </Wide>
+              )}
+              {unlisted > 0 && (
+                <p>
+                  {unlisted === 1
+                    ? 'One more entry is in the paper’s .bib files and is not cited in it.'
+                    : `${unlisted} more entries are in the paper’s .bib files and are not cited in it.`}{' '}
+                  <Link prefetch={false} href={`/projects/${id}?entries=all#bibliography`}>
+                    List them too
+                  </Link>
+                </p>
+              )}
             </>
           )}
         </>

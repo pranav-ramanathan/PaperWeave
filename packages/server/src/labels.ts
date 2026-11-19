@@ -20,6 +20,27 @@ export type LabelReport = {
   duplicates: { key: string; places: LabelPlace[] }[];
 };
 
+/**
+ * Which line of a text each place in it is on, the first being 1. The lines are found once.
+ * Asking for each place by reading the text from its top took seconds for a .bib file of
+ * thousands of entries: every entry read everything above it again.
+ */
+export function lineNumbers(text: string): (at: number) => number {
+  const starts = [0];
+  for (let i = text.indexOf('\n'); i >= 0; i = text.indexOf('\n', i + 1)) starts.push(i + 1);
+  return (at) => {
+    // The last line that starts at or before the place.
+    let low = 0;
+    let high = starts.length;
+    while (high - low > 1) {
+      const middle = (low + high) >> 1;
+      if (starts[middle] <= at) low = middle;
+      else high = middle;
+    }
+    return low + 1;
+  };
+}
+
 /** The text of every editable .tex file of a paper, by path, with each file's ID. */
 export async function texFiles(
   pool: Db,
@@ -72,11 +93,12 @@ export async function labelReport(
     const file = files.find((f) => f.path === path);
     if (!file) continue;
     const found = labelIndex(file.text);
+    const line = lineNumbers(file.text);
     const place = (x: { key: string; at: number }) => ({
       key: x.key,
       fileId: file.id,
       path,
-      line: file.text.slice(0, x.at).split('\n').length,
+      line: line(x.at),
     });
     for (const l of found.labels) report.labels.push(place(l));
     for (const r of found.refs) refs.push({ ...place(r), command: r.command });
