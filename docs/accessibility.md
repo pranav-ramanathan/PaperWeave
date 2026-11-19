@@ -23,6 +23,13 @@ Where this stands, what holds it there, and what nobody has checked yet.
   - It checks that nothing sticks out. It does not check that what is there is comfortable to
     use at that size; two of the pages were looked at by eye and read well.
 
+- **Between the text and the PDF, both ways, with the keyboard** (`synctex.spec`). From the
+  text, a button shows the caret's line in the PDF. From the PDF, the pages are scrolled with
+  the keyboard until the passage is in the middle of the pane, and a button goes to the text
+  for what is there, in whichever file it is.
+  - It is coarser than a double-click, which picks a word: it picks what is nearest the middle
+    of the pane. On a page with two columns it cannot say which column is meant.
+
 Other browser tests hold narrower things: composing text with an input method while someone
 else edits the same paragraph (`spike.spec`), switching views with the selection kept
 (`visual.spec`), and the equation, reference, citation, figure and table windows opened from
@@ -59,8 +66,6 @@ the keyboard (`insert.spec`).
 - **Browsers other than Chromium.** Firefox and Safari have not been run at all.
 - **Real input methods.** The composition test drives the browser's composition events; no
   Japanese, Chinese or Korean input method has been typed with.
-- **Going from the PDF to the text without a pointer.** It needs a double-click on a page.
-  Going from the text to the PDF works from the keyboard.
 - **Zoom, beyond the narrow-window test above.** Not checked: text enlarged by itself without
   the page being zoomed, wider spacing between letters and lines, and a narrow window on the
   pages the test does not visit (the differences between two revisions, renaming, a chart

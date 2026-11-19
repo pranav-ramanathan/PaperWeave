@@ -121,4 +121,32 @@ test('a line is shown in the PDF, and a place in the PDF leads back to its line'
   await pickIt();
   await expect(build(page).locator('.pdf-said')).toHaveText('That is line 6 of main.tex.');
   await expect.poll(() => caretLine(page)).toBe(6);
+
+  // The same without a pointer. The pages are scrolled from the keyboard until the passage is
+  // in the middle of the pane, and a button goes to the text for what is there. With the first
+  // page at the top, the middle of the pane is below its two paragraphs: the nearer is line 6.
+  await clickAfter(page, '.editor .cm-content', 'opening paragraph');
+  await expect.poll(() => caretLine(page)).toBe(4);
+  const pages = build(page).getByRole('region', { name: 'Pages of the PDF' });
+  await pages.focus();
+  await page.keyboard.press('ControlOrMeta+Home');
+  await expect.poll(() => pages.evaluate((el) => el.scrollTop)).toBe(0);
+  const go = build(page).getByRole('button', {
+    name: 'Go to the text for the middle of the pages shown',
+  });
+  await go.focus();
+  await page.keyboard.press('Enter');
+  await expect.poll(() => caretLine(page)).toBe(6);
+  // And further down, the second page, which is another file. Arrow keys scroll the pages
+  // until the top of the second page's text is in the middle of the pane.
+  await pages.focus();
+  const wanted = await pages.evaluate((el) => {
+    const second = el.querySelector<HTMLElement>('[data-page="2"]')!;
+    return second.offsetTop + second.offsetHeight * 0.16 - el.clientHeight / 2;
+  });
+  for (let i = 0; i < 300 && (await pages.evaluate((el) => el.scrollTop)) < wanted; i++)
+    await page.keyboard.press('ArrowDown');
+  await go.focus();
+  await page.keyboard.press('Enter');
+  await expect(page.getByRole('region', { name: 'Editor for second.tex' })).toBeVisible();
 });
