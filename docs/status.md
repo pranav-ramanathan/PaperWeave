@@ -578,7 +578,7 @@ What is left is not code that can be written here:
    noticed, and whether to keep that file is the owner's call.
 
 That list was written before a run of faults that were all in code, and each reached by
-ordinary use. Seven ways of looking found them, and each is cheap to do again:
+ordinary use. Eight ways of looking found them, and each is cheap to do again:
 
 1. **Do the second of something.** Open a second file, redraw a chart, build an older
    revision, restore across a chart. Found: a PDF that stayed "behind" for ever and used up
@@ -604,6 +604,10 @@ ordinary use. Seven ways of looking found them, and each is cheap to do again:
 7. **Run two of a service.** Found: two sync servers on one database quietly showed people
    different text. Two workers were fine, and are now held by a test. Two web apps behind a
    proxy sent a posted form to an address no browser could reach.
+
+8. **Change a thing while someone is part-way through working on it.** Resolve the thread
+   they are replying to; decide the proposal they are changing. Found: both forms went, with
+   what was written in them, at the next look at the server and without a word.
 
 Tried the same way and nothing found: thirty connections typing into one file at once (kept
 as a test in `sync.sandbox.test`); 400 threads and 400 proposals on one file, on the server
@@ -918,6 +922,26 @@ Two things about tests, found on the way and not about the product:
   whether or not anything changed (273 KB for 400 threads).
 - **The paper's own page with 200 people** was looked at in the same probe: 804 KB, a third
   of a second, 405 forms. Slow to no one, and larger than it need be. Not changed.
+
+## A reply being written when the thread is resolved
+
+- **What was wrong.** A file's comments and proposed changes are read again every five
+  seconds. If someone resolved a thread while another person was part-way through a reply to
+  it, the thread moved among the resolved ones at that person's next reading and its form
+  went, with what they had written. Nothing said so. The same for a proposal that its owner
+  accepted, rejected or withdrew while someone was changing it: the form started again from
+  the old words, folded out of sight.
+- **Now** the thread or proposal stays where it was for the person writing, and says what
+  happened (`held` in `Threads.tsx` and in `Proposals.tsx`).
+  - A reply can still be sent to a resolved thread; the server always took one. Once sent, or
+    rubbed out, the thread goes where resolved threads go.
+  - A decided proposal can no longer be changed, and the server refuses. The words written
+    stay in the form to be copied, until the form is put away.
+- **Held by** a step in each of the thread and proposal browser tests. Both failed on the old
+  code.
+- **Already right:** a table cell being edited when someone else changes the table says
+  "Your text was not put in:" and gives the text back (`tables.spec`).
+- **Also right:** someone made a viewer while writing a comment. Tried once with a probe: the form stayed with its words, and sending it said "A viewer cannot do that."
 
 ## Pages fetched before anyone asked for them
 

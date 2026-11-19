@@ -157,5 +157,26 @@ test('a reviewer starts a thread, the owner answers, and it outlives the text it
   await expect(mine.getByText('No open threads on this file.')).toBeVisible();
   await mine.getByText('Resolved (1)').click();
   await expect(thread(owner.page)).toContainText('The 95th percentile.');
-  await expect(thread(owner.page).getByRole('button', { name: 'Open again' })).toBeVisible();
+  await thread(owner.page).getByRole('button', { name: 'Open again' }).click();
+
+  // A thread resolved by one person while another is part-way through a reply to it: the
+  // reply is not thrown away. The thread stays where it was for its writer and says what
+  // happened, and the reply can still be sent.
+  await expect(thread(reviewer.page).getByRole('button', { name: 'Resolve' })).toBeVisible({
+    timeout: 15_000,
+  });
+  await thread(reviewer.page).getByLabel('Reply about “forty”').fill('Thank you, that settles it.');
+  await thread(owner.page).getByRole('button', { name: 'Resolve' }).click();
+  await expect(thread(reviewer.page)).toContainText(
+    'This thread was resolved while you were writing. Your reply can still be sent.',
+    { timeout: 15_000 },
+  );
+  await expect(thread(reviewer.page).getByLabel('Reply about “forty”')).toHaveValue(
+    'Thank you, that settles it.',
+  );
+  await thread(reviewer.page).getByRole('button', { name: 'Reply' }).click();
+  // Sent, the thread goes where resolved threads go, with the reply in it.
+  await expect(theirs.getByText('No open threads on this file.')).toBeVisible();
+  await theirs.getByText('Resolved (1)').click();
+  await expect(thread(reviewer.page)).toContainText('Thank you, that settles it.');
 });

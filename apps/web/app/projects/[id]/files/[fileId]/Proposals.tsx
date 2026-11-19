@@ -110,6 +110,10 @@ export default function Proposals(props: {
   const act = async (p: Proposal, action: string) =>
     setNote((await post(`${url}/${p.id}`, { action })) ?? '');
 
+  // A proposal someone else decides while this person is part-way through changing it stays
+  // where it is, with what they have written, until they put the form away. Moved among the
+  // decided ones, the form would start again from the old words, out of sight.
+  const held = (p: Proposal) => p.status !== 'open' && revising === p.id;
   const one = (p: Proposal) => (
     <li key={p.id}>
       <article aria-label={`Proposal to change ${named(p.expected)}`}>
@@ -152,6 +156,15 @@ export default function Proposals(props: {
         )}
         {p.status === 'accepted' && p.stale && (
           <p className="note">The accepted text has been changed since.</p>
+        )}
+        {held(p) && (
+          <p className="note" role="status">
+            <strong>
+              This proposal was {p.status === 'dismissed' ? 'withdrawn' : p.status} while you were
+              changing it.
+            </strong>{' '}
+            It can no longer be changed. What you wrote is still below, to copy if you want it.
+          </p>
         )}
         {revising === p.id ? (
           <Change
@@ -207,8 +220,8 @@ export default function Proposals(props: {
       </article>
     </li>
   );
-  const open = proposals?.filter((p) => p.status === 'open') ?? [];
-  const decided = proposals?.filter((p) => p.status !== 'open') ?? [];
+  const open = proposals?.filter((p) => p.status === 'open' || held(p)) ?? [];
+  const decided = proposals?.filter((p) => p.status !== 'open' && !held(p)) ?? [];
   return (
     <section className="threads" id="proposals" aria-label="Proposed changes">
       <h2>Proposed changes</h2>
