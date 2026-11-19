@@ -96,15 +96,20 @@ What it found is fixed in the same change, or listed under "Open" with what to d
   is deleted. A sign-in that merely runs out is not covered: see "An editor whose sign-in has
   ended" in `docs/status.md`.
 
+- **Nothing limited invitations.** Each one is an email from the service to an address the
+  sender chose, and anyone can make an account and a paper. One person can now send 30 in an
+  hour, over all their papers. The email names the inviter's address and nothing else of
+  theirs: not the paper's name.
+
 ## Open
 
 In rough order of how much they matter.
 
 1. **Limits on requests in general.** What costs most is limited: sign-in links (five a
    minute for an address), builds (120 an hour for a paper), chart drawings (120 an hour for a
-   paper), model reviews (30 an hour for a paper), and papers started (100 an hour for a
-   person, which with 300 MB a paper is what bounds how fast one account can fill the store).
-   Reading pages, checking grammar, uploading within a paper's limit and typing are not, beyond
+   paper), model reviews (30 an hour for a paper), invitations (30 an hour for a person), and
+   papers started (100 an hour for a person, which with 300 MB a paper is what bounds how fast
+   one account can fill the store). Reading pages, checking grammar, uploading within a paper's limit and typing are not, beyond
    needing to be signed in. A proxy in front should limit requests per person. There is no
    limit on what one person's papers add up to over time: that is a decision about accounts,
    not made here.

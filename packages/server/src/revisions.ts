@@ -117,11 +117,17 @@ async function cut(
       .digest('hex');
     const last = (
       await db.query(
-        'select id, number, content_key from revisions where project_id = $1 order by number desc limit 1',
+        'select id, number, content_key, kind, name, restored_from from revisions where project_id = $1 order by number desc limit 1',
         [projectId],
       )
     ).rows[0];
-    if (kind === 'auto' && last?.content_key === key) {
+    // Saved again under the name it was just saved under, or put back again to the revision
+    // it was just put back to, with nothing changed: a button pressed twice. That is the
+    // revision there already, not a second one like it.
+    const again =
+      (kind === 'named' && last?.kind === 'named' && last.name === opts.name) ||
+      (kind === 'restore' && last?.kind === 'restore' && last.restored_from === opts.restoredFrom);
+    if ((kind === 'auto' || again) && last?.content_key === key) {
       // The same text as the latest revision, though the logs may have moved on: a file opened
       // for the first time, something typed and taken back. The revision is this text too, so
       // it is told where the logs now stand. Otherwise a build of it would look behind the

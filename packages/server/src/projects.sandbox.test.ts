@@ -111,6 +111,32 @@ test('an invitation works once, only for its address, and only until it expires'
   );
 });
 
+test('one person can send only so many invitations in an hour', async () => {
+  // Each is an email to an address its sender chose.
+  const sender = await t.signIn('sender@example.org');
+  const first = await createProject(t.pool, sender.id, 'First');
+  const second = await createProject(t.pool, sender.id, 'Second');
+  await invite(t.pool, sender.id, first.id, 'a@example.org', 'viewer', 3);
+  await invite(t.pool, sender.id, first.id, 'a@example.org', 'viewer', 3);
+  await invite(t.pool, sender.id, second.id, 'b@example.org', 'editor', 3);
+  // Counted over all their papers, not for each.
+  expect(await code(invite(t.pool, sender.id, second.id, 'c@example.org', 'viewer', 3))).toBe(
+    'conflict',
+  );
+  expect(
+    (await t.pool.query('select 1 from invitations where invited_by = $1', [sender.id])).rowCount,
+  ).toBe(3);
+  // Someone else's are their own, and an hour later there is room again.
+  const other = await t.signIn('another-sender@example.org');
+  const theirs = await createProject(t.pool, other.id, 'Theirs');
+  await invite(t.pool, other.id, theirs.id, 'd@example.org', 'viewer', 3);
+  await t.pool.query(
+    "update invitations set created_at = now() - interval '61 minutes' where invited_by = $1",
+    [sender.id],
+  );
+  await invite(t.pool, sender.id, first.id, 'c@example.org', 'viewer', 3);
+});
+
 test('only the owner manages people, and the owner cannot be displaced', async () => {
   for (const role of ['editor', 'reviewer', 'viewer'] as const) {
     expect(

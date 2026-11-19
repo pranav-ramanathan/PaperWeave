@@ -53,7 +53,16 @@ async function paper() {
     ['reviewer', 'reviewer'],
     ['viewer', 'viewer'],
   ] as const) {
-    const { token } = await invite(t.pool, users.owner.id, project.id, users[who].email, role);
+    // One owner makes a paper for every test here and invites four people to each: more than
+    // one person may send in an hour, so the limit is lifted for this.
+    const { token } = await invite(
+      t.pool,
+      users.owner.id,
+      project.id,
+      users[who].email,
+      role,
+      1000,
+    );
     await acceptInvitation(t.pool, users[who].id, token);
   }
   const [file] = await listFiles(t.pool, users.owner.id, project.id);
@@ -127,6 +136,34 @@ test('three people edit one file and end with the same text, which is what is st
   await saved(late);
   expect(late.text.toString()).toBe(a.text.toString());
 });
+
+test('thirty connections type into one file at once, and nothing is lost', async () => {
+  const { project, file } = await paper();
+  const who = [users.owner, users.editor, users.second];
+  const clients = Array.from({ length: 30 }, (_, i) => client(who[i % 3], file));
+  await saved(...clients);
+  const start = performance.now();
+  // Twenty rounds, everyone adding to the end of the file in each, a moment apart. The log is
+  // compacted every twenty edits here, so that happens some thirty times under them.
+  for (let round = 0; round < 20; round++) {
+    for (const [i, c] of clients.entries()) c.text.insert(c.text.length, `<${i}.${round}>`);
+    await new Promise((r) => setTimeout(r, 10));
+  }
+  await saved(...clients);
+  await until('everyone to have the same text', () =>
+    clients.every((c) => c.text.toString() === clients[0].text.toString()),
+  );
+  // Measured at about a second on the machine this was written on. The limit is for a
+  // slowdown of many times, not for a slow day.
+  expect(performance.now() - start).toBeLessThan(30_000);
+  const text = clients[0].text.toString();
+  const missing: string[] = [];
+  for (let i = 0; i < 30; i++)
+    for (let round = 0; round < 20; round++)
+      if (!text.includes(`<${i}.${round}>`)) missing.push(`${i}.${round}`);
+  expect(missing).toEqual([]);
+  expect(await stored(project)).toBe(text.replaceAll('\n', '\r\n'));
+}, 120_000);
 
 test('reviewers and viewers can read but nothing they type is saved or shared', async () => {
   const { project, file } = await paper();

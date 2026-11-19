@@ -98,6 +98,9 @@ export async function listMembers(db: Db, userId: string, projectId: string): Pr
   return rows;
 }
 
+/** How many invitations one person can send in an hour, over all their papers. */
+export const INVITATIONS_PER_HOUR = 30;
+
 /** Invite someone by email. Returns the token to put in their link; it is not stored. */
 export async function invite(
   db: Db,
@@ -105,12 +108,24 @@ export async function invite(
   projectId: string,
   email: unknown,
   role: unknown,
+  perHour = INVITATIONS_PER_HOUR,
 ) {
   await authorize(db, userId, id(projectId), 'members.manage');
   if (typeof email !== 'string' || !/^[^@\s]+@[^@\s]+\.[^@\s]+$/.test(email) || email.length > 254)
     throw new AppError('invalid_input', 'That is not an email address.');
   if (role !== 'editor' && role !== 'reviewer' && role !== 'viewer')
     throw new AppError('invalid_input', 'Invite someone as an editor, a reviewer or a viewer.');
+  // Each invitation is an email to an address its sender chose. Without a limit, anyone with
+  // an account could have the service write to any number of strangers.
+  const sent = await db.query(
+    "select count(*)::int as n from invitations where invited_by = $1 and created_at > now() - interval '1 hour'",
+    [userId],
+  );
+  if (sent.rows[0].n >= perHour)
+    throw new AppError(
+      'conflict',
+      `One person can send ${perHour} invitations in an hour, and you have sent that many. Try again in a little while.`,
+    );
   const token = randomBytes(32).toString('base64url');
   await db.query(
     `insert into invitations (project_id, email, role, token_hash, invited_by, expires_at)

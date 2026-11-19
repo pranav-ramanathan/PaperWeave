@@ -100,6 +100,17 @@ test('revisions are cut when something changed, numbered in order, and can be na
   ]);
   expect(all[1]).toMatchObject({ id: named.id, createdBy: 'owner@example.org', hasPdf: false });
 
+  // The button pressed twice: the same paper under the same name is the same revision. Under
+  // another name, or once the paper has changed, it is a new one.
+  const once = await saveRevision(t.pool, store, owner.id, p.id, 'Camera ready');
+  const twice = await saveRevision(t.pool, store, owner.id, p.id, 'Camera ready');
+  expect(twice).toEqual(once);
+  const renamed = await saveRevision(t.pool, store, owner.id, p.id, 'Camera ready, really');
+  expect(renamed.number).toBe(once.number + 1);
+  await replace(p.main, 'Hello, world.', 'Hello again.');
+  const later = await saveRevision(t.pool, store, owner.id, p.id, 'Camera ready, really');
+  expect(later.number).toBe(renamed.number + 1);
+
   expect(await code(saveRevision(t.pool, store, owner.id, p.id, '   '))).toBe('invalid_input');
   expect(await code(saveRevision(t.pool, store, viewer.id, p.id, 'x'))).toBe('permission_denied');
   expect(await code(saveRevision(t.pool, store, outsider.id, p.id, 'x'))).toBe('not_found');
@@ -234,6 +245,10 @@ test('restoring puts the paper back as a new revision and erases nothing', async
     [1, 'named', 'Good', null],
   ]);
   expect(all[0].id).toBe(restored.id);
+  // "Restore" pressed twice: the paper is already as it was put back, and that is the same
+  // revision, not another one like it.
+  expect(await restoreRevision(t.pool, store, owner.id, p.id, good.id)).toEqual(restored);
+  expect(await listRevisions(t.pool, owner.id, p.id)).toHaveLength(3);
   // The regretted revision is still there to go back to.
   const regretted = await files(
     (await exportRevision(t.pool, store, owner.id, p.id, all[1].id)).zip,
