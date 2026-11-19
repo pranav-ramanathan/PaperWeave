@@ -735,8 +735,9 @@ Two things about tests, found on the way and not about the product:
   - a build of the same text tells the revision where the logs now stand (`cut` in
     `packages/server/src/revisions.ts`). If a file was deleted and made again under its name
     the text is the same but the file is another one, and a new revision is cut;
-  - the pane asks once for each state of the text. A build that comes back behind is not
-    asked for again until something is edited (`BuildPane.tsx`).
+  - the pane asks once for each state of the paper and revision the newest build is of. A
+    build that comes back behind, of the same revision, is not asked for again until
+    something changes (`BuildPane.tsx`).
 - **Tests hold the first two.** A service test (`builds.sandbox.test`) and a browser test
   (`building.spec`), which opens a second file and sees the PDF stay up to date with no build
   asked for. Both failed on the old code. The part of the service test about a file deleted
@@ -755,9 +756,17 @@ Two things about tests, found on the way and not about the product:
   - A service test holds the three; it failed on each before. The browser test deletes a
     file in another window and sees the pane build; that step was not run against the old
     code.
-- **Not held by a test:** the pane's own rule, since after the other two changes nothing is
-  known that brings a build back behind. If the request for a build fails, the pane does
-  not try again by itself; the message and "Compile now" are there.
+- **The pane's rule was wrong when first written**, and is now held by a step of the browser
+  test. It asked once for each state of the paper, whatever the newest build was of. But a
+  person can build the PDF of an older revision (the paper's page offers it for a revision
+  that has none). That is then the newest build, the paper has not changed, and the pane
+  would not build it again until something was edited: it went on showing the older
+  revision's PDF. The revision is now part of the rule. The step failed on the rule as first
+  written.
+- **Not held by a test:** that a build coming back behind is asked for only once, since
+  after the other changes nothing is known that brings one back behind. If the request for a
+  build fails, the pane does not try again by itself; the message and "Compile now" are
+  there.
 
 ## A chart whose files have left the paper
 
