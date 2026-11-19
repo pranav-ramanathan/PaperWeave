@@ -137,3 +137,8 @@ In rough order of how much they matter.
 5. **What only a deployment can settle:** TLS and HSTS, the production sandbox (the tests use
    Docker on one machine), where the object store and its backups live, retention at the
    model provider, and who can read the metrics page. These wait on the hosting decision.
+   So do three things found since by running the services as a deployment would, each written
+   up in `docs/settings.md`: something must start a service again if its process ends; only
+   one sync server may serve a database, which the sync server now sees to itself; and every
+   build of the web app should be given the same key for its forms, or a new version breaks
+   the buttons on pages people already have open.
