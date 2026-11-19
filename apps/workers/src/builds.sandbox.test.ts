@@ -201,6 +201,34 @@ test('a build is behind a paper that has changed without anything being typed', 
   });
 });
 
+test('two workers never build the same build, and build two papers side by side', async () => {
+  const first = (await paper()).project;
+  const second = (await paper()).project;
+  // One build waiting, two workers reaching for it at the same moment: one gets it.
+  await requestBuild(t.pool, owner.id, first);
+  expect(
+    (await Promise.all([buildNext(t.pool, store, image), buildNext(t.pool, store, image)])).sort(),
+  ).toEqual([false, true]);
+  expect((await t.pool.query('select 1 from builds where project_id = $1', [first])).rowCount).toBe(
+    1,
+  );
+  // Two papers waiting: each worker takes one.
+  await edit(
+    (await listFiles(t.pool, owner.id, first)).find((f) => f.path === 'main.tex')!.id,
+    (text) => text.insert(0, '% changed\n'),
+  );
+  await requestBuild(t.pool, owner.id, first);
+  await requestBuild(t.pool, owner.id, second);
+  expect(
+    await Promise.all([buildNext(t.pool, store, image), buildNext(t.pool, store, image)]),
+  ).toEqual([true, true]);
+  for (const project of [first, second])
+    expect((await latestBuilds(t.pool, owner.id, project)).latest).toMatchObject({
+      status: 'succeeded',
+      stale: false,
+    });
+}, 120_000);
+
 test('a burst of requests is one build, and a paper cannot build without limit', async () => {
   const { project } = await paper();
   const ids = await Promise.all(
