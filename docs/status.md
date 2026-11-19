@@ -905,6 +905,12 @@ Two things about tests, found on the way and not about the product:
   looked the newest build up twice whenever it was also the newest with a PDF, which is
   nearly always. Once now: 113 ms down to 58 ms for a paper of 2,000 files, 10 ms to 6 ms
   for a small paper with 10,000 builds (`docs/benchmarks.md`).
+- **An editor nobody is looking at asks for nothing.** Each open editor asked how the builds
+  stood every two seconds, and for the threads and the proposals every five, for as long as
+  its tab was open, in front or not. They now wait while the tab is hidden and ask at once
+  when it is shown again (`whileShown` in `apps/web/lib/shown.ts`). A browser test holds it.
+  The connection to the sync server is not affected: someone else's typing still arrives in
+  a hidden tab.
 - **A measurement that misled for a while.** Clicking through to the editor of a 2,000-file
   paper took 28 s in a browser test. A profile showed the time was the test's own search for
   the link by its name among thousands. Opened directly, that editor shows in 1.6 s.

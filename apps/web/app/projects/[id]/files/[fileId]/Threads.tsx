@@ -2,6 +2,7 @@
 
 import type { Thread } from '@paperweave/server';
 import { useCallback, useEffect, useRef, useState } from 'react';
+import { whileShown } from '../../../../../lib/shown';
 
 export type Member = { userId: string; email: string };
 /** A stretch of the file as the editor holds it: its two ends, and the words between them. */
@@ -107,11 +108,7 @@ export default function Threads(props: {
     setThreads(found);
     told.current(found);
   }, [url, fileId]);
-  useEffect(() => {
-    void read();
-    const timer = setInterval(read, 5000);
-    return () => clearInterval(timer);
-  }, [read]);
+  useEffect(() => whileShown(() => void read(), 5000), [read]);
 
   /** Post, read the threads again, and return what went wrong, if anything did. */
   const post = async (to: string, body: object) => {

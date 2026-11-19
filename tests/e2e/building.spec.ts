@@ -177,3 +177,42 @@ test('the PDF is behind only when the paper has changed, and is built once for e
   await expect(buildStatus(page)).toHaveText('The latest build failed.', { timeout: 30_000 });
   await expect(build(page)).toContainText('before the latest edits');
 });
+
+test('an editor nobody is looking at asks the server for nothing', async ({ browser }) => {
+  const { page, email } = await person(browser, 'build-hidden');
+  await page.goto('/sign-in');
+  await signIn(page, email);
+  await page
+    .getByLabel('Or import a ZIP of a LaTeX project')
+    .setInputFiles(await fixtureZip('Hidden'));
+  await page.getByRole('button', { name: 'Import ZIP' }).click();
+  await page.getByRole('link', { name: 'main.tex' }).first().click();
+  await expect(buildStatus(page)).toHaveText('The PDF is up to date.', { timeout: 60_000 });
+
+  // What the page asks for by itself: how the builds stand, and the threads and proposals.
+  const asked: string[] = [];
+  page.on('request', (r) => {
+    const what = /\/(builds|threads|proposals)(\?|$)/.exec(r.url())?.[1];
+    if (what && r.method() === 'GET') asked.push(what);
+  });
+  await page.waitForTimeout(5500);
+  expect(new Set(asked)).toEqual(new Set(['builds', 'threads', 'proposals']));
+
+  // The tab goes behind another. (The browser says so to the page; here the page is told the
+  // same thing directly.)
+  const show = (hidden: boolean) =>
+    page.evaluate((h) => {
+      Object.defineProperty(document, 'hidden', { configurable: true, get: () => h });
+      document.dispatchEvent(new Event('visibilitychange'));
+    }, hidden);
+  await show(true);
+  await page.waitForTimeout(500);
+  asked.length = 0;
+  await page.waitForTimeout(6000);
+  expect(asked).toEqual([]);
+
+  // Looked at again: it catches up at once, not at the next turn of a clock.
+  await show(false);
+  await expect.poll(() => new Set(asked).size, { timeout: 1500 }).toBe(3);
+  await expect(buildStatus(page)).toHaveText('The PDF is up to date.');
+});

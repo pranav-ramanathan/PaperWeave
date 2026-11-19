@@ -4,6 +4,7 @@ import type { Build } from '@paperweave/server';
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { type Numbers, setNumbers } from '../../../../../lib/numbers';
 import { onShow, showInEditor } from '../../../../../lib/pdfsync';
+import { whileShown } from '../../../../../lib/shown';
 import PdfView, { type Mark } from './PdfView';
 
 type Builds = { latest: Build | null; lastGood: Build | null; edits: string };
@@ -59,11 +60,10 @@ export default function BuildPane({
         void compile();
       }
     };
-    void poll();
-    const timer = setInterval(poll, 2000);
+    const off = whileShown(() => void poll(), 2000);
     return () => {
       stop = true;
-      clearInterval(timer);
+      off();
     };
   }, [url, auto, canBuild, compile]);
 
