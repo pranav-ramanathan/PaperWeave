@@ -6,7 +6,7 @@ import { mkdtempSync, readdirSync, readFileSync, statSync, writeFileSync } from 
 import { tmpdir } from 'node:os';
 import { join, relative } from 'node:path';
 import { writeZip } from '../../packages/server/src/archive';
-import { person, run, showSource, signIn } from './helpers';
+import { audit, person, run, showSource, signIn } from './helpers';
 
 const FIXTURE = join(import.meta.dirname, '../../fixtures/article-basic');
 const source = (page: Page) => page.locator('.editor .cm-content');
@@ -78,6 +78,7 @@ test('save a revision, build and download it, compare, restore and rename', asyn
   await page.getByRole('button', { name: 'Save revision' }).click();
   await page.getByRole('link', { name: 'Changes since 1' }).click();
   await expect(page.getByRole('heading', { name: 'Revision 1 to revision 2' })).toBeVisible();
+  await audit(page, 'the differences between two revisions');
   await expect(page.locator('.diff .added')).toHaveText('+ % a regrettable first line\n');
   await expect(page.locator('.diff .removed')).toHaveCount(0);
 
@@ -107,6 +108,7 @@ test('save a revision, build and download it, compare, restore and rename', asyn
   const change = page.getByRole('region', { name: 'main.tex' });
   await expect(change).toContainText('\\bibliography{refs}');
   await expect(change).toContainText('\\bibliography{bibliography/refs}');
+  await audit(page, 'the lines a file rename would change');
   await page.getByRole('button', { name: 'Rename and update that line' }).click();
   await expect(page.getByRole('status')).toHaveText(
     'Renamed to bibliography/refs.bib, and updated 1 place that names it.',

@@ -5,7 +5,7 @@ import { mkdtempSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { writeZip } from '../../packages/server/src/archive';
-import { clickAfter, person, run, showSource, signIn, typingSaved } from './helpers';
+import { audit, clickAfter, person, run, showSource, signIn, typingSaved } from './helpers';
 
 const VISUAL = '.editor .visual .ProseMirror';
 
@@ -85,6 +85,7 @@ test('a chart is drawn from approved data and is out of date once the data chang
   await expect(listed).toContainText('Its files are no longer in the paper: draw it again.');
   await page.goto(chart);
   await expect(page.getByRole('status')).toContainText('Not in the paper.');
+  await audit(page, 'a chart whose files have gone');
   await expect(picture).toHaveCount(0);
   await page.getByRole('button', { name: 'Draw it again' }).click();
   await expect(page.getByText('Not in the paper.')).toHaveCount(0, { timeout: 30_000 });

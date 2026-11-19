@@ -5,7 +5,16 @@ import { mkdtempSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { writeZip } from '../../packages/server/src/archive';
-import { audit, clickAfter, emailedLink, person, run, showSource, signIn } from './helpers';
+import {
+  audit,
+  clickAfter,
+  emailedLink,
+  person,
+  run,
+  showSource,
+  signIn,
+  sticksOut,
+} from './helpers';
 
 const MAIN = '\\documentclass{article}\n\\begin{document}\nHello.\n\\end{document}\n';
 const source = (page: Page) => page.locator('.editor .cm-content');
@@ -452,6 +461,11 @@ test('someone whose role changes while a file is open is told, and does not type
     'You are now a reviewer on this paper and can no longer edit. What you typed last was not saved. Reload the page to carry on.',
     { timeout: 20_000 },
   );
+  // The longest thing the editor's bar ever says, with a button beside it: in a narrow window
+  // it wraps, and the page still does not have to be scrolled sideways.
+  await page.setViewportSize({ width: 320, height: 800 });
+  expect(await sticksOut(page)).toEqual([]);
+  await page.setViewportSize({ width: 1280, height: 720 });
   await page
     .getByRole('region', { name: /^Editor for/ })
     .getByRole('button', { name: 'Reload the page' })
@@ -469,6 +483,12 @@ test('someone whose role changes while a file is open is told, and does not type
   await page.keyboard.press('ControlOrMeta+End');
   await expect.poll(() => scroller.evaluate((el) => el.scrollTop)).toBeGreaterThan(before);
   await page.keyboard.press('ControlOrMeta+Home');
+  // And selected from, to copy: here the first two lines.
+  await page.keyboard.press('Shift+ArrowDown');
+  await page.keyboard.press('Shift+ArrowDown');
+  await expect
+    .poll(() => page.evaluate(() => getSelection()?.toString() ?? ''))
+    .toContain('% typed as an editor again');
   await expect(source(page)).toContainText('% typed as an editor again');
   await expect(source(page)).not.toContainText('% typed offline');
 
