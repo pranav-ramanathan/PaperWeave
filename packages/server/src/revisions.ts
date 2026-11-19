@@ -387,8 +387,10 @@ export type FileDiff = {
   /** The earlier path, if the file was renamed. */
   was?: string;
   status: 'added' | 'removed' | 'changed' | 'renamed';
-  /** Line by line, for text that changed. Null for other files and for files too large. */
+  /** Line by line, for text that changed. Null for other files and for text too large to compare. */
   lines: DiffLine[] | null;
+  /** The file is text on both sides, but too much of it changed to compare line by line here. */
+  tooLarge?: true;
 };
 
 /** What changed between two revisions of a paper. Files that did not change are left out. */
@@ -414,11 +416,13 @@ export async function diffRevisions(
     else if (old.digest !== f.digest) {
       const [x, y] = [await text(old.digest), await text(f.digest)];
       const was = old.path !== f.path ? old.path : undefined;
+      const lines = x != null && y != null ? diffLines(x, y) : null;
       files.push({
         path: f.path,
         was,
         status: 'changed',
-        lines: x != null && y != null ? diffLines(x, y) : null,
+        lines,
+        ...(x != null && y != null && !lines ? { tooLarge: true as const } : {}),
       });
     } else if (old.path !== f.path)
       files.push({ path: f.path, was: old.path, status: 'renamed', lines: null });

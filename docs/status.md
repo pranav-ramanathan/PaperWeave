@@ -629,7 +629,23 @@ other paper changed. Two answers are by design: `/api/sync-ticket` issues a tick
 file, and the sync server refuses the connection (its tests hold that); the rename page
 checks the new name before it looks at the file. One probe, run once, not kept.
 
-Not yet tried: 400 proposals in the browser; a second browser.
+Also tried and found sound: 400 proposed changes on one file, in the browser. Measured with
+the browser's own event timing and long-task records, one machine, once each, the rows
+cloned in the database by a probe that is not kept:
+
+| Open | Decided | Elements on the page | A key typed, source view | Visual view | Long tasks, 12 s idle |
+| ---- | ------- | -------------------- | ------------------------ | ----------- | --------------------- |
+| 1    | 0       | 761                  | 16 ms (worst 16)         | 16 ms (32)  | none                  |
+| 20   | 380     | 4,814                | 16 ms (32)               | 24 ms (48)  | none                  |
+| 400  | 0       | 8,991                | 16 ms (32)               | 24 ms (80)  | none                  |
+
+Figures are medians, in the browser's 8 ms steps. Nothing was changed. Two costs are real
+and harmless at this size: the 380 decided proposals are drawn inside their closed list
+(4,605 of the elements), and the list is asked for whole every five seconds, 460 KB once
+unpacked (16 KB over the wire). The bar for changing code was a median key over 50 ms or an
+idle long task over 100 ms; neither came near. Noticed while planning this: the next section.
+
+Not yet tried: a second browser.
 
 If more is to be built before those are settled, the candidates are in the code as
 `shortcut:` comments (seven of them, each saying when it stops being good enough) and in the
@@ -890,6 +906,24 @@ Two things about tests, found on the way and not about the product:
   signs in again, as it did before.
 - **Held by** a browser test (`recover.spec`: "someone taken off the paper while a file is
   open"), which failed on the old code.
+
+## A file too changed to compare
+
+- **What was wrong.** Comparing two revisions shows each changed file line by line, up to a
+  limit (about 2,000 changed lines on each side). Past it, and for files that are not text,
+  the page said "This file changed, but it is not text that can be shown line by line." For
+  a large `.tex` file that is untrue, and reads as if the file had been spoiled.
+- **Now** the comparison says which it is (`tooLarge` on `FileDiff`, in `diffRevisions`), and
+  the page says "Too much of this file changed to show it line by line here", with links to
+  download the ZIP of each of the two revisions. Files that are not text keep the old
+  sentence.
+- **Held by** a service test (`revisions.sandbox.test`: "a text file that changed too much to
+  compare line by line is marked too large"), which failed on the old code. The page's new
+  sentence was not looked at in a browser; the suite passes with it.
+- **Not changed:** the limit itself, and the `shortcut:` note in `textdiff.ts` about how the
+  comparison is done.
+- **How it was made.** Planned by one agent from reading the code, written by another, and
+  checked here: the test run on the old code and the new, and the whole suites.
 
 ## What the browser keeps of a paper
 
