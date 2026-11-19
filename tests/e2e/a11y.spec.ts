@@ -1,13 +1,12 @@
 // An automated accessibility audit of the pages people spend their time on. It finds what a
 // machine can find (names, roles, contrast, structure); it does not replace trying the pages
 // with a keyboard and a screen reader. Needs the services, the sync server and the worker.
-import AxeBuilder from '@axe-core/playwright';
 import { expect, type Page, test } from '@playwright/test';
 import { mkdtempSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { writeZip } from '../../packages/server/src/archive';
-import { person, run, selectWord, showSource, signIn } from './helpers';
+import { audit, person, run, selectWord, showSource, signIn } from './helpers';
 
 const MAIN = [
   '\\documentclass{article}',
@@ -34,18 +33,6 @@ const MAIN = [
 ].join('\n');
 const BIB = '@book{knuth1984, author = {Donald Knuth}, title = {The TeXbook}, year = 1984}\n';
 const CSV = 'day,latency (ms)\n2024-03-01,9\n2024-03-02,38\n';
-
-/** Everything axe can check against WCAG 2.1 A and AA on the page as it stands. */
-async function audit(page: Page, what: string) {
-  const { violations } = await new AxeBuilder({ page })
-    .withTags(['wcag2a', 'wcag2aa', 'wcag21a', 'wcag21aa'])
-    .analyze();
-  expect(
-    violations.map(
-      (v) => `${what}: ${v.id} (${v.help}) at ${v.nodes.map((n) => n.target).join('; ')}`,
-    ),
-  ).toEqual([]);
-}
 
 test('the main pages have no accessibility failures a machine can find', async ({ browser }) => {
   test.setTimeout(180_000);

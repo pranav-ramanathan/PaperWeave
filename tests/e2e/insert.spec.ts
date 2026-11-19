@@ -207,11 +207,28 @@ test('after an equation is put on a line of its own, typing carries on after it'
   // At the end of a paragraph: the next place is the start of the paragraph that follows.
   await equation('here.', 'b = 2');
   await page.keyboard.type('NEXT');
+  // A table goes in by the same road. It is put after the paragraph it was asked for in,
+  // which here is the last thing in the paper: nothing after it can take text, so the caret
+  // goes back to the nearest place before, the end of that paragraph.
+  await clickAfter(page, VISUAL, 'Second');
+  await page.getByRole('group', { name: 'Edit' }).getByRole('button', { name: 'Table' }).click();
+  const table = page.getByRole('dialog', { name: 'Insert a table' });
+  await table.getByLabel('Caption').fill('Sizes');
+  await table.getByRole('button', { name: 'Insert' }).click();
+  await expect(table).toBeHidden();
+  await expect(page.locator(VISUAL).getByRole('group', { name: 'Table' })).toBeVisible();
+  await page.keyboard.type('TABLED');
   await expect(status).toHaveText('All edits saved.');
 
   await showSource(page);
-  const lines = await page.locator('.editor .cm-line').allTextContents();
-  expect(lines.filter((l) => l.trim())).toEqual([
+  const all = (await page.locator('.editor .cm-line').allTextContents()).filter((l) => l.trim());
+  const tableAt = all.findIndex((l) => l.startsWith('\\begin{table}'));
+  const tableEnd = all.findIndex((l) => l.startsWith('\\end{table}'));
+  expect(all.slice(-8), 'the end of the file').toContain('\\end{table}');
+  expect(tableAt).toBeGreaterThan(0);
+  expect(all[tableAt - 1]).toBe('NEXTSecond paragraph.TABLED');
+  const lines = [...all.slice(0, tableAt - 1), ...all.slice(tableEnd + 1)];
+  expect(lines).toEqual([
     '\\documentclass{article}',
     '\\begin{document}',
     'Hello world',
@@ -222,7 +239,6 @@ test('after an equation is put on a line of its own, typing carries on after it'
     '\\begin{equation}',
     '  b = 2',
     '\\end{equation}',
-    'NEXTSecond paragraph.',
     '\\end{document}',
   ]);
 });

@@ -363,7 +363,14 @@ export default function FileEditor(props: {
     // One undo history per person, for both views: undo never takes back someone else's edit.
     const undo = new Y.UndoManager(text);
     const writable = new Compartment();
-    const lock = (on: boolean) => [EditorState.readOnly.of(on), EditorView.editable.of(!on)];
+    // Locked, the text still takes the keyboard: someone who cannot edit can scroll it, move
+    // through it and select from it with keys alone. Without the tab stop a locked editor
+    // could only be scrolled with a mouse.
+    const lock = (on: boolean) => [
+      EditorState.readOnly.of(on),
+      EditorView.editable.of(!on),
+      EditorView.contentAttributes.of(on ? { tabindex: '0' } : {}),
+    ];
     const view = new EditorView({
       parent: host.current!,
       state: EditorState.create({
