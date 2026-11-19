@@ -578,7 +578,7 @@ What is left is not code that can be written here:
    noticed, and whether to keep that file is the owner's call.
 
 That list was written before a run of faults that were all in code, and each reached by
-ordinary use. Five ways of looking found them, and each is cheap to do again:
+ordinary use. Six ways of looking found them, and each is cheap to do again:
 
 1. **Do the second of something.** Open a second file, redraw a chart, build an older
    revision, restore across a chart. Found: a PDF that stayed "behind" for ever and used up
@@ -597,6 +597,10 @@ ordinary use. Five ways of looking found them, and each is cheap to do again:
    the accessibility audit in the editor's stopped states and on pages only reached through a
    flow. Found: invitations and sign-in links with no limit on how many one address is sent;
    two revisions from one save; a stopped editor the keyboard could not reach.
+
+6. **Take a service away.** The build worker, the mail, the object store. Found: "Compiling"
+   for ever; an invitation left behind when its email could not be sent; an error page that
+   the pages' own content policy refused.
 
 Tried the same way and nothing found: thirty connections typing into one file at once (kept
 as a test in `sync.sandbox.test`); 400 threads and 400 proposals on one file (both lists
@@ -998,6 +1002,30 @@ twice quickly.
   be emailed, the sign-in form said the link could not be sent, and with the mail back the
   same person could invite. No test is kept for that: it means stopping a service that the
   other tests are using.
+
+## When a page cannot be made
+
+Found by stopping the object store under a running service, by hand.
+
+- **The framework's own error page was refused by the pages' content policy**, as its
+  "not found" page had been: it brings a style sheet of its own. The service now has its own
+  page for this (`apps/web/app/error.tsx`, and `global-error.tsx` for a failure in the frame
+  every page shares). It says the page could not be shown, that the fault is the service's,
+  and that what was saved is still saved.
+- **"Try again" asks the server again.** The framework's own way of trying again draws the
+  same failure without asking; the button loads the page afresh.
+- **What a person sees with the object store stopped:**
+  - typing into a file that is already open is still saved (edits go to the database);
+  - the paper's page, and any page that reads the paper's files, fails at once (a tenth of a
+    second) with the page above; so does opening the editor, since it reads the paper's
+    macros;
+  - the question about builds every two seconds is still answered.
+  - With the store back, "Try again" shows the paper.
+- **Checked once by hand**, the audit and the narrow-window check included. No test is kept:
+  nothing in the product fails on request, and stopping a service under the other tests is
+  not something a kept test should do.
+- **Not tried:** the database stopped, or the sync server stopped while pages are open (the
+  editor says "Offline" for that, which the recovery tests cover from the browser's side).
 
 ## What a paper keeps for ever
 
