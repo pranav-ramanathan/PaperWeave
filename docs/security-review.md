@@ -120,12 +120,13 @@ In rough order of how much they matter.
    be signed in. A proxy in front should limit requests per person. There is no limit on
    what one person's papers add up to over time: that is a decision about accounts, not made
    here.
-2. **One advisory in a development tool.** `pnpm audit` on 18 November 2026 reports nothing in
-   what the service runs (`pnpm audit --prod`), and one moderate advisory overall: `minimatch`,
-   through the linter. It is not part of the running service and is given only this
-   repository's own file names. A fixed version exists (11.0.1) but the linter does not yet
-   take it. An earlier version of this review listed a high-severity advisory in `picomatch`;
-   the audit no longer reports it, and why it went was not looked into.
+2. **One advisory in a development tool.** `pnpm audit` on 18 November 2026, and again on
+   the 19th with the same result, reports nothing in what the service runs
+   (`pnpm audit --prod`), and one moderate advisory overall: `minimatch`, through the linter.
+   It is not part of the running service and is given only this repository's own file names.
+   A fixed version exists (11.0.1) but the linter does not yet take it. An earlier version of
+   this review listed a high-severity advisory in `picomatch`; the audit no longer reports it,
+   and why it went was not looked into.
 3. **A PDF opened by itself is shown by the browser's own viewer from this site's address.**
    The PDFs are built here from the paper's LaTeX in the sandbox, so their content is the
    authors'. Serving them from a separate address would remove the question.

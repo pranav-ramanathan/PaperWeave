@@ -22,6 +22,7 @@ import {
   loadUpdates,
   requestBuild,
   REVISIONS_SHOWN,
+  saveRevision,
   saveChart,
   TEXT,
   writeZip,
@@ -130,8 +131,30 @@ test('the things people wait for, measured', async () => {
     's',
     30,
   );
+  // Every open editor asks how the paper's builds stand every two seconds, and the answer
+  // compares each file with the revision that was built.
+  let cut = '';
   took(
-    'Download it as a ZIP',
+    'Save a revision of the 2,000-file paper',
+    await ms(async () => {
+      cut = (await saveRevision(t.pool, store, owner.id, large, 'Bench')).id;
+    }),
+    'ms',
+    30_000,
+  );
+  await t.pool.query(
+    `insert into builds (project_id, status, pdf_digest, revision_id, finished_at)
+     values ($1, 'succeeded', repeat('a', 64), $2, now())`,
+    [large, cut],
+  );
+  took(
+    'Read how its builds stand, as every open editor does every two seconds',
+    await median(5, () => latestBuilds(t.pool, owner.id, large)),
+    'ms',
+    2000,
+  );
+  took(
+    'Download the six-file paper as a ZIP',
     await ms(() => exportZip(t.pool, store, owner.id, paper)),
     'ms',
     5000,

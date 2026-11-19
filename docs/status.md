@@ -578,7 +578,7 @@ What is left is not code that can be written here:
    noticed, and whether to keep that file is the owner's call.
 
 That list was written before a run of faults that were all in code, and each reached by
-ordinary use. Four ways of looking found them, and each is cheap to do again:
+ordinary use. Five ways of looking found them, and each is cheap to do again:
 
 1. **Do the second of something.** Open a second file, redraw a chart, build an older
    revision, restore across a chart. Found: a PDF that stayed "behind" for ever and used up
@@ -592,6 +592,11 @@ ordinary use. Four ways of looking found them, and each is cheap to do again:
 4. **Make every browser test refuse what no page should do**, after first only collecting it
    over the whole suite. Found: pages fetched before anyone asked; a field's pattern that
    browsers ignored; a caret put where no text can go.
+
+5. **Press things twice, and look where the first look did not go.** Buttons pressed twice;
+   the accessibility audit in the editor's stopped states and on pages only reached through a
+   flow. Found: invitations and sign-in links with no limit on how many one address is sent;
+   two revisions from one save; a stopped editor the keyboard could not reach.
 
 Tried the same way and nothing found: thirty connections typing into one file at once (kept
 as a test in `sync.sandbox.test`); 400 threads and 400 proposals on one file (both lists
@@ -896,6 +901,10 @@ Two things about tests, found on the way and not about the product:
   `packages/server/src/labels.ts`). For a paper of 2,000 files that is 4.1 s down to between 1.0 and 1.3 s
   over two runs (`docs/benchmarks.md`), and in a browser the paper's page went from 7.2 s to 4.0 s; with
   300 files, from 1.4 s to 0.8 s.
+- **The question every open editor asks every two seconds**, how the paper's builds stand,
+  looked the newest build up twice whenever it was also the newest with a PDF, which is
+  nearly always. Once now: 113 ms down to 58 ms for a paper of 2,000 files, 10 ms to 6 ms
+  for a small paper with 10,000 builds (`docs/benchmarks.md`).
 - **A measurement that misled for a while.** Clicking through to the editor of a 2,000-file
   paper took 28 s in a browser test. A profile showed the time was the test's own search for
   the link by its name among thousands. Opened directly, that editor shows in 1.6 s.
