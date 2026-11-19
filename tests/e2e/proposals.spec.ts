@@ -129,7 +129,20 @@ test('a reviewer proposes a change; the owner accepts it, undoes that, and rejec
   await panel(reviewer.page).getByRole('button', { name: 'Propose', exact: true }).click();
   const added = (page: Page) => page.getByRole('article', { name: 'Proposal to change nothing' });
   await expect(added(owner.page)).toContainText('Proposed: So far.', { timeout: 15_000 });
+  // Its author starts to change it, and the owner turns it down meanwhile. What the author
+  // has written is not thrown away: the proposal stays where it was for them, and says so.
+  await added(reviewer.page).getByRole('button', { name: 'Change the proposal' }).click();
+  await added(reviewer.page).getByLabel('Text to add at the caret').fill(' So far, at least.');
   await added(owner.page).getByRole('button', { name: 'Reject' }).click();
+  await expect(added(reviewer.page)).toContainText(
+    'This proposal was rejected while you were changing it.',
+    { timeout: 15_000 },
+  );
+  await expect(added(reviewer.page).getByLabel('Text to add at the caret')).toHaveValue(
+    ' So far, at least.',
+  );
+  await added(reviewer.page).getByRole('button', { name: 'Cancel' }).click();
+  await expect(panel(reviewer.page).getByText('No open proposals on this file.')).toBeVisible();
   // (The list of decided proposals went away when the accept was undone; it is closed again.)
   await panel(owner.page).getByText('Decided (2)').click();
   await expect(added(owner.page)).toContainText(`Rejected by ${owner.email}.`);

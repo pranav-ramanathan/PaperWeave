@@ -18,6 +18,8 @@ function Say(props: {
   members: Member[];
   send(body: string, mentions: string[]): Promise<string | null>;
   onCancel?(): void;
+  /** Told whether something is written here and not yet sent. */
+  onDraft?(written: boolean): void;
 }) {
   const [body, setBody] = useState('');
   const [to, setTo] = useState<string[]>([]);
@@ -40,13 +42,17 @@ function Say(props: {
         setBody('');
         setTo([]);
         setBegun(false);
+        props.onDraft?.(false);
       }}
     >
       <label>
         {props.label}
         <textarea
           value={body}
-          onChange={(e) => setBody(e.target.value)}
+          onChange={(e) => {
+            setBody(e.target.value);
+            props.onDraft?.(e.target.value !== '');
+          }}
           rows={2}
           maxLength={5000}
           required
@@ -103,6 +109,8 @@ export default function Threads(props: {
   const [threads, setThreads] = useState<Thread[] | null>(null);
   const [starting, setStarting] = useState<Stretch | null>(null);
   const [note, setNote] = useState('');
+  /** The threads this person has a reply written to and not yet sent. */
+  const [drafts, setDrafts] = useState<string[]>([]);
   const url = `/projects/${projectId}/threads`;
   const told = useRef(props.onThreads);
   told.current = props.onThreads;
@@ -132,6 +140,10 @@ export default function Threads(props: {
     return null;
   };
 
+  // A thread someone else resolves while this person is part-way through a reply to it stays
+  // where it is until the reply is sent or rubbed out. Moved among the resolved ones, its
+  // form would go, and what was written in it would go too, without a word.
+  const held = (t: Thread) => t.status === 'resolved' && drafts.includes(t.id);
   const one = (t: Thread) => (
     <li key={t.id}>
       <article aria-label={`Thread on “${short(t.excerpt, 40)}”`}>
@@ -192,19 +204,34 @@ export default function Threads(props: {
             </button>
           )}
         </p>
-        {canComment && t.status === 'open' && (
+        {held(t) && (
+          <p className="note" role="status">
+            <strong>This thread was resolved while you were writing.</strong> Your reply can still
+            be sent.
+          </p>
+        )}
+        {canComment && (t.status === 'open' || held(t)) && (
           <Say
             label={`Reply about “${short(t.excerpt, 40)}”`}
             button="Reply"
             members={members}
             send={(body, mentions) => post(`${url}/${t.id}`, { body, mentions })}
+            onDraft={(written) =>
+              setDrafts((now) =>
+                written === now.includes(t.id)
+                  ? now
+                  : written
+                    ? [...now, t.id]
+                    : now.filter((id) => id !== t.id),
+              )
+            }
           />
         )}
       </article>
     </li>
   );
-  const open = threads?.filter((t) => t.status === 'open') ?? [];
-  const resolved = threads?.filter((t) => t.status === 'resolved') ?? [];
+  const open = threads?.filter((t) => t.status === 'open' || held(t)) ?? [];
+  const resolved = threads?.filter((t) => t.status === 'resolved' && !held(t)) ?? [];
   return (
     <section className="threads" id="comments" aria-label="Comments">
       <h2>Comments</h2>
