@@ -59,15 +59,17 @@ the services in `infra/compose.yaml`.
     and keeps in that build's cache.
     - Tried by hand: with a page open, the web app was built again without the kept key and
       started in the old one's place. A button pressed on the open page did nothing, and the
-      person saw the service's "This page could not be shown". "Try again" loaded the page
-      from the new build, and the button then worked.
+      person saw the service's "This page could not be shown". Loading the page again showed
+      it from the new build, with nothing changed by the press. (That is what the page's "Try
+      again" does; here the page was loaded again directly.)
     - Built again on the same machine with its cache, the key is kept and the open page's
       button simply worked. So one machine replacing its own build does not show this; builds
       made on fresh machines do, each time a new version replaces an old one.
     - The framework reads a key of your choosing from `NEXT_SERVER_ACTIONS_ENCRYPTION_KEY` at
-      build time; its own guide to self-hosting says how. With that set the same for every
-      build, a page from the old version keeps working across the change. That was not tried,
-      and nor was the framework's `deploymentId`, its own way of telling an old page that the
+      build time; its own guide to self-hosting says how. Tried by hand: with that set the
+      same for both builds, and no cache kept between them, the button on the page that was
+      already open worked across the change. So set it, the same for every build.
+    - Not tried: the framework's `deploymentId`, its own way of telling an old page that the
       version has changed.
   - The sign-in library counts how often a client has asked in each web app's own memory, so
     its limit (five links a minute for a client) is that many times looser. The limit of ten
