@@ -28,7 +28,7 @@ the services in `infra/compose.yaml`.
 | `MODEL_PROVIDER`       | web                | no                      | `anthropic` lets a paper's owner turn model reviews on for that paper. **Leave unset until the owner has decided what the provider may keep** (`docs/plan.md`).     |
 | `ANTHROPIC_API_KEY`    | web                | with `MODEL_PROVIDER`   | Read by the provider's own library, not by this code.                                                                                                               |
 | `SPIKE`                | web                | never in a deployment   | `1` brings back the Phase B workbench at `/spike` and an endpoint that compiles LaTeX for anyone. The tests set it.                                                 |
-| `NODE_ENV`             | web                | set by the framework    | In development the pages' content policy also allows `eval`.                                                                                                        |
+| `NODE_ENV`             | web                | set by the framework    | In development the pages' content policy is looser: it also allows `eval` and style sheets it did not send.                                                         |
 
 ## What must be reachable from where
 

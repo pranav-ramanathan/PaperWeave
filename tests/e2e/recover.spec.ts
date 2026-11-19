@@ -183,18 +183,24 @@ test('a file takes no typing until it has arrived', async ({ browser }) => {
   const { page, email } = await person(browser, 'rec-early');
   const zip = join(mkdtempSync(join(tmpdir(), 'paperweave-e2e-')), `Early ${run}.zip`);
   writeFileSync(zip, await writeZip([{ path: 'main.tex', bytes: Buffer.from(MAIN) }]));
+  // The connection to the sync server is kept waiting, as a slow network would keep it. What
+  // the page sends meanwhile is passed on once it is let through. (Set up before any page is
+  // loaded: it takes hold of the connections of pages loaded after it.)
+  let letIn!: () => void;
+  const waiting = new Promise<void>((done) => (letIn = done));
+  await page.routeWebSocket(/:4100/, async (socket) => {
+    const held: (string | Buffer)[] = [];
+    socket.onMessage((message) => void held.push(message));
+    await waiting;
+    const server = socket.connectToServer();
+    for (const message of held) server.send(message);
+    socket.onMessage((message) => server.send(message));
+  });
   await page.goto('/sign-in');
   await signIn(page, email);
   await page.getByLabel('Or import a ZIP of a LaTeX project').setInputFiles(zip);
   await page.getByRole('button', { name: 'Import ZIP' }).click();
 
-  // The connection is kept waiting, as a slow network would keep it.
-  let letIn!: () => void;
-  const waiting = new Promise<void>((done) => (letIn = done));
-  await page.route('**/api/sync-ticket**', async (route) => {
-    await waiting;
-    await route.continue();
-  });
   await page.getByRole('link', { name: 'main.tex' }).first().click();
   await showSource(page);
   await expect(status(page)).toHaveText('Opening…');
