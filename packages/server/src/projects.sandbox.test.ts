@@ -1,18 +1,20 @@
 // Needs the services in infra/compose.yaml. Run: pnpm test:sandbox
 import { afterAll, beforeAll, expect, test } from 'vitest';
 import { type Action, ACTIONS, authorize, type Role, ROLES } from './authz.ts';
-import { maySendSignInLink } from './auth.ts';
+import { createAuth, forgetSignInLink, maySendSignInLink } from './auth.ts';
 import { migrate } from './migrate.ts';
 import {
   acceptInvitation,
   createProject,
+  findInvitation,
   invite,
   listMembers,
   listProjects,
   removeMember,
   setRole,
+  withdrawInvitation,
 } from './projects.ts';
-import { testDb } from './testing.ts';
+import { TEST_ENV, testDb } from './testing.ts';
 
 let t: Awaited<ReturnType<typeof testDb>>;
 type User = { id: string; email: string; cookie: string };
@@ -61,12 +63,55 @@ test('one address is sent only so many sign-in links in an hour, whoever asks', 
   const kept = await t.pool.query('select email_hash from sign_in_links');
   expect(kept.rows.every((r) => /^[0-9a-f]{64}$/.test(r.email_hash))).toBe(true);
   expect(JSON.stringify(kept.rows)).not.toContain('victim');
+  // A link that could not be sent is not counted.
+  await forgetSignInLink(t.pool, 'Victim@example.org');
+  expect(await sends('victim@example.org')).toBe(true);
+  expect(await sends('victim@example.org')).toBe(false);
   // An hour on there is room again, and after a day the record is gone.
   await t.pool.query("update sign_in_links set sent_at = sent_at - interval '61 minutes'");
   expect(await sends('victim@example.org')).toBe(true);
   await t.pool.query("update sign_in_links set sent_at = sent_at - interval '25 hours'");
   expect(await sends('victim@example.org')).toBe(true);
   expect((await t.pool.query('select 1 from sign_in_links')).rowCount).toBe(1);
+});
+
+test('with the mail down, a sign-in link is not counted and an invitation is not left behind', async () => {
+  // Sign-in: the request fails, and the address has nothing on record against it.
+  const down = createAuth(
+    t.pool,
+    async () => {
+      throw new Error('the mail server did not answer');
+    },
+    TEST_ENV,
+  );
+  const asked = await down.handler(
+    new Request(`${TEST_ENV.BETTER_AUTH_URL}/api/auth/sign-in/magic-link`, {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ email: 'mail-down@example.org' }),
+    }),
+  );
+  expect(asked.ok).toBe(false);
+  for (let i = 0; i < 3; i++)
+    expect(await maySendSignInLink(t.pool, 'mail-down@example.org', 3)).toBe(true);
+
+  // An invitation whose email could not be sent is taken back: its link is nowhere else, and
+  // it does not count against how many its sender may send.
+  const sender = await t.signIn('mail-down-sender@example.org');
+  const paper = await createProject(t.pool, sender.id, 'Mail down');
+  const made = await invite(t.pool, sender.id, paper.id, 'nobody@example.org', 'viewer', 1);
+  expect(await findInvitation(t.pool, made.token)).toMatchObject({ email: 'nobody@example.org' });
+  await withdrawInvitation(t.pool, made.token);
+  expect(await findInvitation(t.pool, made.token)).toBeNull();
+  await invite(t.pool, sender.id, paper.id, 'nobody@example.org', 'viewer', 1);
+  // One that was accepted is not undone by it.
+  const guest = await t.signIn('guest@example.org');
+  const kept = await invite(t.pool, sender.id, paper.id, guest.email, 'viewer', 10);
+  await acceptInvitation(t.pool, guest.id, kept.token);
+  await withdrawInvitation(t.pool, kept.token);
+  expect((await listMembers(t.pool, sender.id, paper.id)).map((m) => m.email)).toContain(
+    guest.email,
+  );
 });
 
 test('every role against every action', async () => {

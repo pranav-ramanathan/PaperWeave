@@ -2,6 +2,7 @@
 
 import {
   acceptInvitation,
+  AppError,
   approveDataset,
   createFromTemplate,
   createProject,
@@ -10,12 +11,12 @@ import {
   lookUpDoi,
   proposeFileRename,
   recordEvidence,
+  removeChart,
   removeEvidence,
   removeMember,
   renameFileAndReferences,
   renameLabel,
   requestBuild,
-  removeChart,
   restoreRevision,
   saveChart,
   saveRevision,
@@ -23,6 +24,7 @@ import {
   setModelProcessing,
   setRole,
   setRootFile,
+  withdrawInvitation,
 } from '@paperweave/server';
 import { act, baseUrl, blobs, db, requireUser, sendEmail } from '../../lib/server';
 
@@ -54,7 +56,13 @@ export async function inviteAction(projectId: string, form: FormData) {
       email,
       'You have been invited to a paper on PaperWeave',
       `${user.email} invited you to work on a paper as ${role === 'editor' ? 'an' : 'a'} ${role}.\n\nOpen this link to join:\n\n${baseUrl()}/invitations/${token}\n\nThe link works once, for this email address, for 14 days.`,
-    );
+    ).catch(async (err) => {
+      // The link is nowhere but in the email. Unsent, the invitation is taken back, and the
+      // person is told on the page rather than shown an error.
+      console.error('invitation email failed:', (err as Error).name);
+      await withdrawInvitation(db(), token);
+      throw new AppError('unavailable', 'The invitation could not be emailed. Try again later.');
+    });
     return `${back}?invited=${encodeURIComponent(email)}`;
   });
 }

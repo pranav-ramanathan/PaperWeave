@@ -983,6 +983,22 @@ twice quickly.
   "How often the expensive things can be asked for".
 - Not tried: the buttons on other pages, and forms sent twice by going back and forward.
 
+## When an email cannot be sent
+
+- **An invitation** whose email could not be sent ended in an error page, and left an
+  invitation behind that nobody could use (its link is only in the email) and that counted
+  against how many its sender may send in an hour. It is now taken back, and the paper's page
+  says the invitation could not be emailed (`withdrawInvitation`; `inviteAction`).
+- **A sign-in link** that could not be sent was still counted against the ten an hour for
+  its address, so someone trying again while the mail was down could find themselves shut
+  out for an hour once it was back. It is no longer counted (`forgetSignInLink`).
+- **A mention** already went through whether or not its email did.
+- Service tests hold what the server does in both cases. The pages were checked once by
+  hand with the tests' mail catcher stopped: the paper's page said the invitation could not
+  be emailed, the sign-in form said the link could not be sent, and with the mail back the
+  same person could invite. No test is kept for that: it means stopping a service that the
+  other tests are using.
+
 ## What a paper keeps for ever
 
 Nothing is ever removed. That was the plan's promise for what people write, and it also
