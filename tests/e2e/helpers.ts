@@ -48,6 +48,17 @@ export function refusals(context: BrowserContext) {
     if (asked.headers()['next-router-prefetch'])
       throw new Error(`${asked.url()} was fetched before anyone asked for it`);
   });
+  // Nor should a page throw something nobody catches, or say in its console that something is
+  // wrong with it. (A request that fails says so there too, and tests make requests fail on
+  // purpose: those are left alone.) This is how a field's pattern that browsers could not
+  // read, and so ignored, was found.
+  context.on('weberror', (failed) => {
+    throw new Error(`${failed.page()?.url()}: ${failed.error().message}`);
+  });
+  context.on('console', (said) => {
+    if (said.type() === 'error' && !said.text().startsWith('Failed to load resource'))
+      throw new Error(`${said.page()?.url()}: ${said.text()}`);
+  });
 }
 
 let people = 0;

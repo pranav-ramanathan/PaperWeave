@@ -39,8 +39,15 @@ test('a chart is drawn from approved data and is out of date once the data chang
   await page.getByRole('button', { name: 'Approve this description' }).click();
   await data.getByRole('link', { name: 'New chart from data/latency.csv' }).click();
 
-  // A chart that cannot be drawn is refused with the reason, and the form is still there.
   await expect(page.getByRole('heading', { name: 'New chart' })).toBeVisible();
+  // A name the chart's files could not take is caught in the form, before anything is sent.
+  const name = page.getByLabel('Name', { exact: true });
+  await name.fill('Latency by day');
+  expect(await name.evaluate((el: HTMLInputElement) => el.validity.patternMismatch)).toBe(true);
+  await page.getByRole('button', { name: 'Draw the chart' }).click();
+  await expect(page).toHaveURL(/charts\/new\?data=[0-9a-f-]+$/);
+
+  // A chart that cannot be drawn is refused with the reason, and the form is still there.
   await page.getByLabel('Name', { exact: true }).fill('latency');
   await page.getByRole('combobox', { name: 'Kind', exact: true }).selectOption('bar');
   await page.getByRole('combobox', { name: 'Along the bottom', exact: true }).selectOption('site');
