@@ -1,6 +1,13 @@
 // Shared by the browser tests that need a signed-in person.
 import AxeBuilder from '@axe-core/playwright';
-import { type Browser, type BrowserContext, expect, type Page, test } from '@playwright/test';
+import {
+  type Browser,
+  type BrowserContext,
+  expect,
+  type Locator,
+  type Page,
+  test,
+} from '@playwright/test';
 
 export const MAIL = process.env.MAILPIT_URL ?? 'http://localhost:8025';
 export const run = Date.now().toString(36);
@@ -210,3 +217,36 @@ export const sticksOut = (page: Page) =>
     }
     return out;
   });
+
+/**
+ * A drop as the browser makes it: a dragover and then a drop, at the middle of the element,
+ * carrying a file (given as base64) and/or words. Says whether each was cancelled: one that is
+ * not makes the browser open a dropped file in the tab, away from the app.
+ */
+export function dropOn(
+  target: Locator,
+  what: { file?: { name: string; type: string; base64: string }; text?: string; html?: string },
+) {
+  return target.evaluate((el, c) => {
+    const data = new DataTransfer();
+    if (c.file) {
+      const bytes = Uint8Array.from(atob(c.file.base64), (ch) => ch.charCodeAt(0));
+      data.items.add(new File([bytes], c.file.name, { type: c.file.type }));
+    }
+    if (c.html) data.setData('text/html', c.html);
+    if (c.text) data.setData('text/plain', c.text);
+    const box = el.getBoundingClientRect();
+    const at = {
+      clientX: box.left + box.width / 2,
+      clientY: box.top + box.height / 2,
+      bubbles: true,
+      cancelable: true,
+      dataTransfer: data,
+    };
+    const over = new DragEvent('dragover', at);
+    el.dispatchEvent(over);
+    const drop = new DragEvent('drop', at);
+    el.dispatchEvent(drop);
+    return { over: over.defaultPrevented, drop: drop.defaultPrevented };
+  }, what);
+}
