@@ -835,6 +835,42 @@ Two things about tests, found on the way and not about the product:
   for the role at load. Their requests are refused by the server with a message; the status
   line is what says why.
 
+## A paper's page with a long history
+
+- **What was wrong.** Every build of changed text cuts a revision, up to 120 an hour, and the
+  paper's page listed every one of them, each with its buttons. Measured in a browser: 1.6 MB
+  and 0.9 s with 500 revisions; 15.8 MB and 8.4 s with 5,000.
+- **Now** the page lists every revision that a person named or that was a restore, and the
+  newest fifty made automatically, with a link to the fifty before those and so on
+  (`listRevisions` with `autos` and `before`). With 5,000 revisions: 183 KB and a quarter of a
+  second.
+- **Held by** a service test of the list, and two rows in `docs/benchmarks.md` for a paper
+  with 5,000 revisions and 10,000 builds. The link to older revisions was followed once in a
+  browser by hand; no browser test is kept for it, since making thousands of revisions from a
+  browser test means writing to the database from it.
+- **"Changes since"** on a row compares with the row below it. With the list thinned, that
+  may be an older revision than the one just before. It says which.
+
+## What a paper keeps for ever
+
+Nothing is ever removed. That was the plan's promise for what people write, and it also
+holds, undecided, for what the service makes.
+
+- **Each build of changed text keeps** a revision, a row for each file in it, the text of
+  each file edited since the last one, and the build's PDF, log and SyncTeX file. For the two
+  small fixtures that is 100 to 140 KB a build, nearly all of it the PDF. A real paper's PDF
+  is ten or more times that.
+- **A paper can be built 120 times an hour.** Someone typing with "Compile automatically" on
+  builds at every pause. So an hour's writing can keep 17 MB for a paper the size of the
+  fixtures, and hundreds of megabytes for a long one with pictures.
+- **The same bytes are stored once**, so a build that changes nothing keeps nothing new. But
+  nearly every edit changes the PDF.
+- A PDF can be made again from its revision: the same inputs give the same bytes with the
+  same toolchain image. So the PDFs of old automatic revisions could be dropped and built
+  again when asked for, without losing anything a person wrote. Whether to, and after how
+  long, is the owner's to decide: it is in the list at the end of this file.
+- Not measured: a real paper over real weeks of writing.
+
 ## A paper's size, and what a sync ticket opens
 
 Two more of the security review's items.
@@ -969,6 +1005,13 @@ Changed on the way, and worth keeping:
 ## Decisions waiting on the owner
 
 See "What I need from you" in `docs/plan.md`. None blocks C1.
+
+One more, found since:
+
+- **How long to keep what builds make.** Every build's PDF, log and SyncTeX file is kept for
+  ever, and so is every automatic revision. See "What a paper keeps for ever" above for how
+  fast that adds up. The PDFs of old automatic revisions can be made again, so dropping them
+  loses nothing a person wrote; nothing does so today.
 
 ## How things fit
 

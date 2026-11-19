@@ -13,6 +13,8 @@ import {
   diffRevisions,
   exportRevision,
   listRevisions,
+  olderAutoRevisions,
+  REVISIONS_SHOWN,
   renameFile,
   lastRestore,
   restoreRevision,
@@ -102,6 +104,39 @@ test('revisions are cut when something changed, numbered in order, and can be na
   expect(await code(saveRevision(t.pool, store, viewer.id, p.id, 'x'))).toBe('permission_denied');
   expect(await code(saveRevision(t.pool, store, outsider.id, p.id, 'x'))).toBe('not_found');
   expect(await code(listRevisions(t.pool, outsider.id, p.id))).toBe('not_found');
+});
+
+test('a long history is listed a part at a time, and what people named is always there', async () => {
+  const p = await paper();
+  const named = await saveRevision(t.pool, store, owner.id, p.id, 'Sent to the workshop');
+  expect(named.number).toBe(1);
+  // A paper being written gets a revision at every build. Here: 120 of them, made directly.
+  await t.pool.query(
+    `insert into revisions (project_id, number, kind, root, compiler, content_key)
+     select $1, g, 'auto', 'main.tex', 'pdflatex', md5(g::text) from generate_series(2, 121) g`,
+    [p.id],
+  );
+  const numbers = (list: { number: number }[]) => list.map((r) => r.number);
+  const range = (from: number, to: number) =>
+    Array.from({ length: from - to + 1 }, (_, i) => from - i);
+
+  // All of them, when no limit is asked for.
+  expect(numbers(await listRevisions(t.pool, owner.id, p.id))).toEqual(range(121, 1));
+  // The newest fifty automatic ones, and the named one although it is the oldest of all.
+  const first = await listRevisions(t.pool, owner.id, p.id, { autos: REVISIONS_SHOWN });
+  expect(numbers(first)).toEqual([...range(121, 72), 1]);
+  expect(await olderAutoRevisions(t.pool, owner.id, p.id, 72)).toBe(70);
+  // The ones before those, the same way, to the end.
+  const second = await listRevisions(t.pool, owner.id, p.id, {
+    autos: REVISIONS_SHOWN,
+    before: 72,
+  });
+  expect(numbers(second)).toEqual([...range(71, 22), 1]);
+  const last = await listRevisions(t.pool, owner.id, p.id, { autos: REVISIONS_SHOWN, before: 22 });
+  expect(numbers(last)).toEqual(range(21, 1));
+  expect(await olderAutoRevisions(t.pool, owner.id, p.id, 2)).toBe(0);
+  // Only for people on the paper.
+  expect(await code(olderAutoRevisions(t.pool, outsider.id, p.id, 72))).toBe('not_found');
 });
 
 test('a revision never changes, and its export can say how to rebuild it', async () => {
