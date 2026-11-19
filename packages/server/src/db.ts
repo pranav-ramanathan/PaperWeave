@@ -91,18 +91,32 @@ export async function listen(
   };
 }
 
-/** Run `fn` in one transaction: all of its writes happen, or none. */
+/**
+ * Run `fn` in one transaction: all of its writes happen, or none.
+ *
+ * While a connection is out of the pool, its failing is its borrower's to hear: the pool only
+ * listens to the ones it is holding. Unheard, a connection lost in the middle of a transaction
+ * (the database restarted during a build, say) is an error nobody caught, and ends the process.
+ * It is heard here. The query that was running fails as well, which is how `fn` finds out.
+ */
 export async function transaction<T>(pool: pg.Pool, fn: (db: Db) => Promise<T>): Promise<T> {
   const client = await pool.connect();
+  let lost: Error | undefined;
+  const hear = (err: Error) => void (lost = err);
+  client.on('error', hear);
   try {
     await client.query('begin');
     const result = await fn(client);
     await client.query('commit');
     return result;
   } catch (err) {
-    await client.query('rollback');
+    // On a connection that has gone there is nothing to take back, and the error that sent us
+    // here is the one worth having.
+    await client.query('rollback').catch(() => {});
     throw err;
   } finally {
-    client.release();
+    client.removeListener('error', hear);
+    // A connection that failed is thrown away, not handed to the next borrower.
+    client.release(lost);
   }
 }
