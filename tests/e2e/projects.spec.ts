@@ -1,6 +1,10 @@
 // Sign-in, papers, people and invitations, through the real pages and real emails.
 // Needs the services in infra/compose.yaml; email is read back from the local mail catcher.
 import { expect, test } from '@playwright/test';
+import { mkdtempSync, writeFileSync } from 'node:fs';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
+import { writeZip } from '../../packages/server/src/archive';
 import { address, audit, emailedLink, MAIL, person, run, signIn } from './helpers';
 
 test('sign in, create a paper, invite people, and keep outsiders out', async ({ browser }) => {
@@ -82,6 +86,88 @@ test('sign in, create a paper, invite people, and keep outsiders out', async ({ 
   await expect(owner.page).toHaveURL(/\/sign-in/);
   await owner.page.goto(paper);
   await expect(owner.page).toHaveURL(/\/sign-in\?next=/);
+});
+
+test('a button pressed twice does its work once', async ({ browser }) => {
+  test.setTimeout(120_000);
+  const owner = await person(browser, 'twice-owner');
+  const guest = await person(browser, 'twice-guest');
+  const { page } = owner;
+  const twice = (b: HTMLButtonElement) => {
+    b.click();
+    b.click();
+  };
+  await page.goto('/sign-in');
+  await signIn(page, owner.email);
+  await expect(page.getByRole('heading', { name: 'Your papers' })).toBeVisible();
+
+  // Create paper, pressed twice in one task: one paper.
+  const name = `Twice ${run}`;
+  await page.getByLabel('Name of a new paper').fill(name);
+  await page.getByRole('button', { name: 'Create paper' }).evaluate(twice);
+  await page.waitForURL(/\/projects\/[0-9a-f-]{36}$/);
+  await page.goto('/projects');
+  await expect(page.getByRole('link', { name, exact: true })).toHaveCount(1);
+
+  // The browser's own required check stops an empty name; the button works after it is filled.
+  await page.getByRole('button', { name: 'Create paper' }).click();
+  await expect(page).toHaveURL(/\/projects$/);
+  await page.getByLabel('Name of a new paper').fill(`Twice again ${run}`);
+  await page.getByRole('button', { name: 'Create paper' }).click();
+  await page.waitForURL(/\/projects\/[0-9a-f-]{36}$/);
+  await page.goto('/projects');
+
+  // Import ZIP, pressed twice 300 ms apart: one paper.
+  const files = [
+    {
+      path: 'main.tex',
+      bytes: Buffer.from('\\documentclass{article}\n\\begin{document}\nHi.\n\\end{document}\n'),
+    },
+  ];
+  for (let i = 0; i < 300; i++)
+    files.push({ path: `parts/part-${i}.tex`, bytes: Buffer.from(`Part ${i}.\n`) });
+  const zipName = `Zipped ${run}`;
+  const zip = join(mkdtempSync(join(tmpdir(), 'paperweave-e2e-')), `${zipName}.zip`);
+  writeFileSync(zip, await writeZip(files));
+  await page.getByLabel('Or import a ZIP of a LaTeX project').setInputFiles(zip);
+  await page
+    .getByRole('button', { name: 'Import ZIP' })
+    .evaluate(
+      (b: HTMLButtonElement) =>
+        new Promise<void>((r) => {
+          b.click();
+          setTimeout(() => {
+            b.click();
+            r();
+          }, 300);
+        }),
+    )
+    .catch(() => {}); // the page may have left before the second press
+  await page.waitForURL(/\/projects\/[0-9a-f-]{36}/);
+  await page.goto('/projects');
+  await expect(page.getByRole('link', { name: zipName, exact: true })).toHaveCount(1);
+
+  // Remove, pressed twice: it works, and says nothing of an error.
+  await page.getByRole('link', { name, exact: true }).click();
+  await page.getByLabel('Their email address').fill(guest.email);
+  await page.getByLabel('Their role').selectOption('reviewer');
+  await page.getByRole('button', { name: 'Send invitation' }).click();
+  await expect(page.getByRole('status')).toContainText(`Invitation sent to ${guest.email}`);
+  await guest.page.goto(await emailedLink(guest.email, '/invitations/'));
+  await signIn(guest.page, guest.email);
+  await guest.page.getByRole('button', { name: 'Join this paper' }).click();
+  await expect(guest.page.getByText('You are a reviewer')).toBeVisible();
+  await page.reload();
+  await page.getByRole('button', { name: `Remove ${guest.email}` }).evaluate(twice);
+  await page.waitForLoadState('load');
+  await expect(page.getByRole('rowheader', { name: guest.email })).toHaveCount(0);
+  expect(page.url()).not.toContain('error=');
+  await expect(page.locator('[role=alert]').filter({ hasText: 'not in the project' })).toHaveCount(
+    0,
+  );
+
+  await page.goto('/projects');
+  await audit(page, 'the list of papers');
 });
 
 test('sign-in never sends people to another site', async ({ browser }) => {

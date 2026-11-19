@@ -597,7 +597,8 @@ ordinary use. Nine ways of looking found them, and each is cheap to do again:
 5. **Press things twice, and look where the first look did not go.** Buttons pressed twice;
    the accessibility audit in the editor's stopped states and on pages only reached through a
    flow. Found: invitations and sign-in links with no limit on how many one address is sent;
-   two revisions from one save; a stopped editor the keyboard could not reach.
+   two revisions from one save; a stopped editor the keyboard could not reach; two papers
+   from one double press.
 6. **Take a service away.** The build worker, the mail, the object store, the database.
    Found: "Compiling" for ever; an invitation left behind when its email could not be sent;
    an error page that the pages' own content policy refused; and a sync server that a
@@ -1207,7 +1208,36 @@ twice quickly.
 - **Send invitation:** two invitations and two emails. That is left as it is, since sending
   one again is something people do, but it is what showed that invitations had no limit: see
   "How often the expensive things can be asked for".
-- Not tried: the buttons on other pages, and forms sent twice by going back and forward.
+
+Tried later on the other pages, each button pressed twice two ways: both presses in one
+moment, and the second 300 ms after the first. Measured with a probe, counted in the database:
+
+| Button                                   | Both at once                                                       | 300 ms apart                    |
+| ---------------------------------------- | ------------------------------------------------------------------ | ------------------------------- |
+| Create paper (blank, or from a template) | two papers of the same name                                        | one                             |
+| Import ZIP (300 files)                   | one                                                                | two papers of the same name     |
+| Add file                                 | one                                                                | one (the page had left already) |
+| Join this paper                          | one                                                                | one                             |
+| Remove a member                          | removed, then "That person is the owner or is not in the project." | fine                            |
+| Propose a change, Start thread           | two of each                                                        | one                             |
+
+Where two were made, the page ended on the paper as usual, so nobody would know of the
+second one.
+
+- **Now** those buttons send their form once per press: `Once` in `apps/web/app/Once.tsx`, on
+  Create paper, Import ZIP, Add file and Remove/Leave. It drops a second send at the moment the
+  form is sent, rather than after the page draws again, which is too late (the probe showed
+  it). It is free again when a server action answers, an error included, and when the page
+  is come back to with the back button. Propose and Start thread keep the same in a ref in
+  `Change` and `Say`, beside their `busy` state, which was what came too late.
+- **Held by** `projects.spec` ("a button pressed twice does its work once": Create paper,
+  Import ZIP, Remove, and a press stopped by an empty name not leaving the button dead) and a
+  step in `threads.spec`. Each of the four checks failed on the old code; Remove had to be
+  reached by hand, as the earlier failures stop the test before it.
+- **Not changed:** two requests sent without the page still make two; the server does not
+  know them apart from two meant presses. Send invitation as above. Propose has no kept test.
+- **How it was made.** Planned by one agent, written by another, checked here.
+- Not tried: forms sent twice by going back and forward.
 
 ## When an email cannot be sent
 

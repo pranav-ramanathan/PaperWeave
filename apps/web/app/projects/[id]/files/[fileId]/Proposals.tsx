@@ -22,12 +22,17 @@ function Change(props: {
   const [reason, setReason] = useState(props.start.reason);
   const [problem, setProblem] = useState('');
   const [busy, setBusy] = useState(false);
+  const sending = useRef(false);
   return (
     <form
       onSubmit={async (e) => {
         e.preventDefault();
+        if (sending.current) return;
+        sending.current = true;
         setBusy(true);
-        const wrong = await props.send(replacement, reason);
+        const wrong = await props.send(replacement, reason).finally(() => {
+          sending.current = false;
+        });
         setBusy(false);
         setProblem(wrong ?? '');
       }}
