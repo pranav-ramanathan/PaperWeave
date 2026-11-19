@@ -35,12 +35,10 @@ source text within 40 ms and the screen within 150 ms at the 95th percentile, an
 person's edit is on screen within 250 ms. Those are that test's limits; it prints what it
 measured on each run.
 
-A paper whose .bib file holds 2,000 entries and which cites one of them, in a browser,
-measured once by hand: the paper's page is 254 KB and a file opens from it in 0.8 s.
-Before the table of references was limited to what the paper cites: 5.9 MB, and 15.6 s to
-open a file from it. With 8,000 entries a file did not open in two minutes; now the page is
-the same 254 KB and a file opens in 0.6 s. The window for choosing a citation lists all
-8,000 after a second, and narrows as each letter is typed in about a tenth of a second.
+A paper whose .bib file holds 8,000 entries and which cites one of them, in a browser,
+measured once by hand: the paper's page is 254 KB and loads in 0.4 s. Before the table of
+references was limited to what the paper cites, and each entry's line was found by reading
+the file from its top: 22.8 MB and 12.1 s (5.9 MB and 1.9 s with 2,000 entries).
 
 A paper's page with 5,000 revisions, in a browser, measured once by hand: 183 KB and a
 quarter of a second. Before the list of revisions was limited to the newest fifty automatic

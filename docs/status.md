@@ -589,8 +589,8 @@ ordinary use. Eight ways of looking found them, and each is cheap to do again:
    to sign in.
 3. **Give a paper many of something.** 5,000 revisions, 2,000 files, 200 people with 400
    threads, a .bib file of 2,000 entries. Found: a paper's page of 16 MB; every file read
-   one after another; a file's page that took two seconds to take a key; a file that took
-   fifteen seconds to open.
+   one after another; a file's page that took two seconds to take a key; a paper's page of
+   23 MB that took twelve seconds to come.
 4. **Make every browser test refuse what no page should do**, after first only collecting it
    over the whole suite. Found: pages fetched before anyone asked; a field's pattern that
    browsers ignored; a caret put where no text can go.
@@ -972,26 +972,37 @@ paper cites a few dozen of them.
 - **What was wrong, in two places.**
   - The paper's page listed every entry in the .bib files, each row with its forms. Measured
     in a browser with a paper that cites one entry: 5.9 MB and 2,012 forms for 2,000 entries,
-    and a file took 15.6 s to open from that page; 22.8 MB for 8,000, where a file did not
-    open in two minutes. The time went in the browser, leaving the large page.
+    loaded in 1.9 s; 22.8 MB and 8,012 forms for 8,000, loaded in 12.1 s.
   - The server found each entry's line by reading the file from its top, once for each
-    entry. With 8,000 entries that was 7 s, on the paper's page and again each time an
-    editor opened.
+    entry. With 8,000 entries that was 7 s (most of the 12.1), on the paper's page and again
+    each time an editor opened.
 - **Now**
   - The table lists the entries the paper cites, with `\nocite` counted, and any entry that
     has a check recorded. It says how many more the files hold, with a link that lists them
     too (`?entries=all`). `citationReport` says of each entry whether it is cited.
   - A file's lines are found once (`lineNumbers` in `packages/server/src/labels.ts`), for
     citations and for labels alike.
-  - The same papers afterwards: 254 KB and 13 forms at either size, a file open in 0.8 s and
-    0.6 s, and the bibliography read in 0.11 s for 8,000 entries.
+  - The same papers afterwards: 254 KB and 13 forms at either size, loaded in 0.4 s with
+    8,000 entries, and the bibliography read in 0.11 s.
+- **A figure that was wrong, and is not above.** This section first said a file took 15.6 s
+  to open from the old page, and with 8,000 entries did not open in two minutes. That was
+  the test's own looking at a very large page, timed along with the page. Clicked and timed
+  from inside the page, a file opened from the full list in 0.5 s (2,000 entries) and 2.4 s
+  (8,000), and from the short list in 0.4 s. The sizes and times above were all taken
+  inside the page or on the server, and stand. The same mistake was made once before (the
+  editor "taking 28 s to open", below); see "For next time".
 - **Held by** a service test (which entries count as cited: not one named only in a file
   the paper leaves out), the citations browser test (an entry never cited is counted, not
   listed, and listed when asked for), a unit test of the line numbers against counting from
   the top, and a row in `docs/benchmarks.md` whose ceiling the old code passed twice over.
 - **Not changed:** the window for choosing a citation lists every entry, cited or not, as it
-  should. With 8,000 it opened in a second and each letter typed took about 0.1 s, 0.3 s at
-  worst. A paper that itself cites thousands of entries would have the large page back.
+  should. With 8,000 it was open within a second and each letter typed took 0.1 s to 0.3 s;
+  those times include the test's own looking, so they are the most it could be. A paper that
+  itself cites thousands of entries would have the large page back.
+- **The files table is the same shape and was left alone.** Each file's row has two or three
+  forms. Measured the same way: 81 KB for 20 files, 942 KB and 754 forms for 300, and 6.2 MB
+  and 5,004 forms for 2,000, which is as many as a paper may hold. That last page loaded in
+  2.4 s and a file opened from it in 1.9 s, timed inside the page.
 - **Found by** giving a paper many of something in the browser, as with the comments above.
 
 ## Pages fetched before anyone asked for them
@@ -1378,6 +1389,12 @@ Changed on the way, and worth keeping:
   before the logging.
 
 ### For next time
+
+- **Time a page from inside the page.** A click or a wait made by the test, on a page with
+  thousands of elements, can take the test tool many seconds by itself. Twice that was
+  written down as the page being slow: an editor "taking 28 s to open" and a file "taking
+  15.6 s to open". Read the page's own clock (`performance`), or click and wait inside one
+  `page.evaluate`, and profile before believing a large number.
 
 - When a browser test fails in CI, the run now keeps `test-results/` for a week as an
   artifact named `browser-test-results`: for each failed test, what its page showed.
