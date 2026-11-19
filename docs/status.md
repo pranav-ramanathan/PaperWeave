@@ -1045,6 +1045,12 @@ faults found by taking a service away.
   - the connection that listens is made again, and then the sync server looks up everything
     it could have been told meanwhile: what each person on each open file may do, which
     sign-ins have ended, and what each open file's log now holds.
+- **And a third way to the same end.** A connection lost while it was out of the pool, in the
+  middle of a transaction, was heard by nobody either: the pool listens only to the
+  connections it is holding. A build keeps one out for up to a minute. The stop-and-start by
+  hand did not hit this, by luck: nothing was in a transaction at that moment. `transaction`
+  now hears it, fails the work that was running, and throws the connection away. Two tests
+  hold this and the listening connection (`db.sandbox.test`).
 - **A second fault behind the first.** An editor that reconnected while the database was away
   was told it could not connect, and an editor takes that as final: "You no longer have
   access". The server now tells it to try again (`TRY_AGAIN`), and the editor does.
@@ -1222,6 +1228,7 @@ Changed on the way, and worth keeping:
   of the second server that test starts had still not connected after fifteen seconds
   ("socket connecting, closed 0 times, refused false"). Six runs of that file alone and five
   more of the whole suite then passed, and so did CI.
+- Tried again with every processor kept busy: fourteen runs of that file, none failed.
 - It first happened on the day the server's database connections were reworked (see "When the
   database is lost for a while"), so that change is not cleared. Nothing connecting the two
   was found: the ports the test files can pick do not overlap each other or the local
