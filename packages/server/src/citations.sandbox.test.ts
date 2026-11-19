@@ -23,7 +23,7 @@ afterAll(() => t.close());
 const REFS =
   '\ufeff% My references\r\n\r\n@Article{knuth1984,\r\n\tauthor = {Donald E. Knuth},  \r\n\ttitle  = "Literate {P}rogramming",\r\n\tyear   = 1984,\r\n\tdoi    = {https://doi.org/10.1093/comjnl/27.2.97}\r\n}\r\n\r\nstray text\r\n@book{lamport1994, title = {LaTeX}, author = {Leslie Lamport}, year = {1994}}\r\n@misc{knuth1984, title = {The same key again}}\r\n';
 const MORE =
-  '@inproceedings{shapiro2011,\n  title = {CRDTs},\n  author = {Shapiro, Marc and Pregui{\\c{c}}a, Nuno and Baquero, Carlos}\n}\n';
+  '@inproceedings{shapiro2011,\n  title = {CRDTs},\n  author = {Shapiro, Marc and Pregui{\\c{c}}a, Nuno and Baquero, Carlos}\n}\n@misc{never, title = {Cited only by a file left out}}\n';
 const FILES = {
   'main.tex': [
     '\\documentclass{article}',
@@ -50,10 +50,14 @@ test('entries, missing keys and duplicate keys are found, and the .bib files are
     report.entries.map((e) => `${e.path}:${e.line} ${e.key} | ${e.description} | ${e.doi}`),
   ).toEqual([
     'more.bib:1 shapiro2011 | Shapiro et al. CRDTs | null',
+    'more.bib:5 never | Cited only by a file left out | null',
     'refs.bib:3 knuth1984 | Knuth 1984. Literate Programming | 10.1093/comjnl/27.2.97',
     'refs.bib:11 lamport1994 | Lamport 1994. LaTeX | null',
     'refs.bib:12 knuth1984 | The same key again | null',
   ]);
+  // Which of them the paper names. Both entries under a key twice used count: either may be
+  // the one BibTeX keeps. A citation in a file the paper does not include is not the paper's.
+  expect(report.entries.filter((e) => !e.cited).map((e) => e.key)).toEqual(['never']);
   expect(report.missing.map((m) => `${m.path}:${m.line} ${m.command} ${m.key}`)).toEqual([
     'main.tex:3 citep nobody2020',
     'body.tex:1 cite ghost',

@@ -6,7 +6,16 @@ import { mkdtempSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { writeZip } from '../../packages/server/src/archive';
-import { emailedLink, person, run, selectWord, showSource, signIn, typingSaved } from './helpers';
+import {
+  audit,
+  emailedLink,
+  person,
+  run,
+  selectWord,
+  showSource,
+  signIn,
+  typingSaved,
+} from './helpers';
 
 const MAIN = [
   '\\documentclass{article}',
@@ -174,6 +183,7 @@ test('a reviewer starts a thread, the owner answers, and it outlives the text it
   await expect(thread(reviewer.page).getByLabel('Reply about “forty”')).toHaveValue(
     'Thank you, that settles it.',
   );
+  await audit(reviewer.page, 'a thread resolved under a reply being written');
   await thread(reviewer.page).getByRole('button', { name: 'Reply' }).click();
   // Sent, the thread goes where resolved threads go, with the reply in it.
   await expect(theirs.getByText('No open threads on this file.')).toBeVisible();

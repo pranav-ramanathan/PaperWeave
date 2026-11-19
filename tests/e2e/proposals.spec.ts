@@ -7,6 +7,7 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { writeZip } from '../../packages/server/src/archive';
 import {
+  audit,
   clickAfter,
   emailedLink,
   person,
@@ -141,6 +142,7 @@ test('a reviewer proposes a change; the owner accepts it, undoes that, and rejec
   await expect(added(reviewer.page).getByLabel('Text to add at the caret')).toHaveValue(
     ' So far, at least.',
   );
+  await audit(reviewer.page, 'a proposal decided under a change being written');
   await added(reviewer.page).getByRole('button', { name: 'Cancel' }).click();
   await expect(panel(reviewer.page).getByText('No open proposals on this file.')).toBeVisible();
   // (The list of decided proposals went away when the accept was undone; it is closed again.)

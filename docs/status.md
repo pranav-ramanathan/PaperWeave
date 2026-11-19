@@ -588,8 +588,9 @@ ordinary use. Eight ways of looking found them, and each is cheap to do again:
    role. Found: an editor that typed into nothing; a page that carried on as the next person
    to sign in.
 3. **Give a paper many of something.** 5,000 revisions, 2,000 files, 200 people with 400
-   threads. Found: a paper's page of 16 MB; every file read one after another; a file's
-   page that took two seconds to take a key.
+   threads, a .bib file of 2,000 entries. Found: a paper's page of 16 MB; every file read
+   one after another; a file's page that took two seconds to take a key; a file that took
+   fifteen seconds to open.
 4. **Make every browser test refuse what no page should do**, after first only collecting it
    over the whole suite. Found: pages fetched before anyone asked; a field's pattern that
    browsers ignored; a caret put where no text can go.
@@ -962,6 +963,36 @@ Two things about tests, found on the way and not about the product:
   quotes, an ampersand, Japanese, an emoji, `%41` and 180 more characters; a file named
   `sec tions/é ü's "x" & 日本 #1 %20.tex`. Created, opened, typed into, built, listed and
   downloaded: the names came back as given, and the ZIP's own name had only plain characters.
+
+## A paper with a large .bib file
+
+People keep one .bib file for all their papers. Two thousand entries is ordinary, and this
+paper cites a few dozen of them.
+
+- **What was wrong, in two places.**
+  - The paper's page listed every entry in the .bib files, each row with its forms. Measured
+    in a browser with a paper that cites one entry: 5.9 MB and 2,012 forms for 2,000 entries,
+    and a file took 15.6 s to open from that page; 22.8 MB for 8,000, where a file did not
+    open in two minutes. The time went in the browser, leaving the large page.
+  - The server found each entry's line by reading the file from its top, once for each
+    entry. With 8,000 entries that was 7 s, on the paper's page and again each time an
+    editor opened.
+- **Now**
+  - The table lists the entries the paper cites, with `\nocite` counted, and any entry that
+    has a check recorded. It says how many more the files hold, with a link that lists them
+    too (`?entries=all`). `citationReport` says of each entry whether it is cited.
+  - A file's lines are found once (`lineNumbers` in `packages/server/src/labels.ts`), for
+    citations and for labels alike.
+  - The same papers afterwards: 254 KB and 13 forms at either size, a file open in 0.8 s and
+    0.6 s, and the bibliography read in 0.11 s for 8,000 entries.
+- **Held by** a service test (which entries count as cited: not one named only in a file
+  the paper leaves out), the citations browser test (an entry never cited is counted, not
+  listed, and listed when asked for), a unit test of the line numbers against counting from
+  the top, and a row in `docs/benchmarks.md` whose ceiling the old code passed twice over.
+- **Not changed:** the window for choosing a citation lists every entry, cited or not, as it
+  should. With 8,000 it opened in a second and each letter typed took about 0.1 s, 0.3 s at
+  worst. A paper that itself cites thousands of entries would have the large page back.
+- **Found by** giving a paper many of something in the browser, as with the comments above.
 
 ## Pages fetched before anyone asked for them
 
