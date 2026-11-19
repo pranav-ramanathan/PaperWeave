@@ -5,7 +5,7 @@ import { mkdtempSync, readdirSync, readFileSync, statSync, writeFileSync } from 
 import { tmpdir } from 'node:os';
 import { join, relative } from 'node:path';
 import { writeZip } from '../../packages/server/src/archive';
-import { emailedLink, person, run, showSource, signIn } from './helpers';
+import { emailedLink, person, run, showSource, signIn, typingSaved } from './helpers';
 
 const FIXTURE = join(import.meta.dirname, '../../fixtures/ieee-multifile');
 const build = (page: Page) => page.locator('.build');
@@ -144,10 +144,34 @@ test('the PDF is behind only when the paper has changed, and is built once for e
   await expect(buildStatus(page)).toHaveText('The PDF is up to date.');
   expect(asked.length).toBeLessThanOrEqual(2);
 
+  // Someone builds the PDF of an older revision, one saved between two builds. That is now the
+  // newest build, and it is not of the paper as it stands: the pane builds the paper again.
+  const other = await page.context().newPage();
+  const paper = page.url().split('/files/')[0];
+  const auto = build(page).getByRole('checkbox', { name: 'Compile automatically' });
+  await auto.uncheck();
+  await source(page).click();
+  await page.keyboard.press('ControlOrMeta+End');
+  await page.keyboard.type('% one');
+  await typingSaved(page);
+  await other.goto(paper);
+  await other.getByLabel('Name for the paper as it is now').fill('One');
+  await other.getByRole('button', { name: 'Save revision' }).click();
+  await expect(other.getByRole('status')).toContainText('Saved as revision');
+  await page.keyboard.type(' two');
+  await typingSaved(page);
+  await auto.check();
+  await expect(buildStatus(page)).toHaveText('The PDF is up to date.', { timeout: 30_000 });
+  const before = asked.length;
+  await other.reload();
+  await other.getByRole('button', { name: /^Build the PDF for revision/ }).click();
+  await expect.poll(() => asked.length, { timeout: 30_000 }).toBeGreaterThan(before);
+  await expect(buildStatus(page)).toHaveText('The PDF is up to date.', { timeout: 30_000 });
+  await expect(build(page)).not.toContainText('before the latest edits');
+
   // The paper changes with nothing typed: in another window, a file it reads is deleted. The
   // PDF is no longer of this paper, and the pane finds that out and builds by itself.
-  const other = await page.context().newPage();
-  await other.goto(page.url().split('/files/')[0]);
+  await other.goto(paper);
   await other.getByRole('button', { name: 'Delete tables/ablation.tex' }).click();
   await expect(other.getByRole('status')).toContainText('Deleted tables/ablation.tex.');
   await expect(buildStatus(page)).toHaveText('The latest build failed.', { timeout: 30_000 });

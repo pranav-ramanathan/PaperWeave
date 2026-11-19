@@ -24,7 +24,8 @@ export default function BuildPane({
   const url = `/projects/${projectId}/builds`;
   // The paper's mark at the last poll, to see that it has been still since.
   const seen = useRef<string | null>(null);
-  // The paper's mark when this pane last asked for a build by itself.
+  // The paper's mark, and the revision of the newest build, when this pane last asked for a
+  // build by itself.
   const asked = useRef<string | null>(null);
 
   const compile = useCallback(async () => {
@@ -47,11 +48,14 @@ export default function BuildPane({
       const idle = seen.current === next.edits;
       seen.current = next.edits;
       const behind = !next.latest || (next.latest.status !== 'queued' && next.latest.stale);
-      // Once for each state of the paper. A build that comes back still behind is not asked
-      // for again until something changes: asked for every two seconds, a paper would use
-      // up its builds for the hour.
-      if (auto && canBuild && idle && behind && asked.current !== next.edits) {
-        asked.current = next.edits;
+      // Once for each state of the paper and revision the newest build is of. A build that
+      // comes back behind, of the same revision, is not asked for again until something
+      // changes: asked for every two seconds, a paper would use up its builds for the hour.
+      // The revision is part of it because someone may build an older revision, which then
+      // is the newest build: the paper has not changed, and still wants building.
+      const state = `${next.edits} ${next.latest?.revisionId}`;
+      if (auto && canBuild && idle && behind && asked.current !== state) {
+        asked.current = state;
         void compile();
       }
     };
