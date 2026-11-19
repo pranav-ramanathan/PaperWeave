@@ -577,11 +577,27 @@ What is left is not code that can be written here:
    forbid automated access to its site**: `overleaf.md` says what was read before that was
    noticed, and whether to keep that file is the owner's call.
 
-That list was written before the fault under "A PDF that stayed behind the text" was found,
-and that one was in code, reached by anyone with a paper of two files. It was found by making
-a test do the second of something: open a second file. Several tests still do only the first
-(draw a chart once, restore once, rename once). Making them do the second is the cheapest
-place left to look.
+That list was written before a run of faults that were all in code, and each reached by
+ordinary use. Four ways of looking found them, and each is cheap to do again:
+
+1. **Do the second of something.** Open a second file, redraw a chart, build an older
+   revision, restore across a chart. Found: a PDF that stayed "behind" for ever and used up
+   the paper's builds; builds that stayed "up to date" after a chart was redrawn; a chart that
+   said "drawn" with its files gone.
+2. **Change something about a person while their page is open.** Sign them out, lower their
+   role. Found: an editor that typed into nothing; a page that carried on as the next person
+   to sign in.
+3. **Give a paper many of something.** 5,000 revisions, 2,000 files. Found: a paper's page of
+   16 MB; every file read one after another.
+4. **Make every browser test refuse what no page should do**, after first only collecting it
+   over the whole suite. Found: pages fetched before anyone asked; a field's pattern that
+   browsers ignored; a caret put where no text can go.
+
+Tried the same way and nothing found: thirty connections typing into one file at once (kept
+as a test in `sync.sandbox.test`); 400 threads and 400 proposals on one file (both lists
+took about 20 ms on the server; not kept, and their panels in the browser were not tried).
+
+Not yet tried: a paper with hundreds of people on it; a second browser.
 
 If more is to be built before those are settled, the candidates are in the code as
 `shortcut:` comments (seven of them, each saying when it stops being good enough) and in the
@@ -640,6 +656,10 @@ Built after the security review, which had it as its second open item.
 - **Chart drawings: 120 an hour for a paper**, the same as builds (`CHART_DRAWS_PER_HOUR`).
   Counted in `chart_requests` (migration 0022), not `chart_draws`: a drawing that gives the
   same files as before is not recorded there again, so it could not be counted from there.
+- **Invitations: 30 an hour for one person**, over all their papers
+  (`INVITATIONS_PER_HOUR` in `packages/server/src/projects.ts`). Each is an email to an
+  address its sender chose; before this, anyone with an account could have the service write
+  to any number of strangers. Found by pressing "Send invitation" twice to see what happened.
 - The numbers are guesses at "far more than anyone means to do". Nothing measured them.
 - Not limited: reading pages, checking grammar, typing. See `docs/security-review.md`.
 
@@ -903,6 +923,23 @@ caret had been put where no text can go.
   paragraph it is the start of the next one: there is no place for text between the equation
   and the blank line, short of starting a new paragraph for the person.
 - **Held by** a test in `insert.spec` that reads the source afterwards.
+
+## A button pressed twice
+
+Tried on the paper's page: "Delete", "Save revision" and "Send invitation", each pressed
+twice quickly.
+
+- **Delete:** the file is deleted once and the page says so.
+- **Save revision:** two revisions of the same paper under the same name were made. Now a
+  save under the name the paper was just saved under, with nothing changed, is that revision
+  again (`cut` in `packages/server/src/revisions.ts`). A different name, or a changed paper,
+  still makes a new one.
+- **Restore** (tried on the server, not in a browser): two restores of the same revision
+  made two revisions; now the second is the first again.
+- **Send invitation:** two invitations and two emails. That is left as it is, since sending
+  one again is something people do, but it is what showed that invitations had no limit: see
+  "How often the expensive things can be asked for".
+- Not tried: the buttons on other pages, and forms sent twice by going back and forward.
 
 ## What a paper keeps for ever
 
