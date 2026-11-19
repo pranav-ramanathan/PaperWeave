@@ -665,6 +665,10 @@ Built after the security review, which had it as its second open item.
   often one client may ask (five a minute); nothing limited how often one address was written
   to, so a few clients together, or one patient one, could fill someone's inbox. Only a hash
   of the address is kept, for a day. Past the limit the form says the link could not be sent.
+  - The trade: for that hour nobody can have a link sent to the address, its owner included,
+    so someone can be kept from asking for a link by another person asking in their name.
+    The links already sent are in the owner's inbox and each works for 15 minutes, so they
+    are slowed, not shut out. Whether ten is the right number was not tested on anyone.
 - The numbers are guesses at "far more than anyone means to do". Nothing measured them.
 - Not limited: reading pages, checking grammar, typing. See `docs/security-review.md`.
 
