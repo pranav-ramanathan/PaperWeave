@@ -6,7 +6,7 @@ import { Decoration, type DecorationSet, EditorView, keymap, lineNumbers } from 
 import { HocuspocusProvider } from '@hocuspocus/provider';
 import { type Command, type CommandResult, watchSaved } from '@paperweave/bridge';
 import { useRouter } from 'next/navigation';
-import { useEffect, useRef, useState } from 'react';
+import { useEffect, useLayoutEffect, useRef, useState } from 'react';
 import { flushSync } from 'react-dom';
 import { yCollab, yUndoManagerKeymap } from 'y-codemirror.next';
 import * as Y from 'yjs';
@@ -99,6 +99,25 @@ const toBase64 = (bytes: Uint8Array) =>
     .replace(/=+$/, '');
 const fromBase64 = (text: string) =>
   Uint8Array.from(atob(text.replaceAll('-', '+').replaceAll('_', '/')), (c) => c.charCodeAt(0));
+
+// Which view this person last chose, kept in this browser. Storage can be shut (private
+// windows, a setting): then nothing is remembered and nothing breaks.
+const VIEW = 'paperweave.view';
+const chosenView = (): Mode | null => {
+  try {
+    const v = localStorage.getItem(VIEW);
+    return v === 'visual' || v === 'source' ? v : null;
+  } catch {
+    return null;
+  }
+};
+const rememberView = (m: Mode) => {
+  try {
+    localStorage.setItem(VIEW, m);
+  } catch {
+    // Shut: nothing is remembered.
+  }
+};
 
 /**
  * One file, open for live editing. A .tex file has two views of the same text, visual and source;
@@ -215,6 +234,11 @@ export default function FileEditor(props: {
   useEffect(() => () => setBibliography({ entries: {}, known: false }), []);
   // Until the editors exist there is no selection to carry: a click just changes the view.
   const switchTo = useRef<(next: Mode) => void>(setMode);
+  // Open in the view this person last chose. After the first draw, which the server made
+  // without knowing it.
+  useLayoutEffect(() => {
+    if (props.visual && !sourceOnly && chosenView() === 'source') setMode('source');
+  }, []); // once: later changes are the person's own
   const [sync, setSync] = useState<Sync>({
     connected: false,
     loaded: false,
@@ -694,7 +718,10 @@ export default function FileEditor(props: {
                 key={m}
                 type="button"
                 aria-pressed={mode === m}
-                onClick={() => mode !== m && switchTo.current(m)}
+                onClick={() => {
+                  rememberView(m);
+                  if (mode !== m) switchTo.current(m);
+                }}
               >
                 {m === 'visual' ? 'Visual' : 'Source'}
               </button>

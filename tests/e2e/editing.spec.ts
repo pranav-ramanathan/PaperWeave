@@ -5,7 +5,7 @@ import { mkdtempSync, readdirSync, readFileSync, statSync, writeFileSync } from 
 import { tmpdir } from 'node:os';
 import { join, relative } from 'node:path';
 import { readZip, writeZip } from '../../packages/server/src/archive';
-import { emailedLink, person, run, showSource, signIn } from './helpers';
+import { audit, emailedLink, person, run, showSource, showVisual, signIn } from './helpers';
 
 const FIXTURE = join(import.meta.dirname, '../../fixtures/ieee-multifile');
 
@@ -114,4 +114,99 @@ test('two people edit a file together, a reviewer reads along, and offline edits
   );
   for (const f of files)
     if (f.path !== 'sections/intro.tex') expect(bytes(f.path).equals(f.bytes), f.path).toBe(true);
+});
+
+test('a file opens in the view its person last chose', async ({ browser }) => {
+  test.setTimeout(180_000);
+  const owner = await person(browser, 'view-owner');
+  const page = owner.page;
+  const view = (name: string) =>
+    page.getByRole('group', { name: 'View' }).getByRole('button', { name });
+  const visual = page.locator('.editor .visual .ProseMirror');
+  const main = [
+    '\\documentclass{article}',
+    '\\begin{document}',
+    'Latency stays below forty milliseconds.',
+    '',
+    '\\begin{tikzpicture}',
+    '\\draw (0,0) -- (1,1);',
+    '\\end{tikzpicture}',
+    '',
+    '\\input{body}',
+    '\\end{document}',
+    '',
+  ].join('\n');
+  const zip = join(mkdtempSync(join(tmpdir(), 'paperweave-e2e-')), `View ${run}.zip`);
+  writeFileSync(
+    zip,
+    await writeZip([
+      { path: 'main.tex', bytes: Buffer.from(main) },
+      { path: 'body.tex', bytes: Buffer.from('Nothing else is claimed here.\n') },
+      { path: 'refs.bib', bytes: Buffer.from('@book{k, title={A Title}}\n') },
+    ]),
+  );
+  await page.goto('/sign-in');
+  await signIn(page, owner.email);
+  await page.getByLabel('Or import a ZIP of a LaTeX project').setInputFiles(zip);
+  await page.getByRole('button', { name: 'Import ZIP' }).click();
+  await page.waitForURL(/\/projects\/[0-9a-f-]{36}/);
+  const paper = page.url();
+  const open = async (name: string) => {
+    await page.getByRole('link', { name, exact: true }).first().click();
+    await page.waitForURL(/\/files\//);
+    await expect(page.getByRole('region', { name: `Editor for ${name}` })).toBeVisible();
+  };
+
+  // Nothing chosen yet: the visual view.
+  await open('main.tex');
+  await expect(view('Visual')).toHaveAttribute('aria-pressed', 'true');
+  await expect(visual).toBeVisible();
+
+  // Source chosen, then the page reloaded: still the source.
+  await showSource(page);
+  await page.reload();
+  await expect(view('Source')).toHaveAttribute('aria-pressed', 'true');
+  await expect(source(page)).toBeVisible();
+  await expect(source(page)).toContainText('Latency stays below forty');
+  await audit(page, 'a file opened in the source view');
+
+  // Another file of the paper opens in the source too.
+  await page.goto(paper);
+  await open('body.tex');
+  await expect(view('Source')).toHaveAttribute('aria-pressed', 'true');
+  await expect(source(page)).toContainText('Nothing else is claimed here.');
+
+  // Visual chosen, then reloaded: visual. A switch the page makes itself is not remembered.
+  await showVisual(page);
+  await page.reload();
+  await expect(view('Visual')).toHaveAttribute('aria-pressed', 'true');
+  await page.goto(paper);
+  await open('main.tex');
+  await expect(view('Visual')).toHaveAttribute('aria-pressed', 'true');
+  await visual.getByRole('button', { name: 'Edit in source' }).first().click();
+  await expect(view('Source')).toHaveAttribute('aria-pressed', 'true');
+  await page.reload();
+  await expect(view('Visual')).toHaveAttribute('aria-pressed', 'true');
+  await expect(visual).toBeVisible();
+
+  // A file with no visual view shows its source, and leaves the choice as it was.
+  await page.goto(paper);
+  await open('refs.bib');
+  await expect(source(page)).toContainText('A Title');
+  await page.goto(paper);
+  await open('main.tex');
+  await expect(view('Visual')).toHaveAttribute('aria-pressed', 'true');
+
+  // The choice belongs to a browser: someone else on their own paper still starts in visual.
+  await showSource(page);
+  const other = await person(browser, 'view-other');
+  await other.page.goto('/sign-in');
+  await signIn(other.page, other.email);
+  await other.page.getByLabel('Or import a ZIP of a LaTeX project').setInputFiles(zip);
+  await other.page.getByRole('button', { name: 'Import ZIP' }).click();
+  await other.page.waitForURL(/\/projects\/[0-9a-f-]{36}/);
+  await other.page.getByRole('link', { name: 'main.tex', exact: true }).first().click();
+  await expect(
+    other.page.getByRole('group', { name: 'View' }).getByRole('button', { name: 'Visual' }),
+  ).toHaveAttribute('aria-pressed', 'true');
 });
