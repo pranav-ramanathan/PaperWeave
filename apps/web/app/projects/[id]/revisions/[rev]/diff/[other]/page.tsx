@@ -50,6 +50,13 @@ export default async function Diff({
                 </span>
               ))}
             </pre>
+          ) : f.tooLarge ? (
+            <p>
+              Too much of this file changed to show it line by line here. To compare them, download{' '}
+              <a href={`/projects/${id}/revisions/${other}/zip`}>the ZIP of revision {diff.from}</a>{' '}
+              and <a href={`/projects/${id}/revisions/${rev}/zip`}>the ZIP of revision {diff.to}</a>
+              .
+            </p>
           ) : (
             f.status === 'changed' && (
               <p>This file changed, but it is not text that can be shown line by line.</p>

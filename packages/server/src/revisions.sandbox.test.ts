@@ -232,6 +232,24 @@ test('comparing two revisions shows changed lines, renames and nothing else', as
   expect(await code(diffRevisions(t.pool, store, outsider.id, p.id, a.id, b.id))).toBe('not_found');
 });
 
+test('a text file that changed too much to compare line by line is marked too large', async () => {
+  const p = await paper();
+  const block = (word: string) => Array.from({ length: 2100 }, (_, i) => `${word} ${i}`).join('\n');
+  await replace(p.main, 'Second line.', block('old'));
+  const a = await saveRevision(t.pool, store, owner.id, p.id, 'Old');
+  await replace(p.main, block('old'), block('new'));
+  const b = await saveRevision(t.pool, store, owner.id, p.id, 'New');
+
+  const diff = await diffRevisions(t.pool, store, viewer.id, p.id, a.id, b.id);
+  expect(diff.files).toHaveLength(1);
+  expect(diff.files[0]).toMatchObject({
+    path: 'main.tex',
+    status: 'changed',
+    lines: null,
+    tooLarge: true,
+  });
+});
+
 test('restoring puts the paper back as a new revision and erases nothing', async () => {
   const p = await paper();
   const good = await saveRevision(t.pool, store, owner.id, p.id, 'Good');
