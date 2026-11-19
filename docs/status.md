@@ -1049,15 +1049,20 @@ faults found by taking a service away.
   was told it could not connect, and an editor takes that as final: "You no longer have
   access". The server now tells it to try again (`TRY_AGAIN`), and the editor does.
 - **What a person sees now**, from a database stopped and started by hand: while it is away,
-  "Saving your edits…" and the editor still takes typing; about half a minute after it is
-  back, "All edits saved" with nothing lost; a role changed afterwards reaches the open
+  "Saving your edits…" and the editor still takes typing; once it is back, "All edits saved"
+  with nothing lost (after half a minute at first, now within seconds: see below); a role changed afterwards reaches the open
   editor as before.
 - **Held by** a sync test that drops every connection to the database at once, makes an edit
   on the server and lowers a role before the server can be listening again, and sees both
   arrive, nobody disconnected and typing saved. The stop-and-start by hand is not kept.
-- **Not looked at:** half a minute is the sync library's own waiting between attempts, which
-  grows each time one fails. The web app's pages fail with the service's error page while the
+- **Half a minute was the sync library's waiting between attempts**, which grows each time
+  one fails, up to thirty seconds. The editor now caps it at five (`maxDelay` in
+  `FileEditor.tsx`). After a 45-second outage, by hand: typing was saved within the few
+  seconds the database took to say it was ready again.
+- **Not looked at:** the web app's pages fail with the service's error page while the
   database is away, as they should; whether every one of them recovers was not gone through.
+  While it is away the server's log fills with one line for every question it could not
+  answer, about one a second for each open editor.
 
 ## What a paper keeps for ever
 
@@ -1209,6 +1214,23 @@ Changed on the way, and worth keeping:
   page did on the wire did.
 - Locally, the database logs lock waits and statements over 150 ms. That is a setting of the
   local container (`alter system`), not of the repository.
+
+### A sync test that failed once and is not explained
+
+- On 19 November, in one of eight runs of the whole service suite that day, "what someone
+  typed as they left reaches whoever opens the file next" failed at its first step: a client
+  of the second server that test starts had still not connected after fifteen seconds
+  ("socket connecting, closed 0 times, refused false"). Six runs of that file alone and five
+  more of the whole suite then passed, and so did CI.
+- It first happened on the day the server's database connections were reworked (see "When the
+  database is lost for a while"), so that change is not cleared. Nothing connecting the two
+  was found: the ports the test files can pick do not overlap each other or the local
+  services, and the test before it stops its server.
+- The message is the one a client gives when nothing is listening at its address, which was
+  checked by pointing one at an empty port. The test's failure message now also says whether
+  anything accepts connections there, so the next one will say whether the server was up.
+  On the machine this was run on, only the database listens anywhere in the range these
+  tests take their ports from, and it is outside what this test can pick.
 
 ## Decisions waiting on the owner
 

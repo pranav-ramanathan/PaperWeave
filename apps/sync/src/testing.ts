@@ -1,4 +1,5 @@
 // Shared by the sync server's tests: a client that connects the way the browser does.
+import { createConnection } from 'node:net';
 import { HocuspocusProvider, HocuspocusProviderWebsocket } from '@hocuspocus/provider';
 import { syncTicket, TEXT } from '@paperweave/server';
 import * as Y from 'yjs';
@@ -105,8 +106,27 @@ export const saved = (...cs: Client[]) => {
       state[i] = 'saved';
     }
     return true;
-  }).catch((err: Error) => {
+  }).catch(async (err: Error) => {
     err.message += `: ${state.map((s, i) => `client ${i + 1} ${s}`).join('; ')}`;
+    // A client that never connected: is anything there to connect to? Asked of the address
+    // itself, so that a server that is not listening can be told from one that does not answer.
+    const stuck = cs.find((c) => !c.provider.synced);
+    if (stuck) err.message += `; ${await reachable(stuck.socket.configuration.url)}`;
     throw err;
   });
 };
+
+/** Whether anything accepts a connection at a WebSocket address, in words. */
+function reachable(address: string): Promise<string> {
+  const { hostname, port } = new URL(address);
+  return new Promise((resolve) => {
+    const socket = createConnection({ host: hostname, port: Number(port) });
+    const done = (said: string) => {
+      socket.destroy();
+      resolve(`${hostname}:${port} ${said}`);
+    };
+    socket.setTimeout(1000, () => done('did not answer a new connection within a second'));
+    socket.once('connect', () => done('accepts connections'));
+    socket.once('error', (e) => done(`refuses connections (${(e as NodeJS.ErrnoException).code})`));
+  });
+}

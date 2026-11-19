@@ -237,6 +237,11 @@ export default function FileEditor(props: {
       url: syncUrl,
       name: fileId,
       document: doc,
+      // After a failed attempt to connect the library waits longer before each next one, up
+      // to half a minute. Five seconds at most here: when a service that was away comes back,
+      // what was typed meanwhile should not wait half a minute more to be saved. (The library
+      // hands everything here on to the connection it makes; its types for this do not say so.)
+      ...({ maxDelay: 5000 } as object),
       // Asked for on every connection attempt: a ticket only lives for a minute.
       token: async () => {
         // Their unsaved edits hold one the server will not take: connecting would send it again.
