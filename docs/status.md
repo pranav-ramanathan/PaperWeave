@@ -891,6 +891,19 @@ that current browsers cannot read (a bare hyphen inside brackets), so they ignor
 name was sent to the server, which refused it with a message. The pattern is fixed and a step
 of `charts.spec` holds that a bad name is caught in the form.
 
+One warning is refused as well, found the same way: the visual editor's library saying a
+caret had been put where no text can go.
+
+- **What was wrong.** After an equation or a figure is inserted on a line of its own, the
+  caret was put "just after it", which is between two blocks. No text can go there. The caret
+  was not drawn, and what was typed next landed before the equation, not after.
+- **Now** the caret takes the nearest place after that can take text, or failing that the
+  nearest before (`selectAt` in `apps/web/lib/visual.ts`). In the middle of a paragraph that
+  is the rest of the paragraph, so typing carries on after the equation. At the end of a
+  paragraph it is the start of the next one: there is no place for text between the equation
+  and the blank line, short of starting a new paragraph for the person.
+- **Held by** a test in `insert.spec` that reads the source afterwards.
+
 ## What a paper keeps for ever
 
 Nothing is ever removed. That was the plan's promise for what people write, and it also
