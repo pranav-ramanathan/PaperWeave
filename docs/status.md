@@ -787,6 +787,25 @@ Two things about tests, found on the way and not about the product:
   record of what a chart was drawn from is one row, not one for each revision. It errs towards
   asking a person to look.
 
+## An editor whose sign-in has ended
+
+- **What happened before.** An editor that could not get a ticket because the person was
+  signed out (their sign-in ran out, or they signed out in another tab) said "You no longer
+  have access to this file, or it has been deleted" and stopped. Anything typed and not yet
+  saved stayed in a page that could do nothing with it.
+- **Now** it says they are signed out, with a link that opens the sign-in page in a new tab.
+  The editor stays open for typing, goes on asking for a ticket, and carries on by itself
+  once they have signed in: what was typed meanwhile is saved (`token` in `FileEditor.tsx`).
+- **Not as the next person.** The ticket's answer says whom it is for. If someone else has
+  signed in on the browser, the page stops instead of carrying on as them. Before this, a
+  page that reconnected after another person had signed in did carry on as them; see
+  `docs/security-review.md`.
+- **Two browser tests hold it** (`recover.spec`). The second fails without the check on whom
+  the ticket is for: the first person's typing is saved as the second's.
+- **Not changed:** a page that still has its connection when its person signs out elsewhere
+  keeps it until the connection drops. The sync server checks the person's role on every
+  edit, not whether they are still signed in.
+
 ## A paper's size, and what a sync ticket opens
 
 Two more of the security review's items.

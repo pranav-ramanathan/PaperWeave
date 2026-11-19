@@ -18,5 +18,10 @@ export async function GET(request: Request) {
     if (err instanceof AppError) return null;
     throw err;
   });
-  return Response.json({ ticket, restored }, { headers: { 'cache-control': 'no-store' } });
+  // Who it is for, so that a page left open by one person does not carry on as the next person
+  // to sign in on the same browser.
+  return Response.json(
+    { ticket, restored, user: user.email },
+    { headers: { 'cache-control': 'no-store' } },
+  );
 }

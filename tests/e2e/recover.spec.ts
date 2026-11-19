@@ -290,3 +290,102 @@ test('a structural edit whose answer is lost is made once, and not said to have 
   await expect(source(page)).toContainText('\\caption{Lost and found}');
   expect((await source(page).innerText()).split('\\begin{table}').length - 1).toBe(1);
 });
+
+test('an editor whose sign-in has ended says so, keeps what is typed, and carries on after signing in', async ({
+  browser,
+}) => {
+  const { page, email } = await person(browser, 'rec-signed-out');
+  const zip = join(mkdtempSync(join(tmpdir(), 'paperweave-e2e-')), `Signed out ${run}.zip`);
+  writeFileSync(zip, await writeZip([{ path: 'main.tex', bytes: Buffer.from(MAIN) }]));
+  await page.goto('/sign-in');
+  await signIn(page, email);
+  await page.getByLabel('Or import a ZIP of a LaTeX project').setInputFiles(zip);
+  await page.getByRole('button', { name: 'Import ZIP' }).click();
+  await page.getByRole('link', { name: 'main.tex' }).first().click();
+  await showSource(page);
+  await expect(status(page)).toHaveText('All edits saved.');
+
+  // Signed out, as from another tab: the page is not told. Then the connection is lost, and
+  // something is typed before it comes back.
+  const out = await page.request.post('/api/auth/sign-out', {
+    headers: { origin: 'http://localhost:3100' },
+    data: {},
+  });
+  expect(out.ok()).toBe(true);
+  await page.context().setOffline(true);
+  await expect(status(page)).toContainText('Offline.');
+  await typeAtStart(page, '% typed while signed out\n');
+  await page.context().setOffline(false);
+
+  // Not "you no longer have access": the edit is kept, more can be typed, and there is a way
+  // back in.
+  await expect(status(page)).toHaveText(
+    'You are signed out. Sign in again in another tab and this page will carry on. Your edits are kept here until then.',
+    { timeout: 20_000 },
+  );
+  await expect(source(page)).toHaveAttribute('contenteditable', 'true');
+  await expect(source(page)).toContainText('% typed while signed out');
+  const link = page
+    .getByRole('region', { name: /^Editor for/ })
+    .getByRole('link', { name: 'Sign in (opens a new tab)' });
+  const [tab] = await Promise.all([page.context().waitForEvent('page'), link.click()]);
+  await signIn(tab, email);
+
+  // The page left open carries on by itself, and what was typed is saved.
+  await expect(status(page)).toHaveText('All edits saved.', { timeout: 20_000 });
+  await tab.goto(page.url());
+  await showSource(tab);
+  await expect(source(tab)).toContainText('% typed while signed out');
+});
+
+test('a page left open by one person does not carry on as the next person to sign in', async ({
+  browser,
+}) => {
+  const first = await person(browser, 'rec-first');
+  const second = await person(browser, 'rec-second');
+  const { page } = first;
+  const zip = join(mkdtempSync(join(tmpdir(), 'paperweave-e2e-')), `Shared ${run}.zip`);
+  writeFileSync(zip, await writeZip([{ path: 'main.tex', bytes: Buffer.from(MAIN) }]));
+  await page.goto('/sign-in');
+  await signIn(page, first.email);
+  await page.getByLabel('Or import a ZIP of a LaTeX project').setInputFiles(zip);
+  await page.getByRole('button', { name: 'Import ZIP' }).click();
+  // The second person may edit the paper too: nothing but the page being someone else's
+  // stands between them and it.
+  await page.getByLabel('Their email address').fill(second.email);
+  await page.getByLabel('Their role').selectOption('editor');
+  await page.getByRole('button', { name: 'Send invitation' }).click();
+  await expect(page.getByRole('status')).toContainText(second.email);
+  await second.page.goto(await emailedLink(second.email, '/invitations/'));
+  await signIn(second.page, second.email);
+  await second.page.getByRole('button', { name: 'Join this paper' }).click();
+
+  await page.getByRole('link', { name: 'main.tex' }).first().click();
+  await showSource(page);
+  await expect(status(page)).toHaveText('All edits saved.');
+  const out = await page.request.post('/api/auth/sign-out', {
+    headers: { origin: 'http://localhost:3100' },
+    data: {},
+  });
+  expect(out.ok()).toBe(true);
+  await page.context().setOffline(true);
+  await expect(status(page)).toContainText('Offline.');
+  await typeAtStart(page, '% typed by the first person\n');
+  await page.context().setOffline(false);
+  await expect(status(page)).toContainText('You are signed out.', { timeout: 20_000 });
+
+  // The second person signs in on the same browser.
+  const tab = await page.context().newPage();
+  await tab.goto('/sign-in');
+  await signIn(tab, second.email);
+  // The first person's page stops. What they typed is not saved under the second's name.
+  await expect(status(page)).toHaveText(
+    'You no longer have access to this file, or it has been deleted.',
+    { timeout: 20_000 },
+  );
+  await tab.goto(page.url());
+  await showSource(tab);
+  await expect(status(tab)).toHaveText('All edits saved.');
+  await expect(source(tab)).toContainText('Hello.');
+  await expect(source(tab)).not.toContainText('typed by the first person');
+});
