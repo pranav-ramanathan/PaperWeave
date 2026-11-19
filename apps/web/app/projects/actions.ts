@@ -28,7 +28,8 @@ import {
 } from '@paperweave/server';
 import { act, baseUrl, blobs, db, requireUser, sendEmail } from '../../lib/server';
 
-const text = (form: FormData, name: string) => String(form.get(name) ?? '');
+// A browser sends a line break in a form as two characters and counts it as one in the field.
+const text = (form: FormData, name: string) => String(form.get(name) ?? '').replace(/\r\n/g, '\n');
 
 export async function createAction(form: FormData) {
   const user = await requireUser('/projects');

@@ -98,6 +98,18 @@ test('a chart is drawn from approved data and is out of date once the data chang
 
   // Its author gives it a caption. The record of how it was made is on its page.
   await page.goto(chart);
+  // One character over what the field allows (the browser's own limit is lifted to try it) is
+  // refused for its length, not for what it holds.
+  await page.getByLabel(/^Caption/).evaluate((el) => el.removeAttribute('maxlength'));
+  await page.getByLabel(/^Caption/).fill('a'.repeat(501));
+  await page.getByRole('button', { name: 'Draw it again' }).click();
+  await expect(page.locator('main [role=alert]')).toHaveText('The caption is too long.');
+  await page.getByLabel(/^Description/).evaluate((el) => el.removeAttribute('maxlength'));
+  await page.getByLabel(/^Description/).fill('a'.repeat(301));
+  await page.getByLabel(/^Caption/).fill('Latency over four days.');
+  await page.getByRole('button', { name: 'Draw it again' }).click();
+  await expect(page.locator('main [role=alert]')).toHaveText('The description is too long.');
+  // The page comes back without what was typed.
   await page.getByLabel(/^Caption/).fill('Latency over four days.');
   await page.getByRole('button', { name: 'Draw it again' }).click();
   await expect(page.getByText('Waiting to be drawn…')).toHaveCount(0, { timeout: 30_000 });
