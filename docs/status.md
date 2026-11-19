@@ -1083,8 +1083,11 @@ faults found by taking a service away.
   `packages/server/src/db.ts`). A second one waits and says so. If the connection holding the
   lock is lost, the server asks for the lock again; if another server got it first, this one
   stops.
-- **Held by** a test of the lock itself (`db.sandbox.test`), and tried once by hand with two
-  servers: the second said it was waiting, and began to serve when the first stopped.
+- **Held by** a test of the lock itself (`db.sandbox.test`), and tried twice by hand with two
+  servers. The second said it was waiting, and began to serve when the first stopped. Done
+  again on one port with an editor open, as a new version would replace an old one: the
+  editor said "All edits saved" throughout the wait, and was saving again 1.4 seconds after
+  the old server was stopped, with what was typed either side of that kept.
 - **Not built:** two sync servers serving together. The notes said only that structural edits
   would need work for that. Ordinary typing and presence would too.
 
