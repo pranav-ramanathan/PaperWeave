@@ -904,25 +904,34 @@ Two things about tests, found on the way and not about the product:
 
 - **What was wrong.** Every open thread on a file carries a form for replying, and each form
   listed everyone on the paper who could be mentioned, a box apiece. So the page drew a box for each person under each thread, and typing into the text slowed as they grew: the editor draws its panels again as its saving status changes, which is at every key.
-  Measured in a browser, on one machine, once each:
+  Measured in a browser, on one machine, once each. The last column is the browser's own
+  count of the time from a key going down to the screen showing it:
 
-  | People | Threads | Boxes  | Elements on the page | A key typed, median |
-  | ------ | ------- | ------ | -------------------- | ------------------- |
-  | 1      | 1       | 1      | 174                  | 17 ms               |
-  | 30     | 100     | 2,901  | 7,758                | 49 ms               |
-  | 200    | 400     | 79,601 | 166,558              | 1.8 s               |
+  | People | Threads | Boxes  | Elements on the page | A key typed, median    |
+  | ------ | ------- | ------ | -------------------- | ---------------------- |
+  | 1      | 1       | 0      | 174                  | 16 ms or less          |
+  | 30     | 100     | 2,900  | 7,758                | 32 ms                  |
+  | 200    | 400     | 79,600 | 166,558              | 1.4 s (2.0 s at worst) |
 
 - **Now** a form lists who can be mentioned once someone starts on it: when the keyboard
-  first goes into it (`Say` in `Threads.tsx`). The same three papers after the change: 17 ms,
-  17 ms and 34 ms a key; 1,758 elements for the middle one and about 6,500 for the largest.
+  first goes into it (`Say` in `Threads.tsx`). The same three papers after the change: 16 ms
+  or less, 16 ms, and 24 ms a key (40 ms at worst); 1,758 elements for the middle one and
+  about 6,500 for the largest.
+- **How the times were taken.** At first with the test's clock around each key: 17 ms, 49 ms
+  and 1.8 s before the change, and 17, 17 and 34 ms after. Those went into the pull request
+  that made the change. They were taken again with the browser's event timing after another
+  figure in these notes turned out to be the test's own work (the large .bib file, below),
+  with the old behaviour put back for the purpose. The table has the second set. The first
+  was a little high and told the same story.
 - **Held by** a step in the thread test: no boxes under a thread until its reply is begun,
   and then the people. It failed on the old code. The measurements came from a probe that
   wrote people and threads straight into the database; it is not kept.
 - **Not changed:** the comments still draw every thread again at each key typed, which is
-  the 17 ms that became 34 with 400 of them. The list is asked for again every five seconds
+  the 16 ms that became 24 with 400 of them. The list is asked for again every five seconds
   whether or not anything changed (273 KB for 400 threads).
-- **The paper's own page with 200 people** was looked at in the same probe: 804 KB, a third
-  of a second, 405 forms. Slow to no one, and larger than it need be. Not changed.
+- **The paper's own page with 200 people** was looked at in the same probe: 804 KB, 405
+  forms, and there within a third of a second by the test's clock, which can only overstate
+  it. Slow to no one, and larger than it need be. Not changed.
 
 ## A reply being written when the thread is resolved
 
@@ -1004,6 +1013,22 @@ paper cites a few dozen of them.
   and 5,004 forms for 2,000, which is as many as a paper may hold. That last page loaded in
   2.4 s and a file opened from it in 1.9 s, timed inside the page.
 - **Found by** giving a paper many of something in the browser, as with the comments above.
+
+## A file with many figures
+
+- **What happened.** The visual view fetched every figure's picture as soon as the file
+  opened. A file with sixty figures of 200 KB each made sixty requests for 11.9 MB before
+  its first page had been read, and again a minute later if opened again (a picture is kept
+  by the browser for sixty seconds). Counted with the page's own record of what it fetched.
+- **Now** a picture is fetched when it is scrolled near (`loading = 'lazy'` on the picture,
+  in `apps/web/lib/visual.ts`). The same file fetched twenty pictures, 4 MB, on opening:
+  twenty and not three because a picture not yet fetched takes no room, so more of them
+  count as near. Scrolled to the end, the last picture was there, and all sixty after
+  going through the file.
+- **Held by** one line in the figures browser test, which reads the setting. Nothing kept
+  counts the requests.
+- **Not changed:** pictures are still fetched whole and at full size, and still kept for a
+  minute only.
 
 ## Pages fetched before anyone asked for them
 

@@ -59,6 +59,9 @@ test('a figure shows its picture, and is given a description in place', async ({
   const figure = page.locator(VISUAL).getByRole('group', { name: 'Figure' });
   const picture = figure.locator('img');
   await expect.poll(() => picture.evaluate((img: HTMLImageElement) => img.naturalWidth)).toBe(8);
+  // Pictures are fetched as they are scrolled near, so that a file of many figures does not
+  // fetch them all to show its first page.
+  await expect(picture).toHaveAttribute('loading', 'lazy');
   // It has no description, and that is said rather than left blank.
   const described = figure.getByRole('button', { name: /^Description of figures\/dot:/ });
   await expect(described).toHaveText('None yet. Add one.');
