@@ -14,6 +14,8 @@ export default function PdfView(props: {
   src: string;
   mark: Mark | null;
   onPick(page: number, x: number, y: number): void;
+  /** Set to a way of picking the place in the middle of what the pane is showing. */
+  middle: { current: () => void };
 }) {
   const { src, mark } = props;
   const host = useRef<HTMLDivElement>(null);
@@ -112,6 +114,22 @@ export default function PdfView(props: {
       close();
     };
   }, [src]);
+
+  // For going from the PDF to the text without a pointer: the pane is scrolled with the
+  // keyboard until the passage is in the middle of it, and this picks what is there.
+  props.middle.current = () => {
+    const el = host.current;
+    const pages = [...(el?.querySelectorAll<HTMLElement>('.pdf-page') ?? [])];
+    if (!el || !pages.length) return;
+    const at = el.scrollTop + el.clientHeight / 2;
+    // The page the middle falls on, or the nearest if it falls between two.
+    const far = (p: HTMLElement) =>
+      at < p.offsetTop ? p.offsetTop - at : Math.max(0, at - p.offsetTop - p.offsetHeight);
+    const holder = pages.reduce((best, p) => (far(p) < far(best) ? p : best));
+    const [width, height] = [Number(holder.dataset.width), Number(holder.dataset.height)];
+    const down = Math.min(1, Math.max(0, (at - holder.offsetTop) / holder.offsetHeight));
+    pick.current(Number(holder.dataset.page), width / 2, down * height);
+  };
 
   // Point at the place: bring its page into view and lay a band over the line.
   useEffect(() => {

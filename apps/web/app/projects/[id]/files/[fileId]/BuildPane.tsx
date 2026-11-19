@@ -78,6 +78,7 @@ export default function BuildPane({
   // editor for the line that made what is there.
   const [mark, setMark] = useState<(Mark & { pdf: string }) | null>(null);
   const [said, setSaid] = useState('');
+  const middle = useRef(() => {});
   const ask = useCallback(
     async (query: string) => {
       const res = await fetch(`${url}/${pdf}/sync?${query}`).catch(() => null);
@@ -165,7 +166,11 @@ export default function BuildPane({
             <a href={`${url}/${lastGood.id}/pdf`} target="_blank" rel="noreferrer">
               Open the PDF by itself
             </a>
-            . Double-click a place on a page to go to its line in the text.{' '}
+            . Double-click a place on a page to go to its line in the text, or scroll the pages
+            until it is in the middle and use the button.{' '}
+            <button type="button" onClick={() => middle.current()}>
+              Go to the text for the middle of the pages shown
+            </button>{' '}
             <span aria-live="polite" className="pdf-said">
               {said}
             </span>
@@ -174,6 +179,7 @@ export default function BuildPane({
             src={`${url}/${lastGood.id}/pdf`}
             mark={mark && mark.pdf === lastGood.id ? mark : null}
             onPick={pick}
+            middle={middle}
           />
         </>
       ) : (
