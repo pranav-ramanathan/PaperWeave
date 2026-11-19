@@ -42,7 +42,7 @@ export async function cutRevision(
 }
 
 /** What a file's text was stored as, and the place in its log that was the text of. */
-type Ready = Map<string, { seq: string; digest: string }>;
+type Ready = Map<string, { seq: string; digest: string; size: number }>;
 
 /**
  * Store every edited file's text as it is now, ahead of a cut and without holding anything.
@@ -59,11 +59,14 @@ async function putEdited(pool: pg.Pool, store: BlobStore, projectId: string): Pr
     [projectId],
   );
   const ready: Ready = new Map();
-  for (const f of rows)
+  for (const f of rows) {
+    const bytes = await currentBytes(pool, store, f);
     ready.set(f.id, {
       seq: String(f.head_seq),
-      digest: await store.put(await currentBytes(pool, store, f)),
+      digest: await store.put(bytes),
+      size: bytes.length,
     });
+  }
   return ready;
 }
 
@@ -95,17 +98,30 @@ async function cut(
     ).rows[0];
     if (!project) throw new AppError('not_found', 'No such project.');
     const captured: { id: string; path: string; digest: string; seq: string }[] = [];
+    const sized: { id: string; size: number }[] = [];
     for (const f of files) {
       const edited = f.eol && Number(f.head_seq) > 1;
+      if (!edited) {
+        captured.push({ id: f.id, path: f.path, digest: f.digest, seq: f.head_seq });
+        continue;
+      }
       // Stored already, unless it has been edited since.
-      const had = opts.ready?.get(f.id);
-      const digest = !edited
-        ? f.digest
-        : had?.seq === String(f.head_seq)
-          ? had.digest
-          : await store.put(await currentBytes(db, store, f));
-      captured.push({ id: f.id, path: f.path, digest, seq: f.head_seq });
+      let had = opts.ready?.get(f.id);
+      if (had?.seq !== String(f.head_seq)) {
+        const bytes = await currentBytes(db, store, f);
+        had = { seq: String(f.head_seq), digest: await store.put(bytes), size: bytes.length };
+      }
+      captured.push({ id: f.id, path: f.path, digest: had.digest, seq: f.head_seq });
+      sized.push({ id: f.id, size: had.size });
     }
+    // How large each edited file now is, for the paper's page and for what a paper may hold.
+    // Otherwise a file would go on saying the size it was added with: nothing, for one started
+    // blank and written here. It is known at this moment and at no cheaper one.
+    await db.query(
+      `update files f set size = c.size from unnest($1::uuid[], $2::int[]) as c(id, size)
+       where f.id = c.id and f.size <> c.size`,
+      [sized.map((x) => x.id), sized.map((x) => x.size)],
+    );
     const key = createHash('sha256')
       .update(
         JSON.stringify({

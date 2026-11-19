@@ -117,6 +117,22 @@ test('revisions are cut when something changed, numbered in order, and can be na
   expect(await code(listRevisions(t.pool, outsider.id, p.id))).toBe('not_found');
 });
 
+test('a file says how large it is now, as of the newest revision of the paper', async () => {
+  const p = await paper();
+  const size = async () =>
+    (await listFiles(t.pool, owner.id, p.id)).find((f) => f.path === 'body.tex')!.size;
+  expect(await size()).toBe(BODY.length);
+  // Written to since it was added. Its size is worked out when a revision is cut, which every
+  // build does, and stands until then.
+  await edit(p.body, (text) => text.insert(text.length, '% more, with an accent: é\n'));
+  expect(await size()).toBe(BODY.length);
+  await saveRevision(t.pool, store, owner.id, p.id, 'Sized');
+  expect(await size()).toBe(Buffer.byteLength(BODY + '% more, with an accent: é\n'));
+  // Saved again with nothing changed: no new revision, and the size stands.
+  await saveRevision(t.pool, store, owner.id, p.id, 'Sized');
+  expect(await size()).toBe(Buffer.byteLength(BODY + '% more, with an accent: é\n'));
+});
+
 test('a long history is listed a part at a time, and what people named is always there', async () => {
   const p = await paper();
   const named = await saveRevision(t.pool, store, owner.id, p.id, 'Sent to the workshop');
