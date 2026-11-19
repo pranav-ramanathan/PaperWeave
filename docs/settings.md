@@ -52,8 +52,13 @@ the services in `infra/compose.yaml`.
 - **Any number of workers.** Each build and each chart is taken by one worker. A test has two
   workers reach for one build at the same moment, and then build two papers side by side
   (`builds.sandbox.test`).
-- **Any number of web apps, with two things to know.** Two at once were not tried here; one
-  replacing another was.
+- **Any number of web apps, with three things to know.** Two at once were tried behind a
+  proxy that gave each request to the other in turn, and the browser tests passed through it;
+  one replacing another was tried too.
+  - The proxy in front must pass the `Host` header as it came, or put the host people use in
+    `X-Forwarded-Host`. With neither, every button on a page fails with "This page could not
+    be shown": the framework will not run a form it cannot tell came from its own page. Both
+    ways were tried by hand, and so was the failure.
   - Every web app must be the same build, or built with the same key. The buttons on a paper's
     page are forms whose arguments the framework encrypts with a key it makes at each build
     and keeps in that build's cache.

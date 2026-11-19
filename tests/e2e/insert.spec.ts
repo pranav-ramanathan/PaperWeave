@@ -131,6 +131,15 @@ test('references and equations are inserted from the toolbar, the keyboard and t
   await expect(menu.getByRole('menuitem').first()).toBeFocused();
   await page.keyboard.press('ArrowDown');
   await expect(menu.getByRole('menuitem').nth(1)).toBeFocused();
+  // The place the arrow keys reached is kept while the editor draws itself again, as it does
+  // whenever anyone arrives, moves or types. Here the same person opens the file a second time.
+  const second = await page.context().newPage();
+  await second.goto(page.url());
+  await expect(page.getByText(`Also here: ${email}`)).toBeVisible();
+  await expect(menu.getByRole('menuitem').nth(1)).toBeFocused();
+  await second.close();
+  await expect(page.getByText('Nobody else is here.')).toBeVisible();
+  await expect(menu.getByRole('menuitem').nth(1)).toBeFocused();
   await page.keyboard.press('Escape');
   await expect(menu).toBeHidden();
   await page.mouse.click(where.x, where.y, { button: 'right' });
