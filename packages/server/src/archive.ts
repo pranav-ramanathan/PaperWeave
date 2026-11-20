@@ -1,5 +1,6 @@
 // Reading and writing project ZIPs. An uploaded archive is untrusted: nothing in it is believed
 // until checked, and nothing is written anywhere by its own say-so.
+import { constants, gunzipSync } from 'node:zlib';
 import yauzl from 'yauzl';
 import yazl from 'yazl';
 import { AppError } from './errors.ts';
@@ -19,10 +20,42 @@ export type Entry = { path: string; bytes: Uint8Array };
 export type Skipped = { path: string; reason: string };
 
 /** What a LaTeX project is made of. Anything else in an archive is listed and left out. */
-const WANTED = /\.(tex|ltx|bib|bst|cls|sty|bbx|cbx|def|cfg|clo|png|jpe?g|pdf|eps|csv|tsv|txt|md)$/i;
+const WANTED =
+  /\.(tex|ltx|bib|bst|cls|sty|bbx|cbx|def|cfg|clo|tikz|pgf|pdf_tex|dat|lua|ist|inc|fd|ldf|ttf|otf|png|jpe?g|pdf|eps|csv|tsv|txt|md)$/i;
+/** Pictures LaTeX is not able to read as they are. */
+const PICTURE = /\.(svg|gif|tiff?|bmp)$/i;
+const PICTURE_REASON = 'LaTeX cannot use this picture as it is: convert it to PDF or PNG';
 const SYSTEM = /(^|\/)(__MACOSX|\.git|\.svn)(\/|$)|(^|\/)(\.DS_Store|Thumbs\.db)$/;
 const BUILD =
   /\.(aux|log|out|toc|lof|lot|bbl|blg|fls|fdb_latexmk|synctex\.gz|synctex|nav|snm|vrb)$/i;
+/**
+ * A .bbl is build output, made again from the .bib files. An archive with no .bib file at all
+ * (as arXiv gives them) has no other way to its bibliography, so there it is kept.
+ */
+const BBL = /\.bbl$/i;
+const BBL_REASON = 'build output, made again on compile';
+const BIB = /\.bib$/i;
+
+/** What an archive that is not a ZIP is, by its first bytes, or '' if it may be one. */
+function notZip(zip: Uint8Array): string {
+  if (zip.length > 262 && Buffer.from(zip.subarray(257, 262)).toString('latin1') === 'ustar')
+    return 'This is a .tar, not a ZIP. Unpack it and make a ZIP of the folder, then import that.';
+  if (zip.length > 2 && zip[0] === 0x1f && zip[1] === 0x8b) {
+    // A .tar.gz holds a tar once unzipped. Only the start of it is looked at.
+    try {
+      const head = gunzipSync(zip.subarray(0, 8192), {
+        finishFlush: constants.Z_SYNC_FLUSH,
+        maxOutputLength: 8 << 20,
+      });
+      if (head.length < 262 || head.subarray(257, 262).toString('latin1') !== 'ustar')
+        return 'This is a .gz, one compressed file. Unpack it and put it in a ZIP with the rest of the paper, then import that.';
+    } catch {
+      // Not readable far enough to tell: arXiv's own shape is the likelier.
+    }
+    return 'This is a .tar.gz, as arXiv gives. Unpack it and make a ZIP of the folder, then import that.';
+  }
+  return '';
+}
 
 const bad = (message: string) =>
   new AppError('invalid_input', `This ZIP cannot be imported: ${message}.`);
@@ -38,6 +71,7 @@ export function checkPath(path: unknown, limits: Limits = LIMITS): string {
     path.split('/').some((part) => !part || part === '.' || part === '..')
   )
     return 'it must be a plain path inside the paper';
+  if (PICTURE.test(path)) return PICTURE_REASON;
   if (SYSTEM.test(path) || BUILD.test(path) || !WANTED.test(path))
     return 'it is not a file type a paper uses';
   return '';
@@ -49,6 +83,8 @@ export function readZip(
   limits: Limits = LIMITS,
 ): Promise<{ entries: Entry[]; skipped: Skipped[]; review: Entry[] }> {
   if (zip.length > limits.archiveBytes) throw bad('it is too large');
+  const other = notZip(zip);
+  if (other) throw new AppError('invalid_input', other);
   return new Promise((resolve, reject) => {
     // yauzl refuses absolute paths and ".." itself, and checks each entry's real size against
     // the size the archive claims.
@@ -65,7 +101,13 @@ export function readZip(
         reject(bad(message));
       };
       file.on('error', () => reject(bad('it is damaged or not what it claims to be')));
-      file.on('end', () => resolve({ entries, skipped, review }));
+      file.on('end', () => {
+        // The .bbl files wait here, where every entry is known.
+        const bibs = entries.some((e) => BIB.test(e.path));
+        const dropped = bibs ? entries.filter((e) => BBL.test(e.path)) : [];
+        for (const e of dropped) skipped.push({ path: e.path, reason: BBL_REASON });
+        resolve({ entries: entries.filter((e) => !dropped.includes(e)), skipped, review });
+      });
       file.on('entry', (entry: yauzl.Entry) => {
         const path = entry.fileName;
         if (path.endsWith('/')) return file.readEntry();
@@ -85,15 +127,18 @@ export function readZip(
 
         if (SYSTEM.test(path)) return file.readEntry();
         const isReview = /(^|\/)paperweave-review\.json$/.test(path);
-        const reason = isReview
-          ? ''
-          : BUILD.test(path)
-            ? 'build output, made again on compile'
-            : /(^|\/)\.?latexmkrc$/.test(path)
-              ? 'build script, never run'
-              : !WANTED.test(path)
-                ? 'not a file type a paper uses'
-                : '';
+        const reason =
+          isReview || BBL.test(path)
+            ? ''
+            : BUILD.test(path)
+              ? BBL_REASON
+              : /(^|\/)\.?latexmkrc$/.test(path)
+                ? 'build script, never run'
+                : PICTURE.test(path)
+                  ? PICTURE_REASON
+                  : !WANTED.test(path)
+                    ? 'not a file type a paper uses'
+                    : '';
         if (reason) {
           skipped.push({ path, reason });
           return file.readEntry();

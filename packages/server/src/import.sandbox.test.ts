@@ -1,7 +1,7 @@
 // Needs the services in infra/compose.yaml. Run: pnpm test:sandbox
 import { readdirSync, readFileSync, statSync } from 'node:fs';
 import { join, relative } from 'node:path';
-import { crc32, deflateRawSync } from 'node:zlib';
+import { crc32, deflateRawSync, gzipSync } from 'node:zlib';
 import { afterAll, beforeAll, expect, test } from 'vitest';
 import { type Entry, LIMITS, readZip, writeZip } from './archive.ts';
 import { blobStore } from './blobs.ts';
@@ -130,8 +130,8 @@ test('the report says what is visual, what is source-only and what was left out'
     { path: '__MACOSX/My Paper/._main.tex', bytes: Buffer.from('x') },
   ];
   const [project] = await importZip(t.pool, store, owner.id, await writeZip(files), 'fallback');
-  // The wrapping folder becomes the paper's name and is taken off every path.
-  expect(project.name).toBe('My Paper');
+  // The wrapping folder is taken off every path. A paper that is alone is named after its ZIP.
+  expect(project.name).toBe('fallback');
   const report = (await importReport(t.pool, owner.id, project.id))!;
   const file = (path: string) => report.files.find((f) => f.path === path);
   expect(file('macros.tex')).toEqual({ path: 'macros.tex', sourceOnly: true });
@@ -342,4 +342,195 @@ test('the root file travels with the review data', async () => {
   expect((await importReport(t.pool, owner.id, odd.id))!.notes.join('\n')).toContain(
     'the root file was gone.tex, but the paper has no such .tex file',
   );
+});
+
+// ---- the shapes real papers come in
+
+const doc = (body = 'Hello.', pre = '') =>
+  `\\documentclass{article}\n${pre}\\begin{document}\n${body}\n\\end{document}\n`;
+const file = (path: string, text: string | Buffer): Entry => ({
+  path,
+  bytes: Buffer.from(text),
+});
+const reportOf = async (userId: string, files: Entry[], name = 'Shape') => {
+  const made = await importZip(t.pool, store, userId, await writeZip(files), name);
+  return {
+    made,
+    report: (await importReport(t.pool, userId, made[0].id))!,
+    paths: (await listFiles(t.pool, userId, made[0].id)).map((f) => f.path),
+  };
+};
+const refused = (zip: Uint8Array) =>
+  importZip(t.pool, store, owner.id, zip, 'x').then(
+    () => 'imported',
+    (e) => `${e.code}: ${e.message}`,
+  );
+
+test('a root in a folder, with files beside the folder, imports whole and is still the root', async () => {
+  const { made, report, paths } = await reportOf(owner.id, [
+    file('src/main.tex', doc('\\input{../parts/a}')),
+    file('parts/a.tex', 'A.'),
+    file('figures/a.png', 'png'),
+    file('refs.bib', '@book{k, title={T}}'),
+  ]);
+  expect(report.root).toBe('src/main.tex');
+  expect(report.missing).toEqual([]);
+  expect(report.skipped).toEqual([]);
+  expect(paths).toEqual(['figures/a.png', 'parts/a.tex', 'refs.bib', 'src/main.tex']);
+  expect(made[0].name).toBe('Shape');
+  // A wrapping folder that holds all of it still goes.
+  const wrapped = await reportOf(owner.id, [
+    file('proj/src/main.tex', doc()),
+    file('proj/figures/a.png', 'png'),
+  ]);
+  expect(wrapped.paths).toEqual(['figures/a.png', 'src/main.tex']);
+  expect(wrapped.report.root).toBe('src/main.tex');
+});
+
+test('files shared between several papers are left out, and the report says why', async () => {
+  const { report } = await reportOf(owner.id, [
+    file('paper/main.tex', doc()),
+    file('poster/poster.tex', doc()),
+    file('figures/a.png', 'png'),
+  ]);
+  expect(report.skipped).toEqual([
+    {
+      path: 'figures/a.png',
+      reason: 'shared between the papers in this archive: add it to each paper that needs it',
+    },
+  ]);
+});
+
+test('a .bbl is kept when the archive has no .bib file, and the report says so', async () => {
+  const bbl = '\\begin{thebibliography}{1}\\bibitem{k} A.\\end{thebibliography}\n';
+  const alone = await reportOf(owner.id, [
+    file('main.tex', doc('\\cite{k}\\bibliography{refs}')),
+    file('main.bbl', bbl),
+  ]);
+  expect(alone.paths).toEqual(['main.bbl', 'main.tex']);
+  expect(alone.report.skipped).toEqual([]);
+  expect(alone.report.notes).toContain(
+    'The bibliography came ready-made (main.bbl), with no .bib file: citations cannot be checked or added here.',
+  );
+  // With a .bib file it is build output as before.
+  const both = await reportOf(owner.id, [
+    file('main.tex', doc()),
+    file('main.bbl', bbl),
+    file('refs.bib', '@book{k, title={T}}'),
+  ]);
+  expect(both.paths).toEqual(['main.tex', 'refs.bib']);
+  expect(both.report.skipped).toEqual([
+    { path: 'main.bbl', reason: 'build output, made again on compile' },
+  ]);
+  expect(both.report.notes.join(' ')).not.toMatch(/ready-made/);
+});
+
+test('the file types real papers use are kept; pictures LaTeX cannot read are skipped, with a reason', async () => {
+  const kept = [
+    ...['x.tikz', 'x.pgf', 'x.pdf_tex', 'x.dat', 'x.lua', 'x.ist', 'x.inc', 'x.fd', 'x.ldf'].map(
+      (p) => file(p, 'text\n'),
+    ),
+    file('x.ttf', Buffer.from([0, 1, 0, 0, 255])),
+    file('x.otf', Buffer.from('OTTO\u00ff', 'latin1')),
+  ];
+  const svgs = ['x.svg', 'x.gif', 'x.tif', 'x.tiff', 'x.bmp'].map((p) => file(p, 'x'));
+  const { report, paths } = await reportOf(owner.id, [file('main.tex', doc()), ...kept, ...svgs]);
+  expect(paths).toEqual(['main.tex', ...kept.map((k) => k.path)].sort());
+  expect(report.skipped).toEqual(
+    svgs.map((s) => ({
+      path: s.path,
+      reason: 'LaTeX cannot use this picture as it is: convert it to PDF or PNG',
+    })),
+  );
+  // The text types open as text; the fonts are bytes.
+  const byPath = new Map(report.files.map((f) => [f.path, f]));
+  expect(byPath.get('x.tikz')).toEqual({ path: 'x.tikz' });
+  expect(byPath.get('x.ttf')).toEqual({ path: 'x.ttf', readonly: 'binary' });
+});
+
+test('a .tar.gz, a .tar and a .gz are refused with a sentence that says what to do', async () => {
+  const tar = Buffer.alloc(1024);
+  tar.write('paper/main.tex');
+  tar.write('ustar', 257);
+  expect(await refused(gzipSync(tar))).toBe(
+    'invalid_input: This is a .tar.gz, as arXiv gives. Unpack it and make a ZIP of the folder, then import that.',
+  );
+  expect(await refused(gzipSync(Buffer.from(doc())))).toBe(
+    'invalid_input: This is a .gz, one compressed file. Unpack it and put it in a ZIP with the rest of the paper, then import that.',
+  );
+  expect(await refused(tar)).toBe(
+    'invalid_input: This is a .tar, not a ZIP. Unpack it and make a ZIP of the folder, then import that.',
+  );
+});
+
+test('an archive with no root says what a root is; a Latin-1 root says what is wrong with it', async () => {
+  const noRoot =
+    'invalid_input: No file here has both \\documentclass and \\begin{document}. If the class is loaded from another file, put \\documentclass in the main file.';
+  expect(
+    await refused(
+      await writeZip([file('main.tex', '\\documentclass{article}\n'), file('b.tex', 'text')]),
+    ),
+  ).toBe(noRoot);
+  const latin = Buffer.from(doc('Caf\u00e9', '\\usepackage[latin1]{inputenc}\n'), 'latin1');
+  expect(await refused(await writeZip([file('paper/main.tex', latin)]))).toBe(
+    "invalid_input: This ZIP cannot be imported: paper/main.tex is the paper's main file, but it is not UTF-8 text (it may be Latin-1). Save it as UTF-8, change \\usepackage[latin1]{inputenc} to utf8, and import again.",
+  );
+  // A Latin-1 file that is not a root is no reason for that sentence.
+  expect(
+    await refused(
+      await writeZip([file('x.tex', Buffer.from('Caf\u00e9', 'latin1')), file('y.tex', 'y')]),
+    ),
+  ).toBe(noRoot);
+  // A UTF-8 root with a Latin-1 file it includes is still imported, with that file read-only.
+  const { report } = await reportOf(owner.id, [
+    file('main.tex', doc('\\input{lat}')),
+    file('lat.tex', Buffer.from('Caf\u00e9', 'latin1')),
+  ]);
+  expect(report.files.find((f) => f.path === 'lat.tex')).toEqual({
+    path: 'lat.tex',
+    readonly: 'not-utf8',
+  });
+});
+
+test('of several files that could be the paper, the one that brings in the others is it', async () => {
+  const { report } = await reportOf(owner.id, [
+    file('cover-letter.tex', doc('Dear editor, we send you our paper. '.repeat(5))),
+    file('paper.tex', doc('\\input{sections/a}\\input{sections/b}')),
+    file('sections/a.tex', 'A'),
+    file('sections/b.tex', 'B'),
+  ]);
+  expect(report.root).toBe('paper.tex');
+  expect(report.otherRoots).toEqual(['cover-letter.tex']);
+  // "main." in the name still comes before anything reached, and depth before that.
+  const named = await reportOf(owner.id, [
+    file('main.tex', doc('x')),
+    file('paper.tex', doc('\\input{a}\\input{b}')),
+    file('a.tex', 'A'),
+    file('b.tex', 'B'),
+  ]);
+  expect(named.report.root).toBe('main.tex');
+  // With nothing to tell them apart by reach, the name decides, not the length.
+  const plain = await reportOf(owner.id, [
+    file('paper.tex', doc('PAPER BODY')),
+    file('response-to-reviewers.tex', doc('RESPONSE BODY, which is the longer of the two')),
+  ]);
+  expect(plain.report.root).toBe('paper.tex');
+  expect(plain.report.otherRoots).toEqual(['response-to-reviewers.tex']);
+});
+
+test('a paper that is alone is named after its ZIP, several keep their folders', async () => {
+  const wrapped = await reportOf(
+    owner.id,
+    [file('src/main.tex', doc()), file('notes.md', 'n')],
+    'My ZIP',
+  );
+  expect(wrapped.made.map((p) => p.name)).toEqual(['My ZIP']);
+  const folder = await reportOf(owner.id, [file('Thesis draft/main.tex', doc())], 'thesis-zip');
+  expect(folder.made.map((p) => p.name)).toEqual(['thesis-zip']);
+  // No name for the ZIP: the folder's.
+  expect((await reportOf(owner.id, [file('Thesis draft/main.tex', doc())], '')).made[0].name).toBe(
+    'Thesis draft',
+  );
+  const several = await reportOf(owner.id, [file('a/main.tex', doc()), file('b/main.tex', doc())]);
+  expect(several.made.map((p) => p.name)).toEqual(['a', 'b']);
 });

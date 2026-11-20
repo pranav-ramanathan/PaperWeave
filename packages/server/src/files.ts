@@ -19,7 +19,8 @@ import { cutRevision, renameFile } from './revisions.ts';
 import { loadUpdates } from './sync.ts';
 
 /** Extensions that hold text the editors can open. Everything else is kept as bytes. */
-export const TEXT_FILE = /\.(tex|ltx|bib|bst|cls|sty|bbx|cbx|def|cfg|clo|csv|tsv|txt|md)$/i;
+export const TEXT_FILE =
+  /\.(tex|ltx|bib|bst|cls|sty|bbx|cbx|def|cfg|clo|tikz|pgf|pdf_tex|dat|lua|ist|inc|fd|ldf|csv|tsv|txt|md)$/i;
 
 /** The newline style, byte order mark or read-only reason to record for a file's bytes. */
 export function fileMeta(path: string, bytes: Uint8Array) {
