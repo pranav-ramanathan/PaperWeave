@@ -157,9 +157,12 @@ test('a citation to nothing is listed on a build that worked, and a broken .bib 
   await expect(
     owner.page.getByRole('region', { name: 'Editor for sections/intro.tex' }),
   ).toBeVisible();
+  // The editor takes no typing until the file has arrived: wait for its text first.
+  await expect(source(owner.page)).toContainText('\\cite{nokey}');
   await source(owner.page).click();
   await owner.page.keyboard.press('ControlOrMeta+End');
   for (let i = 0; i < '\\cite{nokey}'.length; i++) await owner.page.keyboard.press('Backspace');
+  await expect(source(owner.page)).not.toContainText('nokey');
   await expect(warnings).toHaveCount(0, { timeout: 60_000 });
 });
 
