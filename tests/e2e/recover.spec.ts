@@ -129,6 +129,38 @@ test('edits made offline across a restore are held until their author decides', 
   await expect(source(watch)).toContainText('% typed while away');
 });
 
+test('a sync ticket that never comes is said to be offline, and the editor carries on once it does', async ({
+  browser,
+}) => {
+  const { page, email } = await person(browser, 'rec-quiet');
+  const zip = join(mkdtempSync(join(tmpdir(), 'paperweave-e2e-')), `Quiet ${run}.zip`);
+  writeFileSync(zip, await writeZip([{ path: 'main.tex', bytes: Buffer.from(MAIN) }]));
+  await page.goto('/sign-in');
+  await signIn(page, email);
+  await page.getByLabel('Or import a ZIP of a LaTeX project').setInputFiles(zip);
+  await page.getByRole('button', { name: 'Import ZIP' }).click();
+  await page.getByRole('link', { name: 'main.tex' }).click();
+  await showSource(page);
+  await expect(status(page)).toHaveText('All edits saved.');
+
+  // The server takes the connection but never answers the request for a ticket.
+  const asked = page.waitForRequest('**/api/sync-ticket**');
+  await page.route('**/api/sync-ticket**', () => {});
+  await page.context().setOffline(true);
+  await expect(status(page)).toContainText('Offline.');
+  await page.context().setOffline(false);
+  await asked;
+  await page.waitForTimeout(1000);
+  // The socket is open, but nothing is saved without a ticket: not "saved", not "saving".
+  await expect(status(page)).toContainText('Offline.');
+  await expect(status(page)).toHaveAttribute('data-state', 'offline');
+
+  // The request is given up on after ten seconds and asked again, now answered.
+  await page.unroute('**/api/sync-ticket**');
+  await expect(status(page)).toHaveText('All edits saved.', { timeout: 30_000 });
+  await expect(status(page)).toHaveAttribute('data-state', 'online');
+});
+
 test('an edit too large to save stops the editor, which says so and lets it be discarded', async ({
   browser,
 }) => {

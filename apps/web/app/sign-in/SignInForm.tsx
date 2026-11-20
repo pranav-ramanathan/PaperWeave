@@ -26,6 +26,8 @@ export default function SignInForm({ next }: { next: string }) {
             callbackURL: next,
             errorCallbackURL: `/sign-in?next=${encodeURIComponent(next)}`,
           }),
+          // Above the server's own limit, so that normally its answer comes first.
+          signal: AbortSignal.timeout(40_000),
         }).catch(() => null);
         // A refusal (too many links to one address, or not an address) says so with a 4xx. The mail
         // service not answering is the server's fault, and is said to be.

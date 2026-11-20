@@ -33,11 +33,17 @@ export default function Language(props: {
   const url = `/projects/${projectId}/grammar`;
 
   const check = useCallback(async () => {
-    const res = await fetch(`${url}?file=${fileId}`).catch(() => null);
-    if (!res) return;
-    if (res.status === 503) {
+    // A little over the server's own 20 seconds for the checker.
+    const res = await fetch(`${url}?file=${fileId}`, { signal: AbortSignal.timeout(25_000) }).catch(
+      () => null,
+    );
+    if (!res || res.status === 503) {
       // No checker: say so once, and show nothing as if it were clean.
-      setOff(((await res.json().catch(() => null)) as { error?: string } | null)?.error ?? '');
+      setOff(
+        res
+          ? (((await res.json().catch(() => null)) as { error?: string } | null)?.error ?? '')
+          : 'The spelling and grammar checker did not answer.',
+      );
       setFindings(null);
       return told.current([]);
     }

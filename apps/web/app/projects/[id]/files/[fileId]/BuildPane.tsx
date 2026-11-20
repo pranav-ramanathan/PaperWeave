@@ -17,6 +17,8 @@ const QUIET_EVERY_MS = 5000;
 
 /** A build takes a minute at most once it starts. Waiting twice that, it has not started. */
 const STUCK_AFTER_MS = 120_000;
+// Said when the builds have twice not been answered.
+const NO_ANSWER = 'The server is not answering. What is shown here may be out of date.';
 
 /** Said after a place that is the nearest one, because the PDF is of text since edited. */
 const NEAREST = ' The PDF is from before your latest edits, so this is the nearest place.';
@@ -52,11 +54,13 @@ export default function BuildPane({
   // Asks now, whatever the clock says: set by the poll below.
   const askNow = useRef(() => {});
   const compile = useCallback(async () => {
-    const res = await fetch(url, { method: 'POST' });
+    const res = await fetch(url, { method: 'POST', signal: AbortSignal.timeout(15_000) }).catch(
+      () => null,
+    );
     setProblem(
-      res.ok
+      res?.ok
         ? ''
-        : ((await res.json().catch(() => ({}))).error ?? 'The build could not be started.'),
+        : ((await res?.json().catch(() => ({})))?.error ?? 'The build could not be started.'),
     );
     // See the build that was asked for, and ask about it quickly from here on.
     busy.current = true;
@@ -65,10 +69,16 @@ export default function BuildPane({
 
   useEffect(() => {
     let stop = false;
+    // Polls in a row that got no answer at all.
+    let silent = 0;
     const poll = async () => {
-      const res = await fetch(url).catch(() => null);
+      const res = await fetch(url, { signal: AbortSignal.timeout(15_000) }).catch(() => null);
       if (notTheirs(res)) return STOP;
-      if (stop || !res?.ok) return;
+      if (stop) return;
+      silent = res ? 0 : silent + 1;
+      if (silent >= 2) setProblem(NO_ANSWER);
+      if (!res?.ok) return;
+      setProblem((p) => (p === NO_ANSWER ? '' : p));
       const next: Builds = await res.json();
       setBuilds(next);
       setMarks({ edits: next.edits, review: next.review });

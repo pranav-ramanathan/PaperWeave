@@ -358,3 +358,20 @@ test('an invitation tells someone already on the paper that it changes nothing',
   await guest.page.getByRole('link', { name: 'Open the paper' }).click();
   await expect(guest.page).toHaveURL(paper);
 });
+
+test('a sign-in form whose request is never answered gives up, says so and can be used again', async ({
+  browser,
+}) => {
+  test.setTimeout(120_000);
+  const visitor = await person(browser, 'quiet-signin');
+  await visitor.page.goto('/sign-in');
+  await visitor.page.getByLabel('Email address').fill(visitor.email);
+  // The server takes the request and says nothing.
+  await visitor.page.route('**/api/auth/sign-in/magic-link', () => {});
+  const send = visitor.page.getByRole('button', { name: 'Email me a sign-in link' });
+  await send.click();
+  await expect(visitor.page.locator('main [role=alert]')).toContainText('did not answer', {
+    timeout: 60_000,
+  });
+  await expect(send).toBeEnabled();
+});
