@@ -2849,6 +2849,20 @@ Changed on the way, and worth keeping:
 - The sign-in step of the browser tests now fails with the server's own answer, status and
   words, if a link is not sent. The page says only that it could not be sent.
 
+### What the browser says when the server does not answer
+
+- Sync ticket: the request is given up after 10 seconds and asked again. The editor says
+  "Offline." until the sync server has accepted the ticket (`authenticated`); the library's
+  "connected" comes when the socket opens, before the ticket is fetched, and no longer counts.
+- Build pane: each poll and the compile request are given up after 15 seconds. After two polls
+  in a row with no answer it shows "The server is not answering. What is shown here may be out
+  of date." and removes it at the next answer.
+- Spelling and grammar: given up after 25 seconds, and says "The spelling and grammar checker
+  did not answer." (also shown when the browser has no network).
+- Sign-in form: given up after 40 seconds, with the existing "the email service did not answer"
+  message, which may then be the database. Browser tests: `recover.spec.ts`, `building.spec.ts`,
+  `projects.spec.ts`.
+
 ## Decisions waiting on the owner
 
 See "What I need from you" in `docs/plan.md`. None blocks C1.
