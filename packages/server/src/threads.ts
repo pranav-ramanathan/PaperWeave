@@ -42,6 +42,9 @@ export type Thread = {
   comments: ThreadComment[];
 };
 
+/** How many mention emails one person's comments may cause in an hour, over all their papers. */
+export const MENTION_EMAILS_PER_HOUR = 60;
+
 const EXCERPT = 500;
 const CONTEXT = 80;
 const bad = (why: string) => new AppError('invalid_input', why);
@@ -93,7 +96,8 @@ export async function startThread(
   projectId: string,
   fileId: string,
   input: { from: unknown; to: unknown; body: unknown; mentions?: unknown },
-): Promise<{ id: string; mentioned: string[] }> {
+  perHour = MENTION_EMAILS_PER_HOUR,
+): Promise<{ id: string; mentioned: string[]; limited?: true }> {
   await authorize(pool, userId, id(projectId), 'comment.write');
   const file = (
     await pool.query('select 1 from files where id = $1 and project_id = $2 and eol is not null', [
@@ -139,16 +143,35 @@ export async function startThread(
     'insert into thread_comments (thread_id, author, body, mentions) values ($1, $2, $3, $4)',
     [made.id, userId, said, mentions],
   );
-  return { id: made.id, mentioned: await emails(pool, mentions, userId) };
+  return { id: made.id, ...(await toEmail(pool, mentions, userId, perHour)) };
 }
 
-/** The addresses of the people a comment was addressed to, its own author left out. */
-async function emails(db: Db, users: string[], author: string): Promise<string[]> {
+/**
+ * The addresses to email about a comment: the people it was addressed to, its author left out,
+ * and no more than the hour's limit allows. Counted from the comments themselves: each person
+ * a comment is addressed to (other than its author) is one email. A comment is saved whether
+ * or not all its emails are sent; `limited` is set when some were left out. The comment just
+ * saved is already in the count, so it is taken off.
+ */
+async function toEmail(db: Db, users: string[], author: string, perHour: number) {
   const { rows } = await db.query('select email from "user" where id = any($1) and id <> $2', [
     users,
     author,
   ]);
-  return rows.map((r) => r.email);
+  const addresses: string[] = rows.map((r) => r.email);
+  if (!addresses.length) return { mentioned: addresses };
+  const earlier = (
+    await db.query(
+      `select coalesce(sum(cardinality(array_remove(mentions, author))), 0)::int as n
+       from thread_comments
+       where author = $1 and created_at > now() - interval '1 hour'`,
+      [author],
+    )
+  ).rows[0].n as number;
+  const room = Math.max(0, perHour - (earlier - addresses.length));
+  return addresses.length <= room
+    ? { mentioned: addresses }
+    : { mentioned: addresses.slice(0, room), limited: true as const };
 }
 
 /** Add a comment to a thread. Returns the addresses of the people it mentions. */
@@ -158,7 +181,8 @@ export async function reply(
   projectId: string,
   threadId: string,
   input: { body: unknown; mentions?: unknown },
-): Promise<{ fileId: string; mentioned: string[] }> {
+  perHour = MENTION_EMAILS_PER_HOUR,
+): Promise<{ fileId: string; mentioned: string[]; limited?: true }> {
   await authorize(db, userId, id(projectId), 'comment.write');
   const thread = (
     await db.query('select file_id from threads where id = $1 and project_id = $2', [
@@ -173,7 +197,7 @@ export async function reply(
     'insert into thread_comments (thread_id, author, body, mentions) values ($1, $2, $3, $4)',
     [threadId, userId, said, mentions],
   );
-  return { fileId: thread.file_id, mentioned: await emails(db, mentions, userId) };
+  return { fileId: thread.file_id, ...(await toEmail(db, mentions, userId, perHour)) };
 }
 
 /** Mark a thread as dealt with, or open it again. */

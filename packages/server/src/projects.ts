@@ -44,18 +44,37 @@ export async function mayStartPapers(
     );
 }
 
+/**
+ * A paper's name: one line of at most 200 characters, with no control characters. The name goes
+ * into emails, where a line break would let a name add lines of its own to the message.
+ * Names made before this check are as they were; where one goes into an email it is put on one
+ * line (see `oneLine`).
+ */
+export function paperName(name: unknown): string {
+  if (typeof name !== 'string' || !name.trim() || name.length > 200)
+    throw new AppError('invalid_input', 'A project needs a name of at most 200 characters.');
+  if (/\p{Cc}|\u2028|\u2029/u.test(name))
+    throw new AppError(
+      'invalid_input',
+      "A paper's name must be on one line, without line breaks or other control characters.",
+    );
+  return name.trim();
+}
+
+/** Text for an email's body or subject: runs of whitespace, line breaks included, made one space. */
+export const oneLine = (text: string) => text.replace(/[\s\u2028\u2029]+/gu, ' ').trim();
+
 export async function createProject(
   pool: pg.Pool,
   userId: string,
   name: unknown,
   perHour = LIMITS.papersPerHour,
 ): Promise<Project> {
-  if (typeof name !== 'string' || !name.trim() || name.length > 200)
-    throw new AppError('invalid_input', 'A project needs a name of at most 200 characters.');
+  const named = paperName(name);
   await mayStartPapers(pool, userId, 1, perHour);
   return transaction(pool, async (db) => {
     const { rows } = await db.query('insert into projects (name) values ($1) returning id, name', [
-      name.trim(),
+      named,
     ]);
     await db.query(
       "insert into project_members (project_id, user_id, role) values ($1, $2, 'owner')",

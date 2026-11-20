@@ -823,6 +823,10 @@ img.chart {
   border-radius: 8px;
   background: var(--paper);
 }
+.threads article[aria-current='true'] {
+  outline: 3px solid var(--accent);
+  outline-offset: 2px;
+}
 .threads blockquote {
   margin: 0 0 0.4rem;
   padding-left: 0.6rem;

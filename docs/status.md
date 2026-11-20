@@ -710,6 +710,12 @@ ordinary use. Ten ways of looking found them, and each is cheap to do again:
     at the download; a manifest naming a file not in it; and download names that lost every
     letter outside ASCII, and every PDF saved as `pdf.pdf`.
 
+28. **Follow every email: who gets it, how fast, and where its link lands.** Found: a request
+    held 30 to 60 seconds by a mail service that said nothing, a saved comment that looked
+    unsent and was posted twice, mention emails without limit, a link that did not lead to the
+    comment, a paper name that put lines into other people's emails, and "INVALID_TOKEN" on the
+    page.
+
 Tried the same way and nothing found: thirty connections typing into one file at once (kept
 as a test in `sync.sandbox.test`); 400 threads and 400 proposals on one file, on the server
 (both lists took about 20 ms; not kept); and each tool of the visual view worked slowly
@@ -2254,6 +2260,54 @@ second one.
   - `unzip` (Info-ZIP 6.00) on a system whose locale is not UTF-8 shows the accented and Chinese
     names wrongly, though the ZIP marks them UTF-8.
   - A finding about held data names the file that reads it, not the line.
+- **How it was made.** Planned by one agent, probed and written by others, checked here.
+
+## The emails
+
+- **What was tried**, with a probe: every email the product sends, with the mail service
+  running and paused (so that it takes the connection and says nothing), a page closed in the
+  middle, one person mentioning another again and again, the link in each email followed signed
+  in and signed out, and odd paper names.
+
+| Email or case                                                      | Before                                                    | Now                                                                                                |
+| ------------------------------------------------------------------ | --------------------------------------------------------- | -------------------------------------------------------------------------------------------------- |
+| A sign-in link while the mail service hangs                        | **30 s with nothing said; then blamed the address**       | under 20 s: "the email service did not answer"                                                     |
+| An invitation while it hangs                                       | **30 s, the button still live**                           | the button waits once; ends within seconds, taken back                                             |
+| A comment mentioning two people while it hangs                     | **60 s busy, though the comment was saved: posted twice** | answers at once; the emails go after                                                               |
+| One reviewer mentioning the owner in 50 comments                   | **52 emails**                                             | 60 an hour, then "Your comment is saved. No more emails will be sent for your mentions this hour." |
+| The link in a mention or reply email                               | **the file; signed out, not even the comments**           | the comment itself, in view and marked, resolved or not                                            |
+| The link to a comment that has gone                                | the file, with nothing said                               | "The comment this link was about is no longer here."                                               |
+| A paper name with line breaks                                      | **accepted, and its lines in other people's emails**      | refused; names already there are put on one line                                                   |
+| A sign-in link used twice, or expired                              | **"INVALID_TOKEN" on the page, or nothing**               | "That sign-in link has been used or has expired."                                                  |
+| The same person mentioned twice; oneself; someone not on the paper | one email; none; refused                                  | the same                                                                                           |
+| A link to a file since renamed                                     | opens it                                                  | the same                                                                                           |
+
+- **What was wrong.** The mail library was given no time limits, so a mail service that
+  accepted the connection and then said nothing held each request for 30 seconds, and a comment
+  with mentions waited for each email in turn before it answered, though it was already saved.
+  Nothing limited mention emails. Their link named the file, and the part that named the
+  comments was lost through sign-in. A paper's name could hold line breaks, and an email
+  carried them.
+- **Now** (`sendEmail` in `apps/web/lib/server.ts`; `threads/mentions.ts`; `threads.ts`;
+  `Threads.tsx`; the sign-in page and form; `paperName` in `projects.ts`): the mail connection
+  gives up within 10 to 15 seconds. A comment answers first, and its emails go after
+  (`after()`), all at once. A person's mention emails are counted over the last hour from what
+  their comments mention, and past 60 the comment is saved and no email sent. The link names the
+  thread, sign-in keeps it, and the panel opens to it and marks it. A paper's name is one line.
+  A sign-in that fails says whether the service or the limit refused it.
+- **Held by** browser tests of the link signed out and in, resolved and gone; tests with the
+  mail service paused, where a comment answers within 5 seconds and exists once and a sign-in
+  fails within 20 with its sentence (three runs each); a browser test of a used link; service
+  tests of the limit; and a unit test of the name. Each failed on the old code.
+- **Not changed:**
+  - An email that fails while the service stays down is lost, not sent again later.
+  - A link to a file since deleted shows "Nothing here".
+  - Nobody is emailed when a thread they started gets a reply without a mention, their proposal
+    is decided, their role changes, they are removed, or their invitation is accepted.
+  - The invitation email does not name the paper (see "Someone coming onto a paper").
+  - Mentions past the limit still count, so a person who keeps on stays limited until an hour
+    after their last comment.
+  - Links emailed before this change land on the old error for the 15 minutes they last.
 - **How it was made.** Planned by one agent, probed and written by others, checked here.
 
 ## When an email cannot be sent

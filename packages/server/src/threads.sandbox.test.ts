@@ -7,7 +7,14 @@ import { importZip, listFiles } from './import.ts';
 import { acceptInvitation, invite } from './projects.ts';
 import { editFile, loadUpdates, TEXT } from './sync.ts';
 import { TEST_ENV, testDb } from './testing.ts';
-import { listThreads, reattachThread, reply, setThreadStatus, startThread } from './threads.ts';
+import {
+  listThreads,
+  MENTION_EMAILS_PER_HOUR,
+  reattachThread,
+  reply,
+  setThreadStatus,
+  startThread,
+} from './threads.ts';
 
 const store = blobStore(TEST_ENV);
 let t: Awaited<ReturnType<typeof testDb>>;
@@ -235,4 +242,86 @@ test('threads keep to their paper and to the people who may comment', async () =
   );
   expect(await code(listThreads(t.pool, store, users.outsider.id, p.id))).toBe('not_found');
   expect(await listThreads(t.pool, store, users.owner.id, other.id)).toEqual([]);
+});
+
+test('mention emails are limited to sixty an hour, and a comment past that is saved all the same', async () => {
+  // The count is of one person's comments in the last hour: the tests above are theirs too.
+  await t.pool.query('delete from thread_comments');
+  const p = await paper();
+  const first = await startThread(t.pool, store, users.reviewer.id, p.id, p.file, {
+    ...(await ends(p.file, 'below 40 ms')),
+    body: 'Start.',
+    mentions: [users.owner.id],
+  });
+  expect(first.mentioned).toEqual(['owner@example.org']);
+  expect(first.limited).toBeUndefined();
+  // 59 more replies, each addressed to the owner: sixty emails in all.
+  for (let i = 1; i < MENTION_EMAILS_PER_HOUR; i++) {
+    const r = await reply(t.pool, users.reviewer.id, p.id, first.id, {
+      body: `Reply ${i}.`,
+      mentions: [users.owner.id],
+    });
+    expect(r.mentioned, `email ${i + 1}`).toEqual(['owner@example.org']);
+  }
+  // The 61st is saved, and not emailed.
+  const over = await reply(t.pool, users.reviewer.id, p.id, first.id, {
+    body: 'The sixty-first.',
+    mentions: [users.owner.id],
+  });
+  expect(over).toEqual({ fileId: p.file, mentioned: [], limited: true });
+  const [thread] = await threads(p);
+  expect(thread.comments).toHaveLength(MENTION_EMAILS_PER_HOUR + 1);
+  expect(thread.comments.at(-1)).toMatchObject({
+    body: 'The sixty-first.',
+    mentions: ['owner@example.org'],
+  });
+  // Comments that mention nobody are not held back, and another person has a count of their own.
+  expect(await reply(t.pool, users.reviewer.id, p.id, first.id, { body: 'No one.' })).toEqual({
+    fileId: p.file,
+    mentioned: [],
+  });
+  expect(
+    (
+      await reply(t.pool, users.owner.id, p.id, first.id, {
+        body: 'Thanks.',
+        mentions: [users.reviewer.id],
+      })
+    ).mentioned,
+  ).toEqual(['reviewer@example.org']);
+  // An hour later the count has run down: comments from an hour ago do not count.
+  await t.pool.query("update thread_comments set created_at = now() - interval '61 minutes'");
+  expect(
+    (
+      await reply(t.pool, users.reviewer.id, p.id, first.id, {
+        body: 'Later.',
+        mentions: [users.owner.id],
+      })
+    ).mentioned,
+  ).toEqual(['owner@example.org']);
+});
+
+test('part of a comment past the limit is emailed: only as many as the hour allows', async () => {
+  // The count is of one person's comments in the last hour: the tests above are theirs too.
+  await t.pool.query('delete from thread_comments');
+  const p = await paper();
+  const first = await startThread(
+    t.pool,
+    store,
+    users.reviewer.id,
+    p.id,
+    p.file,
+    { ...(await ends(p.file, 'below 40 ms')), body: 'One.', mentions: [users.owner.id] },
+    2,
+  );
+  expect(first.mentioned).toHaveLength(1);
+  const two = await reply(
+    t.pool,
+    users.reviewer.id,
+    p.id,
+    first.id,
+    { body: 'Two.', mentions: [users.owner.id, users.viewer.id] },
+    2,
+  );
+  expect(two.mentioned).toHaveLength(1);
+  expect(two.limited).toBe(true);
 });

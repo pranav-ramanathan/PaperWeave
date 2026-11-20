@@ -5,7 +5,7 @@ import { writeZip } from './archive.ts';
 import type { BlobStore } from './blobs.ts';
 import { AppError } from './errors.ts';
 import { importZip } from './import.ts';
-import type { Project } from './projects.ts';
+import { paperName, type Project } from './projects.ts';
 
 const REFS = String.raw`@book{knuth1984,
   author    = {Donald E. Knuth},
@@ -252,12 +252,11 @@ export async function createFromTemplate(
 ): Promise<Project> {
   const template = TEMPLATES.find((t) => t.id === templateId);
   if (!template) throw new AppError('invalid_input', 'Choose one of the templates.');
-  if (typeof name !== 'string' || !name.trim() || name.length > 200)
-    throw new AppError('invalid_input', 'A project needs a name of at most 200 characters.');
+  const named = paperName(name);
   const zip = await writeZip(
     Object.entries(template.files).map(([path, text]) => ({ path, bytes: Buffer.from(text) })),
   );
-  const [project] = await importZip(pool, store, userId, zip, name.trim());
+  const [project] = await importZip(pool, store, userId, zip, named);
   // Kept so that it can later be said how papers from each template fare.
   await pool.query('update projects set template = $2 where id = $1', [project.id, template.id]);
   return project;

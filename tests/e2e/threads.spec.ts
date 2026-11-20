@@ -6,9 +6,11 @@ import { mkdtempSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { writeZip } from '../../packages/server/src/archive';
+import { connect } from '../../packages/server/src/db';
 import {
   audit,
   emailedLink,
+  MAIL,
   person,
   run,
   selectWord,
@@ -194,4 +196,140 @@ test('a reviewer starts a thread, the owner answers, and it outlives the text it
   await expect(theirs.getByText('No open threads on this file.')).toBeVisible();
   await theirs.getByText('Resolved (1)').click();
   await expect(thread(reviewer.page)).toContainText('Thank you, that settles it.');
+});
+
+/** The texts of the mention emails sent to an address, once there are `count` of them. */
+async function mentionMails(to: string, count: number): Promise<string[]> {
+  for (let i = 0; i < 60; i++) {
+    const found = await (
+      await fetch(`${MAIL}/api/v1/search?query=${encodeURIComponent(`to:${to} subject:mentioned`)}`)
+    ).json();
+    const texts: string[] = await Promise.all(
+      (found.messages ?? []).map(
+        async (m: { ID: string }) =>
+          ((await (await fetch(`${MAIL}/api/v1/message/${m.ID}`)).json()) as { Text: string }).Text,
+      ),
+    );
+    if (texts.length >= count) return texts;
+    await new Promise((r) => setTimeout(r, 250));
+  }
+  throw new Error(`fewer than ${count} mention emails reached ${to}`);
+}
+
+test('the link in a mention email opens the comment it is about, signed out or in, resolved or not', async ({
+  browser,
+}) => {
+  test.setTimeout(180_000);
+  const owner = await person(browser, 'link-owner');
+  const reviewer = await person(browser, 'link-reviewer');
+  const zip = join(mkdtempSync(join(tmpdir(), 'paperweave-e2e-')), `Links ${run}.zip`);
+  writeFileSync(zip, await writeZip([{ path: 'main.tex', bytes: Buffer.from(MAIN) }]));
+  await owner.page.goto('/sign-in');
+  await signIn(owner.page, owner.email);
+  await owner.page.getByLabel('Or import a ZIP of a LaTeX project').setInputFiles(zip);
+  await owner.page.getByRole('button', { name: 'Import ZIP' }).click();
+  await owner.page.getByLabel('Their email address').fill(reviewer.email);
+  await owner.page.getByLabel('Their role').selectOption('reviewer');
+  await owner.page.getByRole('button', { name: 'Send invitation' }).click();
+  await expect(owner.page.getByRole('status')).toContainText(reviewer.email);
+  await reviewer.page.goto(await emailedLink(reviewer.email, '/invitations/'));
+  await signIn(reviewer.page, reviewer.email);
+  await reviewer.page.getByRole('button', { name: 'Join this paper' }).click();
+  await expect(reviewer.page.getByText('You are a reviewer')).toBeVisible();
+
+  // A paper made before names were checked can have a line break in its name. What is in the
+  // name must not become lines of the email.
+  const projectId = owner.page.url().split('/projects/')[1].split(/[/?#]/)[0];
+  const pool = connect(
+    process.env.DATABASE_URL ?? 'postgres://paperweave:paperweave@localhost:5432/paperweave',
+  );
+  try {
+    await pool.query('update projects set name = $2 where id = $1', [
+      projectId,
+      'Line one\nLine two\nBcc: someone@example.org',
+    ]);
+  } finally {
+    await pool.end();
+  }
+
+  // The reviewer comments on two places, mentioning the owner each time, and resolves the second.
+  await reviewer.page.getByRole('link', { name: 'main.tex' }).first().click();
+  const panel = reviewer.page.getByRole('region', { name: 'Comments' });
+  for (const word of ['forty', 'edits']) {
+    await selectWord(reviewer.page, VISUAL, word);
+    await panel.getByRole('button', { name: 'Comment on the selected text' }).click();
+    await panel.getByLabel('Comment', { exact: true }).fill(`About ${word}.`);
+    await panel.getByRole('checkbox', { name: owner.email }).check();
+    await panel.getByRole('button', { name: 'Start thread' }).click();
+    await expect(reviewer.page.getByRole('article', { name: `Thread on “${word}”` })).toBeVisible();
+  }
+  await reviewer.page
+    .getByRole('article', { name: 'Thread on “edits”' })
+    .getByRole('button', { name: 'Resolve' })
+    .click();
+  await expect(panel.getByText('Resolved (1)')).toBeVisible();
+
+  const texts = await mentionMails(owner.email, 2);
+  const links = texts.map((t) => /https?:\/\/\S+/.exec(t)![0]);
+  for (const t of texts) {
+    // On one line, and with nothing of what was written.
+    expect(t).toContain('on the paper "Line one Line two Bcc: someone@example.org"');
+    expect(t).not.toMatch(/^Bcc:/m);
+    expect(t).not.toContain('About ');
+  }
+  for (const l of links)
+    expect(l).toMatch(/\/files\/[0-9a-f-]{36}\?thread=[0-9a-f-]{36}#comments$/);
+
+  // Which link is which: the thread each names, found by opening the file as the reviewer.
+  await panel.getByText('Resolved (1)').click();
+  const resolvedId = await reviewer.page
+    .getByRole('article', { name: 'Thread on “edits”' })
+    .getAttribute('id')
+    .then((id) => id!.replace('thread-', ''));
+  const openId = await reviewer.page
+    .getByRole('article', { name: 'Thread on “forty”' })
+    .getAttribute('id')
+    .then((id) => id!.replace('thread-', ''));
+  const linkTo = (id: string) => links.find((l) => l.includes(`thread=${id}`))!;
+  expect(linkTo(resolvedId)).toBeTruthy();
+  expect(linkTo(openId)).toBeTruthy();
+
+  const marked = (page: typeof owner.page, word: string) =>
+    page.getByRole('article', { name: `Thread on “${word}”` });
+  const seen = async (page: typeof owner.page, word: string, id: string) => {
+    await expect(page).toHaveURL(new RegExp(`thread=${id}`));
+    await expect(marked(page, word)).toHaveAttribute('aria-current', 'true', { timeout: 30_000 });
+    await expect(marked(page, word)).toBeInViewport();
+    await expect(marked(page, word)).toHaveCSS('outline-style', 'solid');
+    // And only that one.
+    await expect(page.locator('article[aria-current=true]')).toHaveCount(1);
+  };
+
+  // Signed out: the link goes through sign-in and arrives at the marked thread.
+  const guest = await person(browser, 'link-owner');
+  await guest.page.goto(linkTo(openId));
+  await expect(guest.page).toHaveURL(/\/sign-in\?next=.*thread%3D/);
+  await signIn(guest.page, owner.email);
+  await seen(guest.page, 'forty', openId);
+
+  // The resolved one: the list of resolved threads is opened for it.
+  const resolved = await person(browser, 'link-owner');
+  await resolved.page.goto(linkTo(resolvedId));
+  await signIn(resolved.page, owner.email);
+  await seen(resolved.page, 'edits', resolvedId);
+  await expect(resolved.page.locator('details[open]')).toContainText('Resolved (1)');
+
+  // Signed in already: the same, with no sign-in in between.
+  await owner.page.goto(linkTo(openId));
+  await seen(owner.page, 'forty', openId);
+  await owner.page.goto(linkTo(resolvedId));
+  await seen(owner.page, 'edits', resolvedId);
+  await expect(owner.page.locator('details[open]')).toContainText('Resolved (1)');
+
+  // A thread that is gone: the panel says so.
+  await owner.page.goto(linkTo(openId).replace(openId, '00000000-0000-4000-8000-000000000000'));
+  await expect(owner.page.getByRole('region', { name: 'Comments' })).toContainText(
+    'The comment this link was about is no longer here.',
+  );
+  await expect(owner.page.locator('article[aria-current=true]')).toHaveCount(0);
 });

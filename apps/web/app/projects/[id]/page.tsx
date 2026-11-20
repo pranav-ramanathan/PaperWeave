@@ -1081,7 +1081,7 @@ export default async function Project({
                 ))}
               </select>
             </label>
-            <button type="submit">Send invitation</button>
+            <Once>Send invitation</Once>
           </form>
         </>
       )}

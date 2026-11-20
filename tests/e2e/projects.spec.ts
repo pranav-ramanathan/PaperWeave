@@ -229,6 +229,26 @@ test('a form posted to the site is answered with a path, not with an address', a
   }
 });
 
+test('a sign-in link that has been used says so, and never shows its code', async ({ browser }) => {
+  const visitor = await person(browser, 'used-link');
+  const again = await person(browser, 'used-link-again');
+  await visitor.page.goto('/sign-in');
+  await signIn(visitor.page, visitor.email);
+  await expect(visitor.page.getByRole('heading', { name: 'Your papers' })).toBeVisible();
+  // The same link, in a browser that is not signed in.
+  const link = await emailedLink(visitor.email, '/magic-link/verify');
+  await again.page.goto(link);
+  await expect(again.page).toHaveURL(/\/sign-in/);
+  await expect(again.page.locator('main [role=alert]')).toHaveText(
+    'That sign-in link has been used or has expired. Ask for a new one below.',
+  );
+  expect(again.page.url()).not.toContain('INVALID_TOKEN');
+  await expect(again.page.locator('body')).not.toContainText('INVALID_TOKEN');
+  // Asking for a new one from there works, and goes where the first was going.
+  await signIn(again.page, visitor.email);
+  await expect(again.page.getByRole('heading', { name: 'Your papers' })).toBeVisible();
+});
+
 test('one address is sent only so many sign-in links in an hour, whoever asks for them', async ({
   browser,
 }) => {

@@ -17,7 +17,7 @@ import type { BlobStore } from './blobs.ts';
 import { type Db, transaction } from './db.ts';
 import { AppError } from './errors.ts';
 import { setRootFile, TEXT_FILE } from './files.ts';
-import { id, mayStartPapers, type Project } from './projects.ts';
+import { id, mayStartPapers, oneLine, type Project } from './projects.ts';
 import {
   carriedRoot,
   exportReview,
@@ -256,8 +256,10 @@ export async function importZip(
     const created: Project[] = [];
     for (const p of found) {
       // One paper is named after the ZIP it came in. Several keep the names of their folders.
+      // A name taken from a file or folder is put on one line rather than refused.
       const name = (
-        (found.length === 1 ? fallbackName || p.name : p.name || fallbackName) || 'Imported paper'
+        oneLine((found.length === 1 ? fallbackName || p.name : p.name || fallbackName) ?? '') ||
+        'Imported paper'
       ).slice(0, 200);
       const project = (
         await db.query('insert into projects (name, compiler) values ($1, $2) returning id, name', [

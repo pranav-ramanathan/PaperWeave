@@ -1,7 +1,7 @@
 // The threads of a paper (?file=<id> for one file's), and starting one.
 import { AppError, getProject, listThreads, startThread } from '@paperweave/server';
 import { blobs, currentUser, db, readJson, sameOrigin } from '../../../../lib/server';
-import { failed, tellMentioned } from './mentions';
+import { failed, MENTION_LIMIT_NOTE, tellMentioned } from './mentions';
 
 type Params = { params: Promise<{ id: string }> };
 
@@ -35,8 +35,8 @@ export async function POST(request: Request, { params }: Params) {
       mentions: input.mentions,
     });
     const paper = await getProject(db(), user.id, id);
-    await tellMentioned(started.mentioned, user.email, paper.name, id, String(input.file));
-    return Response.json({ id: started.id });
+    tellMentioned(started.mentioned, user.email, paper.name, id, String(input.file), started.id);
+    return Response.json({ id: started.id, ...(started.limited && { note: MENTION_LIMIT_NOTE }) });
   } catch (err) {
     return failed(err);
   }
