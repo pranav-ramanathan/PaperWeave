@@ -1684,6 +1684,11 @@ second one.
   is given to none. There is no limit on how many comments a thread may have, and sign-in takes
   an address longer than the 320 characters an export keeps. No browser test makes the round
   trip; the page's sentences are not under test.
+- **Found later, in CI:** an imported thread's comments came back in an order of their own
+  when two were made within one millisecond, since the file keeps times to the millisecond
+  and the database then put ties in a random order. Each imported comment is now stored after
+  the one before it, so the file's order holds. A service test with twenty comments of one
+  time held it, and failed on the old code three times in three.
 - **How it was made.** Planned by one agent, probed and written by others, checked here.
 
 ## A paper whose root file is in a folder
