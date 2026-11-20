@@ -1,5 +1,5 @@
 import { expect, test } from 'vitest';
-import { bibEntries, bibItems, describeEntry, plainText } from './bib.ts';
+import { bibEntries, bibItems, cleanDoi, describeEntry, plainText } from './bib.ts';
 import { citeIndex } from './labels.ts';
 import { fixtureFiles } from './testutil.ts';
 
@@ -102,4 +102,27 @@ test('bibitems are read from thebibliography, with their text', () => {
   expect(bibItems('\\begin{document}\\cite{a}\\end{document}')).toEqual([]);
   // An environment that never ends runs to the end of the file.
   expect(bibItems('\\begin{thebibliography}{9}\\bibitem{z} Z.').map((i) => i.key)).toEqual(['z']);
+});
+
+test('a DOI is read from an entry the way a registry wants it', () => {
+  const doi = (fields: Record<string, string>) => cleanDoi({ fields });
+  expect(doi({ doi: '10.1007/978-3-540-74958-5\\_1' })).toBe('10.1007/978-3-540-74958-5_1');
+  expect(doi({ doi: '{10.1000/a\\%b\\&c\\#d}' })).toBe('10.1000/a%b&c#d');
+  for (const written of [
+    'doi:10.1000/x',
+    'DOI 10.1000/x',
+    'DOI: 10.1000/x',
+    'https://doi.org/10.1000/x',
+    'http://dx.doi.org/10.1000/x',
+    '10.1000/x.',
+    '10.1000/x,',
+    ' 10.1000/x; ',
+  ])
+    expect(doi({ doi: written })).toBe('10.1000/x');
+  // No doi field: a doi.org address in url. Any other address is not a DOI.
+  expect(doi({ url: 'https://doi.org/10.1000/x' })).toBe('10.1000/x');
+  expect(doi({ url: '\\url{https://dx.doi.org/10.1000/x}' })).toBe('10.1000/x');
+  expect(doi({ url: 'https://example.org/10.1000/x' })).toBe('');
+  expect(doi({ doi: '10.1000/own', url: 'https://doi.org/10.1000/other' })).toBe('10.1000/own');
+  expect(doi({ title: 'T' })).toBe('');
 });

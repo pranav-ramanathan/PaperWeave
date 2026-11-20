@@ -89,11 +89,30 @@ export function bibEntries(text: string): BibEntry[] {
   return out;
 }
 
+const LIGATURES: Record<string, string> = {
+  oe: 'œ',
+  OE: 'Œ',
+  ae: 'æ',
+  AE: 'Æ',
+  aa: 'å',
+  AA: 'Å',
+  ss: 'ß',
+  o: 'ø',
+  O: 'Ø',
+  l: 'ł',
+  L: 'Ł',
+  i: 'i',
+};
+
 /** A field's text as a person reads it: TeX accents, commands and braces taken away. */
 export function plainText(tex: string) {
   return tex
     .replace(/\\[`'^"~=.uvHtcdbkr]\s*\{?\s*\\?([a-zA-Z])\}?/g, '$1')
     .replace(/\\([&%$#_])/g, '$1')
+    .replace(
+      /\\(oe|OE|ae|AE|aa|AA|ss|[oOlLi])(?![a-zA-Z])\s*(?:\{\})?/g,
+      (_, c: string) => LIGATURES[c],
+    )
     .replace(/\\[a-zA-Z]+\s*/g, '')
     .replace(/[{}]/g, '')
     .replace(/~/g, ' ')
@@ -161,4 +180,27 @@ export function bibItems(src: string): BibItem[] {
     ENV.lastIndex = stop;
   }
   return out;
+}
+
+/**
+ * The DOI an entry gives, as the bare `10.xxxx/...` a registry is asked for: TeX escapes and
+ * braces taken away, a `doi:`, `DOI ` or doi.org address taken off the front, and trailing
+ * punctuation off the end. With no `doi` field, a `url` on doi.org is used. Empty if none.
+ */
+export function cleanDoi(entry: { fields: Record<string, string> }) {
+  const { doi, url } = entry.fields;
+  const bare = (raw: string) =>
+    raw
+      .replace(/\\url(?![a-zA-Z])/g, '')
+      .replace(/\\([&%$#_{}])/g, '$1')
+      .replace(/[{}]/g, '')
+      .trim()
+      .replace(/^(?:doi\s*:?\s*)?(?:https?:\/\/(?:www\.)?(?:dx\.)?doi\.org\/)?/i, '')
+      .replace(/[.,;]+$/, '')
+      .trim();
+  const own = doi ? bare(doi) : '';
+  if (own) return own;
+  return url && /^\s*(?:\\url)?\{?\s*https?:\/\/(?:www\.)?(?:dx\.)?doi\.org\//i.test(url)
+    ? bare(url)
+    : '';
 }
