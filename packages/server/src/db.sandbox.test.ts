@@ -185,3 +185,13 @@ test('a statement that gets no answer in time fails, and its connection is not u
     await pool.end();
   }
 });
+
+test('a connection lost while checked out is heard', async () => {
+  // As above, an unheard error fails the run: here the client is not in a transaction.
+  const c = await t.pool.connect();
+  const { rows } = await c.query('select pg_backend_pid() as pid');
+  await t.pool.query('select pg_terminate_backend($1)', [rows[0].pid]);
+  await new Promise((r) => setTimeout(r, 200));
+  c.release();
+  expect((await t.pool.query('select 1 as n')).rows[0].n).toBe(1);
+});

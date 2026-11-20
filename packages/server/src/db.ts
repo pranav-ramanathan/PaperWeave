@@ -39,6 +39,10 @@ export const connect = (
   // between cut it) is reported here. With nobody listening, that report is an error nobody
   // caught, and ends the process. The pool makes a new connection the next time one is needed.
   pool.on('error', (err) => console.error('a database connection was lost:', err.message));
+  // The same, for one that is out of the pool: the pool stops listening when it hands one out.
+  pool.on('connect', (client) =>
+    client.on('error', (err) => console.error('a database connection was lost:', err.message)),
+  );
   // A query that timed out is still waiting for its answer. The connection must not go back to
   // the pool, where the next borrower would wait behind it.
   pool.on('release', (err, client) => {
