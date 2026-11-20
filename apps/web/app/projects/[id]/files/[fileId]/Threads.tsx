@@ -116,6 +116,13 @@ export default function Threads(props: {
   const [note, setNote] = useState('');
   /** The threads this person has a reply written to and not yet sent. */
   const [drafts, setDrafts] = useState<string[]>([]);
+  /** The thread the address names (?thread=), as an email's link does. */
+  const [named, setNamed] = useState<string | null>(null);
+  const [resolvedOpen, setResolvedOpen] = useState(false);
+  const found = useRef(false);
+  useEffect(() => {
+    setNamed(new URLSearchParams(location.search).get('thread'));
+  }, []);
   const url = `/projects/${projectId}/threads`;
   const told = useRef(props.onThreads);
   told.current = props.onThreads;
@@ -137,14 +144,32 @@ export default function Threads(props: {
       headers: { 'content-type': 'application/json' },
       body: JSON.stringify(body),
     }).catch(() => null);
+    const answer = (await res?.json().catch(() => null)) as {
+      error?: string;
+      note?: string;
+    } | null;
     if (!res?.ok)
-      return (
-        ((await res?.json().catch(() => null)) as { error?: string } | null)?.error ??
-        'That could not be sent. Check the connection and try again.'
-      );
+      return answer?.error ?? 'That could not be sent. Check the connection and try again.';
+    // What the server has to say about a comment that was saved (the limit on emails).
+    setNote(answer?.note ?? '');
     await read();
     return null;
   };
+
+  // Once the threads are read: the one the address names is opened (if resolved), scrolled
+  // into view and marked, or the person is told it is gone. Done once.
+  useEffect(() => {
+    if (!named || !threads || found.current) return;
+    const t = threads.find((x) => x.id === named);
+    if (!t) {
+      found.current = true;
+      setNote('The comment this link was about is no longer here.');
+    } else if (t.status === 'resolved' && !resolvedOpen) setResolvedOpen(true);
+    else {
+      found.current = true;
+      document.getElementById(`thread-${named}`)?.scrollIntoView({ block: 'center' });
+    }
+  }, [named, threads, resolvedOpen]);
 
   // A thread someone else resolves while this person is part-way through a reply to it stays
   // where it is until the reply is sent or rubbed out. Moved among the resolved ones, its
@@ -152,7 +177,11 @@ export default function Threads(props: {
   const held = (t: Thread) => t.status === 'resolved' && drafts.includes(t.id);
   const one = (t: Thread) => (
     <li key={t.id}>
-      <article aria-label={`Thread on “${short(t.excerpt, 40)}”`}>
+      <article
+        id={`thread-${t.id}`}
+        aria-label={`Thread on “${short(t.excerpt, 40)}”`}
+        aria-current={t.id === named ? 'true' : undefined}
+      >
         <blockquote>{short(t.excerpt)}</blockquote>
         {t.state === 'changed' && (
           <p className="note">
@@ -190,7 +219,10 @@ export default function Threads(props: {
           {canComment && t.state === 'detached' && (
             <button
               type="button"
-              onClick={async () => setNote((await post(`${url}/${t.id}`, { attach: true })) ?? '')}
+              onClick={async () => {
+                const wrong = await post(`${url}/${t.id}`, { attach: true });
+                if (wrong) setNote(wrong);
+              }}
             >
               Attach to the same words again
             </button>
@@ -198,13 +230,12 @@ export default function Threads(props: {
           {canComment && (
             <button
               type="button"
-              onClick={async () =>
-                setNote(
-                  (await post(`${url}/${t.id}`, {
-                    status: t.status === 'open' ? 'resolved' : 'open',
-                  })) ?? '',
-                )
-              }
+              onClick={async () => {
+                const wrong = await post(`${url}/${t.id}`, {
+                  status: t.status === 'open' ? 'resolved' : 'open',
+                });
+                if (wrong) setNote(wrong);
+              }}
             >
               {t.status === 'open' ? 'Resolve' : 'Open again'}
             </button>
@@ -281,7 +312,7 @@ export default function Threads(props: {
       {threads && open.length === 0 && <p>No open threads on this file.</p>}
       <ul>{open.map(one)}</ul>
       {resolved.length > 0 && (
-        <details>
+        <details open={resolvedOpen} onToggle={(e) => setResolvedOpen(e.currentTarget.open)}>
           <summary>Resolved ({resolved.length})</summary>
           <ul>{resolved.map(one)}</ul>
         </details>

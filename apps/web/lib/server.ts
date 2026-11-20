@@ -24,7 +24,15 @@ const need = (name: string) => {
 
 export async function sendEmail(to: string, subject: string, text: string) {
   const from = process.env.EMAIL_FROM ?? 'PaperWeave <no-reply@localhost>';
-  await nodemailer.createTransport(need('SMTP_URL')).sendMail({ from, to, subject, text });
+  // A mail server that does not answer must not hold up the person who asked for the email for
+  // longer than this. (Given with the URL in one object: the options a URL does not set apply.)
+  const transport = nodemailer.createTransport({
+    url: need('SMTP_URL'),
+    connectionTimeout: 10_000,
+    greetingTimeout: 10_000,
+    socketTimeout: 15_000,
+  });
+  await transport.sendMail({ from, to, subject, text });
 }
 
 function services() {

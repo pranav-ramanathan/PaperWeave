@@ -2,7 +2,7 @@
 // its words again ({attach}).
 import { AppError, getProject, reattachThread, reply, setThreadStatus } from '@paperweave/server';
 import { blobs, currentUser, db, readJson, sameOrigin } from '../../../../../lib/server';
-import { failed, tellMentioned } from '../mentions';
+import { failed, MENTION_LIMIT_NOTE, tellMentioned } from '../mentions';
 
 export async function POST(
   request: Request,
@@ -16,14 +16,16 @@ export async function POST(
     const input = await readJson(request);
     if (!input || typeof input !== 'object')
       throw new AppError('invalid_input', 'That is not a comment.');
+    let note: string | undefined;
     if ('attach' in input) await reattachThread(db(), blobs(), user.id, id, threadId);
     else if ('status' in input) await setThreadStatus(db(), user.id, id, threadId, input.status);
     else {
       const made = await reply(db(), user.id, id, threadId, input);
       const paper = await getProject(db(), user.id, id);
-      await tellMentioned(made.mentioned, user.email, paper.name, id, made.fileId);
+      tellMentioned(made.mentioned, user.email, paper.name, id, made.fileId, threadId);
+      if (made.limited) note = MENTION_LIMIT_NOTE;
     }
-    return Response.json({ ok: true });
+    return Response.json({ ok: true, ...(note && { note }) });
   } catch (err) {
     return failed(err);
   }

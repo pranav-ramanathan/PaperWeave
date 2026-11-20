@@ -19,11 +19,18 @@ export const dynamic = 'force-dynamic';
 
 export default async function FilePage({
   params,
+  searchParams,
 }: {
   params: Promise<{ id: string; fileId: string }>;
+  searchParams: Promise<{ thread?: string }>;
 }) {
   const { id, fileId } = await params;
-  const user = await requireUser(`/projects/${id}/files/${fileId}`);
+  const { thread } = await searchParams;
+  // The thread an email's link names comes through sign-in with the rest of the address.
+  const named = typeof thread === 'string' && /^[0-9a-f-]{36}$/i.test(thread) ? thread : null;
+  const user = await requireUser(
+    `/projects/${id}/files/${fileId}${named ? `?thread=${named}` : ''}`,
+  );
   const loaded = await Promise.all([
     getProject(db(), user.id, id),
     listFiles(db(), user.id, id),

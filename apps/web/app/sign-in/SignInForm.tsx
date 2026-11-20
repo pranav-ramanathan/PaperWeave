@@ -3,7 +3,7 @@
 import { useState } from 'react';
 
 export default function SignInForm({ next }: { next: string }) {
-  const [state, setState] = useState<'idle' | 'sending' | 'sent' | 'failed'>('idle');
+  const [state, setState] = useState<'idle' | 'sending' | 'sent' | 'refused' | 'unsent'>('idle');
   const [email, setEmail] = useState('');
 
   if (state === 'sent')
@@ -20,9 +20,16 @@ export default function SignInForm({ next }: { next: string }) {
         const res = await fetch('/api/auth/sign-in/magic-link', {
           method: 'POST',
           headers: { 'content-type': 'application/json' },
-          body: JSON.stringify({ email, callbackURL: next }),
+          // A link that is used again, or has expired, comes back to this page with a message.
+          body: JSON.stringify({
+            email,
+            callbackURL: next,
+            errorCallbackURL: `/sign-in?next=${encodeURIComponent(next)}`,
+          }),
         }).catch(() => null);
-        setState(res?.ok ? 'sent' : 'failed');
+        // A refusal (too many links to one address, or not an address) says so with a 4xx. The mail
+        // service not answering is the server's fault, and is said to be.
+        setState(res?.ok ? 'sent' : res && res.status < 500 ? 'refused' : 'unsent');
       }}
     >
       <label>
@@ -39,7 +46,12 @@ export default function SignInForm({ next }: { next: string }) {
       <button type="submit" disabled={state === 'sending'}>
         {state === 'sending' ? 'Sending…' : 'Email me a sign-in link'}
       </button>
-      {state === 'failed' && (
+      {state === 'unsent' && (
+        <p role="alert">
+          The link could not be sent: the email service did not answer. Try again in a few minutes.
+        </p>
+      )}
+      {state === 'refused' && (
         <p role="alert">
           The link could not be sent. Check the address and try again in a minute. Only so many
           links are sent to one address in an hour: if you have asked several times, use the newest
