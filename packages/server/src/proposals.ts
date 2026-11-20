@@ -5,7 +5,7 @@ import type pg from 'pg';
 import * as Y from 'yjs';
 import { authorize, can } from './authz.ts';
 import type { BlobStore } from './blobs.ts';
-import { claimChanges, describeClaimChange } from './claims.ts';
+import { type ClaimChange, claimChanges, describeClaimChange, sentenceAround } from './claims.ts';
 import { runCommand } from './commands.ts';
 import type { Db } from './db.ts';
 import { AppError } from './errors.ts';
@@ -376,8 +376,21 @@ export async function listProposals(
     if (!texts.has(r.file_id)) texts.set(r.file_id, await textOf(pool, store, r.file_id));
     const { doc, text } = texts.get(r.file_id)!;
     const [from, to] = [locate(doc, text, r.anchor_from), locate(doc, text, r.anchor_to)];
-    const now = from >= 0 && to >= from ? text.toString().slice(from, to) : '';
     const known = from >= 0 && to >= from;
+    const whole = text.toString();
+    const now = known ? whole.slice(from, to) : '';
+    // A change is judged in the sentence it stands in, not as the words alone: "high" for "low"
+    // says nothing until it is seen in what it is high or low about. Only the open ones show flags.
+    let flags: ClaimChange[] = [];
+    if (r.status === 'open') {
+      if (known && now === r.expected) {
+        const [start, end] = sentenceAround(whole, from, to);
+        flags = claimChanges(
+          whole.slice(start, end),
+          whole.slice(start, from) + r.replacement + whole.slice(to, end),
+        );
+      } else flags = claimChanges(r.expected, r.replacement);
+    }
     out.push({
       id: r.id,
       fileId: r.file_id,
@@ -393,7 +406,7 @@ export async function listProposals(
           ? !known || now !== r.expected
           : r.status === 'accepted' && (!known || now !== r.replacement),
       now,
-      flags: claimChanges(r.expected, r.replacement).map(describeClaimChange),
+      flags: flags.map(describeClaimChange),
       origin: r.origin,
       madeBy: r.made_by,
       evidence: r.evidence,
