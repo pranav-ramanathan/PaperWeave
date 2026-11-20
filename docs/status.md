@@ -2392,7 +2392,8 @@ update` held the paper's file rows for **189.6 s** (until the proxy was cut; it 
     `tmp/<person>/<id>`; the import or the add then names the key, and the server checks its size
     before reading it, runs the import or the add as before, and deletes it. Only the person who
     asked can use a key. What is left is swept after a day by the workers. A smaller file, or a
-    form sent without scripts, goes the old way.
+    form sent without scripts, goes the old way. The PUT is an `XMLHttpRequest`, which reports
+    progress; it sets no header, so the store's CORS needs are those of the `fetch` it replaced.
   - **Downloads.** A revision's ZIP and the paper's ZIP are streamed, with the same bytes as
     before. A PDF over 4 MB is answered, after the check of who may see it, with a redirect to a
     signed link that lasts five minutes and carries the file's name.
@@ -2890,9 +2891,21 @@ Changed on the way, and worth keeping:
   page, and clears at the answer. It is not `role="status"`, which the pages already have. The
   error page now also says that a change may or may not have been made. Browser tests:
   `waiting.spec.ts` (a form held 9.5 s; a page held 2.5 s); unit test `lib/waiting.test.ts`. Not changed: the error page still comes after
-  the server's own limits (30 to 36 s); forms posted to routes (Add file, Import ZIP, the GET
-  form to "See what would change") rely on the browser's own loading sign; the editor's panels
-  keep their own busy states; `Fresh`'s refresh says nothing.
+  the server's own limits (30 to 36 s); the GET form to "See what would change" relies on the
+  browser's own loading sign; the editor's panels keep their own busy states; `Fresh`'s refresh
+  says nothing.
+- Uploads (Import ZIP, Add file; `DirectUpload`). A file over 4 MB is put in the store with an
+  `XMLHttpRequest`, and the page shows "Uploading <name> (n MB). Keep this page open." with a
+  progress bar, then "<name> is uploaded. Waiting for the server to take it." The request for an
+  address is given up after 15 s; the put after 30 s in which no byte has left. A failure says
+  "The server did not answer, so nothing was uploaded", "The file did not reach the store" or
+  the server's own words (for example, too large), not the browser's "Failed to fetch". A file of
+  4 MB or less is posted by the browser and holds the waiting line from the press. The waiting
+  line is not used while bytes go, since "No answer from the server yet" would be untrue. Browser
+  tests: `uploading.spec.ts` (progress shown; a put and an address request that fail; a put
+  that stops), `waiting.spec.ts` (a small file added). Not changed: after the upload an import
+  still runs inside one request (a job queue for imports is not built; see "So a job queue for imports is still not built"), and the page says only
+  "Working…" or "No answer from the server yet" during it.
 
 ## Decisions waiting on the owner
 
