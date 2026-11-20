@@ -1596,6 +1596,50 @@ second one.
 - **How it was made.** Planned and its faults explained by one agent, probed and written by
   others, checked here.
 
+## When the line to Postgres or the store goes quiet
+
+- **What was tried**, with a probe, on one machine: a proxy between the web app and Postgres (or
+  the store) that holds or drops the bytes of live connections for a while, and the same with
+  `iptables` dropping packets (the kernel runs), with Playwright driving the browser. Not tried:
+  Vercel, pgbouncer (none on the machine), and kernel keepalive probing of a dead peer.
+- **Found (before any change).** Nothing in the stack timed out: no statement, query or connect
+  limit, `idle_in_transaction_session_timeout` and `tcp_keepalives_idle` at 0, no abort on the
+  browser's `fetch` calls.
+  - A save, restore or rename made while the line went quiet right after its `select … for
+update` held the paper's file rows for **189.6 s** (until the proxy was cut; it did not end
+    by itself, and the lock was still held 70 s after the line returned). Another person's
+    typing into the paper went unsaved for that time; the owner's page said nothing.
+  - The build worker's claim transaction waited on that lock for 66 s: builds of every paper
+    stayed queued, and built within 3 s of the cut.
+  - A request in flight when the line went quiet was still pending at +95 s, and a build poll
+    stayed in flight at +130 s.
+  - After one failed first call to the store, every later `put` in that process failed at once
+    (0 ms) with the same error, though the store was back.
+  - With the kernel dropping the store's port, the ZIP failed after 12.2 s as a blank 500.
+  - A cut connection (as opposed to a quiet one) was fine, except that a connection held by the
+    sign-in library was an uncaught `Connection terminated unexpectedly`; the process survived.
+- **Now** (`packages/server/src/db.ts`, `blobs.ts`): the limits in `docs/settings.md`, "Fixed in
+  the code". A connection released with a timed-out query still waiting is closed, and one
+  whose rollback does not answer within 5 s is thrown away. A connection lost while checked out
+  is heard. A failed first call to the store is not remembered.
+- **Held by** tests, each failed on the old code: `db.sandbox.test.ts` (a quiet transaction is
+  ended in 0.5 s and frees its row; the default is `15s`; a statement times out and its
+  connection is dropped; a lost checked-out connection is heard), `db.test.ts` (the pool's
+  limits), `blobs.test.ts` (a failed first call is asked again; a store that never answers
+  fails with `unavailable` after 10 s, tried with fake timers).
+- **Not tried or not measured.**
+  - The probe was not re-run after the change: the end-to-end numbers for cases 4, 6 and 7 wait
+    for the browser half. Until then a person at an open editor is still not told the server
+    is not answering.
+  - Vercel and pgbouncer. How the 15-second limit passes through a pooler was not tried.
+  - Kernel keepalive: that a dead peer is noticed in about 20 s (Node's libuv probes) is from
+    memory, not confirmed. Only a kernel drop could test it.
+  - A timed-out write may still have been made (an invitation row without its email); not
+    changed.
+  - Transactions that read many files from the store while holding no statement, such as the
+    proposal's apply, can idle for as long as the reads take; none was measured near 15 s.
+- **How it was made.** Planned from the probe by one agent, written and checked here.
+
 ## Undoing each thing
 
 - **What was tried**, with a probe, three times over: twenty cases of undo and redo, by the

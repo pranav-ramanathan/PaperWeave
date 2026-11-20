@@ -2,6 +2,7 @@
 // bytes are stored once and a stored blob can never change.
 import { createHash, randomUUID } from 'node:crypto';
 import { AwsClient } from 'aws4fetch';
+import { AppError } from './errors.ts';
 
 export type BlobStore = {
   /** Store bytes and return their digest. Storing the same bytes twice is harmless. */
@@ -37,6 +38,9 @@ export type BlobStore = {
 /** Where uploads wait between the browser's PUT and the call that takes them. */
 const UPLOAD_KEY = /^tmp\/[0-9a-f-]{36}\/[0-9a-f-]{36}$/;
 
+const ANSWER_MS = 10_000;
+const BYTES_PER_MS = 100;
+
 export const sha256 = (bytes: Uint8Array) => createHash('sha256').update(bytes).digest('hex');
 
 export function blobStore(env: Record<string, string | undefined> = process.env): BlobStore {
@@ -64,8 +68,35 @@ export function blobStore(env: Record<string, string | undefined> = process.env)
     return `${bucket}/${key}`;
   };
   let ready: Promise<unknown> | undefined;
+  /**
+   * A request to the store that gives up when the line has gone quiet: the store has 10 seconds
+   * to answer, and then the body, in or out, is allowed to move at 100 kB/s at least. A flat limit
+   * would cut a large download or leave a dead line hanging for minutes.
+   */
+  const ask = async (address: string, init: RequestInit = {}, sending = 0) => {
+    const stop = new AbortController();
+    const allow = (ms: number) =>
+      setTimeout(
+        () =>
+          stop.abort(
+            new AppError('unavailable', 'The file store did not answer. Try again in a moment.'),
+          ),
+        ms,
+      ).unref();
+    const first = allow(ANSWER_MS + sending / BYTES_PER_MS);
+    const res = await s3
+      .fetch(address, { ...init, signal: stop.signal })
+      .finally(() => clearTimeout(first));
+    allow(ANSWER_MS + Number(res.headers.get('content-length') ?? 0) / BYTES_PER_MS);
+    return res;
+  };
   // Creating a bucket that exists is an error we can ignore; a real failure shows on the PUT.
-  const bucketReady = () => (ready ??= s3.fetch(bucket, { method: 'PUT' }));
+  // A failure is not kept: the next call asks again.
+  const bucketReady = () =>
+    (ready ??= ask(bucket, { method: 'PUT' }).catch((err) => {
+      ready = undefined;
+      throw err;
+    }));
   /** A signed address, to be used by whoever holds it, until it expires. */
   const signed = async (
     address: string,
@@ -86,7 +117,7 @@ export function blobStore(env: Record<string, string | undefined> = process.env)
     return request.url;
   };
   const head = async (address: string) => {
-    const res = await s3.fetch(address, { method: 'HEAD' });
+    const res = await ask(address, { method: 'HEAD' });
     if (res.status === 404) return null;
     if (!res.ok) throw new Error(`blob store refused a read: ${res.status}`);
     return Number(res.headers.get('content-length'));
@@ -95,12 +126,12 @@ export function blobStore(env: Record<string, string | undefined> = process.env)
     async put(bytes) {
       await bucketReady();
       const digest = sha256(bytes);
-      const res = await s3.fetch(url(digest), { method: 'PUT', body: bytes as BodyInit });
+      const res = await ask(url(digest), { method: 'PUT', body: bytes as BodyInit }, bytes.length);
       if (!res.ok) throw new Error(`blob store refused a write: ${res.status}`);
       return digest;
     },
     async get(digest) {
-      const res = await s3.fetch(url(digest));
+      const res = await ask(url(digest));
       if (res.status === 404) return null;
       if (!res.ok) throw new Error(`blob store refused a read: ${res.status}`);
       const bytes = new Uint8Array(await res.arrayBuffer());
@@ -125,12 +156,12 @@ export function blobStore(env: Record<string, string | undefined> = process.env)
     },
     uploadSize: (key) => head(uploadKey(key)),
     async uploadRead(key) {
-      const res = await s3.fetch(uploadKey(key));
+      const res = await ask(uploadKey(key));
       if (!res.ok) throw new Error(`blob store refused a read: ${res.status}`);
       return new Uint8Array(await res.arrayBuffer());
     },
     async uploadDrop(key) {
-      const res = await s3.fetch(uploadKey(key), { method: 'DELETE' });
+      const res = await ask(uploadKey(key), { method: 'DELETE' });
       if (!res.ok && res.status !== 404)
         throw new Error(`blob store refused a delete: ${res.status}`);
     },
@@ -145,7 +176,7 @@ export function blobStore(env: Record<string, string | undefined> = process.env)
           prefix: 'tmp/',
           ...(token ? { 'continuation-token': token } : {}),
         }).toString();
-        const res = await s3.fetch(list.href);
+        const res = await ask(list.href);
         if (!res.ok) throw new Error(`blob store refused a listing: ${res.status}`);
         const xml = await res.text();
         for (const m of xml.matchAll(/<Contents>([\s\S]*?)<\/Contents>/g)) {

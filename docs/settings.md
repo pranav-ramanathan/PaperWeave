@@ -41,6 +41,15 @@ the services in `infra/compose.yaml`.
   to 60 seconds. Editing in the editor stops at once, and who may do what on a paper is read from
   the database every time. Not a setting: it is `SESSION_CACHE_SECONDS` in
   `packages/server/src/auth.ts`. `docs/deploy.md` has the rest.
+- **Limits on a line that has gone quiet.** None is a setting.
+  - A transaction that sits 15 seconds between two statements is ended by the database, which
+    frees the rows it held (`transaction` in `packages/server/src/db.ts`). The build and chart
+    workers' transactions are exempt: they hold their row through a compile or a render, and it
+    is taken `skip locked`, so nobody waits on it.
+  - A database statement gets 30 seconds and a connection, or a wait for a free one, 10; TCP
+    keepalive is on. The migrator has no limit, as it waits on another migrator.
+  - Every request to the object store has 10 seconds to answer, and then its body is allowed to
+    move at 100 kB/s at least (`ask` in `packages/server/src/blobs.ts`).
 
 ## What must be reachable from where
 
@@ -102,6 +111,12 @@ was tried by hand on one machine, except where it says otherwise; the details ar
   service's error page. The sync server and the workers keep running, make their connections
   again and look up what they missed. Typing is saved within seconds of the database being
   back.
+- **The line goes quiet** (a connection to the database or the store that stops answering
+  without being closed, as when something between loses it). A transaction is ended by the
+  database after 15 seconds, a statement fails after 30 and a store call after 10 (see "Fixed in
+  the code"), and the person gets the service's error page or a message instead of a page that
+  never finishes. A write that timed out may still have been made. What the browser says while
+  it waits is not changed by this.
 - **The object store.** Typing into a file that is already open is still saved. Pages that
   read the paper's files show the error page; "Try again" works once the store is back.
 - **The sync server.** Editors say "Offline" and keep what is typed. It is saved within

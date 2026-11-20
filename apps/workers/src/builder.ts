@@ -4,7 +4,7 @@ import { createHash } from 'node:crypto';
 import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { dirname, join } from 'node:path';
-import { type BlobStore, cutRevision, transaction } from '@paperweave/server';
+import { type BlobStore, cutRevision, type Db, transaction } from '@paperweave/server';
 import type pg from 'pg';
 import { compile, type Compiler, IMAGE } from './compile.ts';
 
@@ -24,7 +24,9 @@ export function buildNext(
   image: string,
   seconds = 60,
 ): Promise<boolean> {
-  return transaction(pool, async (db) => {
+  // The row is taken `skip locked`, so nobody waits on it, and this worker is next to the
+  // database: it may sit between statements for a whole compile.
+  const run = async (db: Db) => {
     const job = (
       await db.query(
         `select id, project_id, requested_by, revision_id from builds
@@ -137,5 +139,6 @@ export function buildNext(
       rmSync(work, { recursive: true, force: true });
     }
     return true;
-  });
+  };
+  return transaction(pool, run, 0);
 }

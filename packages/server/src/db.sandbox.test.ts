@@ -1,6 +1,6 @@
 // Needs the services in infra/compose.yaml. Run: pnpm test:sandbox
 import { afterAll, beforeAll, expect, test } from 'vitest';
-import { listen, onlyOne, transaction } from './db.ts';
+import { connect, listen, onlyOne, transaction } from './db.ts';
 import { testDb } from './testing.ts';
 
 let t: Awaited<ReturnType<typeof testDb>>;
@@ -124,4 +124,74 @@ test('only one process does a job at a time, and the next takes over when it sto
   await until('the second to learn it was displaced', () => said.includes('second displaced'));
   await second!();
   await third!();
+});
+
+const took = async (what: Promise<unknown>) => {
+  const start = Date.now();
+  await what.catch(() => {});
+  return Date.now() - start;
+};
+
+test('a transaction left quiet is ended by the database, and what it held is free', async () => {
+  await t.pool.query('create table held (n int)');
+  await t.pool.query('insert into held values (1)');
+  const holder = transaction(
+    t.pool,
+    async (db) => {
+      await db.query('select * from held for update');
+      await new Promise((r) => setTimeout(r, 3000));
+      await db.query('select 1');
+    },
+    500,
+  );
+  const failed = expect(holder).rejects.toThrow(/./);
+  await new Promise((r) => setTimeout(r, 100));
+  const waited = await took(t.pool.query('select * from held for update'));
+  expect(waited).toBeLessThan(2000);
+  await failed;
+});
+
+test('a transaction ends after 15 seconds of quiet unless it is told otherwise', async () => {
+  const shown = (idle?: number) =>
+    transaction(
+      t.pool,
+      async (db) =>
+        (await db.query('show idle_in_transaction_session_timeout')).rows[0]
+          .idle_in_transaction_session_timeout,
+      idle,
+    );
+  expect(await shown()).toBe('15s');
+  expect(await shown(0)).toBe('0');
+});
+
+test('a statement that gets no answer in time fails, and its connection is not used again', async () => {
+  const pool = connect(t.url, {}, 300);
+  try {
+    expect(await took(pool.query('select pg_sleep(3)'))).toBeLessThan(1000);
+    await expect(pool.query('select pg_sleep(3)')).rejects.toThrow(/timeout/i);
+    // Released with its query still waiting, the connection is dropped, not handed on.
+    const c = await pool.connect();
+    await expect(c.query('select pg_sleep(3)')).rejects.toThrow(/timeout/i);
+    c.release();
+    expect(pool.totalCount).toBe(0);
+    expect(await took(pool.query('select 1'))).toBeLessThan(1000);
+    // In a transaction, the rollback does not wait behind the statement that timed out.
+    const work = transaction(pool, (db) => db.query('select pg_sleep(3)'));
+    const start = Date.now();
+    await expect(work).rejects.toThrow(/timeout/i);
+    expect(Date.now() - start).toBeLessThan(6000);
+    expect(await took(pool.query('select 1'))).toBeLessThan(1000);
+  } finally {
+    await pool.end();
+  }
+});
+
+test('a connection lost while checked out is heard', async () => {
+  // As above, an unheard error fails the run: here the client is not in a transaction.
+  const c = await t.pool.connect();
+  const { rows } = await c.query('select pg_backend_pid() as pid');
+  await t.pool.query('select pg_terminate_backend($1)', [rows[0].pid]);
+  await new Promise((r) => setTimeout(r, 200));
+  c.release();
+  expect((await t.pool.query('select 1 as n')).rows[0].n).toBe(1);
 });
