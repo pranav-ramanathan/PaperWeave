@@ -144,7 +144,9 @@ export default function BuildPane({
       ? latest.diagnostics.filter(
           (d) =>
             d.severity === 'warning' &&
-            /^(Citation|Reference) .+ undefined|^Label .+ multiply defined/.test(d.message),
+            /^(Citation|Reference|Hyper reference) .+ undefined|^Label .+ multiply defined/.test(
+              d.message,
+            ),
         )
       : [];
   const place = (d: { file?: string; line?: number }) => (

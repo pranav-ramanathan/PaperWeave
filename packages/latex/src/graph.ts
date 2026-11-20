@@ -69,19 +69,47 @@ export const norm = (path: string) => {
 export const rootDir = (root: string) =>
   root.includes('/') ? root.slice(0, root.lastIndexOf('/') + 1) : '';
 
-/**
- * The project file an include names, if there is one: the path as written, or with the
- * extension TeX would add for that kind of include. `all` is every path in the project.
- */
-export function resolveInclude(inc: Include, dir: string, all: ReadonlySet<string>) {
-  if (inc.dynamic) return undefined;
-  const base = norm(dir + inc.target);
-  const tries =
-    inc.kind === 'graphics'
-      ? GRAPHICS.map((x) => base + x)
-      : [base, base + (inc.kind === 'bib' ? '.bib' : '.tex')];
-  return tries.find((p) => all.has(p));
+/** The folders `\\graphicspath{{a/}{b/}}` names, as written: `['a/', 'b/']`. Pass the root file's text. */
+export function graphicsPaths(rootText: string): string[] {
+  const out: string[] = [];
+  for (const m of uncomment(rootText).matchAll(/\\graphicspath\s*\{((?:\s*\{[^{}]*\})*)\s*\}/g))
+    for (const g of m[1].matchAll(/\{([^{}]*)\}/g)) {
+      const folder = g[1].trim();
+      if (folder) out.push(folder);
+    }
+  return out;
 }
+
+/**
+ * The project file an include names, if there is one, and the `\\graphicspath` folder it was
+ * found through (`''` for none): the path as written, or with the extension TeX would add for
+ * that kind of include. `all` is every path in the project.
+ */
+export function resolveVia(
+  inc: Include,
+  dir: string,
+  all: ReadonlySet<string>,
+  via: string[] = [],
+): { path: string; via: string } | undefined {
+  if (inc.dynamic) return undefined;
+  for (const v of inc.kind === 'graphics' ? ['', ...via] : ['']) {
+    const base = norm(dir + v + inc.target);
+    const tries =
+      inc.kind === 'graphics'
+        ? GRAPHICS.map((x) => base + x)
+        : [base, base + (inc.kind === 'bib' ? '.bib' : '.tex')];
+    const path = tries.find((p) => all.has(p));
+    if (path) return { path, via: v };
+  }
+  return undefined;
+}
+
+export const resolveInclude = (
+  inc: Include,
+  dir: string,
+  all: ReadonlySet<string>,
+  via: string[] = [],
+) => resolveVia(inc, dir, all, via)?.path;
 
 export type Graph = {
   /** Text files reachable from the root, root first. */
@@ -106,6 +134,7 @@ export function includeGraph(
 ): Graph {
   const all = new Set(paths);
   const dir = rootDir(root);
+  const via = graphicsPaths(files[root] ?? '');
   const g: Graph = { order: [], preamble: [], edges: [], missing: [], dynamic: [], cycles: [] };
   const body = uncomment(files[root] ?? '').indexOf('\\begin{document}');
   const stack: string[] = [];
@@ -124,7 +153,7 @@ export function includeGraph(
         continue;
       }
       // TeX resolves every path against the directory it was started in: the root's.
-      const to = resolveInclude(inc, dir, all);
+      const to = resolveInclude(inc, dir, all, via);
       if (!to) {
         g.missing.push({ from, target: inc.target, at: inc.targetAt });
         continue;

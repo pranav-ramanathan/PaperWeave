@@ -192,3 +192,20 @@ test('a rename is refused whole when the text has moved on, the name is taken or
   });
   expect((await texts(project))['sections/a.tex']).toContain('Again \\ref{sec:alpha}.');
 });
+
+test('hyperref, fref, Fref and zcref references follow a renamed label', async () => {
+  const zip = await writeZip([
+    {
+      path: 'main.tex',
+      bytes: Buffer.from(
+        '\\documentclass{article}\n\\begin{document}\n\\section{A}\\label{sec:a}\n\\hyperref[sec:a]{x} \\fref{sec:a} \\Fref{sec:a} \\zcref{sec:a}\n',
+      ),
+    },
+  ]);
+  const [project] = await importZip(t.pool, store, owner.id, zip, 'Hyper');
+  const proposal = await proposeLabelRename(t.pool, store, owner.id, project.id, 'sec:a', 'sec:b');
+  await renameLabel(t.pool, store, owner.id, project.id, 'sec:a', 'sec:b', proposal.digest);
+  expect((await texts(project.id))['main.tex']).toBe(
+    '\\documentclass{article}\n\\begin{document}\n\\section{A}\\label{sec:b}\n\\hyperref[sec:b]{x} \\fref{sec:b} \\Fref{sec:b} \\zcref{sec:b}\n',
+  );
+});

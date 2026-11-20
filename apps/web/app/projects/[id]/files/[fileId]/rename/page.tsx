@@ -50,12 +50,20 @@ export default async function RenameFile({
         {back}
       </header>
       {error && <p role="alert">{error}</p>}
-      <p>
-        {lines === 0
-          ? 'No other file names this one.'
-          : `${lines} ${lines === 1 ? 'line names' : 'lines name'} this file. Renaming it would change ${lines === 1 ? 'that line' : 'those lines'} too.`}{' '}
-        Nothing has been changed yet.
-      </p>
+      {lines === 0 ? (
+        <p>
+          No line that this page can see names <em>{proposal.from}</em>. A package, class,
+          bibliography style, listing or data file can be named in ways it does not read (
+          <code>\usepackage</code>, <code>\documentclass</code>, <code>\lstinputlisting</code> and
+          the like). If the paper names this file that way, change that line yourself, and check
+          that the paper still builds. Nothing has been changed yet.
+        </p>
+      ) : (
+        <p>
+          {lines} {lines === 1 ? 'line names' : 'lines name'} this file. Renaming it would change{' '}
+          {lines === 1 ? 'that line' : 'those lines'} too. Nothing has been changed yet.
+        </p>
+      )}
       {files.map((path) => (
         <section key={path} aria-label={path}>
           <h2>
@@ -84,7 +92,9 @@ export default async function RenameFile({
         <input type="hidden" name="to" value={proposal.to} />
         <input type="hidden" name="digest" value={proposal.digest} />
         <button type="submit" name="how" value="all">
-          Rename and update {lines === 1 ? 'that line' : `those ${lines} lines`}
+          {lines === 0
+            ? 'Rename'
+            : `Rename and update ${lines === 1 ? 'that line' : `those ${lines} lines`}`}
         </button>{' '}
         {lines > 0 && (
           <button type="submit" name="how" value="only">
