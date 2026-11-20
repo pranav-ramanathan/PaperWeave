@@ -1,9 +1,18 @@
 // Needs Docker and the TeX image (docker build -t paperweave-tex infra/tex). Run: pnpm test:sandbox
 import { execFileSync } from 'node:child_process';
-import { cpSync, existsSync, mkdirSync, mkdtempSync, readFileSync, writeFileSync } from 'node:fs';
+import {
+  cpSync,
+  existsSync,
+  mkdirSync,
+  mkdtempSync,
+  readFileSync,
+  renameSync,
+  writeFileSync,
+} from 'node:fs';
 import { tmpdir } from 'node:os';
+import { gunzipSync } from 'node:zlib';
 import { dirname, join } from 'node:path';
-import { encodeFile, findRoot, includeGraph } from '@paperweave/latex';
+import { encodeFile, findRoot, includeGraph, parseSyncTeX, toPdf } from '@paperweave/latex';
 import { expect, test } from 'vitest';
 import { fixtures, replica, visualOp } from '../../../packages/bridge/src/harness.ts';
 import { FIXTURES, rng } from '../../../packages/latex/src/testutil.ts';
@@ -148,6 +157,47 @@ test('a warning is reported with the file it is in, not only the line', async ()
     file: 'sections/intro.tex',
     line: before.split('\n').length + 1,
     message: "Reference `sec:nowhere' on page 1 undefined",
+  });
+});
+
+/** ieee-multifile with its root in paper/, and its macros in shared/ beside it. */
+function inFolder() {
+  const project = tmp();
+  cpSync(join(FIXTURES, 'ieee-multifile'), join(project, 'paper'), { recursive: true });
+  mkdirSync(join(project, 'shared'));
+  renameSync(join(project, 'paper/macros.tex'), join(project, 'shared/macros.tex'));
+  const main = join(project, 'paper/main.tex');
+  writeFileSync(
+    main,
+    readFileSync(main, 'utf8').replace('\\input{macros}', '\\input{../shared/macros}'),
+  );
+  return project;
+}
+
+test('a paper whose root is in a folder builds, with the paths of the project', async () => {
+  const project = inFolder();
+  const out = tmp();
+  const ok = await compile(project, 'paper/main.tex', out);
+  expect(ok.diagnostics.filter((d) => d.severity === 'error')).toEqual([]);
+  expect(ok.ok).toBe(true);
+  expect(readFileSync(join(out, ok.pdf!)).subarray(0, 5).toString()).toBe('%PDF-');
+  const sync = parseSyncTeX(gunzipSync(readFileSync(join(out, ok.synctex!))).toString('latin1'));
+  expect(sync.inputs).toContain('paper/sections/intro.tex');
+  expect(sync.inputs).toContain('shared/macros.tex');
+  expect(toPdf(sync, 'paper/sections/intro.tex', 8)).toMatchObject({ page: 1 });
+
+  const intro = join(project, 'paper/sections/intro.tex');
+  writeFileSync(
+    intro,
+    readFileSync(intro, 'utf8').replace('Reviewers then', '\\nosuchmacro Reviewers then'),
+  );
+  const bad = await compile(project, 'paper/main.tex', tmp());
+  expect(bad.ok).toBe(false);
+  expect(bad.diagnostics).toContainEqual({
+    severity: 'error',
+    file: 'paper/sections/intro.tex',
+    line: 8,
+    message: 'Undefined control sequence.',
   });
 });
 

@@ -92,3 +92,24 @@ test('a point leads to the line that made what is nearest on that line of text',
   expect(where(2, 100, 88)).toBe('sections/a.tex:7');
   expect(where(3, 100, 100)).toBeNull();
 });
+
+test("a build run in the root file's folder (-cd) names files above it by their project path", () => {
+  const sync = parseSyncTeX(
+    [
+      'SyncTeX Version:1',
+      'Input:1:/work/paper/./main.tex',
+      'Input:2:/work/paper/../shared/macros.tex',
+      'Input:3:/work/paper/sections/../sections/./a.tex',
+      'Input:4:/work/../etc/outside.tex',
+      'Output:pdf',
+      'Content:',
+      '',
+    ].join('\n'),
+  );
+  expect(sync.inputs).toEqual([
+    'paper/main.tex',
+    'shared/macros.tex',
+    'paper/sections/a.tex',
+    'etc/outside.tex',
+  ]);
+});

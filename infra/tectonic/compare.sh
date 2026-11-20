@@ -37,7 +37,7 @@ for paper in article-basic ieee-multifile ams-multifile; do
     rm -rf "$work/$engine" && cp -r "$fixtures/$paper" "$work/$engine" && chmod -R a+rwX "$work/$engine"
   done
   seconds=$(timed docker run --rm --network none -v "$work/texlive":/work paperweave-tex \
-    latexmk -norc -pdf -no-shell-escape -interaction=nonstopmode -synctex=1 main.tex)
+    latexmk -norc -cd -pdf -no-shell-escape -interaction=nonstopmode -synctex=1 main.tex)
   set -- $(facts "$work/texlive")
   echo "| $paper | TeX Live, latexmk | $(cat "$work/ok") | $seconds | $1 | $2 | $3 |"
 

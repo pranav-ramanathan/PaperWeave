@@ -47,12 +47,12 @@ export function parseSyncTeX(text: string, base = '/work/'): SyncTeX {
       const colon = line.indexOf(':', 6);
       const path = line.slice(colon + 1);
       if (!path.startsWith(base)) continue;
-      // "/work/./sections/a.tex" is sections/a.tex.
-      const name = path
-        .slice(base.length)
-        .split('/')
-        .filter((part) => part && part !== '.')
-        .join('/');
+      // "/work/./sections/a.tex" is sections/a.tex; "/work/paper/../shared/a.tex" is shared/a.tex.
+      const parts: string[] = [];
+      for (const part of path.slice(base.length).split('/'))
+        if (part === '..') parts.pop();
+        else if (part && part !== '.') parts.push(part);
+      const name = parts.join('/');
       let at = inputs.indexOf(name);
       if (at < 0) at = inputs.push(name) - 1;
       tags.set(Number(line.slice(6, colon)), at);

@@ -13,16 +13,22 @@ const buildStatus = (page: Page) => build(page).getByRole('status');
 const source = (page: Page) => page.locator('.editor .cm-content');
 
 /** A ZIP of the fixture, named for this run. */
-async function fixtureZip(name: string) {
+async function fixtureZip(name: string, under = '') {
   const files: { path: string; bytes: Buffer }[] = [];
   const walk = (dir: string) => {
     for (const f of readdirSync(dir).sort()) {
       const p = join(dir, f);
       if (statSync(p).isDirectory()) walk(p);
-      else files.push({ path: relative(FIXTURE, p), bytes: readFileSync(p) });
+      else files.push({ path: under + relative(FIXTURE, p), bytes: readFileSync(p) });
     }
   };
   walk(FIXTURE);
+  // A different paper at the top, so the folder's is not the root until it is made one.
+  if (under)
+    files.push({
+      path: 'main.tex',
+      bytes: Buffer.from('\\documentclass{article}\\begin{document}Top.\\end{document}\n'),
+    });
   const zip = join(mkdtempSync(join(tmpdir(), 'paperweave-e2e-')), `${name} ${run}.zip`);
   writeFileSync(zip, await writeZip(files));
   return zip;
@@ -314,5 +320,22 @@ test('a build that is not being built says so, and does not say "compiling" for 
     'Still waiting to compile after two minutes. The build service may be busy or not running.',
   );
   // The last PDF that was built is still shown meanwhile.
+  await expect(build(page).getByRole('group', { name: /^Page 1 of/ })).toBeVisible();
+});
+
+test('a paper whose root file is in a folder builds', async ({ browser }) => {
+  test.setTimeout(120_000);
+  const { page, email } = await person(browser, 'folder-root');
+  await page.goto('/sign-in');
+  await signIn(page, email);
+  await page
+    .getByLabel('Or import a ZIP of a LaTeX project')
+    .setInputFiles(await fixtureZip('Folder', 'paper/'));
+  await page.getByRole('button', { name: 'Import ZIP' }).click();
+  // The paper's own \input{sections/intro} and \bibliography{refs} are read from paper/.
+  await page.getByRole('button', { name: 'Make paper/main.tex the root file' }).click();
+  await expect(page.getByRole('row', { name: /paper\/main\.tex/ })).toContainText('Root file');
+  await page.getByRole('link', { name: 'paper/sections/intro.tex' }).click();
+  await expect(buildStatus(page)).toHaveText('The PDF is up to date.', { timeout: 60_000 });
   await expect(build(page).getByRole('group', { name: /^Page 1 of/ })).toBeVisible();
 });

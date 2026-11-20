@@ -15,7 +15,7 @@ import {
 } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { auxLabels } from '@paperweave/latex';
+import { auxLabels, norm, rootDir } from '@paperweave/latex';
 
 export const IMAGE = process.env.PAPERWEAVE_TEX_IMAGE ?? 'paperweave-tex';
 /** The image's unprivileged user. */
@@ -91,7 +91,25 @@ const CONTINUED = /\n\([A-Za-z0-9@-]+\)[ \t]+/g;
 /** TeX announcing that it gave up; the cause is the entry before it. */
 const STOP = /^\s*(?:Emergency stop\.?|==> Fatal error occurred)/;
 
-export function diagnostics(log: string, output = ''): Diagnostic[] {
+/**
+ * A path as TeX wrote it, relative to the root file's folder, as a project path. Undefined for
+ * one that climbs out of the project.
+ */
+function place(dir: string, file: string): string | undefined {
+  let depth = 0;
+  for (const part of (dir + file).split('/')) {
+    if (part === '..') depth--;
+    else if (part && part !== '.') depth++;
+    if (depth < 0) return undefined;
+  }
+  return norm(dir + file);
+}
+
+/**
+ * `dir` is the root file's folder with its trailing slash, or '': the build runs there (-cd),
+ * so that is what the paths in the log are relative to.
+ */
+export function diagnostics(log: string, output = '', dir = ''): Diagnostic[] {
   // Errors in the order the log has them, so the cause is not listed after the stop.
   const found: { at: number; d: Diagnostic }[] = [];
   for (const m of log.matchAll(ERROR))
@@ -137,6 +155,12 @@ export function diagnostics(log: string, output = ''): Diagnostic[] {
     const { file, message } = out[i];
     if (file === undefined) continue;
     const base = file.split('/').at(-1);
+    // Placed in the project, unless it is somewhere else, or the next rules turn it into words.
+    if (!file.startsWith('/')) {
+      const placed = place(dir, file);
+      if (placed !== undefined) out[i] = { ...out[i], file: placed };
+      else delete out[i].file;
+    }
     const own = (text: string) => (out[i] = { severity: 'error', message: text });
     if (file.startsWith('/')) own(`In ${base}: ${message}`);
     else if (file.endsWith('.bbl'))
@@ -146,7 +170,7 @@ export function diagnostics(log: string, output = ''): Diagnostic[] {
   }
   // A warning gives a line but not the file the line is in. That is whichever of the paper's
   // files TeX was reading when it wrote the warning.
-  const reading = readingAt(log);
+  const reading = readingAt(log, dir);
   for (const m of log.matchAll(WARNING)) {
     const said = /^(.+?)(?: on input line (\d+))?\.?$/s.exec(m[1].replace(CONTINUED, ' '))!;
     const line = said[2] ? Number(said[2]) : undefined;
@@ -182,11 +206,11 @@ function runaway(log: string, at: number, d: Diagnostic): Diagnostic {
  * A file TeX brought in from its own installation is not one of the paper's: a warning written
  * while reading one gets no file.
  */
-function readingAt(log: string): (offset: number) => string | undefined {
+function readingAt(log: string, dir: string): (offset: number) => string | undefined {
   // The file being read from each place where that changes.
   const changes: { at: number; file: string | undefined }[] = [];
   const stack: (string | null)[] = [];
-  const opening = /\(((?:\.\/|\/)[^\s()]+)/y;
+  const opening = /\(((?:\.\.?\/|\/)[^\s()]+)/y;
   let at = 0;
   let quoted = false;
   for (const text of log.split('\n')) {
@@ -203,7 +227,10 @@ function readingAt(log: string): (offset: number) => string | undefined {
       } else if (text[i] === ')') stack.pop();
       else continue;
       const top = stack.findLast((f) => f !== null);
-      changes.push({ at: at + i, file: top?.startsWith('./') ? top.slice(2) : undefined });
+      changes.push({
+        at: at + i,
+        file: top?.startsWith('/') || !top ? undefined : place(dir, top),
+      });
     }
     // A bracket that was not a file's and was not closed on its line was never going to be.
     while (stack.at(-1) === null) stack.pop();
@@ -238,8 +265,11 @@ export async function compile(
     const run = await sandbox(
       work,
       // -norc: a project's latexmkrc is arbitrary Perl and is never read.
+      // -cd: TeX runs in the root file's folder, where it writes its output and resolves
+      // \input, as the rest of the app reads paths.
       [
-        ...['latexmk', '-norc', ENGINE[compiler], '-no-shell-escape', '-interaction=nonstopmode'],
+        ...['latexmk', '-norc', '-cd', ENGINE[compiler], '-no-shell-escape'],
+        ...['-interaction=nonstopmode'],
         ...['-file-line-error', '-synctex=1', root],
       ],
       seconds,
@@ -268,7 +298,7 @@ export async function compile(
       ok: !!pdf,
       // `timeout -s KILL` reports 137.
       timedOut: run.code === 137,
-      diagnostics: diagnostics(log, run.output),
+      diagnostics: diagnostics(log, run.output, rootDir(root)),
       log,
       pdf,
       synctex: pdf && keep('.synctex.gz'),
