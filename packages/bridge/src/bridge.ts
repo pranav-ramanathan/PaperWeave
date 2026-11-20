@@ -2,7 +2,7 @@
 import { DEFAULT_TRANSPARENT, parse, reparse, sourceOnly } from '@paperweave/latex';
 import type { Node as PMNode, Schema } from '@tiptap/pm/model';
 import { ReplaceStep } from '@tiptap/pm/transform';
-import { type EditorState, Selection, type Transaction } from '@tiptap/pm/state';
+import { type EditorState, Selection, TextSelection, type Transaction } from '@tiptap/pm/state';
 import * as Y from 'yjs';
 import { locate, model, type Model, projector, toSrc } from './project.ts';
 import { diff, type Edit, emphEdit, translate, type Translation } from './translate.ts';
@@ -143,6 +143,19 @@ export class Bridge {
     // first place text can go.
     if (d.a === 0 && d.endA === state.doc.content.size)
       tr.setSelection(Selection.findFrom(tr.doc.resolve(0), 1, true) ?? Selection.atStart(tr.doc));
+    // The caret's text was taken away (its paragraph went): the selection would land on or beside
+    // a block, where the next key is refused. Put it at the nearest place text can go.
+    const was = state.selection;
+    if (!(d.a === 0 && d.endA === state.doc.content.size) && was instanceof TextSelection) {
+      const now = tr.selection;
+      if (!(now instanceof TextSelection && now.$head.parent.inlineContent)) {
+        const $at = tr.doc.resolve(
+          Math.max(0, Math.min(tr.mapping.map(was.head, -1), tr.doc.content.size)),
+        );
+        const near = Selection.findFrom($at, -1, true) ?? Selection.findFrom($at, 1, true);
+        if (near) tr.setSelection(near);
+      }
+    }
     this.host.dispatch(tr.setMeta('projection', true).setMeta('addToHistory', false));
   }
 

@@ -19,7 +19,7 @@ import {
 } from '@paperweave/latex';
 import { Editor, Extension, type Node } from '@tiptap/core';
 import type { Node as PMNode } from '@tiptap/pm/model';
-import { Plugin, TextSelection } from '@tiptap/pm/state';
+import { Plugin, Selection, TextSelection } from '@tiptap/pm/state';
 import { Decoration, DecorationSet } from '@tiptap/pm/view';
 import katex from 'katex';
 import * as Y from 'yjs';
@@ -163,14 +163,16 @@ export function createVisual(opts: {
    * Where the caret should be when the keyboard comes back from a window opened here. The
    * browser, handing focus back, may put it at the start of the text.
    */
-  let resume: { from: number; to: number } | null = null;
+  let resume: { from: number; to: number; acted: number } | null = null;
+  /** Goes up when the person presses the mouse or a key in the text. */
+  let acted = 0;
   /** Goes up each time the person moves the caret or changes the text themselves. */
   let moves = 0;
   /** Open the formula at `pos` for editing. What it says now is what a later edit must find. */
   const openMath = (pos: number, src: string) => {
     const c = bridge.atomCommand(editor.state, pos, src);
     if (!c) return say('That formula cannot be edited here. Edit it in the source.');
-    resume = { from: editor.state.selection.from, to: editor.state.selection.to };
+    resume = { from: editor.state.selection.from, to: editor.state.selection.to, acted };
     opts.editMath!(src, async (replacement) =>
       opts.run({ ...c, key: crypto.randomUUID(), replacement }),
     );
@@ -586,7 +588,7 @@ export function createVisual(opts: {
     catchUp();
     const c = bridge.insertCommand(editor.state, '');
     if (!c) return null;
-    resume = { from: editor.state.selection.from, to: editor.state.selection.to };
+    resume = { from: editor.state.selection.from, to: editor.state.selection.to, acted };
     return async (latex) => {
       const before = moves;
       const result = await opts.run({ ...c, key: crypto.randomUUID(), replacement: latex });
@@ -600,7 +602,7 @@ export function createVisual(opts: {
         const caret = fromSrc(bridge.model, editor.state.doc, after);
         selectAt(caret);
         const { from, to } = editor.state.selection;
-        resume = { from, to };
+        resume = { from, to, acted };
       }
       return result;
     };
@@ -698,7 +700,18 @@ export function createVisual(opts: {
           bridge?.applied(transaction);
         },
         addKeyboardShortcuts: () => ({
-          'Mod-z': () => !!undo.undo() || true,
+          'Mod-z': ({ editor: e }) => {
+            // A paragraph just opened with Enter is not in the paper yet: taking it back is the undo.
+            const sel = e.state.selection;
+            if (bridge.model.phantom && sel.empty && !sel.$head.parent.content.size) {
+              const near = Selection.findFrom(e.state.doc.resolve(sel.$head.before(1)), -1, true);
+              if (near) {
+                e.view.dispatch(e.state.tr.setSelection(near).setMeta('own', true));
+                return true;
+              }
+            }
+            return !!undo.undo() || true;
+          },
           'Mod-y': () => !!undo.redo() || true,
           'Mod-Shift-z': () => !!undo.redo() || true,
           'Mod-i': emph,
@@ -728,6 +741,17 @@ export function createVisual(opts: {
     ],
     editorProps: {
       attributes: { 'aria-label': opts.label, role: 'textbox', 'aria-multiline': 'true' },
+      // A press of the mouse or a key in the text: the caret is the person's from then on.
+      handleDOMEvents: {
+        mousedown: () => {
+          acted++;
+          return false;
+        },
+        keydown: () => {
+          acted++;
+          return false;
+        },
+      },
       // What is pasted goes in as its words, as if typed: the clipboard's formatting is not LaTeX.
       handlePaste: (_view, event) => {
         const data = event.clipboardData;
@@ -805,8 +829,12 @@ export function createVisual(opts: {
     insertion,
     /** Put the keyboard back in the visual view, with the caret where it should be. */
     focus() {
-      const { from, to } = resume ?? editor.state.selection;
+      const kept = resume;
       resume = null;
+      // The person has already clicked or typed in the text since the window was asked for: the
+      // caret is theirs. (A window closed with Escape is gone before this is called.)
+      if (kept && kept.acted !== acted) return;
+      const { from, to } = kept ?? editor.state.selection;
       editor.view.focus();
       selectAt(from, to);
     },

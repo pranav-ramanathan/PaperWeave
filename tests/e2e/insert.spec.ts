@@ -266,9 +266,23 @@ test('an insertion slow to arrive leaves the caret where its person put it', asy
   await expect(citing.getByRole('option')).toHaveCount(1);
   await page.keyboard.press('Enter');
   // The window is dismissed and the caret put at the end of another paragraph before the
-  // answer arrives, and typed in as slowly as a person does.
+  // answer arrives, and typed in as slowly as a person does. The window's close event is held
+  // back for 400 ms, as it is on a machine too busy to deliver it at once.
+  await page.evaluate(() => {
+    const d = document.querySelector('dialog[open]')!;
+    d.addEventListener(
+      'close',
+      (e) => {
+        e.stopImmediatePropagation();
+        setTimeout(() => d.dispatchEvent(new Event('close')), 400);
+      },
+      { capture: true, once: true },
+    );
+  });
   await page.keyboard.press('Escape');
-  // The keyboard goes back to the text when the window has closed; then the person clicks.
+  // Hiding the window and focusing the text is the browser's doing, and is done at once; the
+  // page's own return of the caret comes after, when the close event arrives. Then the person
+  // clicks.
   await expect(citing).toBeHidden();
   await expect(page.locator(VISUAL)).toBeFocused();
   await clickAfter(page, VISUAL, 'charlieend');
