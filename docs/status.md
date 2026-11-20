@@ -633,6 +633,10 @@ ordinary use. Ten ways of looking found them, and each is cheap to do again:
     once its answer came; a full stop of the person's own deleted after a table cell was
     changed; an edit said to have failed that had been made, and made twice when tried again.
 
+14. **Undo, and redo, everything the page can do.** Found: after undoing a paragraph just
+    begun, the caret left where nothing can be typed, and what was typed next lost; undo in a
+    paragraph just opened with Enter taking back the thing before it.
+
 Tried the same way and nothing found: thirty connections typing into one file at once (kept
 as a test in `sync.sandbox.test`); 400 threads and 400 proposals on one file, on the server
 (both lists took about 20 ms; not kept); and each tool of the visual view worked slowly
@@ -1499,6 +1503,56 @@ second one.
   the text where it was, which a click made at the same instant can lose to.
 - **How it was made.** Planned and its faults explained by one agent, probed and written by
   others, checked here.
+
+## Undoing each thing
+
+- **What was tried**, with a probe, three times over: twenty cases of undo and redo, by the
+  keys and by the buttons, with a second person on the paper, reading both people's copies of
+  the source and where the caret was after each step.
+
+| Undone and redone                                                      | What happened                                                              |
+| ---------------------------------------------------------------------- | -------------------------------------------------------------------------- |
+| A word typed; 30 characters typed fast, then five undos                | taken back whole, and put back                                             |
+| A formula, citation, reference, figure, table inserted                 | each one step, whole; no `$` or brace left                                 |
+| A cell, a row, a column, a caption, a description changed              | each one step; every row of the table well formed throughout               |
+| Emphasis; a paste of two paragraphs; a drop of two paragraphs          | each one step, whole                                                       |
+| Typed in one view, undone in the other                                 | the right change undone                                                    |
+| **Enter, then a letter, then undo; then typing**                       | **the caret left beside the table, and what was typed next lost**          |
+| **Enter, then undo at once**                                           | **the thing typed before Enter taken back; the empty paragraph left**      |
+| A proposal accepted, then Ctrl+Z                                       | nothing: an accept is not in the person's history. "Undo the accept" works |
+| Another person deletes the paragraph typed in, or restores a revision  | the owner's undo changes nothing; nothing comes back                       |
+| Another person edits inside a formula the owner inserted; owner undoes | their text left, without the formula around it (below)                     |
+| Ctrl+Z in a table cell's field, or in the formula window               | the field's own text undone; the paper untouched                           |
+| Nothing to undo; a viewer pressing the keys                            | nothing changes; a viewer is offered no Undo or Redo                       |
+
+- **What was wrong.** A paragraph begun with Enter is not in the source until something is
+  typed in it. Undoing what was typed takes the paragraph away again, and the caret, which was
+  in it, was left on the table after it: the next key was a change to the table, refused, and
+  what was typed went nowhere. And undo in such a paragraph before anything was typed took back
+  the person's previous change instead, leaving the empty paragraph.
+- **Now** a caret whose paragraph is taken away goes to the nearest place text can go (`sync`
+  in `packages/bridge/src/bridge.ts`), whoever took it away. Undo in an empty paragraph just
+  opened closes it and puts the caret at the end of the paragraph before (`Mod-z` in
+  `apps/web/lib/visual.ts`).
+- **Held by** a bridge test ("a caret whose paragraph is removed by another origin stays where
+  text can go") and a browser test (`visual.spec`: "undo leaves a caret that can be typed at"),
+  each failed on the old code.
+- **Looked at and not a fault:** after undoing a table edit the caret seemed to go to the start
+  of the file. It had been there all along: changing a cell in its field does not move the
+  text's caret, and undo did not move it.
+- **Not changed:**
+  - Undoing a formula that another person has since edited inside takes away only what the
+    owner put there: `bravoend$RRR$.` becomes `bravoendRRR.`, and a numbered equation becomes
+    `bravoendRRR.` too. Nothing is lost and redo puts it back, but the words left are outside
+    any formula, and a command meant for a formula among them would stop the build.
+  - On a slow line, undo takes things back in the order they reached the paper: a formula
+    whose answer came after later typing is undone first.
+  - After an undo elsewhere, the caret stays where it was, rather than going to the change.
+  - Ctrl+Z just after accepting a proposal does nothing; "Undo the accept" is the way.
+  - The history of undo does not survive a reload.
+- **How it was made.** Planned and judged by one agent, probed and written by others, checked
+  here. The cause first given for the caret at the start of the file was looked for and not
+  found, which is how it was seen not to be a fault.
 
 ## When an email cannot be sent
 

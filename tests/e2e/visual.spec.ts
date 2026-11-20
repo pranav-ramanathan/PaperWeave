@@ -352,3 +352,77 @@ test('a caret at the end of the source is kept in the visual view', async ({ bro
   await page.keyboard.type('Z');
   await expect(page.locator(VISUAL)).toContainText('Z');
 });
+
+test('undo leaves a caret that can be typed at', async ({ browser }) => {
+  const { page, email } = await person(browser, 'vis-undo');
+  const main = [
+    '\\documentclass{article}',
+    '\\usepackage{booktabs}',
+    '\\begin{document}',
+    'The first paragraph ends alphaend.',
+    '',
+    'The third paragraph is where the person clicks and ends charlieend.',
+    '',
+    '\\begin{table}[t]',
+    '  \\caption{Edits}',
+    '  \\begin{tabular}{@{}lr@{}}',
+    '    \\toprule',
+    '    Template & Edits \\\\',
+    '    \\bottomrule',
+    '  \\end{tabular}',
+    '\\end{table}',
+    '\\end{document}',
+    '',
+  ].join('\n');
+  const zip = join(mkdtempSync(join(tmpdir(), 'paperweave-e2e-')), `Undo ${run}.zip`);
+  writeFileSync(zip, await writeZip([{ path: 'main.tex', bytes: Buffer.from(main) }]));
+  await page.goto('/sign-in');
+  await signIn(page, email);
+  await page.getByLabel('Or import a ZIP of a LaTeX project').setInputFiles(zip);
+  await page.getByRole('button', { name: 'Import ZIP' }).click();
+  await page.getByRole('link', { name: 'main.tex' }).first().click();
+  await expect(status(page)).toHaveText('All edits saved.');
+  const note = page.locator('.editor .toolbar .note');
+  const text = async () => {
+    await showSource(page);
+    await page.waitForTimeout(800);
+    const t = (await page.locator(SOURCE).innerText()).replace(/⁠/g, '');
+    await view(page, 'Visual').click();
+    await expect(page.locator(VISUAL)).toBeVisible();
+    return t;
+  };
+
+  // Case 8b: a paragraph opened with Enter and typed in, then undone.
+  await clickAfter(page, VISUAL, 'charlieend');
+  await page.keyboard.press('End');
+  await page.keyboard.type(' pre');
+  // Let each step be its own undo step.
+  await page.waitForTimeout(1500);
+  await page.keyboard.press('Enter');
+  await page.waitForTimeout(1500);
+  await page.keyboard.type('x');
+  await page.waitForTimeout(1500);
+  await page.keyboard.press('ControlOrMeta+z');
+  await page.waitForTimeout(600);
+  await page.keyboard.type('ZZ');
+  await page.waitForTimeout(600);
+  expect(await text()).toMatch(/charlieend\. preZZ\s*\\begin\{table\}/);
+  await expect(note).toHaveText('');
+
+  // Case 8: Enter and straight back. The empty paragraph goes, and " pre" stays.
+  await clickAfter(page, VISUAL, 'ZZ');
+  await page.keyboard.press('End');
+  await page.keyboard.press('Backspace');
+  await page.keyboard.press('Backspace');
+  await page.waitForTimeout(1500);
+  await page.keyboard.press('Enter');
+  await page.keyboard.press('ControlOrMeta+z');
+  const empty = await page
+    .locator(`${VISUAL} p`)
+    .evaluateAll((ps) => ps.filter((p) => !p.textContent).length);
+  expect(empty).toBe(0);
+  await page.keyboard.type('QQ');
+  await page.waitForTimeout(600);
+  const t = await text();
+  expect(t).toMatch(/charlieend\. preQQ\s*\\begin\{table\}/);
+});

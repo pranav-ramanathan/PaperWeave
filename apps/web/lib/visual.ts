@@ -19,7 +19,7 @@ import {
 } from '@paperweave/latex';
 import { Editor, Extension, type Node } from '@tiptap/core';
 import type { Node as PMNode } from '@tiptap/pm/model';
-import { Plugin, TextSelection } from '@tiptap/pm/state';
+import { Plugin, Selection, TextSelection } from '@tiptap/pm/state';
 import { Decoration, DecorationSet } from '@tiptap/pm/view';
 import katex from 'katex';
 import * as Y from 'yjs';
@@ -698,7 +698,18 @@ export function createVisual(opts: {
           bridge?.applied(transaction);
         },
         addKeyboardShortcuts: () => ({
-          'Mod-z': () => !!undo.undo() || true,
+          'Mod-z': ({ editor: e }) => {
+            // A paragraph just opened with Enter is not in the paper yet: taking it back is the undo.
+            const sel = e.state.selection;
+            if (bridge.model.phantom && sel.empty && !sel.$head.parent.content.size) {
+              const near = Selection.findFrom(e.state.doc.resolve(sel.$head.before(1)), -1, true);
+              if (near) {
+                e.view.dispatch(e.state.tr.setSelection(near).setMeta('own', true));
+                return true;
+              }
+            }
+            return !!undo.undo() || true;
+          },
           'Mod-y': () => !!undo.redo() || true,
           'Mod-Shift-z': () => !!undo.redo() || true,
           'Mod-i': emph,

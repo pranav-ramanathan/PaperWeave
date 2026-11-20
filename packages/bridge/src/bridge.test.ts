@@ -479,3 +479,20 @@ test('editing one cell of a table changes only that cell, and two people can edi
   expect(r.src).toContain('\\caption{A new caption}');
   expect(r.bridge.atomCommand(r.state, cap.at, 'x', { at: 0, end: 99_999 })).toBeNull();
 });
+
+test('a caret whose paragraph is removed by another origin stays where text can go', () => {
+  const src =
+    'One.\n\nTwo here.\n\n\\begin{table}\n\\begin{tabular}{l}\na\\\\\n\\end{tabular}\n\\end{table}\n';
+  const r = replica(src);
+  const tbs = textblocks(r).filter((t) => t.para);
+  const two = tbs[1];
+  r.select(two.start + 3);
+  const at = r.src.indexOf('Two here.');
+  r.ytext.delete(at, 'Two here.\n\n'.length);
+  r.check();
+  const sel = r.state.selection;
+  expect(sel).toBeInstanceOf(TextSelection);
+  expect(sel.$head.parent.inlineContent).toBe(true);
+  // In the paragraph before, not on the table.
+  expect(sel.$head.parent.textContent).toBe('One.');
+});
