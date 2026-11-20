@@ -30,6 +30,8 @@ async function findings(latex: string, language: string) {
       disabledRules: NEVER.join(','),
     }),
   });
+  // The checker answers 503 "Server overloaded" when too many checks are queued at once.
+  if (!res.ok) throw new Error(`the checker answered ${res.status}: ${await res.text()}`);
   const { matches } = (await res.json()) as { matches: Match[] };
   const hard = matches.filter((m) =>
     segments.some((s) => s.kind === 'hard' && s.from < m.offset + m.length && s.to > m.offset),
@@ -68,10 +70,11 @@ test('the checker on the labelled sentences', async () => {
     for (const f of answer.shown) wrong.push(`- \`${f.rule}\` on "${f.words}" in: \`${latex}\``);
   }
   // British text read as American: the spellings are pointed at, which is what choosing
-  // American English is for.
-  const american = (
-    await Promise.all(corpus.clean.map((latex) => findings(latex, 'en-US')))
-  ).flatMap((a) => a.shown.map((f) => f.words));
+  // American English is for. One at a time, as above: twenty at once filled the checker's
+  // queue on a two-core runner, and it answered "Server overloaded".
+  const american: string[] = [];
+  for (const latex of corpus.clean)
+    american.push(...(await findings(latex, 'en-US')).shown.map((f) => f.words));
 
   const total = corpus.mistakes.length;
   const hits = total - missed.length;
