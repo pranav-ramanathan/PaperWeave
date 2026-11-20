@@ -465,6 +465,27 @@ test('what the browser kept of a paper is not handed to whoever uses it after a 
   expect((await asked()).status).toBe(401);
 });
 
+test('after "Sign out" the same browser is sent to sign in at once, though the session was kept in a cookie', async ({
+  browser,
+}) => {
+  const { page, email } = await person(browser, 'rec-cache-out');
+  await page.goto('/sign-in');
+  await signIn(page, email);
+  await page.goto('/projects');
+  await expect(page.getByRole('button', { name: 'Sign out' })).toBeVisible();
+  // The session is kept in the browser for a minute, so that the database need not be asked.
+  const names = async () => (await page.context().cookies()).map((c) => c.name);
+  expect((await names()).some((n) => n.endsWith('session_data'))).toBe(true);
+  // Not left to run out: pressing "Sign out" ends it for pages now, and gets rid of the copy.
+  await page.getByRole('button', { name: 'Sign out' }).click();
+  await page.waitForURL(/\/sign-in/);
+  expect((await names()).some((n) => /session_(token|data)$/.test(n))).toBe(false);
+  await page.goto('/projects');
+  await expect(page).toHaveURL(/\/sign-in/);
+  await page.goto('/');
+  await expect(page.getByRole('button', { name: 'Sign out' })).toHaveCount(0);
+});
+
 test('someone taken off the paper while a file is open is told, and the page stops asking', async ({
   browser,
 }) => {

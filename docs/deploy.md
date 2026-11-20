@@ -71,7 +71,7 @@ Run pgbouncer in front of Postgres, in transaction mode, and give its address to
 What the web app does with the database (`packages/server/src/db.ts`, and a search of
 `apps/web` and `packages/server`):
 
-- It makes a `pg.Pool` with the library's defaults (at most 10 connections for one instance).
+- It makes a `pg.Pool` (at most `DATABASE_POOL_MAX` connections for one instance, default 10; an idle one is closed after `DATABASE_POOL_IDLE_MS`, default 10 seconds).
   Every query is `pool.query(sql, params)` and every transaction is `begin` … `commit` on one
   connection. It never names a prepared statement, never uses `listen`, and takes no advisory
   lock.
@@ -87,6 +87,39 @@ Not tried: Vercel's `attachDatabasePool`, which its page says "ensures idle conn
 closed before suspension". The web app does not use it. If idle connections to the pooler cause
 trouble, it is the first thing to look at.
 
+### Pool size on Vercel
+
+Set `DATABASE_POOL_MAX=3` and `DATABASE_POOL_IDLE_MS=5000` for the web app on Vercel. Many
+instances run at once, and each holds its own pool: with the defaults every one of them could keep
+up to 10 idle connections open to the pooler for 10 seconds, which together hold server
+connections that nobody is using. A request does one or two things at a time, so 3 is enough for
+an instance, and a cold instance opens few connections instead of many when its first page
+asks for several things at once. Closing an idle one after 5 seconds gives it back sooner.
+These two are read by every service that calls `connect` (`docs/settings.md`); leave them unset on
+the sync server and the workers, which keep the defaults. A value that is not a positive whole
+number stops the service at start, saying which. Not tried: Vercel itself, only that the pool
+takes the values (`packages/server/src/db.test.ts`).
+
+### Sessions are kept in the browser for a minute
+
+Sign-in (Better Auth) keeps a copy of the session in a cookie, `session.cookieCache` with
+`maxAge` 60 seconds (`createAuth`), so that a page or action does not ask the database who is
+signed in every time, which across a distance is two round trips on each. **The trade, accepted by
+the owner:** a session that is ended from another device (signed out there, or removed) goes on
+working in this browser, for pages and actions, for up to 60 seconds. Editing in the editor
+stops at once: the sync server asks the database itself, and the ticket it is shown is not
+given from the cache (`apps/web/app/api/sync-ticket/route.ts`). Signing out in this browser
+clears the cache with the session, and the next page load goes to sign-in.
+
+What does not wait: who may do what on a paper is read from the database on every call
+(`authorize`), so removing someone or changing their role takes effect at once.
+
+How it is kept going: when the minute is up, the next call asks the database and makes the
+cookie again. A page cannot set cookies, so only a route handler or an action can pass the new
+one on (`currentSession` in `apps/web/lib/server.ts`). The editor's build poll, every 5 seconds
+while an editor is open, is the one that does; a person who only reads pages goes to the database
+for the session on each page after the minute is up, as before.
+
 ## Settings on Vercel
 
 Set these in the project's environment variables, for Production. `docs/settings.md` says what
@@ -100,6 +133,7 @@ each is.
 | `BETTER_AUTH_SECRET`                                       | Long and random. **The same value as the sync server's.**                                   |
 | `BETTER_AUTH_URL`                                          | The address people use: the Vercel address, or your own domain on it                        |
 | `SMTP_URL`, `EMAIL_FROM`                                   | The mail provider's. `EMAIL_FROM` should be an address you may send from                    |
+| `DATABASE_POOL_MAX`, `DATABASE_POOL_IDLE_MS`               | `3` and `5000`, for the web app only (see above)                                            |
 | `SYNC_URL`                                                 | The sync server's public address, `wss://…`. The pages' content policy allows only this one |
 | `GRAMMAR_URL`                                              | LanguageTool's tunnel address                                                               |
 | `CROSSREF_URL`                                             | Leave unset                                                                                 |

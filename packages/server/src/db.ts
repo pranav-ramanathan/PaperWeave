@@ -3,9 +3,31 @@ import pg from 'pg';
 /** A pool, or a client inside a transaction: anything that runs a query. */
 export type Db = Pick<pg.Pool, 'query'>;
 
-export const connect = (url = process.env.DATABASE_URL) => {
+/**
+ * A setting that must be a positive whole number, or `fallback` if it is not set. A bad one
+ * stops the process at start, saying which: a pool of "ten" or of 0 would otherwise fail on
+ * the first request, or hold every request for ever.
+ */
+function positiveInteger(name: string, value: string | undefined, fallback: number): number {
+  if (value === undefined || value.trim() === '') return fallback;
+  const n = Number(value);
+  if (!/^\d+$/.test(value.trim()) || !Number.isSafeInteger(n) || n < 1)
+    throw new Error(`${name} must be a positive whole number, not "${value}"`);
+  return n;
+}
+
+export const connect = (
+  url = process.env.DATABASE_URL,
+  env: Record<string, string | undefined> = process.env,
+) => {
   if (!url) throw new Error('DATABASE_URL is not set');
-  const pool = new pg.Pool({ connectionString: url });
+  const pool = new pg.Pool({
+    connectionString: url,
+    // How many connections one process holds at most, and how long one that nobody needs is
+    // kept before it is closed (docs/settings.md).
+    max: positiveInteger('DATABASE_POOL_MAX', env.DATABASE_POOL_MAX, 10),
+    idleTimeoutMillis: positiveInteger('DATABASE_POOL_IDLE_MS', env.DATABASE_POOL_IDLE_MS, 10_000),
+  });
   // A connection that is lost while nobody is using it (the database restarted, something
   // between cut it) is reported here. With nobody listening, that report is an error nobody
   // caught, and ends the process. The pool makes a new connection the next time one is needed.
