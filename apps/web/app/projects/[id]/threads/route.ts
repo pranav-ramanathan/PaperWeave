@@ -1,11 +1,11 @@
 // The threads of a paper (?file=<id> for one file's), and starting one.
-import { AppError, getProject, listThreads, startThread } from '@paperweave/server';
+import { AppError, getProject, listThreads, startThread, withScope } from '@paperweave/server';
 import { blobs, currentUser, db, readJson, sameOrigin } from '../../../../lib/server';
 import { failed, MENTION_LIMIT_NOTE, tellMentioned } from './mentions';
 
 type Params = { params: Promise<{ id: string }> };
 
-export async function GET(request: Request, { params }: Params) {
+async function read(request: Request, { params }: Params) {
   const user = await currentUser();
   if (!user) return Response.json({ error: 'Sign in first.' }, { status: 401 });
   try {
@@ -16,6 +16,9 @@ export async function GET(request: Request, { params }: Params) {
     return failed(err);
   }
 }
+
+// Everything this reads about the paper is asked for once.
+export const GET: typeof read = (request, context) => withScope(() => read(request, context));
 
 export async function POST(request: Request, { params }: Params) {
   if (!sameOrigin(request)) return new Response('Forbidden', { status: 403 });

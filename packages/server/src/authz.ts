@@ -1,6 +1,7 @@
 // Who may do what. This is the only place that decides; the HTTP API and the sync server both ask it.
 import type { Db } from './db.ts';
 import { AppError } from './errors.ts';
+import { remembered } from './scope.ts';
 
 export const ROLES = ['owner', 'editor', 'reviewer', 'viewer'] as const;
 export type Role = (typeof ROLES)[number];
@@ -35,11 +36,14 @@ export async function authorize(
   projectId: string,
   action: Action,
 ): Promise<Role> {
-  const { rows } = await db.query(
-    'select role from project_members where project_id = $1 and user_id = $2',
-    [projectId, userId],
-  );
-  const role = rows[0]?.role as Role | undefined;
+  // Who is in the paper is remembered in a scope; what the role may do is asked every time.
+  const role = await remembered(db, ['role', userId, projectId], async () => {
+    const { rows } = await db.query(
+      'select role from project_members where project_id = $1 and user_id = $2',
+      [projectId, userId],
+    );
+    return rows[0]?.role as Role | undefined;
+  });
   if (!role) throw new AppError('not_found', 'No such project.');
   if (!can(role, action)) throw new AppError('permission_denied', `A ${role} cannot do that.`);
   return role;

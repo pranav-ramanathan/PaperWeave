@@ -1,5 +1,6 @@
 import {
   AppError,
+  withScope,
   can,
   getProject,
   importReport,
@@ -17,7 +18,7 @@ import FileEditor from './FileEditor';
 
 export const dynamic = 'force-dynamic';
 
-export default async function FilePage({
+async function FilePage({
   params,
   searchParams,
 }: {
@@ -96,4 +97,9 @@ export default async function FilePage({
       </div>
     </main>
   );
+}
+
+// What this page reads about the paper, it reads once.
+export default function Scoped(props: Parameters<typeof FilePage>[0]) {
+  return withScope(() => FilePage(props));
 }

@@ -1,8 +1,8 @@
 // The paper's labels, for choosing one to refer to.
-import { AppError, labelReport } from '@paperweave/server';
+import { AppError, labelReport, withScope } from '@paperweave/server';
 import { blobs, currentUser, db } from '../../../../lib/server';
 
-export async function GET(_request: Request, { params }: { params: Promise<{ id: string }> }) {
+async function read(_request: Request, { params }: { params: Promise<{ id: string }> }) {
   const user = await currentUser();
   if (!user) return Response.json({ error: 'Sign in first.' }, { status: 401 });
   try {
@@ -14,3 +14,6 @@ export async function GET(_request: Request, { params }: { params: Promise<{ id:
     throw err;
   }
 }
+
+// Everything this reads about the paper is asked for once.
+export const GET: typeof read = (request, context) => withScope(() => read(request, context));

@@ -1,9 +1,9 @@
 // The paper's bibliography entries and the citation command it uses, for the editor: to say
 // what a citation is, to flag one with no entry, and to choose one to insert.
-import { AppError, citationReport } from '@paperweave/server';
+import { AppError, citationReport, withScope } from '@paperweave/server';
 import { blobs, currentUser, db } from '../../../../lib/server';
 
-export async function GET(_request: Request, { params }: { params: Promise<{ id: string }> }) {
+async function read(_request: Request, { params }: { params: Promise<{ id: string }> }) {
   const user = await currentUser();
   if (!user) return Response.json({ error: 'Sign in first.' }, { status: 401 });
   try {
@@ -21,3 +21,6 @@ export async function GET(_request: Request, { params }: { params: Promise<{ id:
     throw err;
   }
 }
+
+// Everything this reads about the paper is asked for once.
+export const GET: typeof read = (request, context) => withScope(() => read(request, context));

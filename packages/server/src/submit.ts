@@ -9,6 +9,7 @@ import { chartPath, listCharts } from './charts.ts';
 import { citationReport } from './citations.ts';
 import { labelReport, texFiles } from './labels.ts';
 import { id } from './projects.ts';
+import { inScope } from './scope.ts';
 
 export type Finding = {
   /** A problem must be put right before the paper is sent. A warning is worth a look. */
@@ -105,13 +106,31 @@ export async function heldDataReadBy(
 /** How long a build may wait before it is taken not to be being built. */
 export const BUILD_STUCK_MS = 120_000;
 
-export async function submissionChecks(
+export const submissionChecks = (
+  pool: pg.Pool,
+  store: BlobStore,
+  userId: string,
+  projectId: string,
+): Promise<Submission> => inScope(() => checksOf(pool, store, userId, projectId));
+
+async function checksOf(
   pool: pg.Pool,
   store: BlobStore,
   userId: string,
   projectId: string,
 ): Promise<Submission> {
   await authorize(pool, userId, id(projectId), 'project.read');
+  // The reports read the same files and ask the same questions; in this scope they share
+  // the answers, and wait for the database together.
+  const [builds, files, pathRows, labels, cited, held, charts] = await Promise.all([
+    latestBuilds(pool, userId, projectId),
+    texFiles(pool, store, projectId),
+    pool.query('select path from files where project_id = $1', [projectId]),
+    labelReport(pool, store, userId, projectId),
+    citationReport(pool, store, userId, projectId),
+    heldDataRead(pool, store, projectId),
+    listCharts(pool, store, userId, projectId),
+  ]);
   const findings: Finding[] = [];
   const problem = (kind: Finding['kind'], message: string, where: Partial<Finding> = {}) =>
     findings.push({ level: 'problem', kind, message, ...where });
@@ -121,7 +140,7 @@ export async function submissionChecks(
   // What TeX itself said about the newest build decides what reading the paper cannot: a macro
   // can make a label, a file can come from the installation. Only a build that is of the paper
   // as it stands, and that succeeded, is asked.
-  const { latest } = await latestBuilds(pool, userId, projectId);
+  const { latest } = builds;
   const queued = latest?.status === 'queued';
   const fresh = !!latest && !queued && !latest.stale && latest.status === 'succeeded';
   const unresolved = { citation: new Set<string>(), label: new Set<string>() };
@@ -135,11 +154,8 @@ export async function submissionChecks(
   // The keys the reading of the paper has already reported, so TeX's account does not repeat them.
   const reported = new Set<string>();
 
-  const files = await texFiles(pool, store, projectId);
   const root = files.find((f) => f.root);
-  const paths: string[] = (
-    await pool.query('select path from files where project_id = $1', [projectId])
-  ).rows.map((r) => r.path);
+  const paths: string[] = pathRows.rows.map((r) => r.path);
   const used = new Set<string>();
   if (!root) problem('root', 'The paper has no root file to build.');
   else {
@@ -177,7 +193,6 @@ export async function submissionChecks(
     path: p.path,
     line: p.line,
   });
-  const labels = await labelReport(pool, store, userId, projectId);
   for (const r of labels.undefined)
     if (fresh && !unresolved.label.has(r.key))
       warning(
@@ -197,7 +212,6 @@ export async function submissionChecks(
     reported.add(`label:${d.key}`);
     problem('label', `The label "${d.key}" is given ${d.places.length} times.`, at(d.places[1]));
   }
-  const cited = await citationReport(pool, store, userId, projectId);
   for (const m of cited.missing)
     if (fresh && !unresolved.citation.has(m.key))
       warning(
@@ -217,11 +231,11 @@ export async function submissionChecks(
     );
 
   // The ZIP leaves held data out, so a paper that reads it would not build from the ZIP.
-  for (const h of await heldDataRead(pool, store, projectId))
+  for (const h of held)
     problem('file', heldReadMessage(h.path), { fileId: h.fromId, path: h.from });
 
   // A chart the paper shows must be drawn from the data as it is now.
-  for (const c of await listCharts(pool, store, userId, projectId)) {
+  for (const c of charts) {
     if (!used.has(chartPath(c.name, 'pdf')) && !used.has(chartPath(c.name, 'png'))) continue;
     if (c.stale)
       problem('chart', `The chart "${c.name}" is out of date: its data has changed.`, {

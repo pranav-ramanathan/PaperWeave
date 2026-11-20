@@ -10,7 +10,7 @@ import { runCommand } from './commands.ts';
 import type { Db } from './db.ts';
 import { AppError } from './errors.ts';
 import { id } from './projects.ts';
-import { loadUpdates, TEXT } from './sync.ts';
+import { docsOf, loadUpdates, TEXT } from './sync.ts';
 
 export type Proposal = {
   id: string;
@@ -53,9 +53,17 @@ export type Proposal = {
 const MAX = 20_000;
 const bad = (why: string) => new AppError('invalid_input', why);
 
-async function textOf(pool: pg.Pool, store: BlobStore, fileId: string) {
+async function textOf(
+  pool: pg.Pool,
+  store: BlobStore,
+  fileId: string,
+  logs?: Map<string, Uint8Array[]>,
+) {
   const doc = new Y.Doc();
-  for (const update of await loadUpdates(pool, store, fileId)) Y.applyUpdate(doc, update);
+  // A paper's listing reads every log in one statement; a file with none opens as it always did.
+  const logged = logs?.get(fileId);
+  for (const update of logged?.length ? logged : await loadUpdates(pool, store, fileId))
+    Y.applyUpdate(doc, update);
   return { doc, text: doc.getText(TEXT) };
 }
 function locate(doc: Y.Doc, text: Y.Text, encoded: Uint8Array) {
@@ -370,10 +378,12 @@ export async function listProposals(
      order by p.created_at, p.id`,
     [projectId, fileId === undefined ? null : id(fileId)],
   );
+  // For the whole paper, every log is read in one statement; for one file, only its own.
+  const logs = rows.length && fileId === undefined ? await docsOf(pool, projectId) : undefined;
   const texts = new Map<string, Awaited<ReturnType<typeof textOf>>>();
   const out: Proposal[] = [];
   for (const r of rows) {
-    if (!texts.has(r.file_id)) texts.set(r.file_id, await textOf(pool, store, r.file_id));
+    if (!texts.has(r.file_id)) texts.set(r.file_id, await textOf(pool, store, r.file_id, logs));
     const { doc, text } = texts.get(r.file_id)!;
     const [from, to] = [locate(doc, text, r.anchor_from), locate(doc, text, r.anchor_to)];
     const known = from >= 0 && to >= from;

@@ -3,6 +3,7 @@ import Once from '../../Once';
 import { Wide } from '../../Wide';
 import {
   AppError,
+  withScope,
   can,
   citationChecks,
   citationReport,
@@ -53,7 +54,7 @@ export const dynamic = 'force-dynamic';
 const INVITABLE = ['editor', 'reviewer', 'viewer'] as const;
 const TEX = /\.(tex|ltx)$/i;
 
-export default async function Project({
+async function Project({
   params,
   searchParams,
 }: {
@@ -1088,4 +1089,9 @@ export default async function Project({
       )}
     </main>
   );
+}
+
+// What this page reads about the paper, it reads once.
+export default function Scoped(props: Parameters<typeof Project>[0]) {
+  return withScope(() => Project(props));
 }

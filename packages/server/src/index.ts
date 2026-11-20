@@ -4,6 +4,7 @@ export * from './critique.ts';
 export * from './csv.ts';
 export * from './data.ts';
 export * from './db.ts';
+export { withScope } from './scope.ts';
 export * from './auth.ts';
 export * from './authz.ts';
 export * from './metrics.ts';

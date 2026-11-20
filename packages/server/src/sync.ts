@@ -9,6 +9,7 @@ import { LIMITS } from './archive.ts';
 import { can, type Role, ROLES } from './authz.ts';
 import type { BlobStore } from './blobs.ts';
 import { type Db, transaction } from './db.ts';
+import { remembered } from './scope.ts';
 import { AppError } from './errors.ts';
 import { id } from './projects.ts';
 
@@ -339,14 +340,59 @@ export async function currentBytes(
     if (!bytes) throw new Error(`blob ${file.digest} is missing`);
     return bytes;
   }
-  const doc = new Y.Doc();
   const { rows } = await db.query(
     'select update from file_updates where file_id = $1 order by seq',
     [file.id],
   );
-  for (const r of rows) Y.applyUpdate(doc, new Uint8Array(r.update));
+  return bytesOfLog(
+    file,
+    rows.map((r) => new Uint8Array(r.update)),
+  );
+}
+
+/** What a file's edited log adds up to, as the bytes of the file. */
+export function bytesOfLog(
+  file: { eol: string | null; bom: boolean | null },
+  updates: Uint8Array[],
+): Uint8Array {
+  const doc = new Y.Doc();
+  for (const u of updates) Y.applyUpdate(doc, u);
   return encodeFile(doc.getText(TEXT).toString(), {
     eol: file.eol as 'lf' | 'crlf',
     bom: !!file.bom,
+  });
+}
+
+/** The logs of many files in one statement, each oldest edit first. A file with none is absent. */
+export async function readLogs(db: Db, fileIds: string[]): Promise<Map<string, Uint8Array[]>> {
+  const logs = new Map<string, Uint8Array[]>();
+  if (!fileIds.length) return logs;
+  const { rows } = await db.query(
+    'select file_id, update from file_updates where file_id = any($1) order by file_id, seq',
+    [fileIds],
+  );
+  for (const r of rows) {
+    const log = logs.get(r.file_id) ?? [];
+    log.push(new Uint8Array(r.update));
+    logs.set(r.file_id, log);
+  }
+  return logs;
+}
+
+/**
+ * The logs of every file of a paper that has one, by file, in one go. In a request's scope the
+ * paper's threads and proposals share one reading. A file with no log yet is not in it: its
+ * reader opens it with `loadUpdates`, which is what writes its first edit.
+ */
+export function docsOf(db: Db, projectId: string): Promise<Map<string, Uint8Array[]>> {
+  return remembered(db, ['docs', projectId], async () => {
+    const { rows } = await db.query(
+      'select id from files where project_id = $1 and eol is not null and head_seq > 0',
+      [projectId],
+    );
+    return readLogs(
+      db,
+      rows.map((r) => r.id),
+    );
   });
 }
