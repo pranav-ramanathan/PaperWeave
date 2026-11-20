@@ -327,6 +327,34 @@ test('a build that is not being built says so, and does not say "compiling" for 
   await expect(build(page).getByRole('group', { name: /^Page 1 of/ })).toBeVisible();
 });
 
+test('a server that stops answering is said so, and the pane carries on when it answers again', async ({
+  browser,
+}) => {
+  test.setTimeout(150_000);
+  const { page, email } = await person(browser, 'build-quiet');
+  await page.goto('/sign-in');
+  await signIn(page, email);
+  await page
+    .getByLabel('Or import a ZIP of a LaTeX project')
+    .setInputFiles(await fixtureZip('Quiet'));
+  await page.getByRole('button', { name: 'Import ZIP' }).click();
+  await page.getByRole('link', { name: 'main.tex' }).first().click();
+  await expect(buildStatus(page)).toHaveText('The PDF is up to date.', { timeout: 60_000 });
+
+  // Asked how the builds stand, the server takes the request and says nothing.
+  const builds = /\/projects\/[0-9a-f-]+\/builds$/;
+  await page.route(builds, () => {});
+  // Each poll is given up on after fifteen seconds; the second in a row says so.
+  const alert = build(page).getByRole('alert');
+  await expect(alert).toHaveText(
+    'The server is not answering. What is shown here may be out of date.',
+    { timeout: 60_000 },
+  );
+  await page.unroute(builds);
+  await expect(alert).toHaveCount(0, { timeout: 30_000 });
+  await expect(buildStatus(page)).toHaveText('The PDF is up to date.');
+});
+
 test('a paper whose root file is in a folder builds', async ({ browser }) => {
   test.setTimeout(120_000);
   const { page, email } = await person(browser, 'folder-root');
