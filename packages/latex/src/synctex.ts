@@ -19,6 +19,14 @@ export type SyncRecord = {
   d: number;
   /** A horizontal box: a line of text or part of one. Otherwise something inside a box. */
   box: boolean;
+  /** The record's letter: `(` box, `h` and `v` boxes, `x` current, `k` kern, `g` glue, `$` maths. */
+  kind: string;
+  /**
+   * Said nothing of where its words were typed. TeX tags a paragraph's line boxes, and what it
+   * puts at their start and end, with the line the paragraph ended on; so a box that holds a
+   * record of another file or line is stale, and so are its records tagged as it is.
+   */
+  stale: boolean;
 };
 export type SyncTeX = {
   /** The paper's own files, as paths in the project. Class and package files are left out. */
@@ -41,6 +49,8 @@ export function parseSyncTeX(text: string, base = '/work/'): SyncTeX {
   let unit = 1;
   let offset = 0;
   let page = 0;
+  // The boxes open now: what is directly inside each, to tell at its close if it is mixed.
+  let open: { box: SyncRecord | null; kids: SyncRecord[] }[] = [];
   for (const line of text.split('\n')) {
     const c = line[0];
     if (c === 'I' && line.startsWith('Input:')) {
@@ -62,14 +72,26 @@ export function parseSyncTeX(text: string, base = '/work/'): SyncTeX {
     // An engine that writes a PDF itself counts from the page's corner. One that writes DVI
     // first counts from TeX's origin, an inch in from it.
     else if (c === 'O' && line.startsWith('Output:')) offset = line.slice(7) === 'pdf' ? 0 : 72.27;
-    else if (c === '{') page = Number(line.slice(1));
+    else if (c === '{') [page, open] = [Number(line.slice(1)), []];
     else if (page) {
+      if (c === ')' || c === ']') {
+        const done = open.pop();
+        const b = done?.box;
+        if (b && done.kids.some((k) => k.file !== b.file || k.line !== b.line)) {
+          b.stale = true;
+          for (const k of done.kids) if (k.file === b.file && k.line === b.line) k.stale = true;
+        }
+        continue;
+      }
       const m = RECORD.exec(line);
-      if (!m) continue;
-      const file = tags.get(Number(m[2]));
-      if (file === undefined) continue;
+      const file = m ? tags.get(Number(m[2])) : undefined;
+      if (!m || file === undefined) {
+        // A box of a class file or the like: its inside is nobody's, but it still closes.
+        if (c === '(' || c === '[') open.push({ box: null, kids: [] });
+        continue;
+      }
       const pt = (v?: string) => (Number(v ?? 0) * unit) / SP;
-      records.push({
+      const record: SyncRecord = {
         page,
         file,
         line: Number(m[3]),
@@ -79,7 +101,13 @@ export function parseSyncTeX(text: string, base = '/work/'): SyncTeX {
         h: pt(m[7]),
         d: pt(m[8]),
         box: m[1] === '(',
-      });
+        kind: m[1],
+        stale: false,
+      };
+      records.push(record);
+      if (c === '(') open.push({ box: record, kids: [] });
+      else if (c === '[') open.push({ box: null, kids: [] });
+      else open.at(-1)?.kids.push(record);
     }
   }
   return { inputs, records };
@@ -92,15 +120,18 @@ export function parseSyncTeX(text: string, base = '/work/'): SyncTeX {
 export function toPdf(sync: SyncTeX, path: string, line: number) {
   const file = sync.inputs.indexOf(path);
   if (file < 0) return null;
+  // What a line only ended, or was stray in, is not what it made: a blank line that closed a
+  // paragraph made nothing. (A file with nothing else is taken as it is.)
+  const own = sync.records.filter((r) => r.file === file);
+  const mine = own.some((r) => !r.stale) ? own.filter((r) => !r.stale) : own;
   let best = Infinity;
-  for (const r of sync.records)
-    if (r.file === file && r.line >= line && r.line < best) best = r.line;
+  for (const r of mine) if (r.line >= line && r.line < best) best = r.line;
   // Past the last line that made anything: the last one that did.
   if (best === Infinity) {
     best = -1;
-    for (const r of sync.records) if (r.file === file && r.line > best) best = r.line;
+    for (const r of mine) if (r.line > best) best = r.line;
   }
-  const made = sync.records.filter((r) => r.file === file && r.line === best);
+  const made = mine.filter((r) => r.line === best);
   if (!made.length) return null;
   // Where the line's own text begins: the first thing it put inside a box, on the first page it
   // reached. (Its boxes alone can span columns, or a whole float.)
@@ -112,8 +143,25 @@ export function toPdf(sync: SyncTeX, path: string, line: number) {
   return { page, x: first.x, y: first.y - up, height: up + Math.max(first.d, 2), line: best };
 }
 
-/** The file and line that made what is at a point of a page. */
-export function toSource(sync: SyncTeX, page: number, x: number, y: number) {
+/** The paper's own records inside a line box, in the order TeX wrote them. */
+function inside(on: SyncRecord[], box: SyncRecord) {
+  return on.filter(
+    (r) => !r.box && r.x >= box.x - 1 && r.x <= box.x + box.w + 1 && Math.abs(r.y - box.y) < 1,
+  );
+}
+
+/** What a line box says about where its words were typed: its records that are not stale. */
+function usable(on: SyncRecord[], box: SyncRecord) {
+  const all = inside(on, box);
+  const good = all.filter((r) => !r.stale);
+  return good.length ? good : all;
+}
+
+/**
+ * The file and line that made what is at a point of a page. Outside every line of text and more
+ * than a margin from anything, it is nowhere, unless the nearest thing is asked for.
+ */
+export function toSource(sync: SyncTeX, page: number, x: number, y: number, nearest = false) {
   const on = sync.records.filter((r) => r.page === page);
   if (!on.length) return null;
   // The smallest box around the point. If it is a line of text, what was clicked is on that
@@ -124,18 +172,44 @@ export function toSource(sync: SyncTeX, page: number, x: number, y: number) {
     if (r.box && r.w > 0 && x >= r.x && x <= r.x + r.w && y >= r.y - r.h - 2 && y <= r.y + r.d + 2)
       if (!box || r.w * (r.h + r.d) < box.w * (box.h + box.d)) box = r;
   const text = box && box.h + box.d <= 30 ? box : null;
-  let found: SyncRecord | null = text;
+  const answer = (r: SyncRecord) => ({ path: sync.inputs[r.file], line: r.line });
+  if (text) {
+    // Reading order: the last record at or left of the click, else the first one to its right.
+    let left: SyncRecord | null = null;
+    let right: SyncRecord | null = null;
+    for (const r of usable(on, text)) {
+      if (r.x <= x) {
+        if (!left || r.x >= left.x) left = r;
+      } else if (!right || r.x < right.x) right = r;
+    }
+    const here = left ?? right;
+    if (here) return answer(here);
+    // The box holds nothing of its own: the line above in the same column, at its end.
+    let above: SyncRecord | null = null;
+    let last: SyncRecord | null = null;
+    for (const b of on) {
+      if (!b.box || b.w <= 0 || b.h + b.d > 30 || b.y >= text.y - 0.5) continue;
+      if (b.x > text.x + text.w || b.x + b.w < text.x) continue;
+      if (above && b.y <= above.y) continue;
+      const u = usable(on, b);
+      if (u.length) [above, last] = [b, u[u.length - 1]];
+    }
+    return last ? answer(last) : answer(text);
+  }
+  let found: SyncRecord | null = null;
   let near = Infinity;
   for (const r of on) {
     if (r.box) continue;
     if (box && (r.x < box.x - 1 || r.x > box.x + box.w + 1)) continue;
-    if (text && Math.abs(r.y - text.y) >= 1) continue;
-    // Within a line only the distance along it matters; otherwise the line above or below is
-    // further away than the same distance along.
-    const far = text ? Math.abs(r.x - x) : Math.hypot(r.x - x, (r.y - y) * 3);
+    const far = Math.hypot(r.x - x, (r.y - y) * 3);
     // Of two at the same place, the later is the one further in.
     if (far <= near) [found, near] = [r, far];
   }
+  // Outside every box, beyond the margin of a line: the PDF does not say.
+  if (!box && !nearest && near > MARGIN) return null;
   found ??= box;
-  return found && { path: sync.inputs[found.file], line: found.line };
+  return found && answer(found);
 }
+
+/** How far from any record, in the weighted distance, a point outside every box still counts. */
+const MARGIN = 36;

@@ -47,3 +47,39 @@ export function diffLines(a: string, b: string, maxCells = 4_000_000): DiffLine[
   for (const text of x.slice(endX)) out.push({ op: ' ', text });
   return out;
 }
+
+/**
+ * Where a line of one text is in the other, over `diffLines`' result of (built text, text now).
+ * A kept line maps exactly. A line that was removed (asking `toNow`) or added (asking `toBuilt`)
+ * has no counterpart: it maps to the nearest kept line after it, else before it, and `moved` says
+ * so. Lines are counted from 1. With no diff (the texts were too large to compare) the line is
+ * kept as it is, and `moved`.
+ */
+export function carryLine(
+  diff: DiffLine[] | null,
+  line: number,
+  direction: 'toNow' | 'toBuilt',
+): { line: number; moved: boolean } {
+  if (!diff) return { line, moved: true };
+  // The ops that are in the text asked from, and the one it is mapped to.
+  const gone = direction === 'toNow' ? '-' : '+';
+  const other = direction === 'toNow' ? '+' : '-';
+  let from = 0;
+  let to = 0;
+  let at = -1;
+  const kept: { index: number; to: number }[] = [];
+  for (let i = 0; i < diff.length; i++) {
+    const op = diff[i].op;
+    if (op !== other) from++;
+    if (op !== gone) to++;
+    if (op === ' ') kept.push({ index: i, to });
+    if (op !== other && from === line) at = i;
+  }
+  if (at >= 0 && diff[at].op === ' ')
+    return { line: kept.find((k) => k.index === at)!.to, moved: false };
+  const after = at < 0 ? undefined : kept.find((k) => k.index > at);
+  const before = kept.findLast((k) => k.index < at || at < 0);
+  const near = after ?? before;
+  // Nothing was kept, or the line is past the end of the text: the nearest line that is there.
+  return { line: near ? near.to : Math.max(1, Math.min(line, to)), moved: true };
+}

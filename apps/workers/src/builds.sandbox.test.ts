@@ -1,6 +1,7 @@
 // Needs Docker, the TeX image and the services in infra/compose.yaml. Run: pnpm test:sandbox
 import { readdirSync, readFileSync, statSync } from 'node:fs';
 import { join, relative } from 'node:path';
+import { gunzipSync } from 'node:zlib';
 import {
   acceptInvitation,
   appendUpdate,
@@ -19,6 +20,7 @@ import {
   writeZip,
   pdfToSource,
   putFile,
+  renameFileAndReferences,
   setRootFile,
   sourceToPdf,
   submissionChecks,
@@ -27,6 +29,7 @@ import pg from 'pg';
 import { afterAll, beforeAll, expect, test } from 'vitest';
 import * as Y from 'yjs';
 import { labelIndex } from '../../../packages/latex/src/labels.ts';
+import { parseSyncTeX } from '../../../packages/latex/src/synctex.ts';
 import { FIXTURES } from '../../../packages/latex/src/testutil.ts';
 import { pdfText } from '../../../packages/server/src/pdftext.ts';
 import { TEST_ENV, testDb } from '../../../packages/server/src/testing.ts';
@@ -401,7 +404,8 @@ test('a build says where each line is in its PDF, and which line made each place
       if (found?.fileId === f.id && Math.abs(found.line - n) <= 1) back++;
     }
   }
-  expect(asked).toBeGreaterThan(40);
+  // Blank lines that only end a paragraph made nothing of their own, and no longer count.
+  expect(asked).toBeGreaterThan(35);
   expect(back / asked).toBeGreaterThan(0.9);
 
   // The second column is told from the first: the results are there, the introduction is not.
@@ -431,4 +435,139 @@ test('a build says where each line is in its PDF, and which line made each place
   expect(
     await code(sourceToPdf(t.pool, store, owner.id, other.project, first.id, intro.id, 4)),
   ).toBe('not_found');
+}, 180_000);
+
+// A two-column paper of wrapped paragraphs, each with a marker word on the second line of its
+// text. The three paragraphs of the introduction are MARKERA to MARKERC; the method has more.
+const paragraph = (m: string) =>
+  `Para line one before the marker, with enough ordinary words to fill a column line here.\nThe word ${m} sits on the second line of this paragraph with more words after it to wrap.\nA third line closes the paragraph, nothing special about it at all, just filler text.\n`;
+const INTRO = [
+  '\\section{Introduction}',
+  '',
+  paragraph('MARKERA'),
+  paragraph('MARKERB'),
+  paragraph('MARKERC'),
+].join('\n');
+const METHOD = ['\\section{Method}', '', paragraph('MARKERD')].join('\n');
+const MAIN = [
+  '\\documentclass[twocolumn]{article}',
+  '\\begin{document}',
+  '\\input{sections/intro}',
+  '\\input{sections/method}',
+  '\\end{document}',
+  '',
+].join('\n');
+
+test('a point in the PDF and a line of the text are carried across the edits made since the build', async () => {
+  const [made] = await importZip(
+    t.pool,
+    store,
+    owner.id,
+    await writeZip([
+      { path: 'main.tex', bytes: Buffer.from(MAIN) },
+      { path: 'sections/intro.tex', bytes: Buffer.from(INTRO) },
+      { path: 'sections/method.tex', bytes: Buffer.from(METHOD) },
+    ]),
+    'carried',
+  );
+  const project = made.id;
+  const all = await listFiles(t.pool, owner.id, project);
+  const intro = all.find((f) => f.path === 'sections/intro.tex')!;
+  const method = all.find((f) => f.path === 'sections/method.tex')!;
+  const text = async (file: string) => {
+    const doc = new Y.Doc();
+    for (const u of await loadUpdates(t.pool, store, file)) Y.applyUpdate(doc, u);
+    return doc.getText(TEXT).toString();
+  };
+  const lineOf = (src: string, word: string) =>
+    src.split('\n').findIndex((l) => l.includes(word)) + 1;
+  const b = await build(project);
+  expect(b.status).toBe('succeeded');
+  const to = (file: string, line: number) =>
+    sourceToPdf(t.pool, store, owner.id, project, b.id, file, line);
+  const from = (page: number, x: number, y: number) =>
+    pdfToSource(t.pool, store, owner.id, project, b.id, page, x, y);
+  const sync = parseSyncTeX(
+    gunzipSync(await buildOutput(t.pool, store, owner.id, project, b.id, 'synctex')).toString(
+      'latin1',
+    ),
+  );
+  const built = await text(intro.id);
+  const click = (p: { x: number; y: number; height: number }) =>
+    [p.x + 1, p.y + p.height * 0.7] as const;
+
+  // On the build as it is: a click at the left edge of a wrapped line, before its first word, is
+  // on that line of the text, not on the line the paragraph ends on.
+  for (const m of ['MARKERA', 'MARKERB', 'MARKERC']) {
+    const line = lineOf(built, m);
+    const p = await to(intro.id, line);
+    expect(p.moved).toBe(false);
+    // The line of text the marker is in, and the one below it.
+    const here = sync.records
+      .filter((r) => r.box && r.page === p.page && r.w > 0 && r.h + r.d < 30)
+      .filter((r) => p.x + 1 >= r.x && p.x + 1 <= r.x + r.w && Math.abs(r.y - p.y - 8) < 3)
+      .sort((a, c) => a.w - c.w)[0];
+    const below = sync.records
+      .filter((r) => r.box && r.page === p.page && r.x === here.x && r.w === here.w)
+      .find((r) => Math.abs(r.y - here.y - 12) < 1)!;
+    expect(await from(p.page, below.x + 24, below.y - 2), m).toMatchObject({
+      fileId: intro.id,
+      line,
+      moved: false,
+    });
+  }
+  // A heading that begins a file is where its own line is, below the paragraph before it that
+  // carries its tag, and a click there comes back to it.
+  const c = await to(intro.id, lineOf(built, 'MARKERC'));
+  const heading = await to(method.id, 1);
+  expect(heading.page * 10_000 + heading.y).toBeGreaterThan(c.page * 10_000 + c.y);
+  expect(await from(heading.page, heading.x + 1, heading.y + heading.height * 0.7)).toMatchObject({
+    fileId: method.id,
+    line: 1,
+  });
+  const a = await to(intro.id, lineOf(built, 'MARKERA'));
+  const d = await to(method.id, lineOf(await text(method.id), 'MARKERD'));
+
+  // Ten lines are added above, and nothing is built: the click is on MARKERC's line as it is now.
+  await edit(intro.id, (tx) =>
+    tx.insert(0, Array.from({ length: 10 }, (_, i) => `% inserted ${i}\n`).join('')),
+  );
+  const now = await text(intro.id);
+  expect(lineOf(now, 'MARKERC')).toBe(lineOf(built, 'MARKERC') + 10);
+  expect(await from(c.page, ...click(c))).toMatchObject({
+    fileId: intro.id,
+    line: lineOf(now, 'MARKERC'),
+    moved: false,
+  });
+  // The other way: the line as it is now is where the build put the line it was.
+  expect(await to(intro.id, lineOf(now, 'MARKERC'))).toEqual({ ...c, moved: false });
+  // A line that was not there when it was built is the nearest place, and says so.
+  expect(await to(intro.id, 3)).toMatchObject({ moved: true });
+
+  // Its paragraph is deleted: the point is the nearest line left, and says so.
+  const start = now.indexOf(paragraph('MARKERC'));
+  await edit(intro.id, (tx) => tx.delete(start, paragraph('MARKERC').length));
+  const after = await text(intro.id);
+  expect(after).not.toContain('MARKERC');
+  const gone = await from(c.page, ...click(c));
+  expect(gone).toMatchObject({ fileId: intro.id, moved: true });
+  expect(gone.line).toBeLessThanOrEqual(after.split('\n').length);
+
+  // The file is renamed: the answer carries its path now, and the same id.
+  await renameFileAndReferences(t.pool, store, owner.id, project, intro.id, 'sections/opening.tex');
+  expect(await from(a.page, ...click(a))).toMatchObject({
+    fileId: intro.id,
+    path: 'sections/opening.tex',
+  });
+  expect(await to(intro.id, lineOf(await text(intro.id), 'MARKERA'))).toMatchObject({
+    page: a.page,
+  });
+
+  // A file is deleted: what it made is refused, with the reason.
+  await deleteFile(t.pool, store, owner.id, project, method.id);
+  const refused = await from(d.page, ...click(d)).catch((e) => e);
+  expect(refused).toMatchObject({
+    code: 'not_found',
+    message: 'That part of the PDF came from a file that is no longer in the paper.',
+  });
 }, 180_000);

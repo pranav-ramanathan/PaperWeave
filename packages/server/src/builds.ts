@@ -5,8 +5,10 @@ import type { BlobStore } from './blobs.ts';
 import type { Db } from './db.ts';
 import { AppError } from './errors.ts';
 import { id } from './projects.ts';
+import { currentBytes } from './sync.ts';
+import { carryLine, diffLines } from './textdiff.ts';
 import { gunzipSync } from 'node:zlib';
-import { parseSyncTeX, type SyncTeX, toPdf, toSource } from '@paperweave/latex';
+import { decodeFile, parseSyncTeX, type SyncTeX, toPdf, toSource } from '@paperweave/latex';
 
 export const BUILDS_PER_HOUR = 120;
 
@@ -256,11 +258,71 @@ async function syncOf(
       build.revision_id,
     ])
   ).rows;
-  return { sync, files };
+  return { sync, files, revisionId: (build.revision_id as string | null) ?? null };
 }
 const nowhere = () => new AppError('not_found', 'The PDF does not say where that is.');
 
-/** Where a line of a file is in a build's PDF: the page, and a place on it in PDF points. */
+type LineMap = {
+  /** A line of the file as it was in the built revision, as it is now. */
+  toNow: (line: number) => { line: number; moved: boolean };
+  /** A line of the file as it is now, as it was in the built revision. */
+  toBuilt: (line: number) => { line: number; moved: boolean };
+};
+
+/**
+ * How the lines of a file, as they were in a revision, are numbered in the file now, and back.
+ * `'gone'` if the file is no longer in the paper. A line that was removed (or added since) maps to
+ * the nearest line that is in both, and says it `moved`.
+ */
+export async function lineMap(
+  db: Db,
+  store: BlobStore,
+  projectId: string,
+  revisionId: string | null,
+  fileId: string,
+): Promise<LineMap | 'gone'> {
+  const now = (
+    await db.query(
+      'select id, digest, eol, bom, head_seq from files where id = $1 and project_id = $2',
+      [fileId, projectId],
+    )
+  ).rows[0];
+  if (!now) return 'gone';
+  const same: LineMap = {
+    toNow: (line) => ({ line, moved: false }),
+    toBuilt: (line) => ({ line, moved: false }),
+  };
+  const kept = (moved: boolean): LineMap => ({
+    toNow: (line) => ({ line, moved }),
+    toBuilt: (line) => ({ line, moved }),
+  });
+  const built = revisionId
+    ? (
+        await db.query(
+          'select digest from revision_files where revision_id = $1 and file_id = $2',
+          [revisionId, fileId],
+        )
+      ).rows[0]
+    : undefined;
+  // Not in the built revision: nothing to carry a line from.
+  if (!built) return kept(true);
+  const [a, b] = await Promise.all([
+    store.get(built.digest).then((bytes) => bytes && decodeFile(bytes)),
+    currentBytes(db, store, now).then(decodeFile),
+  ]);
+  if (!a || !a.editable || !b.editable) return kept(true);
+  if (a.text === b.text) return same;
+  const diff = diffLines(a.text, b.text);
+  return {
+    toNow: (line) => carryLine(diff, line, 'toNow'),
+    toBuilt: (line) => carryLine(diff, line, 'toBuilt'),
+  };
+}
+
+/**
+ * Where a line of a file, as it is now, is in a build's PDF: the page, and a place on it in PDF
+ * points. `moved` is true if the PDF is of text that had no such line, so the place is the nearest.
+ */
 export async function sourceToPdf(
   db: Db,
   store: BlobStore,
@@ -271,14 +333,22 @@ export async function sourceToPdf(
   line: number,
 ) {
   if (!Number.isInteger(line) || line < 1) throw new AppError('invalid_input', 'No such line.');
-  const { sync, files } = await syncOf(db, store, userId, projectId, buildId);
+  const { sync, files, revisionId } = await syncOf(db, store, userId, projectId, buildId);
+  // The file as the build had it: its path then, and its lines.
   const path = files.find((f) => f.file_id === fileId)?.path;
-  const place = path === undefined ? null : toPdf(sync, path, line);
+  if (path === undefined) throw nowhere();
+  const map = await lineMap(db, store, projectId, revisionId, fileId);
+  if (map === 'gone') throw nowhere();
+  const built = map.toBuilt(line);
+  const place = toPdf(sync, path, built.line);
   if (!place) throw nowhere();
-  return place;
+  return { ...place, moved: built.moved };
 }
 
-/** The file and line that made what is at a point of a page of a build's PDF. */
+/**
+ * The file and line that made what is at a point of a page of a build's PDF, as the file and its
+ * line stand now. `moved` is true if the line is the nearest to one that has been edited away.
+ */
 export async function pdfToSource(
   db: Db,
   store: BlobStore,
@@ -288,13 +358,30 @@ export async function pdfToSource(
   page: number,
   x: number,
   y: number,
+  nearest = false,
 ) {
   if (!Number.isInteger(page) || page < 1 || !Number.isFinite(x) || !Number.isFinite(y))
     throw new AppError('invalid_input', 'No such place.');
-  const { sync, files } = await syncOf(db, store, userId, projectId, buildId);
-  const found = toSource(sync, page, x, y);
+  const { sync, files, revisionId } = await syncOf(db, store, userId, projectId, buildId);
+  const found = toSource(sync, page, x, y, nearest);
   const file = found && files.find((f) => f.path === found.path);
   // A line of a file the build made for itself (the bibliography's .bbl) is nobody's to edit.
   if (!found || !file) throw nowhere();
-  return { fileId: file.file_id, path: file.path, line: found.line };
+  const gone = () =>
+    new AppError(
+      'not_found',
+      'That part of the PDF came from a file that is no longer in the paper.',
+    );
+  // Its path now: it may have been renamed since, or deleted.
+  const path: string | undefined = (
+    await db.query('select path from files where id = $1 and project_id = $2', [
+      file.file_id,
+      projectId,
+    ])
+  ).rows[0]?.path;
+  if (path === undefined) throw gone();
+  const map = await lineMap(db, store, projectId, revisionId, file.file_id);
+  if (map === 'gone') throw gone();
+  const now = map.toNow(found.line);
+  return { fileId: file.file_id, path, line: now.line, moved: now.moved };
 }

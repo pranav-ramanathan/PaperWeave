@@ -674,6 +674,12 @@ ordinary use. Ten ways of looking found them, and each is cheap to do again:
     in Chinese said to match, and a deleted Chinese claim said to be still in the paper; the
     same title, author, year or venue said to differ for the registry's markup or spelling.
 
+22. **Use the jump while the PDF is behind the text.** Found: a double-click at the start of a
+    wrapped line taken to the end of its paragraph, once into the next file; a heading at the
+    top of an included file shown in the paragraph before it; after an edit above, a click
+    put ten lines early with nothing said; a renamed file named by its old name, and a deleted
+    one answered for.
+
 Tried the same way and nothing found: thirty connections typing into one file at once (kept
 as a test in `sync.sandbox.test`); 400 threads and 400 proposals on one file, on the server
 (both lists took about 20 ms; not kept); and each tool of the visual view worked slowly
@@ -1930,6 +1936,55 @@ second one.
   lookup, once, because what is compared is now the cleaned DOI. "Check before submitting"
   does not list lookups or evidence checks.
 - **How it was made.** Planned by one agent, probed and written by others, checked here.
+
+## From the PDF to the line, and back
+
+- **What was tried**, with a probe: a two-column paper in three files, built, then clicked in the
+  PDF and asked to "show in the PDF", fresh and after edits made since the build, at several
+  sizes and on several pages; and the raw SyncTeX of it and of the IEEE fixture read record by
+  record.
+
+| Case                                                                | Before                                                   | Now                                                        |
+| ------------------------------------------------------------------- | -------------------------------------------------------- | ---------------------------------------------------------- |
+| A double-click at the start of a wrapped line, fresh build          | **the line the paragraph ended on; once, the next file** | the line the word is on                                    |
+| "Show in the PDF" on a heading that begins an `\input` file         | **the previous file's last paragraph**                   | the heading                                                |
+| A click after ten lines were added above, the PDF not yet rebuilt   | **ten lines early, as if right**                         | the word's line now                                        |
+| A click on a paragraph deleted since the build                      | **another paragraph's line, as if right**                | the nearest line, said to be the nearest place             |
+| "Show in the PDF" for a line added since the build                  | **the build's line of that number**                      | the nearest place in the PDF, said to be so                |
+| The same after a failed build, from the older PDF                   | **as above**                                             | as above                                                   |
+| A click in a file renamed since the build                           | the right file, **named by its old name**                | its name now                                               |
+| A click in a file deleted since the build                           | **an answer for a file that is gone**                    | "That part of the PDF came from a file that is no longer…" |
+| A white margin, far from any text                                   | **a distant line**                                       | "The PDF does not say where that is."                      |
+| "Go to the text for the middle of the pages shown" over white space | the nearest line                                         | the same                                                   |
+| A click mid-line; at 800 and 1400 pixels, zoomed; on page 3         | the right line                                           | the same                                                   |
+| A click on a marker in another file                                 | that file opens at the line                              | the same                                                   |
+| The bibliography                                                    | "The PDF does not say where that is."                    | the same                                                   |
+
+- **What was wrong.** TeX tags a paragraph's line boxes, and what it puts at their start and end,
+  with the line it was on when it ended the paragraph: the blank line after it, or the first
+  line of the next file. A click took the record nearest along the line, which at the line's
+  start is one of those. The other way, a heading at the top of an included file shares its
+  line with the end of the paragraph before it, and the first record of that line was taken.
+  Separately, both directions used line numbers as they were when the PDF was built, and said
+  nothing when the text had moved on since.
+- **Now** (`packages/latex/src/synctex.ts`; `pdfToSource`, `sourceToPdf` in
+  `packages/server/src/builds.ts`; `carryLine` in `textdiff.ts`): a box holding records of
+  other lines is known to be tagged with its paragraph's end, and its records tagged so are
+  left out, in both directions. A click takes the last record at or before it on its line. A
+  line is carried between the built text and the text now through the same comparison that
+  shows revisions, and the page says "The PDF is from before your latest edits, so this is the
+  nearest place." when a line was not kept. A file is named as it is now, or refused when gone.
+- **Held by** unit tests of the reading (a wrapped paragraph clicked at its edge, a heading
+  after a paragraph, a margin) and of `carryLine`; a service test on a real build of edits,
+  a deletion, a rename and a heading; and two browser tests, a click at a wrapped line's edge
+  and a click after typing above. Each failed on the old code. The round trip over the IEEE
+  fixture is 39 of 41 lines, against 49 of 52 before: blank lines that only end a paragraph no
+  longer count as making something.
+- **Not changed:** `\begin{tabular}` and `\end{tabular}` point at the table's first row. A
+  place inside a line is known to the nearest space. A line kept exactly is not said to be
+  approximate, though the PDF is behind.
+- **How it was made.** Planned by one agent, probed and written by others, and the cause of
+  the first fix's regression found by the planner from the records themselves; checked here.
 
 ## When an email cannot be sent
 

@@ -67,8 +67,9 @@ test('a line leads to where its text begins, and a line that made nothing to the
   // Line 5 began on the first line of the paragraph and ran on to the second.
   expect(Math.round(toPdf(sync, 'main.tex', 5)!.x)).toBe(220);
   expect(toPdf(sync, 'main.tex', 1)).toMatchObject({ line: 4 });
-  // Past the end: the last line that made something.
-  expect(toPdf(sync, 'main.tex', 99)).toMatchObject({ line: 6 });
+  // Past the end: the last line that made something. Line 6 only ended the paragraph that was
+  // typed on lines 4 and 5.
+  expect(toPdf(sync, 'main.tex', 99)).toMatchObject({ line: 5 });
   expect(toPdf(sync, 'sections/a.tex', 7)).toMatchObject({ page: 2, line: 7 });
   expect(toPdf(sync, 'nope.tex', 1)).toBeNull();
 });
@@ -87,8 +88,10 @@ test('a point leads to the line that made what is nearest on that line of text',
   expect(where(1, 205, 110)).toBe('sections/a.tex:2');
   // Never a class file's line: the nearest of the paper's own.
   expect(where(1, 252, 110)).toBe('sections/a.tex:2');
-  // In the margin, in no line of text: the nearest thing on the page.
-  expect(where(1, 20, 300)).toBe('main.tex:5');
+  // Just outside a line of text, in the margin: the nearest thing on the page.
+  expect(where(1, 70, 97)).toBe('main.tex:4');
+  // Further than that from anything, the PDF does not say.
+  expect(where(1, 20, 300)).toBeNull();
   expect(where(2, 100, 88)).toBe('sections/a.tex:7');
   expect(where(3, 100, 100)).toBeNull();
 });
@@ -112,4 +115,124 @@ test("a build run in the root file's folder (-cd) names files above it by their 
     'paper/sections/a.tex',
     'etc/outside.tex',
   ]);
+});
+
+// A paragraph typed on lines 3 to 5 and ended by the blank line 6, set in two lines. As the
+// engine wrote it down: each line box is tagged with line 6, and so are the `x` records at its
+// start, before the first word's own records.
+const WRAPPED = [
+  'SyncTeX Version:1',
+  'Input:1:/work/./a.tex',
+  'Output:pdf',
+  'Magnification:1000',
+  'Unit:1',
+  'Content:',
+  '{1',
+  `(1,6:${at(72, 100)}:${pt(228)},${pt(8)},${pt(2)}`,
+  `x1,6:${at(80, 100)}`,
+  `x1,6:${at(100, 100)}`,
+  `k1,3:${at(104, 100)}:${pt(4)}`,
+  `x1,3:${at(111, 100)}`,
+  `k1,4:${at(280, 100)}:${pt(4)}`,
+  ')',
+  `(1,6:${at(72, 112)}:${pt(228)},${pt(8)},${pt(2)}`,
+  `x1,6:${at(103, 112)}`,
+  `x1,6:${at(125, 112)}`,
+  `k1,4:${at(128, 112)}:${pt(3)}`,
+  `x1,4:${at(142, 112)}`,
+  `k1,5:${at(250, 112)}:${pt(3)}`,
+  ')',
+  // A line with nothing of its own but the paragraph's end.
+  `(1,6:${at(72, 124)}:${pt(228)},${pt(8)},${pt(2)}`,
+  ')',
+  '}1',
+  'Postamble:',
+  '',
+].join('\n');
+
+test('a click at the left edge of a wrapped line is on that line, not where the paragraph ends', () => {
+  const sync = parseSyncTeX(WRAPPED);
+  const line = (x: number, y: number) => toSource(sync, 1, x, y)?.line;
+  // The edge of the first line, and of the second, whose first records say line 6.
+  expect(line(73, 98)).toBe(3);
+  expect(line(73, 110)).toBe(4);
+  expect(line(96, 110)).toBe(4);
+  // Mid-line, on either side of a word.
+  expect(line(150, 110)).toBe(4);
+  expect(line(260, 110)).toBe(5);
+  expect(line(200, 98)).toBe(3);
+  // A box with nothing of its own is answered by the line above, at its end.
+  expect(line(120, 122)).toBe(5);
+  // Never the paragraph's end while a neighbour can say.
+  expect(toSource(sync, 1, 73, 122)?.line).toBe(5);
+});
+
+test('a point in the margin, far from anything, is not answered', () => {
+  const sync = parseSyncTeX(WRAPPED);
+  expect(toSource(sync, 1, 400, 110)).toBeNull();
+  expect(toSource(sync, 1, 100, 400)).toBeNull();
+  expect(toSource(sync, 1, 20, 110)).toBeNull();
+});
+
+// A paragraph typed in a.tex, lines 3 and 4, and ended by the first line of m.tex, a heading: the
+// paragraph's line box and what it holds at its start and end are tagged m.tex:1. The heading's
+// own box holds only records of its own line. Then a blank line a.tex:5 that only ended a
+// paragraph, and a paragraph of one line, a.tex:7.
+const ENDED = [
+  'SyncTeX Version:1',
+  'Input:1:/work/./a.tex',
+  'Input:2:/work/./m.tex',
+  'Output:pdf',
+  'Magnification:1000',
+  'Unit:1',
+  'Content:',
+  '{1',
+  `(2,1:${at(72, 100)}:${pt(228)},${pt(8)},${pt(2)}`,
+  `x2,1:${at(72, 100)}`,
+  `k1,3:${at(100, 100)}:${pt(4)}`,
+  `x1,4:${at(150, 100)}`,
+  `k2,1:${at(290, 100)}:${pt(4)}`,
+  ')',
+  `(2,1:${at(72, 140)}:${pt(228)},${pt(8)},${pt(2)}`,
+  `x2,1:${at(72, 140)}`,
+  `g2,1:${at(90, 140)}`,
+  ')',
+  `(1,5:${at(72, 180)}:${pt(228)},${pt(8)},${pt(2)}`,
+  `x1,5:${at(72, 180)}`,
+  `k1,3:${at(100, 180)}:${pt(4)}`,
+  ')',
+  `(1,7:${at(72, 200)}:${pt(228)},${pt(8)},${pt(2)}`,
+  `g1,7:${at(80, 200)}`,
+  ')',
+  '}1',
+  'Postamble:',
+  '',
+].join('\n');
+
+test('what a box that ends a paragraph holds is stale, and a heading that ends one is not', () => {
+  const sync = parseSyncTeX(ENDED);
+  const stale = sync.records.map(
+    (r) => `${sync.inputs[r.file]}:${r.line}${r.kind}${r.stale ? '*' : ''}`,
+  );
+  expect(stale).toEqual([
+    'm.tex:1(*',
+    'm.tex:1x*',
+    'a.tex:3k',
+    'a.tex:4x',
+    'm.tex:1k*',
+    'm.tex:1(',
+    'm.tex:1x',
+    'm.tex:1g',
+    'a.tex:5(*',
+    'a.tex:5x*',
+    'a.tex:3k',
+    'a.tex:7(',
+    'a.tex:7g',
+  ]);
+  // The heading is where its own box is, not in the paragraph before it that carries its tag.
+  const heading = toPdf(sync, 'm.tex', 1)!;
+  expect(Math.round(heading.y)).toBe(132);
+  expect(toSource(sync, 1, 73, 138)).toMatchObject({ path: 'm.tex', line: 1 });
+  // A blank line that only ended a paragraph made nothing: the next line that did.
+  expect(toPdf(sync, 'a.tex', 5)).toMatchObject({ line: 7 });
 });
