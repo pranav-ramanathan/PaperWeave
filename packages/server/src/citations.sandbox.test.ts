@@ -86,3 +86,31 @@ test('entries, missing keys and duplicate keys are found, and the .bib files are
     code: 'not_found',
   });
 });
+
+test('\\bibitem entries are entries: known keys with a place and a one-line description', async () => {
+  const main = [
+    '\\documentclass{article}',
+    '\\begin{document}',
+    'See \\cite{one}, \\cite{two} and \\cite{ghost}.',
+    '\\begin{thebibliography}{9}',
+    '\\bibitem{one} A. One.',
+    '  First, 2001.',
+    '\\bibitem[Two(2002)]{two} B. Two. Second.',
+    '\\end{thebibliography}',
+    '\\end{document}',
+    '',
+  ].join('\n');
+  const zip = await writeZip([{ path: 'main.tex', bytes: Buffer.from(main) }]);
+  const [project] = await importZip(t.pool, store, owner.id, zip, 'Bibitems');
+  const report = await citationReport(t.pool, store, owner.id, project.id);
+  expect(
+    report.entries.map(
+      (e) => `${e.path}:${e.line} ${e.type} ${e.key} | ${e.description} | ${e.cited}`,
+    ),
+  ).toEqual([
+    'main.tex:5 bibitem one | A. One. First, 2001. | true',
+    'main.tex:7 bibitem two | B. Two. Second. | true',
+  ]);
+  expect(report.missing.map((m) => m.key)).toEqual(['ghost']);
+  expect(report.duplicates).toEqual([]);
+});

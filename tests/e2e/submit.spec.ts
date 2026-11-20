@@ -80,3 +80,36 @@ test('a paper is checked before submitting, put right, and downloaded as one rev
   );
   expect((await pdf.body()).subarray(0, 5).toString()).toBe('%PDF-');
 });
+
+test('a paper with a hand-written bibliography is ready once built, and offers its downloads', async ({
+  browser,
+}) => {
+  test.setTimeout(180_000);
+  const { page, email } = await person(browser, 'submit-thebib');
+  const main = [
+    '\\documentclass{article}',
+    '\\begin{document}',
+    'As \\cite{one} and \\cite{two} say.',
+    '\\begin{thebibliography}{9}',
+    '\\bibitem{one} A. One. First. 2001.',
+    '\\bibitem[Two(2002)]{two} B. Two. Second. 2002.',
+    '\\end{thebibliography}',
+    '\\end{document}',
+    '',
+  ].join('\n');
+  const zip = join(mkdtempSync(join(tmpdir(), 'paperweave-e2e-')), `Handbib ${run}.zip`);
+  writeFileSync(zip, await writeZip([{ path: 'main.tex', bytes: Buffer.from(main) }]));
+  await page.goto('/sign-in');
+  await signIn(page, email);
+  await page.getByLabel('Or import a ZIP of a LaTeX project').setInputFiles(zip);
+  await page.getByRole('button', { name: 'Import ZIP' }).click();
+  await page.getByRole('link', { name: 'Check before submitting' }).click();
+  const ready = page.getByText('Nothing stands in the way.');
+  const again = page.getByRole('button', { name: 'Build the paper and check again' });
+  await expect(again.or(ready).first()).toBeVisible({ timeout: 60_000 });
+  if (!(await ready.isVisible())) await again.click();
+  await expect(ready).toBeVisible({ timeout: 90_000 });
+  await expect(page.getByRole('heading', { name: 'To put right' })).toHaveCount(0);
+  await expect(page.getByRole('link', { name: 'Download the ZIP', exact: true })).toBeVisible();
+  await expect(page.getByRole('link', { name: 'Download the PDF', exact: true })).toBeVisible();
+});

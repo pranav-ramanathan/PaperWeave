@@ -117,3 +117,48 @@ export function describeEntry(entry: BibEntry) {
   // "Shapiro et al." already ends in a full stop.
   return [lead, title].filter(Boolean).join(lead.endsWith('.') ? ' ' : '. ') || entry.key;
 }
+
+/** An entry of a hand-written `thebibliography`: `\bibitem[label]{key} text`. */
+export type BibItem = {
+  key: string;
+  /** The item's text up to the next `\bibitem` or `\end{thebibliography}`, on one line. */
+  text: string;
+  /** Where the `\bibitem` starts. */
+  at: number;
+};
+
+/**
+ * Every `\bibitem` inside a `thebibliography` environment, in order. Comments are skipped, and
+ * so is anything outside the environment: a `\bibitem` there is not a bibliography entry.
+ */
+export function bibItems(src: string): BibItem[] {
+  // Comments out of the way, keeping every offset: a comment runs to the end of its line.
+  const clean = src.replace(
+    /(^|[^\\])((?:\\\\)*)%[^\n]*/g,
+    (m, a: string, b: string) => a + b + ' '.repeat(m.length - a.length - b.length),
+  );
+  const out: BibItem[] = [];
+  const ENV = /\\begin\{thebibliography\}/g;
+  for (let env = ENV.exec(clean); env; env = ENV.exec(clean)) {
+    const close = clean.indexOf('\\end{thebibliography}', env.index);
+    const stop = close < 0 ? clean.length : close;
+    const body = clean.slice(0, stop);
+    const ITEM = /\\bibitem\s*(?:\[[^\]]*\]\s*)?\{([^{}]*)\}/g;
+    ITEM.lastIndex = env.index;
+    const found: { key: string; at: number; end: number }[] = [];
+    for (let m = ITEM.exec(body); m; m = ITEM.exec(body))
+      if (m[1].trim()) found.push({ key: m[1].trim(), at: m.index, end: m.index + m[0].length });
+    found.forEach((item, n) =>
+      out.push({
+        key: item.key,
+        text: clean
+          .slice(item.end, found[n + 1]?.at ?? stop)
+          .replace(/\s+/g, ' ')
+          .trim(),
+        at: item.at,
+      }),
+    );
+    ENV.lastIndex = stop;
+  }
+  return out;
+}

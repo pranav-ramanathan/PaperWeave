@@ -390,8 +390,9 @@ export default async function Project({
             )}
             {report.missing.map((m) => (
               <li key={m.from + m.target}>
-                <code>{m.from}</code> refers to <code>{m.target}</code>, which is not in the
-                project.
+                <code>{m.from}</code> refers to <code>{m.target}</code>, which is not among the
+                paper&apos;s files. It may come with the TeX installation, which only a build can
+                tell.
               </li>
             ))}
             {report.dynamic.map((m) => (

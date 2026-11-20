@@ -1,6 +1,6 @@
 // A paper's bibliography: the entries in its .bib files and the citations in its text, read
 // from both as they stand now. Nothing here writes to a .bib file.
-import { bibEntries, citeIndex, describeEntry, includeGraph } from '@paperweave/latex';
+import { bibEntries, bibItems, citeIndex, describeEntry, includeGraph } from '@paperweave/latex';
 import type pg from 'pg';
 import { authorize } from './authz.ts';
 import type { BlobStore } from './blobs.ts';
@@ -49,6 +49,31 @@ export async function citationReport(
         line: line(e.at),
       });
   }
+  // Citations count, and \bibitem entries are read, only where the root file reaches.
+  // A paper with no root: every file.
+  const tex = await texFiles(pool, store, projectId);
+  const root = tex.find((f) => f.root);
+  const reached = root
+    ? includeGraph(Object.fromEntries(tex.map((f) => [f.path, f.text])), root.path).order
+    : tex.map((f) => f.path);
+  // A hand-written thebibliography is a bibliography too: each \bibitem is an entry, described
+  // by its text up to the next one, cut to one line.
+  for (const path of reached) {
+    const file = tex.find((f) => f.path === path);
+    if (!file) continue;
+    const line = lineNumbers(file.text);
+    for (const i of bibItems(file.text))
+      report.entries.push({
+        key: i.key,
+        type: 'bibitem',
+        description: i.text.length > 160 ? `${i.text.slice(0, 159)}…` : i.text || i.key,
+        doi: null,
+        cited: false,
+        fileId: file.id,
+        path,
+        line: line(i.at),
+      });
+  }
   const byKey = new Map<string, BibliographyEntry[]>();
   for (const e of report.entries) byKey.set(e.key, [...(byKey.get(e.key) ?? []), e]);
   for (const [key, entries] of byKey)
@@ -58,12 +83,6 @@ export async function citationReport(
         places: entries.map(({ fileId, path, line }) => ({ fileId, path, line })),
       });
 
-  // Citations count only where the root file reaches. A paper with no root: every file.
-  const tex = await texFiles(pool, store, projectId);
-  const root = tex.find((f) => f.root);
-  const reached = root
-    ? includeGraph(Object.fromEntries(tex.map((f) => [f.path, f.text])), root.path).order
-    : tex.map((f) => f.path);
   const uses = new Map<string, number>();
   const named = new Set<string>();
   for (const path of reached) {

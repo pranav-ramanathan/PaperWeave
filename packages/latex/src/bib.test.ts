@@ -1,5 +1,5 @@
 import { expect, test } from 'vitest';
-import { bibEntries, describeEntry, plainText } from './bib.ts';
+import { bibEntries, bibItems, describeEntry, plainText } from './bib.ts';
 import { citeIndex } from './labels.ts';
 import { fixtureFiles } from './testutil.ts';
 
@@ -78,4 +78,28 @@ test('citations are found with their keys, in every common form', () => {
   expect(citeIndex(text('ieee-multifile/sections/intro.tex')).map((c) => c.key)).toEqual([
     'knuth1984',
   ]);
+});
+
+test('bibitems are read from thebibliography, with their text', () => {
+  const src = [
+    '\\bibitem{outside} Not in the environment.',
+    '\\begin{thebibliography}{99}',
+    '\\bibitem{a} A. One.',
+    '  \\emph{First}, 2001.',
+    '% \\bibitem{commented} Gone.',
+    '\\bibitem[Two(2002)]{b} B. Two. Second. 50\\% off. % trailing',
+    '\\bibitem [X]{c}C. Three.',
+    '\\end{thebibliography}',
+    '\\bibitem{after} Not in the environment either.',
+  ].join('\n');
+  const items = bibItems(src);
+  expect(items.map((i) => `${i.key} | ${i.text}`)).toEqual([
+    'a | A. One. \\emph{First}, 2001.',
+    'b | B. Two. Second. 50\\% off.',
+    'c | C. Three.',
+  ]);
+  for (const i of items) expect(src.slice(i.at, i.at + 8)).toBe('\\bibitem');
+  expect(bibItems('\\begin{document}\\cite{a}\\end{document}')).toEqual([]);
+  // An environment that never ends runs to the end of the file.
+  expect(bibItems('\\begin{thebibliography}{9}\\bibitem{z} Z.').map((i) => i.key)).toEqual(['z']);
 });
