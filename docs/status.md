@@ -705,6 +705,11 @@ ordinary use. Ten ways of looking found them, and each is cheap to do again:
     taken for the paper; and refusals of a `.tar.gz`, a split root and a Latin-1 root that said
     nothing useful.
 
+27. **Unpack what was downloaded and build it somewhere else.** Found: a paper called ready to
+    send whose ZIP could not build, for a data file kept back that it reads, with nothing said
+    at the download; a manifest naming a file not in it; and download names that lost every
+    letter outside ASCII, and every PDF saved as `pdf.pdf`.
+
 Tried the same way and nothing found: thirty connections typing into one file at once (kept
 as a test in `sync.sandbox.test`); 400 threads and 400 proposals on one file, on the server
 (both lists took about 20 ms; not kept); and each tool of the visual view worked slowly
@@ -2204,6 +2209,51 @@ second one.
   - A kept `.bbl` is shown as a file that cannot be edited, and cannot be renamed by hand.
   - An `output.pdf` of the paper itself is kept as one of its files.
   - In an archive of several papers, a `.bbl` is dropped if any of them has a `.bib`.
+- **How it was made.** Planned by one agent, probed and written by others, checked here.
+
+## What a download holds
+
+- **What was tried**, with a probe: each of the three ZIPs (plain, with review data, with a
+  toolchain manifest) unpacked outside the app and built there, beside the app's own build and
+  "Check before submitting"; the manifest's command run as written; the names inside the ZIP read
+  by other tools; and the names the browser saves downloads under.
+
+| Case                                                                  | Before                                                              | Now                                                               |
+| --------------------------------------------------------------------- | ------------------------------------------------------------------- | ----------------------------------------------------------------- |
+| A paper that reads a data file kept back from downloads               | **"Nothing stands in the way"; every ZIP fails to build elsewhere** | a problem: it reads the file, and what to do                      |
+| The same, at the download links                                       | **nothing said**                                                    | "Not in these downloads: data.csv (marked as data to keep back)." |
+| The review-data ZIP of that paper imported again                      | **a paper that cannot build, with nothing said missing**            | the same, but said at the download                                |
+| An older revision, the data kept back after it was saved              | **its ZIP without the file, with nothing said**                     | the held file named beside that revision's ZIP                    |
+| The manifest of a chart whose data is kept back                       | **names the data file, which is not in the ZIP**                    | marks it held, and lists what is held                             |
+| "Étude sur les réseaux", "机器学习综述"                               | **`_tude sur les r_seaux.zip`, `_.zip`**                            | the name as it is, with an ASCII one beside it                    |
+| Any PDF downloaded                                                    | **`pdf.pdf`**                                                       | named after the paper, and the revision                           |
+| The data file included; a CSV never described; an arXiv `.bbl`        | in every ZIP; builds                                                | the same                                                          |
+| A root with a space, an accent or in a folder: the manifest's command | builds                                                              | the same                                                          |
+| Accented and Chinese names inside the ZIP                             | marked UTF-8; read right by Python                                  | the same                                                          |
+| A cover letter, an old draft, an unused 5 MB PDF                      | in every ZIP                                                        | the same                                                          |
+
+- **What was wrong.** A data file can be kept back from downloads, and is by default: the ZIP
+  leaves it out. Nothing checked whether the paper reads it, so a paper could be called ready to
+  send while its ZIP would not build anywhere else, and nothing at the download said what was
+  missing. The manifest named the file without saying it was absent. Download names kept only
+  ASCII letters, and PDFs were sent with no name at all.
+- **Now** (`submissionChecks`; `packages/server/src/download.ts`; `revisions.ts`; the export
+  routes and pages): a paper that reads a held data file is not ready, and says which and what to
+  do; the same sentence is beside the dataset. Every place that offers a ZIP names what it leaves
+  out, the revisions table for each revision. The manifest marks held chart data and lists the
+  held files. Every download is named after the paper, with the name as written and an ASCII one
+  for older clients; a PDF shown in the page is sent inline, under the same name.
+- **Held by** service tests of each command that reads a data file and of the manifest; a unit
+  test of the names; and browser tests of the held file named at the download and of the names
+  given to a ZIP and a PDF. Each failed on the old code. The test browser saves any non-ASCII
+  name as "download", so for those papers the test reads the header the server sent.
+- **Not changed:**
+  - Data kept back never leaves, in any download, of any revision, and stays unticked by default:
+    a backup ZIP is then not the whole paper, and says so.
+  - Every file of the paper goes in, used or not.
+  - `unzip` (Info-ZIP 6.00) on a system whose locale is not UTF-8 shows the accented and Chinese
+    names wrongly, though the ZIP marks them UTF-8.
+  - A finding about held data names the file that reads it, not the line.
 - **How it was made.** Planned by one agent, probed and written by others, checked here.
 
 ## When an email cannot be sent

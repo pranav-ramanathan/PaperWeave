@@ -275,6 +275,59 @@ async function load(db: Db, projectId: string, revisionId: string) {
   return { revision, files };
 }
 
+/** The files whose authors keep them out of downloads: data not marked to be included. */
+async function heldFileIds(db: Db, projectId: string): Promise<Set<string>> {
+  return new Set(
+    (
+      await db.query('select file_id from datasets where project_id = $1 and not exported', [
+        projectId,
+      ])
+    ).rows.map((r) => r.file_id),
+  );
+}
+
+/** The paths, now, of the files a download of the paper as it is leaves out. */
+export async function heldNow(db: Db, userId: string, projectId: string): Promise<string[]> {
+  await authorize(db, userId, id(projectId), 'project.read');
+  const { rows } = await db.query(
+    `select f.path from datasets d join files f on f.id = d.file_id
+     where d.project_id = $1 and not d.exported order by f.path`,
+    [projectId],
+  );
+  return rows.map((r) => r.path);
+}
+
+/** For each revision, the paths in it that its ZIP leaves out. A revision with none is absent. */
+export async function heldInRevisions(
+  db: Db,
+  userId: string,
+  projectId: string,
+  revisionIds: string[],
+): Promise<Map<string, string[]>> {
+  await authorize(db, userId, id(projectId), 'project.read');
+  const { rows } = await db.query(
+    `select rf.revision_id, rf.path from revision_files rf
+     join datasets d on d.file_id = rf.file_id and d.project_id = $1 and not d.exported
+     where rf.revision_id = any($2::uuid[]) order by rf.path`,
+    [projectId, revisionIds],
+  );
+  const out = new Map<string, string[]>();
+  for (const r of rows) out.set(r.revision_id, [...(out.get(r.revision_id) ?? []), r.path]);
+  return out;
+}
+
+/** What a revision's downloads are named after: the paper's name, and the revision's number. */
+export async function revisionTitle(
+  db: Db,
+  userId: string,
+  projectId: string,
+  revisionId: string,
+): Promise<{ paper: string; number: number }> {
+  await authorize(db, userId, id(projectId), 'project.read');
+  const { revision } = await load(db, projectId, revisionId);
+  return { paper: revision.paper, number: revision.number };
+}
+
 const blob = async (store: BlobStore, digest: string) => {
   const bytes = await store.get(digest);
   if (!bytes) throw new Error(`blob ${digest} is missing`);
@@ -298,15 +351,10 @@ export async function exportRevision(
   await authorize(db, userId, id(projectId), 'project.export');
   const { revision, files } = await load(db, projectId, revisionId);
   // Data goes into a download only if its author has said so. A CSV file nobody has described
-  // as data is a file like any other.
-  const held = new Set(
-    (
-      await db.query('select file_id from datasets where project_id = $1 and not exported', [
-        projectId,
-      ])
-    ).rows.map((r) => r.file_id),
-  );
+  // as data is a file like any other. The hold is by file, whichever revision is downloaded.
+  const held = await heldFileIds(db, projectId);
   const shared = files.filter((f) => !held.has(f.file_id));
+  const kept = files.filter((f) => held.has(f.file_id));
   const entries: Entry[] = [];
   for (const f of shared) entries.push({ path: f.path, bytes: await blob(store, f.digest) });
   if (manifest) {
@@ -329,7 +377,14 @@ export async function exportRevision(
     const charts = Object.fromEntries(
       shared.flatMap((f) => {
         const from = drawn.findLast((d) => d.pdf_digest === f.digest || d.png_digest === f.digest);
-        return from ? [[f.path, from.record]] : [];
+        if (!from) return [];
+        // The chart's data may be among the files held back: it is named all the same, and
+        // marked, so that its absence from the archive is seen to be on purpose.
+        const data = from.record.data;
+        const away = kept.some(
+          (k) => k.path === data?.path || `sha256:${k.digest}` === data?.sha256,
+        );
+        return [[f.path, away ? { ...from.record, data: { ...data, held: true } } : from.record]];
       }),
     );
     const epoch = Math.floor(new Date(revision.created_at).getTime() / 1000);
@@ -349,6 +404,8 @@ export async function exportRevision(
         command: `SOURCE_DATE_EPOCH=${epoch} latexmk -norc -cd ${engine} -no-shell-escape -bibtex-cond -interaction=nonstopmode ${shellPath(revision.root)}`,
         files: Object.fromEntries(shared.map((f) => [f.path, `sha256:${f.digest}`])),
         charts,
+        // Data files left out of this archive on purpose: their authors keep them back.
+        held: kept.map((f) => f.path),
       },
       null,
       2,

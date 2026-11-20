@@ -43,6 +43,65 @@ const namesTarget = (found: string, target: string) => {
   return found === target || bare(found) === bare(target);
 };
 
+/** Why a data file held back from downloads, which the paper reads, is a problem. */
+export const heldReadMessage = (path: string) =>
+  `The paper reads ${path}, which is not included in downloads: the ZIP would not build without it. Include it in downloads, or draw the chart here and include the drawing instead.`;
+
+/**
+ * The data files the paper reads (a table, a CSV, a plot's data) that are held back from
+ * downloads. The ZIP leaves them out, so it would not build elsewhere.
+ */
+export async function heldDataRead(
+  pool: pg.Pool,
+  store: BlobStore,
+  projectId: string,
+): Promise<{ fileId: string; path: string; from: string; fromId: string }[]> {
+  const held = new Map<string, string>(
+    (
+      await pool.query(
+        `select f.id, f.path from datasets d join files f on f.id = d.file_id
+         where d.project_id = $1 and not d.exported`,
+        [projectId],
+      )
+    ).rows.map((r) => [r.path, r.id]),
+  );
+  if (!held.size) return [];
+  const files = await texFiles(pool, store, projectId);
+  const root = files.find((f) => f.root);
+  if (!root) return [];
+  const paths: string[] = (
+    await pool.query('select path from files where project_id = $1', [projectId])
+  ).rows.map((r) => r.path);
+  const graph = includeGraph(
+    Object.fromEntries(files.map((f) => [f.path, f.text])),
+    root.path,
+    paths,
+  );
+  const out = new Map<string, { fileId: string; path: string; from: string; fromId: string }>();
+  for (const e of graph.edges) {
+    const fileId = held.get(e.to);
+    if (fileId && !out.has(e.to))
+      out.set(e.to, {
+        fileId,
+        path: e.to,
+        from: e.from,
+        fromId: files.find((f) => f.path === e.from)!.id,
+      });
+  }
+  return [...out.values()];
+}
+
+/** The same, for a person who may read the paper. */
+export async function heldDataReadBy(
+  pool: pg.Pool,
+  store: BlobStore,
+  userId: string,
+  projectId: string,
+) {
+  await authorize(pool, userId, id(projectId), 'project.read');
+  return heldDataRead(pool, store, projectId);
+}
+
 /** How long a build may wait before it is taken not to be being built. */
 export const BUILD_STUCK_MS = 120_000;
 
@@ -156,6 +215,10 @@ export async function submissionChecks(
       `${d.places.length} bibliography entries have the key "${d.key}".`,
       at(d.places[1]),
     );
+
+  // The ZIP leaves held data out, so a paper that reads it would not build from the ZIP.
+  for (const h of await heldDataRead(pool, store, projectId))
+    problem('file', heldReadMessage(h.path), { fileId: h.fromId, path: h.from });
 
   // A chart the paper shows must be drawn from the data as it is now.
   for (const c of await listCharts(pool, store, userId, projectId)) {

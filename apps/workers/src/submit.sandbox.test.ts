@@ -1,15 +1,26 @@
 // Needs the services in infra/compose.yaml and the toolchain image. Run: pnpm test:sandbox
+import { execFileSync } from 'node:child_process';
+import { mkdtempSync, writeFileSync } from 'node:fs';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
 import {
   acceptInvitation,
   approveDataset,
   blobStore,
   datasetProposal,
   editFile,
+  exportRevision,
+  heldDataReadBy,
+  heldInRevisions,
+  heldNow,
+  heldReadMessage,
   importZip,
   invite,
   listFiles,
+  readZip,
   requestBuild,
   saveChart,
+  saveRevision,
   submissionChecks,
   writeZip,
 } from '@paperweave/server';
@@ -348,3 +359,125 @@ test('an overfull box or a font warning alone leaves a paper ready', async () =>
   expect(warned.ready).toBe(true);
   expect(warned.findings.some((f) => f.level === 'warning' && f.kind === 'compiler')).toBe(true);
 }, 240_000);
+
+const PGF = (body: string) =>
+  [
+    '\\documentclass{article}',
+    '\\usepackage{pgfplots,pgfplotstable,graphicx,csvsimple}\\pgfplotsset{compat=1.16}',
+    '\\pgfplotstableset{col sep=comma}',
+    '\\begin{document}',
+    body,
+    '\\end{document}',
+    '',
+  ].join('\n');
+const HELD_CSV = 'day,latency\n1,9\n2,38\n3,41\n';
+const HELD_COLUMNS = [
+  { name: 'day', type: 'number', unit: '' },
+  { name: 'latency', type: 'number', unit: '' },
+];
+
+async function heldPaper(name: string, main: string, exported = false) {
+  const zip = await writeZip([
+    { path: 'main.tex', bytes: Buffer.from(main) },
+    { path: 'data.csv', bytes: Buffer.from(HELD_CSV) },
+  ]);
+  const [project] = await importZip(t.pool, store, users.owner.id, zip, name);
+  const ids = Object.fromEntries(
+    (await listFiles(t.pool, users.owner.id, project.id)).map((f) => [f.path, f.id]),
+  );
+  await approveDataset(t.pool, store, users.owner.id, project.id, ids['data.csv'], {
+    version: (await datasetProposal(t.pool, store, users.owner.id, project.id, ids['data.csv']))
+      .version,
+    columns: HELD_COLUMNS,
+    missing: [],
+    exported,
+  });
+  return { project, ids };
+}
+
+test.each([
+  ['pgfplotstableread', '\\pgfplotstableread{data.csv}\\table\\pgfplotstabletypeset\\table'],
+  ['csvreader', '\\csvreader[head to column names]{data.csv}{}{\\day\\ }'],
+  ['csvautotabular', '\\csvautotabular{data.csv}'],
+  [
+    'addplot table',
+    '\\begin{tikzpicture}\\begin{axis}\\addplot table[x=day,y=latency]{data.csv};\\end{axis}\\end{tikzpicture}',
+  ],
+])(
+  'a paper that reads held data (%s) is not ready, and says why',
+  async (_name, body) => {
+    const { project } = await heldPaper(`Held ${_name}`, PGF(body));
+    const checks = () => submissionChecks(t.pool, store, users.owner.id, project.id);
+    await requestBuild(t.pool, users.owner.id, project.id);
+    expect(await buildNext(t.pool, store, image)).toBe(true);
+    const held = await checks();
+    expect(held.findings.filter((f) => f.level === 'problem').map((f) => f.message)).toEqual([
+      'The paper reads data.csv, which is not included in downloads: the ZIP would not build without it. Include it in downloads, or draw the chart here and include the drawing instead.',
+    ]);
+    expect(held).toMatchObject({ ready: false, revisionId: null });
+    expect(
+      (await heldDataReadBy(t.pool, store, users.owner.id, project.id)).map((h) => h.path),
+    ).toEqual(['data.csv']);
+    expect(heldReadMessage('data.csv')).toBe(held.findings[0].message);
+  },
+  900_000,
+);
+
+test('a paper that reads data included in downloads, or none, is ready', async () => {
+  const read = PGF('\\pgfplotstableread{data.csv}\\table\\pgfplotstabletypeset\\table');
+  const { project } = await heldPaper('Included data', read, true);
+  await requestBuild(t.pool, users.owner.id, project.id);
+  expect(await buildNext(t.pool, store, image)).toBe(true);
+  expect(await submissionChecks(t.pool, store, users.owner.id, project.id)).toMatchObject({
+    ready: true,
+  });
+  // Held data that nothing reads is not a problem.
+  const { project: unread } = await heldPaper('Unread data', PGF('Nothing.'));
+  await requestBuild(t.pool, users.owner.id, unread.id);
+  expect(await buildNext(t.pool, store, image)).toBe(true);
+  expect(await submissionChecks(t.pool, store, users.owner.id, unread.id)).toMatchObject({
+    ready: true,
+  });
+}, 900_000);
+
+test('a manifest marks the chart data held from the archive, and lists what is held', async () => {
+  const { project, ids } = await heldPaper(
+    'Held manifest',
+    PGF('\\includegraphics{charts/latency}'),
+  );
+  await saveChart(t.pool, store, users.owner.id, project.id, {
+    kind: 'line',
+    x: 'day',
+    y: 'latency',
+    name: 'latency',
+    dataset: ids['data.csv'],
+  });
+  expect(await drawNext(t.pool, store, image)).toBe(true);
+  const revision = await saveRevision(t.pool, store, users.owner.id, project.id, 'Cut');
+  const { zip } = await exportRevision(
+    t.pool,
+    store,
+    users.owner.id,
+    project.id,
+    revision.id,
+    true,
+  );
+  const entries = (await readZip(zip)).entries;
+  expect(entries.map((e) => e.path)).not.toContain('data.csv');
+  const file = join(mkdtempSync(join(tmpdir(), 'paperweave-test-')), 'revision.zip');
+  writeFileSync(file, zip);
+  const manifest = JSON.parse(
+    execFileSync('unzip', ['-p', file, 'paperweave-toolchain.json'], { encoding: 'utf8' }),
+  );
+  expect(manifest.held).toEqual(['data.csv']);
+  expect(Object.keys(manifest.files)).not.toContain('data.csv');
+  expect(manifest.charts['charts/latency.pdf'].data).toMatchObject({
+    path: 'data.csv',
+    sha256: expect.stringMatching(/^sha256:|^[0-9a-f]{64}$/),
+    held: true,
+  });
+  expect(await heldNow(t.pool, users.owner.id, project.id)).toEqual(['data.csv']);
+  expect(
+    (await heldInRevisions(t.pool, users.owner.id, project.id, [revision.id])).get(revision.id),
+  ).toEqual(['data.csv']);
+});

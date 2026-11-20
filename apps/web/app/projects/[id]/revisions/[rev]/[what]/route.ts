@@ -1,5 +1,11 @@
 // A revision's files as a ZIP, or the PDF built from exactly that revision.
-import { AppError, exportRevision, revisionPdf } from '@paperweave/server';
+import {
+  AppError,
+  contentDisposition,
+  exportRevision,
+  revisionPdf,
+  revisionTitle,
+} from '@paperweave/server';
 import { askedForEachTime, blobs, currentUser, db } from '../../../../../../lib/server';
 
 export async function GET(
@@ -12,17 +18,19 @@ export async function GET(
   try {
     if (what === 'pdf') {
       const pdf = await revisionPdf(db(), blobs(), user.id, id, rev);
-      return askedForEachTime(request, pdf, { 'content-type': 'application/pdf' });
+      const { paper, number } = await revisionTitle(db(), user.id, id, rev);
+      return askedForEachTime(request, pdf, {
+        'content-type': 'application/pdf',
+        'content-disposition': contentDisposition(paper, 'pdf', { suffix: ` r${number}` }),
+      });
     }
     if (what !== 'zip') return new Response('Not found.', { status: 404 });
     const manifest = new URL(request.url).searchParams.has('manifest');
     const { zip, paper, number } = await exportRevision(db(), blobs(), user.id, id, rev, manifest);
-    // Only plain characters in the file name: it goes into a header.
-    const name = paper.replace(/[^\w .-]+/g, '_').slice(0, 80) || 'paper';
     return new Response(zip as BodyInit, {
       headers: {
         'content-type': 'application/zip',
-        'content-disposition': `attachment; filename="${name} r${number}.zip"`,
+        'content-disposition': contentDisposition(paper, 'zip', { suffix: ` r${number}` }),
         'cache-control': 'no-store',
       },
     });
