@@ -575,3 +575,128 @@ test("a second person's typing in an untouched paragraph survives a restore whol
   for (const u of sent) await appendUpdate(t.pool, p.main, owner.id, u);
   expect(await textOf(p.main)).toBe(PMAIN.replace('howl loudly', 'howl abcdefghloudly'));
 });
+
+// A restore holds every file of the paper only while it writes. The store here is as far away as
+// the database may be from a web app on Vercel, and the tests below watch what is done while the
+// files are held.
+const FILES = 30;
+const original = (i: number) => `one ${i} alpha\ntwo beta\nthree gamma\n`;
+const changed = (i: number) => `ONE ${i} ALPHA\ntwo changed\nthree GAMMA\n`;
+const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
+const far = (ms: number) => ({
+  ...store,
+  put: async (bytes: Uint8Array) => (await sleep(ms), store.put(bytes)),
+  get: async (digest: string) => (await sleep(ms), store.get(digest)),
+  size: async (digest: string) => (await sleep(ms), store.size(digest)),
+});
+type Seen = { sql: string; params: unknown[] | undefined; tx: boolean };
+/** The pool, noting every statement; `after` may act once a statement outside a transaction is done. */
+function watched(
+  seen: Seen[],
+  after?: (sql: string, params?: unknown[]) => Promise<void>,
+  inTx?: (sql: string) => void,
+) {
+  const mine = (target: object, prop: string | symbol) => {
+    const v = Reflect.get(target, prop);
+    return typeof v === 'function' ? v.bind(target) : v;
+  };
+  return new Proxy(t.pool, {
+    get(target, prop) {
+      if (prop === 'query')
+        return async (sql: string, params?: unknown[]) => {
+          seen.push({ sql, params, tx: false });
+          const result = await target.query(sql, params);
+          await after?.(sql, params);
+          return result;
+        };
+      if (prop === 'connect')
+        return async () => {
+          const client = await target.connect();
+          return new Proxy(client, {
+            get: (c, p) =>
+              p === 'query'
+                ? (sql: string, params?: unknown[]) => (
+                    seen.push({ sql, params, tx: true }),
+                    inTx?.(sql),
+                    c.query(sql, params)
+                  )
+                : mine(c, p),
+          });
+        };
+      return mine(target, prop);
+    },
+  });
+}
+/** A paper of many files, saved, then every file changed. */
+async function manyEdited() {
+  const entries: Record<string, string> = { 'main.tex': PMAIN };
+  for (let i = 0; i < FILES; i++) entries[`f${String(i).padStart(2, '0')}.tex`] = original(i);
+  const p = await lines(entries);
+  const a = await saveRevision(t.pool, store, owner.id, p.id, 'A');
+  const names = Object.keys(entries).filter((n) => n !== 'main.tex');
+  for (const [i, n] of names.entries())
+    await edit(p.ids[n], (text) => (text.delete(0, text.length), text.insert(0, changed(i))));
+  return { ...p, a, names };
+}
+
+test('typing during a restore waits only while the restore writes', async () => {
+  const p = await manyEdited();
+  const seen: Seen[] = [];
+  let held!: () => void;
+  const locked = new Promise<void>((r) => (held = r));
+  // Note when the files are held: the statement that locks them.
+  const spy = watched(seen, undefined, (sql) => /for update/.test(sql) && held());
+  const restoring = restoreRevision(spy, far(50), owner.id, p.id, p.a.id);
+  await locked;
+  await sleep(100);
+  const typed = p.ids[p.names[7]];
+  const started = Date.now();
+  await edit(typed, (text) => text.insert(0, 'Q'));
+  const waited = Date.now() - started;
+  await restoring;
+  expect(waited).toBeLessThan(1500);
+  for (const [i, n] of p.names.entries())
+    expect(await textOf(p.ids[n])).toBe((n === p.names[7] ? 'Q' : '') + original(i));
+});
+
+test('a restore makes a bounded number of statements while the files are held', async () => {
+  const p = await manyEdited();
+  const seen: Seen[] = [];
+  await restoreRevision(watched(seen), store, owner.id, p.id, p.a.id);
+  const tx = seen.filter((s) => s.tx);
+  const from = tx.findIndex((s) => /for update/.test(s.sql));
+  const held = tx.slice(from);
+  expect(held.at(-1)!.sql).toBe('commit');
+  expect(held.length).toBeLessThan(40);
+  for (const [i, n] of p.names.entries()) expect(await textOf(p.ids[n])).toBe(original(i));
+});
+
+test('typing in the moment before a restore holds is not lost, and that file alone is read again', async () => {
+  const p = await manyEdited();
+  const seen: Seen[] = [];
+  const typed = p.ids[p.names[3]];
+  let once = false;
+  // Just after the restore has read every log, and before it holds the files.
+  const pool = watched(seen, async (sql) => {
+    if (once || !/from file_updates where file_id = any/.test(sql)) return;
+    once = true;
+    await edit(typed, (text) => text.insert(0, 'Q'));
+  });
+  const restored = await restoreRevision(pool, store, owner.id, p.id, p.a.id);
+  for (const [i, n] of p.names.entries()) expect(await textOf(p.ids[n])).toBe(original(i));
+  // Only that file's log is read while the files are held: to keep the paper as it stood, to
+  // restore it, and to cut the restore. The other files used what was made ahead of time.
+  const reads = seen.filter((s) => s.tx && /from file_updates/.test(s.sql));
+  expect(new Set(reads.map((s) => (s.params as string[])[0]))).toEqual(new Set([typed]));
+  expect(reads).toHaveLength(3);
+  expect(once).toBe(true);
+  // What was typed is in the revision kept just before the restore.
+  const kept = (await listRevisions(t.pool, owner.id, p.id)).find(
+    (r) => r.number === restored.number - 1,
+  )!;
+  const { rows } = await t.pool.query(
+    'select digest from revision_files where revision_id = $1 and file_id = $2',
+    [kept.id, typed],
+  );
+  expect(Buffer.from((await store.get(rows[0].digest))!).toString()).toBe('Q' + changed(3));
+});

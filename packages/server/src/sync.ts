@@ -131,6 +131,55 @@ export async function appendUpdate(
 }
 
 /**
+ * Append one edit to each of several files of one paper, in one statement: the same check as
+ * `appendUpdate` (the user may write to the paper right now, the file is editable text), made
+ * once, then every file's place in its log taken and its edit written. Returns each file's
+ * place. Throws `permission_denied` if any was refused, so that the caller's transaction ends.
+ */
+export async function appendUpdates(
+  db: Db,
+  projectId: string,
+  userId: string,
+  items: { fileId: string; update: Uint8Array }[],
+): Promise<Map<string, number>> {
+  const seqs = new Map<string, number>();
+  if (!items.length) return seqs;
+  const { rows } = await db.query(
+    `with allowed as (
+       select 1 from project_members m where m.project_id = $1 and m.user_id = $2 and m.role = any($5)
+     ), head as (
+       update files set head_seq = head_seq + 1
+       where id = any($3::uuid[]) and project_id = $1 and eol is not null
+         and exists (select 1 from allowed)
+       returning id, head_seq
+     )
+     insert into file_updates (file_id, seq, update, user_id)
+     select h.id, h.head_seq, u.update, $2 from head h
+     join unnest($3::uuid[], $4::bytea[]) as u(id, update) on u.id = h.id
+     returning file_id, seq`,
+    [
+      projectId,
+      userId,
+      items.map((i) => i.fileId),
+      items.map((i) => Buffer.from(i.update)),
+      WRITERS,
+    ],
+  );
+  for (const r of rows) seqs.set(r.file_id, Number(r.seq));
+  if (seqs.size !== new Set(items.map((i) => i.fileId)).size)
+    throw new AppError('permission_denied', 'You cannot edit this file.');
+  return seqs;
+}
+
+/** Tell the sync server of edits already appended, in one statement. */
+export async function notifyEdits(db: Db, edits: Map<string, number>): Promise<void> {
+  if (!edits.size) return;
+  await db.query("select pg_notify('file_edits', x) from unnest($1::text[]) as x", [
+    [...edits].map(([fileId, seq]) => `${fileId}:${seq}`),
+  ]);
+}
+
+/**
  * Every edit to a file, oldest first. The first time a file is opened, its bytes become the
  * first edit, written once so that every later reader builds on the same history.
  */

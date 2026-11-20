@@ -716,6 +716,11 @@ ordinary use. Ten ways of looking found them, and each is cheap to do again:
     comment, a paper name that put lines into other people's emails, and "INVALID_TOKEN" on the
     page.
 
+29. **Put distance between the web app and its database and store.** Found: a restore that held
+    everyone's typing for 13 s at a 50 ms round trip; an open editor making about 290 round trips
+    a minute; a paper's page reading each file four times; saves and downloads one file at a
+    time.
+
 Tried the same way and nothing found: thirty connections typing into one file at once (kept
 as a test in `sync.sandbox.test`); 400 threads and 400 proposals on one file, on the server
 (both lists took about 20 ms; not kept); and each tool of the visual view worked slowly
@@ -2338,6 +2343,44 @@ second one.
   still reads its files into memory first. Nothing here was tried on Vercel itself.
 - **How it was made.** Written by an agent from a plan made with the Vercel documentation;
   checked here.
+
+## With the database a long way off
+
+- **What was tried**, with a probe: a second copy of the web app whose every message to Postgres
+  and to the store went through a proxy that held it 25 or 75 ms each way (a round trip of 50 or
+  150 ms), as when the web app runs on Vercel and the database on the owner's machine. The sync
+  server and the workers stayed beside the database, as they would. The proxy read each query, so
+  the counts below are measured.
+
+| Case, at 50 ms (150 ms)                                | Measured                                                 |
+| ------------------------------------------------------ | -------------------------------------------------------- |
+| The list of papers                                     | 0.34 s (0.94 s) to the first byte; 6 round trips         |
+| A paper's page, 3 files; 31 files, all edited          | 1.26 s (3.26 s); 1.70 s (5.08 s): 75 and 182 round trips |
+| An editor left open and shown, a minute                | about 290 round trips, whatever the distance             |
+| A hidden editor, a minute                              | none                                                     |
+| Checks before submitting, 31 edited files              | 1.69 s (4.81 s)                                          |
+| Save a revision; download the ZIP; 31 edited files     | 6.1 s (17.6 s); 6.6 s (17.9 s), one file after another   |
+| Post a comment; accept a proposal                      | 0.59 s (1.70 s); 0.80 s (2.31 s)                         |
+| **A restore of 31 edited files: typing held, longest** | **12.8 s (37.3 s)**; the restore 19.7 s (54.8 s)         |
+
+- **First change: a restore holds typing only while it writes.** It read each file's history,
+  worked out its edit and appended it one file at a time with every file of the paper held. Now
+  (`restoreRevision`, `appendUpdates` and `notifyEdits` in `packages/server/src`) it reads the
+  revision and every history first, holding nothing, and works out the edits. Holding the files,
+  it checks that each is still as it read it, appends every edit in one statement and tells the
+  sync server in one more; a file someone typed in meanwhile is worked out again on its own.
+  Typing is now held at most 0.8 s (3.9 s), and the restore takes 7.9 s (22.4 s); 23 statements
+  are made while the files are held, where there were 171.
+- **Held by** service tests: an edit to another file during a restore, with a store slowed to
+  50 ms a call, returns within 1.5 s; the statements made while the files are held stay under 40;
+  and a letter typed in the moment between the reading and the holding is kept in the revision
+  saved just before, and only that file is worked out again. Each failed on the old code. The
+  existing tests of restoring, the fault suite and the attached threads and proposals are
+  unchanged and pass.
+- **Next**, measured the same way: a paper's page reads each file's history four times; an open
+  editor asks three things every few seconds, each with its own sign-in check; saving a revision
+  and making a ZIP go one file at a time; and the pool's size is not a setting.
+- **How it was made.** Probed and planned by agents, written by another, checked here.
 
 ## When an email cannot be sent
 

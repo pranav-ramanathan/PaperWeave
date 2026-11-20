@@ -10,7 +10,8 @@ import { AppError } from './errors.ts';
 import { removeFile } from './files.ts';
 import { recordDownload } from './metrics.ts';
 import { id } from './projects.ts';
-import { currentBytes, editLocked, openFile } from './sync.ts';
+import * as Y from 'yjs';
+import { appendUpdates, currentBytes, editLocked, notifyEdits, openFile, TEXT } from './sync.ts';
 import { type DiffLine, diffLines } from './textdiff.ts';
 
 export type Revision = {
@@ -676,12 +677,28 @@ export async function restoreRevision(
   await authorize(pool, userId, id(projectId), 'revision.write');
   const { revision, files } = await load(pool, projectId, revisionId);
   const ready = await putEdited(pool, store, projectId);
+  // Everything that can be worked out without holding anything is, here: the revision's files are
+  // read and the edit that turns each file's text into its text is made. The database and the
+  // store may be far away, and typing waits for every round trip made while the files are held.
+  const blobs = new Map<string, Uint8Array>();
+  const digests = [...new Set(files.map((t) => t.digest))];
+  for (let i = 0; i < digests.length; i += 16)
+    await Promise.all(
+      digests.slice(i, i + 16).map(async (d) => blobs.set(d, await blob(store, d))),
+    );
+  const prepared = await prepareRestore(pool, projectId, files, blobs);
   // All or nothing, with every file held from here on, so no edit lands between keeping the paper
   // as it stands and replacing it. Typing waits for the moment this takes.
   return transaction(pool, async (db) => {
-    await db.query('select 1 from all_files where project_id = $1 order by path for update', [
-      projectId,
-    ]);
+    const locked = new Map<string, { head_seq: string }>(
+      (
+        await db.query(
+          `select id, head_seq, path, digest, eol, bom from all_files
+           where project_id = $1 order by path for update`,
+          [projectId],
+        )
+      ).rows.map((r) => [r.id, r]),
+    );
     // What is about to be replaced is kept as a revision first, so a restore erases nothing: not
     // even what someone typed a moment ago.
     await cut(db, store, userId, projectId, { ready });
@@ -693,7 +710,9 @@ export async function restoreRevision(
       [projectId, files.map((t) => t.file_id)],
     );
     const live = (
-      await db.query('select id, path, digest, eol from files where project_id = $1', [projectId])
+      await db.query('select id, path, digest, eol, bom from files where project_id = $1', [
+        projectId,
+      ])
     ).rows;
     // Files added since the revision go.
     for (const extra of live)
@@ -703,15 +722,29 @@ export async function restoreRevision(
     await db.query("update files set path = id::text || '.renaming' where id = any($1::uuid[])", [
       moving.map((f) => f.id),
     ]);
+    const appends: { fileId: string; update: Uint8Array }[] = [];
+    const restored: { fileId: string; digest: string; size: number }[] = [];
+    const renames: { id: string; path: string }[] = [];
+    const others: { id: string; digest: string; size: number }[] = [];
     for (const target of files) {
       const file = live.find((f) => f.id === target.file_id);
       if (!file) throw new Error(`file ${target.file_id} of revision ${revisionId} is gone`);
-      if (file.path !== target.path)
-        await db.query('update files set path = $2 where id = $1', [file.id, target.path]);
-      const bytes = await blob(store, target.digest);
+      if (file.path !== target.path) renames.push({ id: file.id, path: target.path });
+      const bytes = blobs.get(target.digest)!;
       const decoded = file.eol ? decodeFile(bytes) : null;
       if (decoded?.editable) {
         const want = decoded.text;
+        const had = prepared.get(file.id);
+        // Nobody has typed since it was read: the edit made ahead of time is still the edit.
+        if (had && had.seenSeq === String(locked.get(file.id)?.head_seq) && had.eol === file.eol) {
+          if (had.update) {
+            appends.push({ fileId: file.id, update: had.update });
+            // The restored file is the revision's bytes, if they are what its row would encode.
+            if (decoded.meta.eol === file.eol && decoded.meta.bom === !!file.bom)
+              restored.push({ fileId: file.id, digest: target.digest, size: bytes.length });
+          }
+          continue;
+        }
         await editLocked(db, store, file.id, userId, (text) => {
           for (const e of restoreEdits(text.toString(), want)) {
             if (e.del) text.delete(e.at, e.del);
@@ -719,11 +752,27 @@ export async function restoreRevision(
           }
         });
       } else if (file.digest !== target.digest)
-        await db.query('update files set digest = $2, size = $3 where id = $1', [
-          file.id,
-          target.digest,
-          bytes.length,
-        ]);
+        others.push({ id: file.id, digest: target.digest, size: bytes.length });
+    }
+    if (renames.length)
+      await db.query(
+        `update files f set path = c.path from unnest($1::uuid[], $2::text[]) as c(id, path)
+         where f.id = c.id`,
+        [renames.map((r) => r.id), renames.map((r) => r.path)],
+      );
+    const seqs = await appendUpdates(db, projectId, userId, appends);
+    await notifyEdits(db, seqs);
+    if (others.length)
+      await db.query(
+        `update files f set digest = c.digest, size = c.size
+         from unnest($1::uuid[], $2::text[], $3::int[]) as c(id, digest, size) where f.id = c.id`,
+        [others.map((o) => o.id), others.map((o) => o.digest), others.map((o) => o.size)],
+      );
+    // What those files now hold is known, so the cut below does not read their logs again.
+    for (const r of restored) {
+      const seq = seqs.get(r.fileId);
+      if (seq !== undefined)
+        ready.set(r.fileId, { seq: String(seq), digest: r.digest, size: r.size });
     }
     await db.query(
       `update projects set compiler = $2, manifest_version = manifest_version + 1,
@@ -731,8 +780,69 @@ export async function restoreRevision(
      where id = $1`,
       [projectId, revision.compiler, revision.root],
     );
-    return cut(db, store, userId, projectId, { kind: 'restore', restoredFrom: revisionId });
+    return cut(db, store, userId, projectId, {
+      kind: 'restore',
+      restoredFrom: revisionId,
+      ready,
+    });
   });
+}
+
+/**
+ * For each file of a revision that is text now and has a log, the edit that would make its text
+ * the revision's, and the place in its log that was the text of. An empty edit is `null`. Files
+ * with no log yet are left out: the restore makes their first entry itself, holding them.
+ */
+async function prepareRestore(
+  pool: pg.Pool,
+  projectId: string,
+  targets: RevisionFile[],
+  blobs: Map<string, Uint8Array>,
+) {
+  // Each file's place in its log is read before its log is, as `putEdited` does.
+  const { rows } = await pool.query(
+    'select id, path, digest, eol, bom, head_seq from files where project_id = $1',
+    [projectId],
+  );
+  const wanted = targets.flatMap((t) => {
+    const file = rows.find((f) => f.id === t.file_id);
+    const decoded =
+      file?.eol && Number(file.head_seq) > 0 ? decodeFile(blobs.get(t.digest)!) : null;
+    return file && decoded?.editable ? [{ file, want: decoded.text }] : [];
+  });
+  const logs = new Map<string, Uint8Array[]>();
+  if (wanted.length)
+    for (const r of (
+      await pool.query(
+        'select file_id, update from file_updates where file_id = any($1::uuid[]) order by file_id, seq',
+        [wanted.map((w) => w.file.id)],
+      )
+    ).rows) {
+      const log = logs.get(r.file_id) ?? [];
+      log.push(new Uint8Array(r.update));
+      logs.set(r.file_id, log);
+    }
+  const out = new Map<string, { update: Uint8Array | null; seenSeq: string; eol: string }>();
+  for (const { file, want } of wanted) {
+    const log = logs.get(file.id);
+    if (!log) continue;
+    const doc = new Y.Doc();
+    for (const u of log) Y.applyUpdate(doc, u);
+    const before = Y.encodeStateVector(doc);
+    const text = doc.getText(TEXT);
+    for (const e of restoreEdits(text.toString(), want)) {
+      if (e.del) text.delete(e.at, e.del);
+      if (e.ins) text.insert(e.at, e.ins);
+    }
+    const update = Y.encodeStateAsUpdate(doc, before);
+    // Two zero bytes: nothing was inserted or deleted.
+    out.set(file.id, {
+      update: update.length <= 2 ? null : update,
+      seenSeq: String(file.head_seq),
+      eol: file.eol,
+    });
+  }
+  return out;
 }
 
 /**
