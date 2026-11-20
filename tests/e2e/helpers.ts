@@ -186,6 +186,9 @@ export async function clickAfter(page: Page, within: string, word: string) {
 
 /** Everything axe can check against WCAG 2.1 A and AA on the page as it stands. */
 export async function audit(page: Page, what: string) {
+  // On a client-side navigation the new page is drawn a moment (tens of milliseconds) before its
+  // <title> is put in; a full load has it from the first byte. Audit the page once it is whole.
+  await expect(page).toHaveTitle(/\S/);
   const { violations } = await new AxeBuilder({ page })
     .withTags(['wcag2a', 'wcag2aa', 'wcag21a', 'wcag21aa'])
     .analyze();
