@@ -50,6 +50,9 @@ the services in `infra/compose.yaml`.
     keepalive is on. The migrator has no limit, as it waits on another migrator.
   - Every request to the object store has 10 seconds to answer, and then its body is allowed to
     move at 100 kB/s at least (`ask` in `packages/server/src/blobs.ts`).
+  - In the browser, the request for an upload address is given up after 15 seconds, and the
+    upload of a large file after 30 seconds in which no byte has gone
+    (`apps/web/app/DirectUpload.tsx`).
 
 ## What must be reachable from where
 
@@ -117,7 +120,7 @@ was tried by hand on one machine, except where it says otherwise; the details ar
   the code"), and the person gets the service's error page or a message instead of a page that
   never finishes. A write that timed out may still have been made, and the error page says
   so. While a form or a link waits, the page says "Working…" after a second and "No answer
-  from the server yet" after eight.
+  from the server yet" after eight; while a large file goes up, it says how far it has got.
 - **The object store.** Typing into a file that is already open is still saved. Pages that
   read the paper's files show the error page; "Try again" works once the store is back.
 - **The sync server.** Editors say "Offline" and keep what is typed. It is saved within

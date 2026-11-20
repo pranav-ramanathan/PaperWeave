@@ -269,6 +269,9 @@ address signed by the app reads or writes it, and each is good for minutes.
   refuses one over the limit without reading it; then it runs the same code as before (`importZip`,
   `createFile`: the same checks, a hostile archive refused as a whole) and deletes the temporary
   object, whether or not that worked.
+  - The `PUT` is an `XMLHttpRequest`, so the page can show progress. It sets no header (the
+    browser sends `content-length`, the one signed header), so the store's CORS needs are
+    unchanged. It is given up after 30 s with no byte sent.
   - The old way is still there, and is what the forms do for a file of 4 MB or less
     (`apps/web/app/DirectUpload.tsx`): a form posted with the file in it (`zip`, `file`) is taken,
     with its `bounded()` cap. So does a browser without scripts. On Vercel that works up to 4.5 MB
