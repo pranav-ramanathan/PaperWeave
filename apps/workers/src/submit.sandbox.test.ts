@@ -209,3 +209,142 @@ test('the checks before submitting find what is wrong, and give the files once n
     ),
   ).toBe('not_found');
 }, 240_000);
+
+// Real builds of papers whose verdict used to be wrong. TeX's own account of a build decides what
+// reading the paper cannot: a bibliography written by hand, a file or label from a package.
+const doc = (pre: string, body: string, cls = 'article') =>
+  `\\documentclass{${cls}}\n${pre}\n\\begin{document}\n${body}\n\\end{document}\n`;
+const BIBK = '@book{k, author={A One}, title={First}, year=2001, publisher={P}}\n';
+const THEBIB =
+  '\\begin{thebibliography}{9}\n\\bibitem{a} A. One. First. 2001.\n\\bibitem[Two(2002)]{b} B. Two. Second. 2002.\n\\end{thebibliography}';
+
+/** Import a paper, build it as it is, and say what the checks make of it. */
+async function verdict(name: string, files: Record<string, string>) {
+  const zip = await writeZip(
+    Object.entries(files).map(([path, text]) => ({ path, bytes: Buffer.from(text) })),
+  );
+  const [project] = await importZip(t.pool, store, users.owner.id, zip, name);
+  await requestBuild(t.pool, users.owner.id, project.id);
+  expect(await buildNext(t.pool, store, image, 90)).toBe(true);
+  const found = await submissionChecks(t.pool, store, users.owner.id, project.id);
+  const problems = found.findings.filter((f) => f.level === 'problem');
+  return { ...found, problems, text: problems.map((f) => `${f.kind}: ${f.message}`) };
+}
+
+test('a thebibliography paper is ready, and a key it does not have is the one problem', async () => {
+  const clean = await verdict('Hand bib', {
+    'main.tex': doc('', `Cite \\cite{a} and \\cite{b}.\n${THEBIB}`),
+  });
+  expect(clean.text).toEqual([]);
+  expect(clean.ready).toBe(true);
+
+  const wrong = await verdict('Hand bib nokey', {
+    'main.tex': doc('', `Cite \\cite{a}, \\cite{b} and \\cite{nokey}.\n${THEBIB}`),
+  });
+  expect(wrong.ready).toBe(false);
+  expect(wrong.problems).toHaveLength(1);
+  expect(wrong.problems[0]).toMatchObject({ kind: 'citation', path: 'main.tex' });
+  expect(wrong.problems[0].message).toContain('nokey');
+}, 240_000);
+
+test('files that come with the TeX installation do not stop a paper; one that is not there does', async () => {
+  const ieee = await verdict('IEEE', {
+    'main.tex': doc(
+      '',
+      'Cite \\cite{k}.\n\\bibliographystyle{IEEEtran}\n\\bibliography{IEEEabrv,refs}',
+      'IEEEtran',
+    ),
+    'refs.bib': BIBK,
+  });
+  expect(ieee.text).toEqual([]);
+  expect(ieee.ready).toBe(true);
+  expect(ieee.findings).toContainEqual(
+    expect.objectContaining({
+      level: 'warning',
+      kind: 'file',
+      message: '"IEEEabrv" is not among the paper\'s files; LaTeX found it elsewhere.',
+    }),
+  );
+
+  const glyph = await verdict('Glyph', {
+    'main.tex': doc(
+      '\\usepackage{graphicx}\n\\input{glyphtounicode}\n\\pdfgentounicode=1',
+      'Hi \\includegraphics[width=3cm]{example-image}',
+    ),
+  });
+  expect(glyph.text).toEqual([]);
+  expect(glyph.ready).toBe(true);
+
+  const absent = await verdict('Absent', { 'main.tex': doc('', 'Hi \\input{nosuchfile}') });
+  expect(absent.ready).toBe(false);
+  expect(absent.text.join('\n')).toContain('nosuchfile');
+}, 240_000);
+
+test('a label made by a package or a macro does not stop a paper', async () => {
+  const lastpage = await verdict('Lastpage', {
+    'main.tex': doc('\\usepackage{lastpage}', 'Page 1 of \\pageref{LastPage}.'),
+  });
+  expect(lastpage.text).toEqual([]);
+  expect(lastpage.ready).toBe(true);
+
+  const macro = await verdict('Macro label', {
+    'main.tex': doc(
+      '\\newcommand{\\mk}[1]{\\label{fig:#1}}',
+      '\\section{A}\\mk{foo} See \\ref{fig:foo}.',
+    ),
+  });
+  expect(macro.text).toEqual([]);
+  expect(macro.ready).toBe(true);
+  expect(macro.findings).toContainEqual(
+    expect.objectContaining({
+      level: 'warning',
+      kind: 'label',
+      message: '\\ref{fig:foo} could not be found by reading the paper; LaTeX resolved it.',
+    }),
+  );
+
+  const sty = await verdict('Own sty', {
+    'main.tex': doc('\\usepackage{mymacros}', '\\section{A}\\anchor See \\ref{sty:a}.'),
+    'mymacros.sty': '\\ProvidesPackage{mymacros}\n\\newcommand{\\anchor}{\\label{sty:a}}\n',
+  });
+  expect(sty.text).toEqual([]);
+  expect(sty.ready).toBe(true);
+}, 240_000);
+
+test('a citation or reference TeX cannot resolve stops a paper, however it is made', async () => {
+  const old = await verdict('Old bib', {
+    'main.tex': doc(
+      '',
+      'Cite \\cite{onlyInOld}.\n\\bibliographystyle{plain}\n\\bibliography{refs}',
+    ),
+    'refs.bib': BIBK,
+    'old.bib': '@book{onlyInOld, author={O Ld}, title={Old}, year=1999, publisher={P}}\n',
+  });
+  expect(old.ready).toBe(false);
+  expect(old.problems).toHaveLength(1);
+  expect(old.problems[0]).toMatchObject({ kind: 'citation', path: 'main.tex', line: 4 });
+  expect(old.problems[0].message).toContain('onlyInOld');
+
+  const wrapper = await verdict('Wrapper', {
+    'main.tex': doc(
+      '\\newcommand{\\see}[1]{(see \\ref{#1})}',
+      '\\section{A}\\label{s:a} \\see{nolabel}.',
+    ),
+  });
+  expect(wrapper.ready).toBe(false);
+  expect(wrapper.problems).toHaveLength(1);
+  expect(wrapper.problems[0]).toMatchObject({ kind: 'label', path: 'main.tex', line: 4 });
+  expect(wrapper.problems[0].message).toContain('nolabel');
+}, 240_000);
+
+test('an overfull box or a font warning alone leaves a paper ready', async () => {
+  const warned = await verdict('Warned', {
+    'main.tex': doc(
+      '',
+      'Hi \\textbf{\\textsc{Small caps bold}} \\hbox to 5pt{Wideeeeeeeeeeeeeeeeeeeee word}.',
+    ),
+  });
+  expect(warned.text).toEqual([]);
+  expect(warned.ready).toBe(true);
+  expect(warned.findings.some((f) => f.level === 'warning' && f.kind === 'compiler')).toBe(true);
+}, 240_000);

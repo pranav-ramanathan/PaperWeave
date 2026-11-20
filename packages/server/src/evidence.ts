@@ -2,7 +2,7 @@
 // whether an entry's details are right (a DOI lookup), and whether the source supports a
 // particular claim the paper makes (a person's judgement, about one quoted claim).
 import { createHash } from 'node:crypto';
-import { type BibEntry, bibEntries, plainText } from '@paperweave/latex';
+import { type BibEntry, bibEntries, bibItems, plainText } from '@paperweave/latex';
 import type pg from 'pg';
 import { authorize, can } from './authz.ts';
 import type { BlobStore } from './blobs.ts';
@@ -69,6 +69,18 @@ async function entriesByKey(db: Db, store: BlobStore, projectId: string) {
   const out = new Map<string, BibEntry>();
   for (const file of await texFiles(db, store, projectId, false, '\\.bib$'))
     for (const e of bibEntries(file.text)) if (!out.has(e.key)) out.set(e.key, e);
+  // A hand-written thebibliography: its items are entries too, with the item's text for a title.
+  for (const file of await texFiles(db, store, projectId))
+    for (const i of bibItems(file.text))
+      if (!out.has(i.key))
+        out.set(i.key, {
+          key: i.key,
+          type: 'bibitem',
+          fields: { title: i.text },
+          at: i.at,
+          end: i.at,
+          keyAt: i.at,
+        });
   return out;
 }
 

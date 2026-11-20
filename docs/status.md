@@ -659,6 +659,11 @@ ordinary use. Ten ways of looking found them, and each is cheap to do again:
     page that said a member would become an editor, and one that left the wrong account with
     no way on.
 
+19. **Ask whether the paper is ready, of papers that are and papers that are not.** Found: a
+    hand-written bibliography, IEEE's own abbreviations and a label made by a package each
+    keeping a correct paper from ever being ready; a reference through a macro, and a key in a
+    `.bib` the paper does not name, called ready with ?? and [?] in the PDF.
+
 Tried the same way and nothing found: thirty connections typing into one file at once (kept
 as a test in `sync.sandbox.test`); 400 threads and 400 proposals on one file, on the server
 (both lists took about 20 ms; not kept); and each tool of the visual view worked slowly
@@ -1787,6 +1792,49 @@ second one.
   for another account.
 - **Not changed:** an invitation lasts fourteen days. A paper cannot change owner. Everyone on
   a paper sees the others' addresses.
+- **How it was made.** Planned by one agent, probed and written by others, checked here.
+
+## What "ready to send" is worth
+
+- **What was tried**, with a probe: papers that build cleanly and papers whose PDF shows ?? or
+  [?], each checked with "Check before submitting" after a fresh build, and the verdict read
+  against the PDF.
+
+| Case                                                                      | Before                                          | Now                                                    |
+| ------------------------------------------------------------------------- | ----------------------------------------------- | ------------------------------------------------------ |
+| A hand-written `thebibliography`, every key present                       | **every citation "a key no entry has"**         | ready; a missing key is the one problem                |
+| `\bibliography{IEEEabrv,refs}`, `\input{glyphtounicode}`, `example-image` | **"The paper has no file …"**, not ready        | a warning: not among the paper's files, LaTeX found it |
+| `\pageref{LastPage}`; a label made by a macro; a label in a `.sty`        | **"refers to a label the paper does not have"** | a warning: LaTeX resolved it                           |
+| `\see{nolabel}`, a macro wrapping `\ref`                                  | **ready**, with ?? in the PDF                   | a problem, from TeX's own warning, with its line       |
+| A key only in a `.bib` that `\bibliography` does not name                 | **ready**, with [?] in the PDF                  | a problem, the same way                                |
+| `\input{nosuchfile}`                                                      | a problem                                       | the same                                               |
+| biblatex `\parencite` and natbib `\citeauthor*` of missing keys           | problems                                        | the same, each once                                    |
+| `\hyperref[nolabel]`; a label given twice                                 | problems                                        | the same                                               |
+| A build older than the text; the ZIP and PDF                              | not ready; of one revision                      | the same                                               |
+| An overfull box or a font warning alone                                   | ready                                           | the same                                               |
+
+- **What was wrong.** The verdict rested on reading the source. What the reading could not
+  follow (a package's file, a macro's label, a hand-written bibliography) was called missing,
+  so a correct paper was never ready. What TeX could not resolve was only a warning in the
+  build, so a paper with ?? in its PDF could be.
+- **Now** (`packages/server/src/submit.ts`, `bibItems` in `packages/latex/src/bib.ts`): when the
+  newest build is of the paper as it stands and succeeded, TeX's per-key "undefined" and
+  "multiply defined" warnings are problems, once each beside what the reading found. A file,
+  label or citation the reading calls missing stays a problem only if TeX also complained of
+  it; otherwise it is a warning that says LaTeX found or resolved it. Without such a build the
+  reading's findings are problems, as before, and the build being out of date is one too.
+  Each `\bibitem` of a `thebibliography` is an entry of the paper's bibliography: offered by
+  the citation picker, listed on the paper's page (with no DOI to look up), and open to
+  evidence checks. The import report says a file it cannot find may come with the TeX
+  installation.
+- **Held by** five real-build service tests (`submit.sandbox.test`), four of which failed on
+  the old code and one that holds an overfull box still ready; unit tests of `bibItems`; a
+  service test of the entries; and a browser step in which a `thebibliography` paper is ready
+  and offers its downloads, which failed on the old code.
+- **Not changed:** the paper page's bibliography section still reports a key no `.bib` entry
+  or `\bibitem` has from the reading alone. A `\bibitem` in a file the root does not reach is
+  not in the bibliography, though evidence checks can still be recorded on it. The summary
+  line "There were undefined references" stays a warning, since a per-key line comes with it.
 - **How it was made.** Planned by one agent, probed and written by others, checked here.
 
 ## When an email cannot be sent
