@@ -1491,6 +1491,14 @@ second one.
   Still trying: it will be made once, so do not make it again.", then "That change has now
   been made." (`run` in `FileEditor.tsx`). The insert windows cannot be sent again while
   their answer is awaited (`Tools.tsx`).
+- **Found afterwards, by the browser tests on another change.** A window closed with Escape is
+  hidden, and the keyboard given back to the text, by the browser at once; the page puts the
+  caret back where it was when the window was asked for only when the window's close event
+  reaches it. On a busy machine the person had clicked elsewhere and typed a letter by then,
+  and the rest of their typing went back beside the insertion. The caret is now put back only
+  if the person has not pressed the mouse or a key in the text since the window was asked for
+  (`acted` in `apps/web/lib/visual.ts`). The test holds the close event back 400 ms, so it
+  failed on the old code every time (5 of 5).
 - **Held by** browser tests, each failed on the old code: `insert.spec` "an insertion slow to
   arrive leaves the caret where its person put it"; `tables.spec` "a cell slow to be changed
   does not take the keyboard back"; `recover.spec` "a change whose answer is late is made
