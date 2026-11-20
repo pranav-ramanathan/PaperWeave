@@ -205,7 +205,10 @@ async function renamePlan(
       const found = resolveVia(inc, dir, paths, via);
       if (found?.path !== from) continue;
       // Written without its extension before, and the extension has not changed: leave it off.
-      const bare = !inc.target.endsWith(ext(from)) && ext(from) === ext(to);
+      // TeX adds .sty, .cls and .bst itself, so a new name for one is written without it.
+      const bare = inc.ext
+        ? to.endsWith(inc.ext)
+        : !inc.target.endsWith(ext(from)) && ext(from) === ext(to);
       const newPath = bare ? to.slice(0, to.length - ext(to).length) : to;
       // Found through a \\graphicspath folder: say it as relative to that folder, if it is
       // still inside it. Otherwise relative to the root's folder, which always works.

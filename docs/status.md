@@ -1700,15 +1700,15 @@ second one.
   mentions in comments and `verbatim`), each paper built before and after; four of them through
   the pages.
 
-| Renamed                                                                           | Before                                                                                                             | Now                                                               |
-| --------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------ | ----------------------------------------------------------------- |
-| A section; a `.bib` in a list; a picture there as `.pdf` and `.png`               | the lines that name it follow; it builds                                                                           | the same                                                          |
-| The paper's own `.sty`, `.cls` or `.bst`; a listing; an included PDF; a data file | **renamed at once, nothing said; the build broke**                                                                 | the page says it sees no line naming it, and what to check, first |
-| A picture found through `\graphicspath{{figures/}}`                               | **not followed; the build broke**; called "not in the project" before any rename, and not shown in the visual view | followed; found; shown                                            |
-| The root file into a folder                                                       | **never built, nothing said why**                                                                                  | builds ("A paper whose root file is in a folder")                 |
-| A picture named `"my plot"`; `\input {a}`; `\input a`                             | **not followed; the build broke**                                                                                  | the same (below)                                                  |
-| A label used by `\ref`, `\cref` (lists, spaces, line breaks), `\ref*`             | followed; `sec:ab` untouched; labels in comments and listings untouched                                            | the same                                                          |
-| A label used by `\hyperref[…]`, `\fref`, `\Fref`, `\zcref`                        | **left behind; "up to date", with ?? in the PDF**                                                                  | followed; and a reference to nothing by `\hyperref` is listed     |
+| Renamed                                                                           | Before                                                                                                             | Now                                                           |
+| --------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------ | ------------------------------------------------------------- |
+| A section; a `.bib` in a list; a picture there as `.pdf` and `.png`               | the lines that name it follow; it builds                                                                           | the same                                                      |
+| The paper's own `.sty`, `.cls` or `.bst`; a listing; an included PDF; a data file | **renamed at once, nothing said; the build broke**                                                                 | the lines that name it follow, and it builds                  |
+| A picture found through `\graphicspath{{figures/}}`                               | **not followed; the build broke**; called "not in the project" before any rename, and not shown in the visual view | followed; found; shown                                        |
+| The root file into a folder                                                       | **never built, nothing said why**                                                                                  | builds ("A paper whose root file is in a folder")             |
+| A picture named `"my plot"`; `\input {a}`; `\input a`                             | **not followed; the build broke**                                                                                  | followed                                                      |
+| A label used by `\ref`, `\cref` (lists, spaces, line breaks), `\ref*`             | followed; `sec:ab` untouched; labels in comments and listings untouched                                            | the same                                                      |
+| A label used by `\hyperref[…]`, `\fref`, `\Fref`, `\zcref`                        | **left behind; "up to date", with ?? in the PDF**                                                                  | followed; and a reference to nothing by `\hyperref` is listed |
 
 - **What was wrong.** A rename that found no line went through at once: the page asked only when
   it had lines to show, and a file named in a way it does not read was renamed without a word.
@@ -1721,17 +1721,22 @@ second one.
   (`graphicsPaths`, `resolveVia` in `packages/latex/src/graph.ts`; `renamePlan`, `picture` in
   `packages/server/src/files.ts`). `\hyperref[…]`, `\fref`, `\Fref`, `\zcref` and `\zcpageref` are
   read as references, by the rename and by the paper's list of references.
+  The ways a paper names its own packages, class, bibliography style, listings, included PDFs,
+  SVGs and plotted or tabled data (`\usepackage`, `\documentclass`, `\bibliographystyle`,
+  `\lstinputlisting`, `\includepdf`, `\addplot table`, `\csvreader` and the like) are read too,
+  for renames only: a system package is not reported missing, and the build's order of files is
+  unchanged. A name in quotes, `\input {a}` and `\input a` are read. A rename no longer changes
+  lines inside `verbatim` or a listing, nor what follows `\\%` (`uncomment` in `graph.ts`). Each held by a unit test of the
+  form read, and a service test renaming a `.sty`, a listing and a data file, then building.
 - **Held by** unit tests (`graph.test.ts`, `labels.test.ts`), service tests (a picture renamed
   under `\graphicspath`, then built; a label renamed through each new form) and browser tests
   (the sentence shown before renaming a style file; a `\hyperref` to nothing listed), each failed
   on the old code.
-- **Not changed:** the ways of naming a file still not read: `\usepackage`, `\documentclass`,
-  `\bibliographystyle`, `\lstinputlisting`, `\includepdf`, the data of a plot, a name in quotes, and
-  `\input` with a space or without braces; what the paper's own `.sty` and `.cls` files name.
-  Lines inside `verbatim`, and after `\\%`, are changed with the rest. A label made by a command
-  of the paper's own with a parameter is not seen, so a reference to it is listed as to nothing,
-  and renaming another label to its name is not refused. The list of pictures offered for
-  insertion still names them from the root's folder, which builds.
+- **Not changed:** what the paper's own `.sty` and `.cls` files name in turn. A label made by a
+  command of the paper's own with a parameter is not seen, so a reference to it is listed as to
+  nothing, and renaming another label to its name is not refused. The list of pictures offered
+  for insertion still names them from the root's folder, which builds. The page's warning before
+  a rename that sees no line stays, for whatever is still not read.
 - **How it was made.** Planned by one agent, probed and written by others, checked here.
 
 ## When an email cannot be sent
