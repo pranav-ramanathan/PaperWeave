@@ -58,3 +58,13 @@ test('numbers are read from an .aux file as LaTeX wrote them', () => {
     'tab:x': { number: 'tab:x on input line 4', page: '4' },
   });
 });
+
+test('\\hyperref, \\fref, \\Fref and \\zcref name labels', () => {
+  const src =
+    '\\hyperref[sec:a]{the part} \\fref{f:a} \\Fref{f:b} \\zcref{z:a, z:b} \\hyperref{url}{}{}{x}';
+  const { refs } = labelIndex(src);
+  expect(refs.map((r) => `${r.command}:${r.key}`)).toEqual([
+    ...['hyperref:sec:a', 'fref:f:a', 'Fref:f:b', 'zcref:z:a', 'zcref:z:b'],
+  ]);
+  for (const r of refs) expect(src.slice(r.keyAt, r.keyAt + r.key.length)).toBe(r.key);
+});

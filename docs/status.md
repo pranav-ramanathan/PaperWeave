@@ -647,6 +647,12 @@ ordinary use. Ten ways of looking found them, and each is cheap to do again:
     built a different document; a thread on edited words coming back detached; a stale accept
     coming back fresh; who decided a proposal not carried.
 
+17. **Rename something, then look everywhere it was named.** Found: a paper whose root file is
+    in a folder never building; a file renamed at once, without a word, when the page saw no line
+    naming it, though a package, class, listing or data file was named another way; a picture
+    found through `\graphicspath` not followed; a label's `\hyperref`, `\fref` and `\zcref` left
+    behind, and the PDF's ?? not said.
+
 Tried the same way and nothing found: thirty connections typing into one file at once (kept
 as a test in `sync.sandbox.test`); 400 threads and 400 proposals on one file, on the server
 (both lists took about 20 ms; not kept); and each tool of the visual view worked slowly
@@ -1685,6 +1691,48 @@ second one.
   Each failed on the old code. The builds of papers whose root is at the top are unchanged.
 - **The convention**, for anyone writing a paper here: its paths are read from the folder of its
   root file, as when LaTeX is run in that folder.
+
+## Something renamed
+
+- **What was tried**, with a probe: files and labels renamed in a paper that names them in
+  every way it can (a class, a package and a bibliography style of its own, `\graphicspath`, a
+  listing, an included PDF, a table of data read by a plot, quoted and brace-less names, and
+  mentions in comments and `verbatim`), each paper built before and after; four of them through
+  the pages.
+
+| Renamed                                                                           | Before                                                                                                             | Now                                                               |
+| --------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------ | ----------------------------------------------------------------- |
+| A section; a `.bib` in a list; a picture there as `.pdf` and `.png`               | the lines that name it follow; it builds                                                                           | the same                                                          |
+| The paper's own `.sty`, `.cls` or `.bst`; a listing; an included PDF; a data file | **renamed at once, nothing said; the build broke**                                                                 | the page says it sees no line naming it, and what to check, first |
+| A picture found through `\graphicspath{{figures/}}`                               | **not followed; the build broke**; called "not in the project" before any rename, and not shown in the visual view | followed; found; shown                                            |
+| The root file into a folder                                                       | **never built, nothing said why**                                                                                  | builds ("A paper whose root file is in a folder")                 |
+| A picture named `"my plot"`; `\input {a}`; `\input a`                             | **not followed; the build broke**                                                                                  | the same (below)                                                  |
+| A label used by `\ref`, `\cref` (lists, spaces, line breaks), `\ref*`             | followed; `sec:ab` untouched; labels in comments and listings untouched                                            | the same                                                          |
+| A label used by `\hyperref[…]`, `\fref`, `\Fref`, `\zcref`                        | **left behind; "up to date", with ?? in the PDF**                                                                  | followed; and a reference to nothing by `\hyperref` is listed     |
+
+- **What was wrong.** A rename that found no line went through at once: the page asked only when
+  it had lines to show, and a file named in a way it does not read was renamed without a word.
+  The folders `\graphicspath` names were not looked in. Four ways of referring to a label were not
+  read, and the build pane's list of what shows as ?? did not know the warning hyperref gives.
+- **Now** every rename of a file shows what would change first, and when it sees no line naming
+  the file it says that a package, class, bibliography style, listing or data file can be named
+  in ways it does not read, and to check the paper still builds (`renameAction`, the rename
+  page). `\graphicspath` is read wherever pictures are found and named
+  (`graphicsPaths`, `resolveVia` in `packages/latex/src/graph.ts`; `renamePlan`, `picture` in
+  `packages/server/src/files.ts`). `\hyperref[…]`, `\fref`, `\Fref`, `\zcref` and `\zcpageref` are
+  read as references, by the rename and by the paper's list of references.
+- **Held by** unit tests (`graph.test.ts`, `labels.test.ts`), service tests (a picture renamed
+  under `\graphicspath`, then built; a label renamed through each new form) and browser tests
+  (the sentence shown before renaming a style file; a `\hyperref` to nothing listed), each failed
+  on the old code.
+- **Not changed:** the ways of naming a file still not read: `\usepackage`, `\documentclass`,
+  `\bibliographystyle`, `\lstinputlisting`, `\includepdf`, the data of a plot, a name in quotes, and
+  `\input` with a space or without braces; what the paper's own `.sty` and `.cls` files name.
+  Lines inside `verbatim`, and after `\\%`, are changed with the rest. A label made by a command
+  of the paper's own with a parameter is not seen, so a reference to it is listed as to nothing,
+  and renaming another label to its name is not refused. The list of pictures offered for
+  insertion still names them from the root's folder, which builds.
+- **How it was made.** Planned by one agent, probed and written by others, checked here.
 
 ## When an email cannot be sent
 

@@ -1,5 +1,9 @@
 // Needs the services in infra/compose.yaml. Run: pnpm test:sandbox
+import { mkdirSync, mkdtempSync, writeFileSync } from 'node:fs';
+import { tmpdir } from 'node:os';
+import { dirname, join } from 'node:path';
 import { afterAll, beforeAll, expect, test } from 'vitest';
+import { compile } from '../../../apps/workers/src/compile.ts';
 import { LIMITS, readZip, writeZip } from './archive.ts';
 import { blobStore } from './blobs.ts';
 import {
@@ -365,4 +369,64 @@ test('a picture is served as LaTeX would find it, and only if a browser can show
     { path: 'photo.JPG', target: 'photo.JPG' },
   ]);
   expect(await code(pictures(t.pool, outsider.id, project.id))).toBe('not_found');
+});
+
+const GP = [
+  '\\documentclass{article}',
+  '\\usepackage{graphicx}',
+  '\\graphicspath{{figures/}}',
+  '\\begin{document}',
+  '\\includegraphics[width=1cm]{plot}',
+  '\\end{document}',
+  '',
+].join('\n');
+
+async function buildsFine(project: string) {
+  const dir = mkdtempSync(join(tmpdir(), 'paperweave-gp-'));
+  for (const e of (await readZip(await exportZip(t.pool, store, owner.id, project))).entries) {
+    mkdirSync(dirname(join(dir, e.path)), { recursive: true });
+    writeFileSync(join(dir, e.path), e.bytes);
+  }
+  const r = await compile(dir, 'main.tex', join(dir, '__out'), 120);
+  return r.ok ? 'ok' : r.diagnostics.filter((d) => d.severity === 'error').map((d) => d.message);
+}
+
+test('a picture under \\graphicspath is found, and renaming it keeps the paper building', async () => {
+  const zip = await writeZip([
+    { path: 'main.tex', bytes: Buffer.from(GP) },
+    { path: 'figures/plot.png', bytes: PNG },
+    { path: 'styles/mine.sty', bytes: Buffer.from('\\ProvidesPackage{mine}\n') },
+  ]);
+  const [project] = await importZip(t.pool, store, owner.id, zip, 'Graphicspath');
+  const ids = Object.fromEntries(
+    (await listFiles(t.pool, owner.id, project.id)).map((f) => [f.path, f.id]),
+  );
+  expect((await picture(t.pool, store, owner.id, project.id, 'plot')).path).toBe(
+    'figures/plot.png',
+  );
+  expect(await buildsFine(project.id)).toBe('ok');
+
+  // A package is named by \\usepackage, which a rename does not read: no line, and no surprise.
+  const sty = await proposeFileRename(
+    t.pool,
+    store,
+    owner.id,
+    project.id,
+    ids['styles/mine.sty'],
+    'mine.sty',
+  );
+  expect(sty.changes).toEqual([]);
+
+  // Still in the folder: the name is relative to it.
+  const plot = ids['figures/plot.png'];
+  const move = async (to: string) => {
+    const proposal = await proposeFileRename(t.pool, store, owner.id, project.id, plot, to);
+    await renameFileAndReferences(t.pool, store, owner.id, project.id, plot, to, proposal.digest);
+    return proposal.changes.map((c) => c.after);
+  };
+  expect(await move('figures/latency.png')).toEqual(['\\includegraphics[width=1cm]{latency}']);
+  expect(await buildsFine(project.id)).toBe('ok');
+  // Out of the folder: relative to the root's folder instead.
+  expect(await move('img/plot.png')).toEqual(['\\includegraphics[width=1cm]{img/plot}']);
+  expect(await buildsFine(project.id)).toBe('ok');
 });

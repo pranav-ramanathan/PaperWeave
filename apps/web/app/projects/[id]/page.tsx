@@ -248,7 +248,7 @@ export default async function Project({
           Renamed to <code>{query.moved}</code>
           {query.places && query.places !== '0'
             ? `, and updated ${query.places} ${query.places === '1' ? 'place that names' : 'places that name'} it.`
-            : '.'}
+            : ', and no line needed changing.'}
         </p>
       )}
       {query.relabelled && (

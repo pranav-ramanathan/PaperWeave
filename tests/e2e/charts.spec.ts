@@ -111,8 +111,17 @@ test('a chart is drawn from approved data and is out of date once the data chang
   await expect(page.locator('main [role=alert]')).toHaveText('The description is too long.');
   // The page comes back without what was typed.
   await page.getByLabel(/^Caption/).fill('Latency over four days.');
-  await page.getByRole('button', { name: 'Draw it again' }).click();
-  await expect(page.getByText('Waiting to be drawn…')).toHaveCount(0, { timeout: 30_000 });
+  // Drawn again, as the chart's page says once it is asked afresh. Looked at straight after the
+  // click, the page could still be the one from before it, which was not waiting: the test then
+  // went on with the chart still to be drawn, and found it so further on.
+  await Promise.all([
+    page.waitForResponse((r) => r.request().method() === 'POST' && r.url().startsWith(chart)),
+    page.getByRole('button', { name: 'Draw it again' }).click(),
+  ]);
+  await expect(async () => {
+    await page.reload();
+    await expect(page.getByText('Waiting to be drawn…')).toHaveCount(0, { timeout: 1000 });
+  }).toPass({ timeout: 60_000 });
   const made = page.getByRole('listitem').filter({ hasText: 'from data/latency.csv version' });
   await expect(made).toHaveCount(1);
   await expect(made).toContainText('1 row with no value left out (no value: NA)');

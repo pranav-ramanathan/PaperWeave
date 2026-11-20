@@ -133,11 +133,9 @@ export async function renameAction(projectId: string, fileId: string, form: Form
   const user = await requireUser(back);
   await act(back, async () => {
     const path = text(form, 'path');
-    const proposal = await proposeFileRename(db(), blobs(), user.id, projectId, fileId, path);
-    // Lines in other files name this one: show what would change before anything does.
-    if (proposal.changes.length)
-      return `${back}/files/${fileId}/rename?to=${encodeURIComponent(path)}`;
-    await renameFileAndReferences(db(), blobs(), user.id, projectId, fileId, path, proposal.digest);
+    // Always look first: a file can be named in ways this app does not read.
+    await proposeFileRename(db(), blobs(), user.id, projectId, fileId, path);
+    return `${back}/files/${fileId}/rename?to=${encodeURIComponent(path)}`;
   });
 }
 

@@ -9,6 +9,7 @@ export type RefUse = { key: string; command: string; at: number; end: number; ke
 const REFS = new Set([
   ...['ref', 'eqref', 'pageref', 'autoref', 'nameref', 'vref', 'Vref', 'vpageref', 'subref'],
   ...['cref', 'Cref', 'cpageref', 'Cpageref', 'namecref', 'crefrange', 'Crefrange', 'labelcref'],
+  ...['fref', 'Fref', 'zcref', 'zcpageref', 'hyperref'],
 ]);
 const CITES = new Set([
   ...['cite', 'citep', 'citet', 'citealt', 'citealp', 'citeauthor', 'citeyear', 'citeyearpar'],
@@ -55,6 +56,24 @@ function keyUses(src: string, wanted: (command: string) => boolean): Use[] {
     }
     if (!wanted(name[1])) {
       i = p - 1;
+      continue;
+    }
+    if (name[1] === 'hyperref') {
+      // \\hyperref[key]{text}: the key is the optional argument. \\hyperref{url}{..}{..}{text} names none.
+      while (src[p] === ' ') p++;
+      const close = src[p] === '[' ? src.indexOf(']', p) : -1;
+      if (close > 0) {
+        const key = src.slice(p + 1, close).trim();
+        if (key && !/[#\\{,]/.test(key))
+          out.push({
+            key,
+            command: 'hyperref',
+            at: i,
+            end: close + 1,
+            keyAt: p + 1 + src.slice(p + 1).indexOf(key),
+          });
+      }
+      i = (close > 0 ? close : p) - 1;
       continue;
     }
     // Optional arguments come first: \cref[x]{..}, \citep[see][p.~3]{..}.

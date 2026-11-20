@@ -236,3 +236,44 @@ test('a file larger than the proxy keeps can be added', async ({ browser }) => {
   const sha = (b: Uint8Array) => createHash('sha256').update(b).digest('hex');
   expect(sha(back.bytes)).toBe(sha(bytes));
 });
+
+test('renaming a file that no line names says so first, and changes nothing until confirmed', async ({
+  browser,
+}) => {
+  test.setTimeout(120_000);
+  const owner = await person(browser, 'files-rename');
+  const page = owner.page;
+  await page.goto('/sign-in');
+  await signIn(page, owner.email);
+  await page.getByLabel('Name of a new paper').fill(`Rename ${run}`);
+  await page.getByRole('button', { name: 'Create paper' }).click();
+  await page.waitForURL(/\/projects\/[0-9a-f-]{36}$/);
+  await page.getByLabel('Name, with folders if you like').fill('paper.tex');
+  await page.getByRole('button', { name: 'Add file' }).click();
+  await expect(page.getByRole('status')).toHaveText('Added paper.tex.');
+  await page.getByLabel('Name, with folders if you like').fill('mystyle.sty');
+  await page.getByRole('button', { name: 'Add file' }).click();
+  await expect(page.getByRole('status')).toHaveText('Added mystyle.sty.');
+
+  const row = page.getByRole('row', { name: /mystyle\.sty/ });
+  await row.locator('summary').click();
+  await row.getByLabel('New name for mystyle.sty').fill('styles/mystyle.sty');
+  await row.getByRole('button', { name: 'Rename' }).click();
+  await expect(page.getByText(/No line that this page can see names/)).toBeVisible();
+  await expect(page.getByText(/change that line yourself/)).toBeVisible();
+  // Nothing has changed yet: the file keeps its name.
+  await page.getByRole('link', { name: 'Back to the paper' }).click();
+  await expect(page.getByRole('row', { name: /^mystyle\.sty/ })).toBeVisible();
+  await expect(page.getByRole('row', { name: /styles\/mystyle\.sty/ })).toHaveCount(0);
+
+  // Confirmed, it is renamed, and the page says no line changed.
+  const again = page.getByRole('row', { name: /mystyle\.sty/ });
+  await again.locator('summary').click();
+  await again.getByLabel('New name for mystyle.sty').fill('styles/mystyle.sty');
+  await again.getByRole('button', { name: 'Rename' }).click();
+  await page.getByRole('button', { name: 'Rename', exact: true }).click();
+  await expect(page.getByRole('status')).toHaveText(
+    'Renamed to styles/mystyle.sty, and no line needed changing.',
+  );
+  await expect(page.getByRole('row', { name: /styles\/mystyle\.sty/ })).toBeVisible();
+});

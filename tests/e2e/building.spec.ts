@@ -339,3 +339,30 @@ test('a paper whose root file is in a folder builds', async ({ browser }) => {
   await expect(buildStatus(page)).toHaveText('The PDF is up to date.', { timeout: 60_000 });
   await expect(build(page).getByRole('group', { name: /^Page 1 of/ })).toBeVisible();
 });
+
+test('a \\hyperref to nothing is listed on a build that worked', async ({ browser }) => {
+  test.setTimeout(180_000);
+  const owner = await person(browser, 'build-hyper');
+  await owner.page.goto('/sign-in');
+  await signIn(owner.page, owner.email);
+  const zip = join(mkdtempSync(join(tmpdir(), 'paperweave-e2e-')), `Hyper ${run}.zip`);
+  writeFileSync(
+    zip,
+    await writeZip([
+      {
+        path: 'main.tex',
+        bytes: Buffer.from(
+          '\\documentclass{article}\n\\usepackage{hyperref}\n\\begin{document}\nSee \\hyperref[nolabel]{there}.\n\\end{document}\n',
+        ),
+      },
+    ]),
+  );
+  await owner.page.getByLabel('Or import a ZIP of a LaTeX project').setInputFiles(zip);
+  await owner.page.getByRole('button', { name: 'Import ZIP' }).click();
+  await owner.page.getByRole('link', { name: 'main.tex', exact: true }).click();
+  await showSource(owner.page);
+  await expect(buildStatus(owner.page)).toHaveText('The PDF is up to date.', { timeout: 60_000 });
+  await expect(build(owner.page).getByRole('list', { name: 'Build warnings' })).toContainText(
+    /main\.tex:\d+ Hyper reference `nolabel' on page \d+ undefined/,
+  );
+});

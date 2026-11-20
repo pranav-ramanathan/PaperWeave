@@ -1,5 +1,5 @@
 // Adding and removing a paper's files, and choosing its root.
-import { decodeFile, includes, resolveInclude, rootDir } from '@paperweave/latex';
+import { decodeFile, graphicsPaths, includes, norm, resolveVia, rootDir } from '@paperweave/latex';
 import type pg from 'pg';
 import { checkPath, type Limits, LIMITS } from './archive.ts';
 import { authorize } from './authz.ts';
@@ -194,16 +194,26 @@ async function renamePlan(
   if (!from) throw new AppError('not_found', 'No such file.');
   const paths = new Set<string>(all.map((f) => f.path));
   // TeX resolves every path against the root file's directory.
-  const dir = rootDir(files.find((f) => f.root)?.path ?? '');
+  const rootFile = files.find((f) => f.root);
+  const dir = rootDir(rootFile?.path ?? '');
+  const via = graphicsPaths(rootFile?.text ?? '');
   const ext = (path: string) => /\.[^./]+$/.exec(path)?.[0] ?? '';
   const splices = new Map<string, Splice[]>();
   for (const file of files) {
     const hits: Splice[] = [];
     for (const inc of includes(file.text)) {
-      if (resolveInclude(inc, dir, paths) !== from) continue;
+      const found = resolveVia(inc, dir, paths, via);
+      if (found?.path !== from) continue;
       // Written without its extension before, and the extension has not changed: leave it off.
       const bare = !inc.target.endsWith(ext(from)) && ext(from) === ext(to);
-      const insert = relativeTo(dir, bare ? to.slice(0, to.length - ext(to).length) : to);
+      const newPath = bare ? to.slice(0, to.length - ext(to).length) : to;
+      // Found through a \\graphicspath folder: say it as relative to that folder, if it is
+      // still inside it. Otherwise relative to the root's folder, which always works.
+      const folder = dir + found.via;
+      const insert =
+        found.via && newPath.startsWith(norm(folder) + '/')
+          ? newPath.slice(norm(folder).length + 1)
+          : relativeTo(dir, newPath);
       hits.push({ at: inc.targetAt, length: inc.target.length, insert });
     }
     if (hits.length) splices.set(file.id, hits);
@@ -298,11 +308,13 @@ export async function picture(
     [projectId],
   );
   const dir = rootDir(rows.find((f) => f.root)?.path ?? '');
-  const path = resolveInclude(
+  const rootFile = (await texFiles(db, store, projectId)).find((f) => f.root);
+  const path = resolveVia(
     { kind: 'graphics', target, dynamic: /[\\#]/.test(target), at: 0, targetAt: 0 },
     dir,
     new Set<string>(rows.map((f) => f.path)),
-  );
+    graphicsPaths(rootFile?.text ?? ''),
+  )?.path;
   // A PDF cannot be shown as it is. A drawn chart has a PNG of the same name beside it: that is
   // shown in its place.
   const twin = path?.replace(/\.pdf$/i, '.png');
