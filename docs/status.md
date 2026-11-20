@@ -695,8 +695,9 @@ ordinary use. Ten ways of looking found them, and each is cheap to do again:
 
 25. **Change a claim the way a reviewer would, and see whether the owner is warned.** Found: a
     one-word proposal judged on that word alone, a swapped comparison read as the same claim,
-    plain opposites not known, and rewordings flagged though nothing changed. Formulas and
-    units in macros are the next change.
+    plain opposites not known, and rewordings flagged though nothing changed; then formulas,
+    units in `\SI` and `\qty`, names opening a sentence and number words past twelve not
+    read at all.
 
 Tried the same way and nothing found: thirty connections typing into one file at once (kept
 as a test in `sync.sandbox.test`); 400 threads and 400 proposals on one file, on the server
@@ -2105,18 +2106,18 @@ second one.
   references, scope, and rewordings that change nothing. And through the product: a reviewer's
   proposal on one word, and on a swapped comparison.
 
-| Kind of rewrite                                                                       | Missed before   | Missed now              |
-| ------------------------------------------------------------------------------------- | --------------- | ----------------------- |
-| Order: "A outperforms B" → "B outperforms A", "from 3 to 5" → "from 5 to 3"           | **7 of 7**      | none                    |
-| Opposites: high/low, stable/unstable, before/after and the like                       | **12 of 18**    | none                    |
-| A change on the line before a `%` comment                                             | **1**           | none                    |
-| Units in `\SI` and `\qty`, megabytes → gigabytes                                      | 3 of 7          | the same (next change)  |
-| A name opening a sentence; a lower-case tool name                                     | 3 of 5          | the same (next change)  |
-| Formulas: `\max`→`\min`, `+`→`-`, `\alpha`→`\beta`                                    | 12 of 13        | the same (next change)  |
-| Number words past twelve; `\hyperref[…]` keys                                         | 3               | the same (next change)  |
-| A limiting phrase removed ("on synthetic data"); "a few" → "few"                      | 4               | 3, written down as such |
-| Rewordings flagged though nothing changed (`1\,000`, `.5`, "percent", "demonstrates") | **4**           | none                    |
-| A reviewer's proposal of one word, "high" → "low", in the product                     | **not flagged** | flagged                 |
+| Kind of rewrite                                                                       | Missed before   | Missed now                |
+| ------------------------------------------------------------------------------------- | --------------- | ------------------------- |
+| Order: "A outperforms B" → "B outperforms A", "from 3 to 5" → "from 5 to 3"           | **7 of 7**      | none                      |
+| Opposites: high/low, stable/unstable, before/after and the like                       | **12 of 18**    | none                      |
+| A change on the line before a `%` comment                                             | **1**           | none                      |
+| Units in `\SI` and `\qty`, megabytes → gigabytes                                      | 3 of 7          | none                      |
+| A name opening a sentence; a lower-case tool name                                     | 3 of 5          | 1: a lower-case tool name |
+| Formulas: `\max`→`\min`, `+`→`-`, `\alpha`→`\beta`                                    | 12 of 13        | none                      |
+| Number words past twelve; `\hyperref[…]` keys                                         | 3               | none                      |
+| A limiting phrase removed ("on synthetic data"); "a few" → "few"                      | 4               | 3, written down as such   |
+| Rewordings flagged though nothing changed (`1\,000`, `.5`, "percent", "demonstrates") | **4**           | none                      |
+| A reviewer's proposal of one word, "high" → "low", in the product                     | **not flagged** | flagged                   |
 
 - **What was wrong.** The check was given only the words a person selected and what they put
   instead, so one word against one word had almost nothing to compare. It compared what was
@@ -2135,10 +2136,16 @@ second one.
   one-word proposal in its sentence, and a browser test of the owner seeing the warning. One
   older assertion, that "A and B took 3 ms and 4 ms" with the numbers swapped is the same claim,
   now expects a flag: which took which is the claim.
-- **Not changed:** formulas, units written in `\SI` or `\qty`, names that open a sentence,
-  number words past twelve and `\hyperref` keys wait for the next change. A limiting phrase
-  removed is not seen by rules of this kind. The set is still written by hand, not taken from
-  real manuscripts.
+- **Then** (rules `claims-3`): operators that carry direction in a formula (`\max`, `\min`,
+  `\sup`, `\inf`) and its signs (`+`, `-`, `\times`, `\cdot`, `/`) are compared, and Greek
+  letters and one-letter subscripts are names. Units are read from `\SI`, `\qty`, `\si` and
+  `\unit`, and written out with their prefixes ("milliseconds" is `ms`). A name opening a
+  sentence counts when the other version does not have it and it is not a common opening word.
+  Number words to the millions, and `\hyperref`'s key, are read. Of the 69 probe pairs, 4 are
+  now missed and none flags a rewording.
+- **Not changed:** a lower-case tool name (`pdflatex` → `xelatex`), and a limiting phrase removed
+  ("on synthetic data"; "a few" → "few"), are not seen by rules of this kind; they are in the set,
+  marked so. The set is still written by hand, not taken from real manuscripts.
 - **How it was made.** Planned by one agent, the order rule prototyped by it against the set;
   probed and written by others, checked here.
 

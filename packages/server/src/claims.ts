@@ -4,7 +4,7 @@
 // A difference in any of them is flagged, so that no edit changes a claim without saying so.
 // These are rules over text, not a model: they err on the side of flagging.
 
-export const CLAIM_RULES = 'claims-2';
+export const CLAIM_RULES = 'claims-3';
 export type ClaimChange = {
   kind:
     | 'number'
@@ -31,10 +31,44 @@ const UNITS = new Set(
     fold times x × pp point points samples participants subjects patients users nodes writers
     replicas runs trials edits requests`),
 );
+/** Spelled-out prefix and base units, and the symbols they are short for. */
+const PREFIX: Record<string, string> = {
+  milli: 'm',
+  micro: 'µ',
+  nano: 'n',
+  kilo: 'k',
+  mega: 'M',
+  giga: 'G',
+};
+const BASE: Record<string, string> = {
+  second: 's',
+  byte: 'b',
+  metre: 'm',
+  meter: 'm',
+  gram: 'g',
+  hertz: 'hz',
+  watt: 'w',
+  volt: 'v',
+};
+/** "megabytes" is "mb", "milliseconds" is "ms", "kilometres" is "km"; "Ms" stays apart from "ms". */
+const symbol = (prefix: string, base: string) =>
+  PREFIX[prefix] && BASE[base]
+    ? (BASE[base] === 'b' || BASE[base] === 'hz' ? PREFIX[prefix].toLowerCase() : PREFIX[prefix]) +
+      BASE[base]
+    : undefined;
+const spelled = (word: string) => {
+  const m = /^(milli|micro|nano|kilo|mega|giga)([a-z]+?)(?:s)?$/.exec(word);
+  return m && (symbol(m[1], m[2]) ?? symbol(m[1], `${m[2]}s`));
+};
+for (const p of Object.keys(PREFIX))
+  for (const b of Object.keys(BASE))
+    for (const plural of b === 'hertz' ? [''] : ['', 's']) UNITS.add(`${p}${b}${plural}`);
+
 const NUMBER_WORDS = new Set(
   words(`zero one two three four five six seven eight nine ten eleven twelve twenty thirty forty
     fifty sixty seventy eighty ninety hundred thousand million billion half third quarter double
-    twice thrice triple once dozen first second`),
+    twice thrice triple once dozen first second thirteen fourteen fifteen sixteen seventeen eighteen
+    nineteen dozens hundreds thousands millions doubled tripled`),
 );
 const NEGATION = new Set(
   words(`not no never none neither nor without cannot fail fails failed lack lacks lacked absent
@@ -92,6 +126,39 @@ const SIGNIFICANCE = new Set(
     meaningful robust`),
 );
 
+/** Capitalised only because a sentence starts with them: not taken for names. */
+const OPENER_STOP = new Set(
+  words(`the this these those that we our in it its however here for as when while each all a an on
+    at by to with from of if then thus both some most such table figure section`).map((w) =>
+    w.toLowerCase(),
+  ),
+);
+const GREEK_RE = new RegExp(
+  String.raw`\\(?:(?:var)?(?:alpha|beta|gamma|delta|epsilon|zeta|eta|theta|iota|kappa|lambda|mu|nu|xi|pi|rho|sigma|tau|upsilon|phi|chi|psi|omega)|Gamma|Delta|Theta|Lambda|Xi|Pi|Sigma|Upsilon|Phi|Psi|Omega)(?![A-Za-z])`,
+  'g',
+);
+
+/** The insides of the maths in a text: `$…$`, `\(…\)`, `\[…\]` and the equation-like environments. */
+function mathParts(text: string): string[] {
+  const parts: string[] = [];
+  let rest = text.replace(/\\\$/g, '  ');
+  const found =
+    (group: number) =>
+    (...m: string[]) => {
+      parts.push(m[group]);
+      return ' ';
+    };
+  rest = rest.replace(
+    /\\begin\{(equation|align|alignat|gather|multline|flalign|eqnarray|displaymath|math|split)\*?\}([\s\S]*?)\\end\{\1\*?\}/g,
+    found(2),
+  );
+  rest = rest.replace(/\$\$([\s\S]*?)\$\$/g, found(1));
+  rest = rest.replace(/\$([^$]+)\$/g, found(1));
+  rest = rest.replace(/(?<!\\)\\\(([\s\S]*?)\\\)/g, found(1));
+  rest.replace(/(?<!\\)\\\[([\s\S]*?)\\\]/g, found(1));
+  return parts;
+}
+
 /** LaTeX that changes how text looks, not what it says, taken off. */
 const plain = (text: string) =>
   text
@@ -131,10 +198,11 @@ const BE = new Set(words('is are was were be been being'));
  * `mask`, the numbers themselves are left out: they are reported as numbers already.
  */
 function bound(source: string, mask = false): string[] {
-  const text = plain(source).replace(
-    /\\(\w*cite\w*|\w*ref|label)\*?(?:\[[^\]]*\])*\{[^}]*\}/g,
-    ' ',
-  );
+  const text = plain(source)
+    .replace(/\\(\w*cite\w*|\w*ref|label)\*?(?:\[[^\]]*\])*\{[^}]*\}/g, ' ')
+    // \SI{40}{\ms} is 40 and a unit, as "40 ms" is.
+    .replace(/\\(SI|qty)\*?(?:\[[^\]]*\])?\{([^}]*)\}\{[^}]*\}/g, ' $2 ')
+    .replace(/\\(si|unit)\*?(?:\[[^\]]*\])?\{[^}]*\}/g, ' ');
   const toks = [
     ...text.matchAll(
       new RegExp(
@@ -178,6 +246,20 @@ function bound(source: string, mask = false): string[] {
   return out.sort();
 }
 
+const CLAIM_WORDS = [
+  UNITS,
+  NUMBER_WORDS,
+  NEGATION,
+  UP,
+  DOWN,
+  HEDGE,
+  BOOST,
+  CAUSE,
+  ASSOCIATE,
+  SCOPE,
+  NOVELTY,
+  SIGNIFICANCE,
+];
 const WORD = /[\p{L}][\p{L}'’-]*/gu;
 /** "unstable" negates "stable" only if "stable" is a word in the passage, in either version. */
 const negatedBy = (w: string, vocabulary: Set<string>) => {
@@ -200,29 +282,76 @@ function facts(source: string, vocabulary: Set<string>) {
     citation: [],
     name: [],
   };
+  /** Operators in formulas, as a list of their own: reported as `direction`. */
+  const operators: string[] = [];
+  /** Every word, lower-cased. */
+  const seen = new Set<string>();
   /** Words with a capital because a sentence starts with them. They may be names all the same. */
   const openers: string[] = [];
   // What is cited and what is referred to: by key, wherever it stands.
-  for (const m of text.matchAll(/\\(\w*cite\w*|\w*ref)\*?(?:\[[^\]]*\])*\{([^}]*)\}/g))
+  for (const m of text.matchAll(
+    /\\(\w*cite\w*|(?!hyperref\b)\w*ref)\*?(?:\[[^\]]*\])*\{([^}]*)\}/g,
+  ))
     for (const key of m[2].split(',')) out.citation.push(`${m[1]}:${key.trim()}`);
-  const prose = text.replace(/\\(\w*cite\w*|\w*ref|label)\*?(?:\[[^\]]*\])*\{[^}]*\}/g, ' ');
+  // \hyperref[key]{words}: the key is what is referred to.
+  for (const m of text.matchAll(/\\hyperref\*?\[([^\]]*)\]/g))
+    out.citation.push(`ref:${m[1].trim()}`);
+  let prose = text.replace(/\\(\w*cite\w*|\w*ref|label)\*?(?:\[[^\]]*\])*\{[^}]*\}/g, ' ');
+  // The unit of \SI{40}{\ms} is read as unit words; its value stays in the text.
+  prose = prose.replace(
+    /\\(SI|qty|si|unit)\*?(?:\[[^\]]*\])?\{([^}]*)\}(?:\{([^}]*)\})?/g,
+    (_, cmd: string, first: string, second?: string) => {
+      const value = cmd === 'SI' || cmd === 'qty';
+      let prefix = '';
+      for (const t of (value ? (second ?? '') : first).matchAll(/\\?([A-Za-zµ]+)/g)) {
+        const w = t[1].toLowerCase();
+        if (PREFIX[w]) prefix = w;
+        else if (prefix && BASE[w]) {
+          out.unit.push(symbol(prefix, w) as string);
+          prefix = '';
+        } else {
+          if (prefix) out.unit.push(prefix);
+          prefix = '';
+          out.unit.push(BASE[w] && !UNITS.has(w) ? BASE[w] : w);
+        }
+      }
+      if (prefix) out.unit.push(prefix);
+      return value ? ` ${first} ` : ' ';
+    },
+  );
   // Numbers as written, with the unit that follows one. A percent is a percent however written.
   for (const m of prose.matchAll(
     new RegExp(String.raw`(?<![\w.])(${NUMBER}(?:[eE][-+]?\d+)?)\s*(%|[A-Za-zµ×]+)?`, 'g'),
   )) {
     out.number.push(numeral(m[1]));
     const unit = m[2]?.toLowerCase();
-    if (unit && UNITS.has(unit)) out.unit.push(unit === 'percent' ? '%' : unit);
+    if (unit && UNITS.has(unit))
+      out.unit.push(
+        unit === 'percent' ? '%' : (spelled(unit) ?? unit.replace(/^(\w+)metre/, '$1meter')),
+      );
   }
   // Comparisons and bounds in formulas and prose: which way they point is part of the claim.
   for (const m of prose.matchAll(/\\(leq?|geq?|ll|gg|neq?|approx|sim)\b|[<>≤≥≠≈]|!=|<=|>=/g))
     out.direction.push(m[0]);
+  // Formulas: which way an extremum goes, which Greek letters and subscripts, which operators.
+  for (const m of prose.matchAll(/(\\arg\s*)?\\(max|min|sup|inf)(?![A-Za-z])/g))
+    out.direction.push(`${m[1] ? '\\arg' : ''}\\${m[2]}`);
+  for (const m of prose.matchAll(GREEK_RE)) out.name.push(m[0]);
+  for (const part of mathParts(prose)) {
+    for (const m of part.matchAll(
+      /((?<![A-Za-z\\])[A-Za-z]|\\(?!(?:max|min|sup|inf|lim|log|ln|sum|prod|int)(?![A-Za-z]))[A-Za-z]+)_\{?([A-Za-z])\}?(?![A-Za-z])/g,
+    ))
+      out.name.push(`${m[1]}_${m[2]}`);
+    for (const m of part.matchAll(/\\(?:times|cdot)(?![A-Za-z])|[+\-−/]/g))
+      operators.push(m[0].replace('−', '-'));
+  }
   const letters = prose.replace(/\\[a-zA-Z]+\*?/g, (m) => ' '.repeat(m.length));
   let first = true;
   let before: string | undefined;
   for (const m of letters.matchAll(/[\p{L}][\p{L}'’-]*/gu)) {
     const raw = m[0];
     const w = raw.toLowerCase().replace(/’/g, "'");
+    seen.add(w);
     if (NUMBER_WORDS.has(w)) out.number.push(w);
     if (NEGATION.has(w) || w.endsWith("n't") || w.startsWith('non-') || negatedBy(w, vocabulary))
       out.negation.push(w);
@@ -244,7 +373,7 @@ function facts(source: string, vocabulary: Set<string>) {
       out.name.push(raw);
     else if (/^\p{Lu}/u.test(raw)) openers.push(raw);
   }
-  return { ...out, openers, bound: bound(source) };
+  return { ...out, openers, operators, seen, bound: bound(source) };
 }
 
 /** The same things, however often and in whatever order. */
@@ -262,12 +391,24 @@ export function claimChanges(before: string, after: string): ClaimChange[] {
     ),
   );
   const [
-    { openers: wasOpeners, bound: wasBound, ...was },
-    { openers: nowOpeners, bound: nowBound, ...now },
+    { openers: wasOpeners, operators: wasOps, seen: wasSeen, bound: wasBound, ...was },
+    { openers: nowOpeners, operators: nowOps, seen: nowSeen, bound: nowBound, ...now },
   ] = [facts(before, vocabulary), facts(after, vocabulary)];
   // A word that has moved to the start of a sentence, or away from it, is the same word.
   was.name = was.name.filter((n) => !nowOpeners.includes(n));
   now.name = now.name.filter((n) => !wasOpeners.includes(n));
+  // A sentence opener that is nowhere in the other version is a name that was swapped out.
+  const gone = (opener: string, other: Set<string>) => {
+    const w = opener.toLowerCase();
+    return (
+      !OPENER_STOP.has(w) &&
+      !CLAIM_WORDS.some((set) => set.has(w)) &&
+      !other.has(w) &&
+      !(w.includes('-') && w.split('-').every((part) => other.has(part)))
+    );
+  };
+  was.name.push(...wasOpeners.filter((o) => gone(o, nowSeen)));
+  now.name.push(...nowOpeners.filter((o) => gone(o, wasSeen)));
   const out: ClaimChange[] = [];
   for (const kind of Object.keys(was) as ClaimChange['kind'][]) {
     if (kind === 'direction') {
@@ -275,9 +416,16 @@ export function claimChanges(before: string, after: string): ClaimChange[] {
       const [a, b] = same(was.number, now.number)
         ? [wasBound, nowBound]
         : [bound(before, true), bound(after, true)];
-      if (!same(a, b)) out.push({ kind, was: a, now: b });
-      else if (!same(was.direction, now.direction))
-        out.push({ kind, was: was.direction, now: now.direction });
+      let moved: [string[], string[]] | undefined;
+      if (!same(a, b)) moved = [a, b];
+      else if (!same(was.direction, now.direction)) moved = [was.direction, now.direction];
+      // The operators in formulas, as a list of their own.
+      if (!same(wasOps, nowOps))
+        moved = [
+          [...(moved?.[0] ?? []), ...wasOps],
+          [...(moved?.[1] ?? []), ...nowOps],
+        ];
+      if (moved) out.push({ kind, was: moved[0], now: moved[1] });
     } else if (kind === 'certainty') {
       // How many hedges and how many boosters, not which: "shows" for "demonstrates" is no change.
       const classes = (l: string[]) => [

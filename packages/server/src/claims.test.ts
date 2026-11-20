@@ -72,7 +72,7 @@ test('a flag says what was there and what is there now', () => {
 });
 
 test('the rules have a version', () => {
-  expect(CLAIM_RULES).toBe('claims-2');
+  expect(CLAIM_RULES).toBe('claims-3');
 });
 
 test('what a number or a direction is about decides whether it moved', () => {
@@ -128,4 +128,73 @@ test('a sentence is found around a stretch of text', () => {
   const long = `${'word '.repeat(400)}high${' word'.repeat(400)}`;
   const i = long.indexOf('high');
   expect(sentenceAround(long, i, i + 4)).toEqual([i - 600, i + 4 + 600]);
+});
+
+test('formulas: extremum, Greek letters, subscripts and operators are compared', () => {
+  const k = (a: string, b: string) => kinds(a, b);
+  expect(k('It is $\\max_i x_i$.', 'It is $\\min_i x_i$.')).toEqual(['direction']);
+  expect(k('It is $\\arg\\max_x f$.', 'It is $\\arg\\min_x f$.')).toEqual(['direction']);
+  expect(k('It is $\\sup S$.', 'It is $\\inf S$.')).toEqual(['direction']);
+  expect(k('It is $\\alpha$.', 'It is $\\beta$.')).toEqual(['name']);
+  expect(k('It is $x_i$.', 'It is $x_j$.')).toEqual(['name']);
+  const [op] = claimChanges('It is $a + b$.', 'It is $a - b$.');
+  expect(op).toEqual({ kind: 'direction', was: ['+'], now: ['-'] });
+  expect(k('It is $a \\times b$.', 'It is $a \\cdot b$.')).toEqual(['direction']);
+  expect(k('It is \\(a + b\\).', 'It is \\(a / b\\).')).toEqual(['direction']);
+  expect(k('It is \\[a + b\\].', 'It is \\[a - b\\].')).toEqual(['direction']);
+  expect(k('\\begin{align}q &= a + b\\end{align}', '\\begin{align}q &= a - b\\end{align}')).toEqual(
+    ['direction'],
+  );
+  // Reformatting and reordering are not changes; a hyphen in prose is not a minus.
+  expect(k('It is $a+b$.', 'It is $a + b$.')).toEqual([]);
+  expect(k('It is $x^2$.', 'It is $x^{2}$.')).toEqual([]);
+  expect(k('It is $x_{i}$.', 'It is $x_i$.')).toEqual([]);
+  expect(k('It is $a + b$.', 'It is $b + a$.')).toEqual([]);
+  expect(k('A well-known path.', 'A well known path.')).toEqual([]);
+  expect(k('A state-of-the-art path.', 'A path of the art.')).not.toContain('direction');
+});
+
+test('units: spelled-out prefixes and the unit argument of siunitx commands', () => {
+  expect(kinds('It is 5 megabytes.', 'It is 5 gigabytes.')).toEqual(['unit']);
+  expect(kinds('It is 5 milliseconds.', 'It is 5 microseconds.')).toEqual(['unit']);
+  expect(kinds('It is 5 kilometres.', 'It is 5 kilometers.')).toEqual([]);
+  expect(kinds('It is 5 milliseconds.', 'It is 5 ms.')).toEqual([]);
+  expect(kinds('It is \\SI{40}{\\ms}.', 'It is \\SI{40}{\\s}.')).toEqual(['unit']);
+  expect(kinds('It is \\qty{40}{\\milli\\second}.', 'It is \\qty{40}{\\second}.')).toEqual([
+    'unit',
+  ]);
+  expect(kinds('It is \\si{\\ms}.', 'It is \\si{\\s}.')).toEqual(['unit']);
+  expect(kinds('It is \\unit{\\ms}.', 'It is \\unit{\\s}.')).toEqual(['unit']);
+  expect(kinds('It is \\SI{40}{\\milli\\second}.', 'It is \\SI{40}{\\ms}.')).toEqual([]);
+  expect(kinds('It is \\SI{40}{\\ms}.', 'It is \\SI{45}{\\ms}.')).toEqual(['number']);
+});
+
+test('names: a sentence opener that is gone from the other version is a name', () => {
+  expect(claimChanges('Smith reports it.', 'Jones reports it.')).toEqual([
+    { kind: 'name', was: ['Smith'], now: ['Jones'] },
+  ]);
+  expect(kinds('One author: Smith reports it.', 'One author: Jones reports it.')).toEqual(['name']);
+  // Stop-list openers, and openers that are in the other version, are not names.
+  expect(kinds('Table 2 shows it.', 'As Table 2 shows it.')).toEqual([]);
+  expect(kinds('The index helps.', 'Our index helps.')).toEqual([]);
+  expect(kinds('Latency fell.', 'The latency fell.')).toEqual([]);
+  expect(kinds('Well-known paths are cheap.', 'Paths that are well known are cheap.')).toEqual([]);
+  // Known gap: a lower-case tool name is told from no ordinary word.
+  expect(kinds('We use pdflatex.', 'We use xelatex.')).toEqual([]);
+});
+
+test('number words: teens, plurals of magnitudes, doubled and tripled', () => {
+  expect(kinds('We saw thirteen.', 'We saw fourteen.')).toEqual(['number']);
+  expect(kinds('We saw dozens.', 'We saw hundreds.')).toEqual(['number']);
+  expect(kinds('It doubled.', 'It tripled.')).toEqual(['number']);
+  expect(kinds('We saw thousands.', 'We saw millions.')).toEqual(['number']);
+});
+
+test('references: the key of \\hyperref is what is referred to', () => {
+  expect(
+    claimChanges('See \\hyperref[fig:a]{the figure}.', 'See \\hyperref[fig:b]{the figure}.'),
+  ).toEqual([{ kind: 'citation', was: ['ref:fig:a'], now: ['ref:fig:b'] }]);
+  expect(
+    kinds('See \\hyperref[fig:a]{the figure}.', 'See \\hyperref[fig:a]{this figure}.'),
+  ).toEqual([]);
 });
