@@ -676,9 +676,11 @@ test('typing in the moment before a restore holds is not lost, and that file alo
   const seen: Seen[] = [];
   const typed = p.ids[p.names[3]];
   let once = false;
-  // Just after the restore has read every log, and before it holds the files.
+  let batches = 0;
+  // Just after the restore has read every log, and before it holds the files. The first read of
+  // them all is for storing what is edited; the second is the restore's own.
   const pool = watched(seen, async (sql) => {
-    if (once || !/from file_updates where file_id = any/.test(sql)) return;
+    if (once || !/from file_updates where file_id = any/.test(sql) || ++batches < 2) return;
     once = true;
     await edit(typed, (text) => text.insert(0, 'Q'));
   });
