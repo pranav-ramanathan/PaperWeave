@@ -133,7 +133,9 @@ export function createVisual(opts: {
   const selectAt = (from: number, to = from) => {
     const { doc, tr } = editor.state;
     const at = (pos: number) => doc.resolve(Math.max(0, Math.min(pos, doc.content.size)));
-    editor.view.dispatch(tr.setSelection(TextSelection.between(at(from), at(to), 1)));
+    editor.view.dispatch(
+      tr.setSelection(TextSelection.between(at(from), at(to), 1)).setMeta('own', true),
+    );
   };
   /**
    * Bring the editor's idea of the selection up to date with the browser's. The editor hears of
@@ -162,6 +164,8 @@ export function createVisual(opts: {
    * browser, handing focus back, may put it at the start of the text.
    */
   let resume: { from: number; to: number } | null = null;
+  /** Goes up each time the person moves the caret or changes the text themselves. */
+  let moves = 0;
   /** Open the formula at `pos` for editing. What it says now is what a later edit must find. */
   const openMath = (pos: number, src: string) => {
     const c = bridge.atomCommand(editor.state, pos, src);
@@ -327,6 +331,7 @@ export function createVisual(opts: {
         // From here the field is no longer something being typed in: when the figure or table
         // is drawn again because this very edit went through, there is nothing to warn about.
         opened(null);
+        const before = moves;
         try {
           const result = await opts.run(c);
           if (result === 'conflict')
@@ -336,8 +341,13 @@ export function createVisual(opts: {
         }
         // Applied, the figure or table is drawn again from the new source; if not, as it was.
         leave();
-        editor.commands.setNodeSelection(Math.min(pos, editor.state.doc.content.size - 1));
-        editor.view.focus();
+        // Only if the person has not gone elsewhere meanwhile, and at where it is now: other text
+        // may have been typed before it since the field was opened.
+        const now = getPos();
+        if (moves === before && now != null) {
+          editor.commands.setNodeSelection(Math.min(now, editor.state.doc.content.size - 1));
+          editor.view.focus();
+        }
       };
       input.onkeydown = (e) => {
         if (e.key === 'Enter') void apply();
@@ -392,6 +402,7 @@ export function createVisual(opts: {
             end: e.at + e.length,
           });
           if (!c) return say('That has moved. Edit it in the source.');
+          const before = moves;
           try {
             if ((await opts.run(c)) === 'conflict')
               say(
@@ -400,8 +411,11 @@ export function createVisual(opts: {
           } catch {
             say('That edit could not be made. Check the connection and try again.');
           }
-          editor.commands.setNodeSelection(Math.min(pos, editor.state.doc.content.size - 1));
-          editor.view.focus();
+          const now = getPos();
+          if (moves === before && now != null) {
+            editor.commands.setNodeSelection(Math.min(now, editor.state.doc.content.size - 1));
+            editor.view.focus();
+          }
         };
         return [button];
       };
@@ -574,12 +588,15 @@ export function createVisual(opts: {
     if (!c) return null;
     resume = { from: editor.state.selection.from, to: editor.state.selection.to };
     return async (latex) => {
+      const before = moves;
       const result = await opts.run({ ...c, key: crypto.randomUUID(), replacement: latex });
       // The caret goes just after what was inserted, so that typing carries on from there
       // rather than over a selection that now reaches across it. The place was named by the
       // character after it, which is now the character after the insertion.
       const after = Y.createAbsolutePositionFromRelativePosition(c.to, opts.ytext.doc!)?.index;
-      if (result !== 'conflict' && after != null) {
+      if (moves !== before)
+        resume = null; // the person has gone elsewhere meanwhile
+      else if (result !== 'conflict' && after != null) {
         const caret = fromSrc(bridge.model, editor.state.doc, after);
         selectAt(caret);
         const { from, to } = editor.state.selection;
@@ -669,7 +686,17 @@ export function createVisual(opts: {
             },
           }),
         ],
-        onTransaction: ({ transaction }) => bridge?.applied(transaction),
+        onTransaction: ({ transaction }) => {
+          // Not the bridge's own (remote updates and server answers come in as 'projection'), nor
+          // the editor's own placing of the caret ('own').
+          if (
+            !transaction.getMeta('projection') &&
+            !transaction.getMeta('own') &&
+            (transaction.selectionSet || transaction.docChanged)
+          )
+            moves++;
+          bridge?.applied(transaction);
+        },
         addKeyboardShortcuts: () => ({
           'Mod-z': () => !!undo.undo() || true,
           'Mod-y': () => !!undo.redo() || true,

@@ -38,6 +38,8 @@ export function FormulaBox(props: {
   const [place, setPlace] = useState<FormulaRequest['place']>(null);
   const [problem, setProblem] = useState('');
   const [undrawable, setUndrawable] = useState('');
+  // While the answer to an edit is awaited, it cannot be asked for again.
+  const [busy, setBusy] = useState(false);
   useEffect(() => {
     setDraft(request?.src ?? '');
     setPlace(request?.place ?? null);
@@ -61,7 +63,8 @@ export function FormulaBox(props: {
     }
   }, [request, latex, macros]);
   const apply = async () => {
-    if (!request) return;
+    if (!request || busy) return;
+    setBusy(true);
     try {
       // A formula on its own line needs its own lines in the source too.
       const result = await request.apply(place === 'display' ? `\n${latex}\n` : latex);
@@ -71,6 +74,8 @@ export function FormulaBox(props: {
       );
     } catch {
       setProblem('That edit could not be made. Check the connection and try again.');
+    } finally {
+      setBusy(false);
     }
   };
   return (
@@ -127,7 +132,7 @@ export function FormulaBox(props: {
         )}
         {problem && <p role="alert">{problem}</p>}
         <p>
-          <button type="submit" disabled={!draft.trim()}>
+          <button type="submit" disabled={!draft.trim() || busy}>
             {request?.place ? 'Insert' : 'Apply'}
           </button>{' '}
           <button type="button" onClick={onDone}>
@@ -174,6 +179,7 @@ export function FloatBox(props: {
   const [rows, setRows] = useState(3);
   const [columns, setColumns] = useState(3);
   const [problem, setProblem] = useState('');
+  const [busy, setBusy] = useState(false);
   /** A drawn chart brings the caption and description its author gave it. */
   const choose = (p?: Picture) => {
     setTarget(p?.target ?? '');
@@ -204,7 +210,7 @@ export function FloatBox(props: {
   }, [request, projectId]);
   const figure = request?.kind === 'figure';
   const insert = async () => {
-    if (!request) return;
+    if (!request || busy) return;
     const said = alt.replace(/\s+/g, ' ').trim();
     const cap = caption.replace(/\s+/g, ' ').trim();
     if (/[{}%#\\\]]/.test(said))
@@ -241,14 +247,17 @@ export function FloatBox(props: {
         ];
     // What was wrong with the last try is not said of this one.
     setProblem('');
+    setBusy(true);
     try {
       // On lines of its own, like any figure or table in the source.
       await request.apply(`\n${lines.join('\n')}\n`);
       onDone();
     } catch (err) {
-      // Why, for whoever is looking into it: no answer in time, or the server's own words.
+      // Why, for whoever is looking into it: the server's own words.
       console.warn('edit not made:', (err as Error).message);
       setProblem('That edit could not be made. Check the connection and try again.');
+    } finally {
+      setBusy(false);
     }
   };
   const count = (value: number, set: (n: number) => void, max: number, min: number) => (
@@ -307,7 +316,9 @@ export function FloatBox(props: {
         </label>
         {problem && <p role="alert">{problem}</p>}
         <p>
-          <button type="submit">Insert</button>{' '}
+          <button type="submit" disabled={busy}>
+            Insert
+          </button>{' '}
           <button type="button" onClick={onDone}>
             Cancel
           </button>
@@ -338,6 +349,7 @@ function Picker(props: {
   const [filter, setFilter] = useState('');
   const [chosen, setChosen] = useState('');
   const [problem, setProblem] = useState('');
+  const [busy, setBusy] = useState(false);
   // The loader is made anew on every render; the list is read once per opening.
   const loader = useRef(load);
   loader.current = load;
@@ -356,12 +368,15 @@ function Picker(props: {
   const shown = (choices ?? []).filter((c) => c.match.toLowerCase().includes(filter.toLowerCase()));
   const pick = shown.find((c) => c.key === chosen) ?? shown[0];
   const insert = async () => {
-    if (!request || !pick) return;
+    if (!request || !pick || busy) return;
+    setBusy(true);
     try {
       await request.apply(pick.latex);
       onDone();
     } catch {
       setProblem('That edit could not be made. Check the connection and try again.');
+    } finally {
+      setBusy(false);
     }
   };
   return (
@@ -404,7 +419,7 @@ function Picker(props: {
         )}
         {problem && <p role="alert">{problem}</p>}
         <p>
-          <button type="submit" disabled={!pick}>
+          <button type="submit" disabled={!pick || busy}>
             Insert
           </button>{' '}
           <button type="button" onClick={onDone}>

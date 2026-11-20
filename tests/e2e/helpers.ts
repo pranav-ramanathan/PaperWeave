@@ -1,5 +1,9 @@
 // Shared by the browser tests that need a signed-in person.
 import AxeBuilder from '@axe-core/playwright';
+import { mkdtempSync, writeFileSync } from 'node:fs';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
+import { writeZip } from '../../packages/server/src/archive';
 import {
   type Browser,
   type BrowserContext,
@@ -253,4 +257,96 @@ export function dropOn(
     el.dispatchEvent(drop);
     return { over: over.defaultPrevented, drop: drop.defaultPrevented };
   }, what);
+}
+
+const sleep = (ms: number) => new Promise((done) => setTimeout(done, ms));
+
+/**
+ * A slow line to the sync server: every frame, each way, is held for `line.each` milliseconds,
+ * in order. The delay can be changed while the page is open (0 is no delay). Set up before the
+ * page that is to be slowed is loaded: it takes hold of the connections of pages loaded after it.
+ */
+export async function slowLine(page: Page, each = 0) {
+  const line = { each };
+  const lane = (send: (m: string | Buffer) => void) => {
+    let chain = Promise.resolve();
+    let last = 0;
+    return (m: string | Buffer) => {
+      const due = Math.max(Date.now() + line.each, last);
+      last = due;
+      chain = chain.then(async () => {
+        const wait = due - Date.now();
+        if (wait > 0) await sleep(wait);
+        send(m);
+      });
+    };
+  };
+  await page.routeWebSocket(/:4100/, (socket) => {
+    const server = socket.connectToServer();
+    socket.onMessage(lane((m) => server.send(m)));
+    server.onMessage(lane((m) => socket.send(m)));
+  });
+  return line;
+}
+
+/** A paper of three paragraphs and a table, for tests of the visual view over a slow line. */
+const SLOW_MAIN = [
+  '\\documentclass{article}',
+  '\\usepackage{booktabs}',
+  '\\begin{document}',
+  '\\section{Intro}',
+  '',
+  'The first paragraph talks about latency in the editor and ends here alphaend.',
+  '',
+  'Latency stays below forty milliseconds for most edits, and emphasis bravoend.',
+  '',
+  'The third paragraph is where the person clicks and ends charlieend.',
+  '',
+  '\\begin{table}[t]',
+  '  \\caption{Edits checked per template}',
+  '  \\centering',
+  '  \\begin{tabular}{@{}lrr@{}}',
+  '    \\toprule',
+  '    Template & Edits & Bytes \\\\',
+  '    \\midrule',
+  '    article & 4000 & 0 \\\\',
+  '    amsart & 3000 & 0 \\\\',
+  '    \\bottomrule',
+  '  \\end{tabular}',
+  '\\end{table}',
+  '',
+  '\\bibliographystyle{plain}',
+  '\\bibliography{refs}',
+  '\\end{document}',
+  '',
+].join('\n');
+const SLOW_BIB =
+  '@book{knuth1984,\n  author = {Donald E. Knuth},\n  title = {The {\\TeX}book},\n  publisher = {Addison-Wesley},\n  year = {1984}\n}\n';
+
+/** Sign in, import the paper above, and open main.tex in the visual view, over a line not yet slowed. */
+export async function slowPaper(browser: Browser, who: string) {
+  const { page, email } = await person(browser, who);
+  const zip = join(mkdtempSync(join(tmpdir(), 'paperweave-e2e-')), `Slow ${who} ${run}.zip`);
+  writeFileSync(
+    zip,
+    await writeZip([
+      { path: 'main.tex', bytes: Buffer.from(SLOW_MAIN) },
+      { path: 'refs.bib', bytes: Buffer.from(SLOW_BIB) },
+    ]),
+  );
+  await page.goto('/sign-in');
+  await signIn(page, email);
+  await page.getByLabel('Or import a ZIP of a LaTeX project').setInputFiles(zip);
+  await page.getByRole('button', { name: 'Import ZIP' }).click();
+  await expect(page.getByRole('link', { name: 'main.tex' }).first()).toBeVisible();
+  const paper = page.url();
+  const line = await slowLine(page);
+  await page.goto(paper);
+  await page.getByRole('link', { name: 'main.tex' }).first().click();
+  await expect(page.locator('.editor .visual .ProseMirror')).toContainText('charlieend');
+  await expect(page.getByRole('region', { name: /^Editor for/ }).getByRole('status')).toHaveText(
+    'All edits saved.',
+    { timeout: 30_000 },
+  );
+  return { page, line };
 }

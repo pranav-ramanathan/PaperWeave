@@ -13,6 +13,7 @@ import {
   run,
   showSource,
   signIn,
+  slowPaper,
   sticksOut,
 } from './helpers';
 
@@ -618,4 +619,29 @@ test('someone whose role changes while a file is open is told, and does not type
   await expect(status(page)).toHaveText(
     'You are now an editor on this paper. Reload the page to carry on.',
   );
+});
+
+test('a change whose answer is late is made once', async ({ browser }) => {
+  test.setTimeout(150_000);
+  const { page, line } = await slowPaper(browser, 'rec-late');
+  const note = page.locator('.editor .toolbar .note');
+  await clickAfter(page, '.editor .visual .ProseMirror', 'alphaend');
+  // Five seconds each way: the server has the edit at five, the answer is back at ten. Asked
+  // again meanwhile, under the same key.
+  line.each = 5000;
+  await page.keyboard.press('Alt+=');
+  const box = page.getByRole('dialog', { name: 'Insert an equation' });
+  await box.getByLabel('LaTeX').fill('\\mathrm{EQK}');
+  await box.getByRole('button', { name: 'Insert' }).click();
+  // Waiting is not failing: the window stays, cannot be asked again, and nothing says it failed.
+  await expect(box.getByRole('button', { name: 'Insert' })).toBeDisabled();
+  await expect(note).toContainText('Still trying', { timeout: 15_000 });
+  await expect(page.getByText('could not be made')).toHaveCount(0);
+  await expect(note).toHaveText('That change has now been made.', { timeout: 30_000 });
+  await expect(page.getByText('could not be made')).toHaveCount(0);
+  await expect(box).toBeHidden();
+  line.each = 0;
+  await showSource(page);
+  const text = await source(page).innerText();
+  expect(text.split('EQK').length - 1).toBe(1);
 });

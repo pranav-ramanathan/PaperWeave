@@ -435,21 +435,45 @@ export default function FileEditor(props: {
     // A structural edit is checked and made by the server, against the text everyone shares.
     // It is asked for over the live connection, and the answer carries the edit.
     const waiting = new Map<string, (reply: Reply) => void>();
+    // Every interval and timer still pending, so that none outlives the provider.
+    const pending = new Set<ReturnType<typeof setTimeout> | ReturnType<typeof setInterval>>();
+    const send = (message: string) => {
+      try {
+        provider.sendStateless(message);
+      } catch {
+        // Not connected just now: asked again in a few seconds.
+      }
+    };
     const run = (c: Command) =>
       new Promise<CommandResult>((resolve, reject) => {
         const place = (p: Y.RelativePosition) => toBase64(Y.encodeRelativePosition(p));
         const asked = JSON.stringify({ ...c, from: place(c.from), to: place(c.to) });
-        // An answer can be lost with a connection. Asked once more, under the same key, the
-        // server makes the edit if it has not, and says so if it has: never twice.
-        const again = setTimeout(() => provider.sendStateless(asked), 3000);
-        const timer = setTimeout(() => {
-          waiting.delete(c.key);
-          reject(new Error('no answer'));
+        // An answer can be lost with a connection. Asked again, under the same key, the server
+        // makes the edit if it has not, and says so if it has: never twice. So this keeps
+        // asking, and never says the edit failed while it may still be made.
+        const again = setInterval(() => send(asked), 3000);
+        let late = false;
+        const slow = setTimeout(() => {
+          late = true;
+          setNote(
+            'No answer yet to that change. Still trying: it will be made once, so do not make it again.',
+          );
         }, 8000);
+        pending.add(again);
+        pending.add(slow);
         waiting.set(c.key, (reply) => {
-          clearTimeout(again);
-          clearTimeout(timer);
+          clearInterval(again);
+          clearTimeout(slow);
+          pending.delete(again);
+          pending.delete(slow);
           waiting.delete(c.key);
+          // A late answer says so; one that is not "made" leaves the saying to whoever asked.
+          if (late)
+            setNote(
+              reply.result === 'applied' || reply.result === 'duplicate'
+                ? 'That change has now been made.'
+                : '',
+            );
           if (!reply.result) return reject(new Error(reply.error));
           if (reply.update) {
             // Applied here as this person's own edit, and as an undo step of its own. The same
@@ -460,7 +484,7 @@ export default function FileEditor(props: {
           }
           resolve(reply.result);
         });
-        provider.sendStateless(asked);
+        send(asked);
       });
     const visual: Visual | null = props.visual
       ? createVisual({
@@ -648,6 +672,12 @@ export default function FileEditor(props: {
       window.removeEventListener('beforeunload', warn);
       // A stretch still waiting to be marked has no view to be marked in.
       markThreads.current = () => {};
+      for (const t of pending) {
+        clearTimeout(t);
+        clearInterval(t);
+      }
+      pending.clear();
+      waiting.clear();
       saving.destroy();
       visual?.destroy();
       view.destroy();
