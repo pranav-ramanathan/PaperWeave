@@ -490,9 +490,10 @@ test('someone taken off the paper while a file is open is told, and the page sto
   await typeAtStart(page, '% typed before being taken off\n');
   await expect(status(page)).toHaveText('All edits saved.');
 
-  // The panels beside the text each ask the server again, and are told "not found".
+  // The build pane asks the server again, and is told "not found". (The panels for comments and
+  // proposals ask only when it says there is something new to read.)
   const panels = /\/(threads|proposals|builds)(\?|$)/;
-  const told = ['threads', 'proposals', 'builds'].map((what) =>
+  const told = ['builds'].map((what) =>
     page.waitForResponse(
       (r) => r.url().includes(`/${what}`) && panels.test(r.url()) && r.status() === 404,
       { timeout: 30_000 },
@@ -506,8 +507,8 @@ test('someone taken off the paper while a file is open is told, and the page sto
   );
   await expect(source(page)).toHaveAttribute('contenteditable', 'false');
   await Promise.all(told);
-  // Then they stop. Before, a page left open went on asking every two and five seconds, for
-  // as long as it stayed open, and was told "not found" each time.
+  // Then it stops. Before, a page left open went on asking every few seconds, for as long as it
+  // stayed open, and was told "not found" each time.
   let asked = 0;
   page.on('request', (r) => panels.test(r.url()) && r.method() === 'GET' && asked++);
   await page.waitForTimeout(6_000);

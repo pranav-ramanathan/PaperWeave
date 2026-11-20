@@ -1,6 +1,6 @@
 // Asking for builds and reading their results. The worker that does the building lives in
 // apps/workers; it takes rows from the builds table.
-import { authorize } from './authz.ts';
+import { authorize, can } from './authz.ts';
 import type { BlobStore } from './blobs.ts';
 import type { Db } from './db.ts';
 import { AppError } from './errors.ts';
@@ -117,43 +117,63 @@ export async function requestBuild(
 }
 
 /**
- * The newest build, the newest one that produced a PDF, and a mark that moves whenever the paper
- * changes: by typing, or by a file being added, replaced, renamed or deleted.
+ * The newest build, the newest one that produced a PDF, and two marks that move whenever
+ * something a page shows is changed: `edits` when the paper changes (by typing, or by a file being
+ * added, replaced, renamed or deleted), `review` when its comments or proposed edits do (a thread
+ * started, replied to, resolved or reattached; a proposal made, revised, decided or reattached).
+ * A page that has seen the same marks has nothing new to read.
+ *
+ * Two statements, the person's place in the paper being asked with the first: a poll is made by
+ * every open editor every few seconds, and each statement is a trip to the database.
  */
 export async function latestBuilds(
   db: Db,
   userId: string,
   projectId: string,
-): Promise<{ latest: Build | null; lastGood: Build | null; edits: string }> {
-  await authorize(db, userId, id(projectId), 'project.read');
-  const latest = await db.query(
-    `select ${COLUMNS} from builds b where b.project_id = $1 order by b.created_at desc limit 1`,
-    [projectId],
+): Promise<{ latest: Build | null; lastGood: Build | null; edits: string; review: string }> {
+  const pid = id(projectId);
+  // One row for each of the builds wanted (the newest, and the newest with a PDF, often the same
+  // one), or one row with no build for a member of a paper that has none. No row: not a member.
+  const { rows } = await db.query(
+    `select m.role, ${COLUMNS}
+     from project_members m
+       left join lateral (
+         select * from builds b0 where b0.project_id = m.project_id and b0.id in (
+           (select id from builds where project_id = m.project_id order by created_at desc limit 1),
+           (select id from builds where project_id = m.project_id and pdf_digest is not null
+            order by created_at desc limit 1)
+         )
+       ) b on true
+     where m.project_id = $1 and m.user_id = $2
+     order by b.created_at desc nulls last`,
+    [pid, userId],
   );
-  // Usually the newest build has a PDF, and is then the newest with one: not looked up twice.
-  // Every open editor asks this every two seconds.
-  const newest: Build | null = latest.rows[0] ?? null;
-  const good: Build | null = newest?.hasPdf
-    ? newest
-    : ((
-        await db.query(
-          `select ${COLUMNS} from builds b where b.project_id = $1 and b.pdf_digest is not null
-           order by b.created_at desc limit 1`,
-          [projectId],
-        )
-      ).rows[0] ?? null);
-  // Lets a client see that the paper has been still since it last looked.
-  const edits = await db.query(
-    `select p.manifest_version || '.' || coalesce(sum(f.head_seq), 0) as mark
-     from projects p left join files f on f.project_id = p.id where p.id = $1
-     group by p.manifest_version`,
-    [projectId],
+  if (!rows[0]) throw new AppError('not_found', 'No such project.');
+  if (!can(rows[0].role, 'project.read'))
+    throw new AppError('permission_denied', `A ${rows[0].role} cannot do that.`);
+  const builds: Build[] = rows.filter((r) => r.id).map(({ role: _, ...build }) => build);
+  const newest = builds[0] ?? null;
+  // Usually the newest build has a PDF, and is then the newest with one.
+  const good = builds.find((b) => b.hasPdf) ?? null;
+  const marks = await db.query(
+    `select
+       p.manifest_version || '.' || coalesce((select sum(f.head_seq) from files f where f.project_id = p.id), 0)
+         as edits,
+       (select count(*) from threads t where t.project_id = p.id) || '.'
+         || (select count(*) from threads t where t.project_id = p.id and t.status = 'resolved') || '.'
+         || (select count(*) from thread_comments c join threads t on t.id = c.thread_id
+             where t.project_id = p.id) || '.'
+         || (select md5(coalesce(string_agg(t.id || md5(t.anchor_from || t.anchor_to), ',' order by t.id), ''))
+             from threads t where t.project_id = p.id) || '.'
+         || (select md5(coalesce(string_agg(
+               p2.id || p2.status || md5(p2.replacement) || md5(p2.expected) || p2.reason
+                 || md5(p2.anchor_from || p2.anchor_to), ',' order by p2.id), ''))
+             from proposals p2 where p2.project_id = p.id)
+         as review
+     from projects p where p.id = $1`,
+    [pid],
   );
-  return {
-    latest: newest,
-    lastGood: good,
-    edits: edits.rows[0].mark,
-  };
+  return { latest: newest, lastGood: good, ...marks.rows[0] };
 }
 
 /** One output of a build. The build must belong to a paper the user is on. */

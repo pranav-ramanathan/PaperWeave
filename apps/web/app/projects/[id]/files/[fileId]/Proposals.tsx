@@ -2,7 +2,7 @@
 
 import type { Proposal } from '@paperweave/server';
 import { useCallback, useEffect, useRef, useState } from 'react';
-import { notTheirs, STOP, whileShown } from '../../../../../lib/shown';
+import { whenMarked } from '../../../../../lib/builds';
 import type { Stretch } from './Threads';
 
 const day = (iso: string) => iso.slice(0, 10);
@@ -90,13 +90,16 @@ export default function Proposals(props: {
 
   const read = useCallback(async () => {
     const res = await fetch(`${url}?file=${fileId}`).catch(() => null);
-    if (notTheirs(res)) return STOP;
-    if (!res?.ok) return;
+    if (!res?.ok) return false;
     const found: Proposal[] = await res.json();
     setProposals(found);
     told.current(found);
+    return true;
   }, [url, fileId]);
-  useEffect(() => whileShown(read, 5000), [read]);
+  // Read when first shown, and then only when the build pane's poll says the paper's text or its
+  // comments and proposals are not what they were, or after this person's own doing. A tab
+  // that shows nothing new asks for nothing.
+  useEffect(() => whenMarked(read), [read]);
 
   /** Post, read the proposals again, and return what went wrong, if anything did. */
   const post = async (to: string, body: object) => {

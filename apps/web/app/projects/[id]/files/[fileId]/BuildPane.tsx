@@ -2,12 +2,18 @@
 
 import type { Build } from '@paperweave/server';
 import { useCallback, useEffect, useRef, useState } from 'react';
+import { setMarks } from '../../../../../lib/builds';
 import { type Numbers, setNumbers } from '../../../../../lib/numbers';
 import { onShow, showInEditor } from '../../../../../lib/pdfsync';
 import { notTheirs, STOP, whileShown } from '../../../../../lib/shown';
 import PdfView, { type Mark } from './PdfView';
 
-type Builds = { latest: Build | null; lastGood: Build | null; edits: string };
+type Builds = { latest: Build | null; lastGood: Build | null; edits: string; review: string };
+
+/** How often to ask how the builds stand while one is waiting or about to be asked for. */
+const BUSY_EVERY_MS = 2000;
+/** And when nothing is happening: a change to the paper is then seen a little later. */
+const QUIET_EVERY_MS = 5000;
 
 /** A build takes a minute at most once it starts. Waiting twice that, it has not started. */
 const STUCK_AFTER_MS = 120_000;
@@ -40,7 +46,11 @@ export default function BuildPane({
   // The paper's mark, and the revision of the newest build, when this pane last asked for a
   // build by itself.
   const asked = useRef<string | null>(null);
+  // Whether something is under way, as of the last poll: it decides how soon to ask again.
+  const busy = useRef(true);
 
+  // Asks now, whatever the clock says: set by the poll below.
+  const askNow = useRef(() => {});
   const compile = useCallback(async () => {
     const res = await fetch(url, { method: 'POST' });
     setProblem(
@@ -48,6 +58,9 @@ export default function BuildPane({
         ? ''
         : ((await res.json().catch(() => ({}))).error ?? 'The build could not be started.'),
     );
+    // See the build that was asked for, and ask about it quickly from here on.
+    busy.current = true;
+    askNow.current();
   }, [url]);
 
   useEffect(() => {
@@ -58,6 +71,7 @@ export default function BuildPane({
       if (stop || !res?.ok) return;
       const next: Builds = await res.json();
       setBuilds(next);
+      setMarks({ edits: next.edits, review: next.review });
       // Build by itself once the paper has been still for one poll and differs from what was built.
       const idle = seen.current === next.edits;
       seen.current = next.edits;
@@ -68,14 +82,20 @@ export default function BuildPane({
       // The revision is part of it because someone may build an older revision, which then
       // is the newest build: the paper has not changed, and still wants building.
       const state = `${next.edits} ${next.latest?.revisionId}`;
+      // Quick while a build is waiting or running, or while the PDF is behind the text and this
+      // pane has yet to ask for a build of it. Otherwise nothing is waited for.
+      busy.current =
+        next.latest?.status === 'queued' || (auto && canBuild && behind && asked.current !== state);
       if (auto && canBuild && idle && behind && asked.current !== state) {
         asked.current = state;
         void compile();
       }
     };
-    const off = whileShown(poll, 2000);
+    askNow.current = () => void poll();
+    const off = whileShown(poll, () => (busy.current ? BUSY_EVERY_MS : QUIET_EVERY_MS));
     return () => {
       stop = true;
+      askNow.current = () => {};
       off();
     };
   }, [url, auto, canBuild, compile]);
@@ -99,6 +119,7 @@ export default function BuildPane({
       setNumbers({ labels: found.labels, known: true, stale: behind });
   }, [found, pdf, behind]);
   useEffect(() => () => setNumbers({ labels: {}, known: false, stale: false }), []);
+  useEffect(() => () => setMarks(null), []);
   // The editor asks for a line to be shown in this PDF; a double-click on a page asks the
   // editor for the line that made what is there.
   const [mark, setMark] = useState<(Mark & { pdf: string }) | null>(null);

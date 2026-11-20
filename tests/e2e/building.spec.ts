@@ -257,14 +257,15 @@ test('an editor nobody is looking at asks the server for nothing', async ({ brow
   await page.getByRole('link', { name: 'main.tex' }).first().click();
   await expect(buildStatus(page)).toHaveText('The PDF is up to date.', { timeout: 60_000 });
 
-  // What the page asks for by itself: how the builds stand, and the threads and proposals.
+  // What the page asks for by itself: how the builds stand. (The threads and proposals are
+  // asked for only when that says they have changed: idle.spec.ts.)
   const asked: string[] = [];
   page.on('request', (r) => {
     const what = /\/(builds|threads|proposals)(\?|$)/.exec(r.url())?.[1];
     if (what && r.method() === 'GET') asked.push(what);
   });
   await page.waitForTimeout(5500);
-  expect(new Set(asked)).toEqual(new Set(['builds', 'threads', 'proposals']));
+  expect(new Set(asked)).toEqual(new Set(['builds']));
 
   // The tab goes behind another. (The browser says so to the page; here the page is told the
   // same thing directly.)
@@ -281,7 +282,7 @@ test('an editor nobody is looking at asks the server for nothing', async ({ brow
 
   // Looked at again: it catches up at once, not at the next turn of a clock.
   await show(false);
-  await expect.poll(() => new Set(asked).size, { timeout: 1500 }).toBe(3);
+  await expect.poll(() => asked.length, { timeout: 1500 }).toBeGreaterThan(0);
   await expect(buildStatus(page)).toHaveText('The PDF is up to date.');
 });
 
@@ -314,10 +315,13 @@ test('a build that is not being built says so, and does not say "compiling" for 
     };
     await route.fulfill({ json: { ...real, latest: waiting } });
   });
-  await expect(buildStatus(page)).toHaveText('Compiling…');
+  // The pane asks every five seconds while nothing is waiting, and every two once it sees
+  // something is.
+  await expect(buildStatus(page)).toHaveText('Compiling…', { timeout: 10_000 });
   since = 5 * 60_000;
   await expect(buildStatus(page)).toHaveText(
     'Still waiting to compile after two minutes. The build service may be busy or not running.',
+    { timeout: 10_000 },
   );
   // The last PDF that was built is still shown meanwhile.
   await expect(build(page).getByRole('group', { name: /^Page 1 of/ })).toBeVisible();
