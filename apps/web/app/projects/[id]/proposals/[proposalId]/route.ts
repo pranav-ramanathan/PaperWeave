@@ -1,8 +1,9 @@
-// Decide a proposed edit, or change it: {action: accept | undo | reject | withdraw | revise}.
+// Decide a proposed edit, or change it: {action: accept | undo | reject | withdraw | revise | attach}.
 import {
   acceptProposal,
   AppError,
   closeProposal,
+  reattachProposal,
   reviseProposal,
   undoAccept,
 } from '@paperweave/server';
@@ -25,6 +26,7 @@ export async function POST(
     else if (action === 'withdraw') await closeProposal(db(), user.id, id, proposalId, 'dismissed');
     else if (action === 'revise')
       await reviseProposal(db(), blobs(), user.id, id, proposalId, input);
+    else if (action === 'attach') await reattachProposal(db(), blobs(), user.id, id, proposalId);
     else throw new AppError('invalid_input', 'That cannot be done to a proposal.');
     return Response.json({ ok: true });
   } catch (err) {

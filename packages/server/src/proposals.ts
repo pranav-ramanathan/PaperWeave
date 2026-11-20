@@ -163,6 +163,13 @@ export async function reviseProposal(
   const [from, to] = [locate(doc, text, p.anchor_from), locate(doc, text, p.anchor_to)];
   if (from < 0 || to < from)
     throw new AppError('conflict', 'The text this was about is gone. Make a new proposal.');
+  // Its words have gone from the file and its place has closed up. Saved now, it would become a
+  // proposal to add text at wherever that left it. Only a proposal made to add text has no words.
+  if (to === from && p.expected !== '')
+    throw new AppError(
+      'conflict',
+      'The words this was about are no longer in the file. Find them again, or make a new proposal.',
+    );
   const expected = text.toString().slice(from, to);
   if (expected === replacement) throw bad('That would change nothing.');
   const done = await pool.query(
@@ -171,6 +178,51 @@ export async function reviseProposal(
     [p.id, replacement, reasonOf(input.reason), expected],
   );
   if (!done.rowCount) throw notOpen();
+}
+
+/**
+ * Attach a proposal whose place has been lost to the same words where they stand now. Only when
+ * there is no doubt which words are meant: they are in the file exactly once. Who may: the same
+ * as may change it.
+ */
+export async function reattachProposal(
+  pool: pg.Pool,
+  store: BlobStore,
+  userId: string,
+  projectId: string,
+  proposalId: string,
+): Promise<void> {
+  const role = await authorize(pool, userId, id(projectId), 'proposal.create');
+  const p = await find(pool, projectId, proposalId);
+  if (p.author !== userId && !can(role, 'proposal.decide'))
+    throw new AppError('permission_denied', 'Only its author or an editor can change a proposal.');
+  if (p.status !== 'open' && p.status !== 'accepted')
+    throw new AppError('conflict', 'That proposal has been decided.');
+  const words: string = p.status === 'open' ? p.expected : p.replacement;
+  if (words === '')
+    throw new AppError(
+      'conflict',
+      'This proposal is about a place, not words, and a place cannot be found again. Make a new proposal.',
+    );
+  const { doc, text } = await textOf(pool, store, p.file_id);
+  const [from, to] = [locate(doc, text, p.anchor_from), locate(doc, text, p.anchor_to)];
+  const all = text.toString();
+  if (from >= 0 && to >= from && all.slice(from, to) === words)
+    throw bad('That proposal is still attached to its words.');
+  const at = all.indexOf(words);
+  if (at < 0) throw new AppError('conflict', 'Those words are not in the file now.');
+  if (all.indexOf(words, at + 1) >= 0)
+    throw new AppError(
+      'conflict',
+      'Those words are in the file more than once. Make a new proposal on the ones you mean.',
+    );
+  const place = (index: number, side: number) =>
+    Buffer.from(Y.encodeRelativePosition(Y.createRelativePositionFromTypeIndex(text, index, side)));
+  await pool.query('update proposals set anchor_from = $2, anchor_to = $3 where id = $1', [
+    p.id,
+    place(at, 0),
+    place(at + words.length, -1),
+  ]);
 }
 
 /**

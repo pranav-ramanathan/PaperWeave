@@ -120,6 +120,9 @@ export default function Proposals(props: {
   // where it is, with what they have written, until they put the form away. Moved among the
   // decided ones, the form would start again from the old words, out of sight.
   const held = (p: Proposal) => p.status !== 'open' && revising === p.id;
+  // Its words have gone from the file, so there is nowhere left to show, and nothing to change.
+  const gone = (p: Proposal) =>
+    p.now === '' && (p.status === 'accepted' ? p.replacement : p.expected) !== '';
   const one = (p: Proposal) => (
     <li key={p.id}>
       <article aria-label={`Proposal to change ${named(p.expected)}`}>
@@ -190,7 +193,13 @@ export default function Proposals(props: {
               <button
                 type="button"
                 onClick={() =>
-                  setNote(props.show(p.from, p.to) ? '' : 'That place is no longer in the file.')
+                  setNote(
+                    gone(p)
+                      ? 'Those words are no longer in the file.'
+                      : props.show(p.from, p.to)
+                        ? ''
+                        : 'That place is no longer in the file.',
+                  )
                 }
               >
                 Show in the text
@@ -206,7 +215,14 @@ export default function Proposals(props: {
                 </button>
               </>
             )}
-            {p.status === 'open' && (p.mine || canDecide) && (
+            {gone(p) &&
+              (p.status === 'open' || p.status === 'accepted') &&
+              (p.mine || canDecide) && (
+                <button type="button" onClick={() => act(p, 'attach')}>
+                  Find these words again
+                </button>
+              )}
+            {p.status === 'open' && !gone(p) && (p.mine || canDecide) && (
               <button type="button" onClick={() => setRevising(p.id)}>
                 Change the proposal
               </button>

@@ -4,11 +4,12 @@ import { mkdtempSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterAll, beforeAll, expect, test } from 'vitest';
-import type * as Y from 'yjs';
+import * as Y from 'yjs';
 import { readZip, writeZip } from './archive.ts';
 import { blobStore } from './blobs.ts';
 import { exportZip, importZip, listFiles } from './import.ts';
 import { acceptInvitation, getProject, invite } from './projects.ts';
+import { acceptProposal, listProposals, propose, undoAccept } from './proposals.ts';
 import {
   diffRevisions,
   exportRevision,
@@ -17,12 +18,15 @@ import {
   REVISIONS_SHOWN,
   renameFile,
   lastRestore,
+  restoreEdits,
   restoreRevision,
   revisionPdf,
   saveRevision,
 } from './revisions.ts';
-import { editFile } from './sync.ts';
+import { appendUpdate, editFile, loadUpdates, TEXT } from './sync.ts';
+import { diffLines } from './textdiff.ts';
 import { TEST_ENV, testDb } from './testing.ts';
+import { listThreads, startThread } from './threads.ts';
 
 const store = blobStore(TEST_ENV);
 const MAIN =
@@ -368,4 +372,206 @@ test('a file can be renamed to a usable name and keeps its identity', async () =
   // A file of another paper cannot be renamed through this one.
   const other = await paper();
   expect(await code(renameFile(t.pool, owner.id, p.id, other.body, 'ok.tex'))).toBe('not_found');
+});
+
+// Restoring replaces each changed stretch on its own, so what is anchored elsewhere stays put.
+const PARAS = [
+  'P1 alpha foxes jump over fences.',
+  'P2 beta cats sleep all day.',
+  'P3 gamma wolves howl loudly at night.',
+  'P4 delta owls watch the dark.',
+  'P5 epsilon bears wait for spring.',
+];
+const PMAIN = `\\documentclass{article}\n\\begin{document}\n${PARAS.join('\n\n')}\n\\end{document}\n`;
+async function lines(entries: Record<string, string>) {
+  const zip = await writeZip(
+    Object.entries(entries).map(([path, s]) => ({ path, bytes: Buffer.from(s) })),
+  );
+  const [project] = await importZip(t.pool, store, owner.id, zip, 'Restore');
+  const ids = Object.fromEntries(
+    (await listFiles(t.pool, owner.id, project.id)).map((f) => [f.path, f.id]),
+  );
+  return { id: project.id as string, ids, main: ids['main.tex'] as string };
+}
+async function docOf(file: string) {
+  const doc = new Y.Doc();
+  for (const u of await loadUpdates(t.pool, store, file)) Y.applyUpdate(doc, u);
+  return { doc, text: doc.getText(TEXT) };
+}
+const textOf = async (file: string) => (await docOf(file)).text.toString();
+async function ends(file: string, words: string) {
+  const { text } = await docOf(file);
+  const at = text.toString().indexOf(words);
+  return {
+    from: Y.encodeRelativePosition(Y.createRelativePositionFromTypeIndex(text, at, 0)),
+    to: Y.encodeRelativePosition(
+      Y.createRelativePositionFromTypeIndex(text, at + words.length, -1),
+    ),
+  };
+}
+const editP1P5 = async (file: string) => {
+  await replace(file, 'foxes jump', 'foxes sprint');
+  await replace(file, 'bears wait', 'bears hibernate');
+};
+const states = async (projectId: string) => ({
+  threads: (await listThreads(t.pool, store, owner.id, projectId)).map((x) => x.state),
+  proposals: await listProposals(t.pool, store, owner.id, projectId),
+});
+async function paperWithAnchors() {
+  const p = await lines({ 'main.tex': PMAIN });
+  await startThread(t.pool, store, owner.id, p.id, p.main, {
+    ...(await ends(p.main, 'gamma wolves')),
+    body: 'Which wolves?',
+  });
+  const prop = await propose(t.pool, store, owner.id, p.id, p.main, {
+    ...(await ends(p.main, 'howl loudly')),
+    replacement: 'howl softly',
+  });
+  return { ...p, prop };
+}
+
+test('words nobody touched keep their thread and proposal through a restore', async () => {
+  const p = await paperWithAnchors();
+  const a = await saveRevision(t.pool, store, owner.id, p.id, 'A');
+  await editP1P5(p.main);
+  await restoreRevision(t.pool, store, owner.id, p.id, a.id);
+  expect(await textOf(p.main)).toBe(PMAIN);
+  const after = await states(p.id);
+  expect(after.threads).toEqual(['attached']);
+  expect(after.proposals).toMatchObject([{ stale: false, now: 'howl loudly' }]);
+  await acceptProposal(t.pool, store, owner.id, p.id, p.prop);
+  expect(await textOf(p.main)).toBe(PMAIN.replace('howl loudly', 'howl softly'));
+});
+
+test('a proposal accepted before the revision can still be undone after a restore', async () => {
+  const p = await paperWithAnchors();
+  await acceptProposal(t.pool, store, owner.id, p.id, p.prop);
+  const a = await saveRevision(t.pool, store, owner.id, p.id, 'A');
+  await editP1P5(p.main);
+  await restoreRevision(t.pool, store, owner.id, p.id, a.id);
+  expect((await states(p.id)).proposals).toMatchObject([{ status: 'accepted', stale: false }]);
+  await undoAccept(t.pool, store, owner.id, p.id, p.prop);
+  expect(await textOf(p.main)).toBe(PMAIN);
+});
+
+test('a change on the same line leaves the words beside it anchored', async () => {
+  const p = await paperWithAnchors();
+  const a = await saveRevision(t.pool, store, owner.id, p.id, 'A');
+  await replace(p.main, 'night', 'dusk');
+  await restoreRevision(t.pool, store, owner.id, p.id, a.id);
+  expect(await textOf(p.main)).toBe(PMAIN);
+  const after = await states(p.id);
+  expect(after.threads).toEqual(['attached']);
+  expect(after.proposals).toMatchObject([{ stale: false, now: 'howl loudly' }]);
+  await acceptProposal(t.pool, store, owner.id, p.id, p.prop);
+});
+
+test('lines that share no word are replaced whole, and the lines around them are not touched', async () => {
+  // Pure: the stretch kept at either end is only ever whole words.
+  expect(restoreEdits('aaa bbb\nkeep\n', 'ccc ddd\nkeep\n')).toEqual([
+    { at: 0, del: 7, ins: 'ccc ddd' },
+  ]);
+  expect(restoreEdits('say howl loudly now\n', 'say howl softly now\n')).toEqual([
+    { at: 9, del: 6, ins: 'softly' },
+  ]);
+  expect(restoreEdits('abcdef\n', 'abcxyf\n')).toEqual([{ at: 0, del: 6, ins: 'abcxyf' }]);
+
+  const before = 'one\naaa bbb\nthree words here\nccc\nfive\n';
+  const now = 'one\nxxx yyy\nthree words here\nzzz\nfive\n';
+  const p = await lines({ 'main.tex': PMAIN, 'x.tex': before });
+  const x = p.ids['x.tex'];
+  await startThread(t.pool, store, owner.id, p.id, x, {
+    ...(await ends(x, 'words here')),
+    body: 'Between two changes.',
+  });
+  const a = await saveRevision(t.pool, store, owner.id, p.id, 'A');
+  await replace(x, 'aaa bbb', 'xxx yyy');
+  await replace(x, 'ccc', 'zzz');
+  expect(await textOf(x)).toBe(now);
+  await restoreRevision(t.pool, store, owner.id, p.id, a.id);
+  expect(await textOf(x)).toBe(before);
+  expect((await states(p.id)).threads).toEqual(['attached']);
+});
+
+test('a file restores to the byte, with a final newline or without one', async () => {
+  const pairs: [string, string][] = [
+    ['one\ntwo\nthree', 'one\ntwo\nthree EDITED'],
+    ['one\ntwo\nthree tail', 'one\ntwo\nthree'],
+    ['a\nb\n', 'a\nb'],
+    ['a\nb', 'a\nb\n'],
+    ['a\nb\nc', 'a'],
+    ['a', 'a\nb\nc'],
+    ['a\nb\nc\n', 'a\n'],
+    ['a\n', 'a\nb\nc\n'],
+    ['keep\nold one\nold two', 'keep\nnew'],
+    ['keep\nold', 'keep\nnew one\nnew two\n'],
+    ['x\nx\nx\nx\n', 'x\nx\n'],
+    ['', 'text'],
+    ['text', ''],
+    // Changes at both ends with a line between them that must stay anchored.
+    ['first\nkeep this line\nlast', 'FIRST\nkeep this line\nLAST'],
+    ['first\nkeep this line\nlast\n', 'FIRST\nkeep this line\nLAST\n'],
+  ];
+  for (const [want, now] of pairs) {
+    const p = await lines({ 'main.tex': PMAIN, 'x.tex': want });
+    const x = p.ids['x.tex'];
+    const kept = want.includes('keep this line');
+    if (kept)
+      await startThread(t.pool, store, owner.id, p.id, x, {
+        ...(await ends(x, 'keep this line')),
+        body: 'Between two changes.',
+      });
+    const a = await saveRevision(t.pool, store, owner.id, p.id, 'A');
+    if (kept) {
+      await replace(x, 'first', 'FIRST');
+      await replace(x, 'last', 'LAST');
+    } else
+      await edit(x, (text) => {
+        text.delete(0, text.length);
+        text.insert(0, now);
+      });
+    await restoreRevision(t.pool, store, owner.id, p.id, a.id);
+    if (kept) expect((await states(p.id)).threads).toEqual(['attached']);
+    const out = (await readZip(await exportZip(t.pool, store, owner.id, p.id))).entries.find(
+      (e) => e.path === 'x.tex',
+    )!;
+    expect(Buffer.from(out.bytes).toString(), JSON.stringify([want, now])).toBe(want);
+    expect(await textOf(x)).toBe(want);
+  }
+});
+
+test('a file too large to compare line by line is still restored exactly', async () => {
+  const make = (prefix: string) =>
+    Array.from({ length: 2100 }, (_, i) => `${prefix} line ${i}`).join('\n') + '\n';
+  const [want, now] = [make('old'), make('new')];
+  // Past what the line diff will compare, so the restore falls back to one stretch.
+  expect(diffLines(want, now)).toBeNull();
+  const p = await lines({ 'main.tex': PMAIN, 'big.tex': want });
+  const big = p.ids['big.tex'];
+  const a = await saveRevision(t.pool, store, owner.id, p.id, 'A');
+  await edit(big, (text) => {
+    text.delete(0, text.length);
+    text.insert(0, now);
+  });
+  await restoreRevision(t.pool, store, owner.id, p.id, a.id);
+  expect(await textOf(big)).toBe(want);
+  const out = (await readZip(await exportZip(t.pool, store, owner.id, p.id))).entries.find(
+    (e) => e.path === 'big.tex',
+  )!;
+  expect(Buffer.from(out.bytes).toString()).toBe(want);
+});
+
+test("a second person's typing in an untouched paragraph survives a restore whole", async () => {
+  const p = await paperWithAnchors();
+  const a = await saveRevision(t.pool, store, owner.id, p.id, 'A');
+  await editP1P5(p.main);
+  // Their editor has the paper as it is now, and the restore has not reached it yet.
+  const { doc: theirs, text: theirText } = await docOf(p.main);
+  await restoreRevision(t.pool, store, owner.id, p.id, a.id);
+  const at = theirText.toString().indexOf('howl ') + 5;
+  const sent: Uint8Array[] = [];
+  theirs.on('update', (u: Uint8Array) => sent.push(u));
+  for (const [i, letter] of [...'abcdefgh'].entries()) theirText.insert(at + i, letter);
+  for (const u of sent) await appendUpdate(t.pool, p.main, owner.id, u);
+  expect(await textOf(p.main)).toBe(PMAIN.replace('howl loudly', 'howl abcdefghloudly'));
 });

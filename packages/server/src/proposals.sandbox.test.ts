@@ -10,6 +10,7 @@ import {
   closeProposal,
   listProposals,
   propose,
+  reattachProposal,
   reviseProposal,
   undoAccept,
 } from './proposals.ts';
@@ -291,4 +292,126 @@ test('proposing is for people who may comment, deciding for people who may edit'
     kind: 'review',
     message: '1 proposed change has not been decided.',
   });
+});
+
+/** The words typed over where they stood: the same text, in new characters nothing is anchored to. */
+const retype = (file: string, words: string) => change(file, words, words);
+
+test('a proposal whose words are gone cannot be revived as an insertion', async () => {
+  const p = await paper();
+  const id = await propose(t.pool, store, users.reviewer.id, p.id, p.file, {
+    ...(await ends(p.file, 'below 40 ms')),
+    replacement: 'under 40 ms',
+  });
+  await change(p.file, 'below 40 ms', '');
+  expect(await proposals(p)).toMatchObject([{ stale: true, now: '', expected: 'below 40 ms' }]);
+  const before = await proposals(p);
+  const text = await saved(p);
+  expect(
+    await code(reviseProposal(t.pool, store, users.reviewer.id, p.id, id, { replacement: 'x' })),
+  ).toBe('conflict');
+  expect(await proposals(p)).toEqual(before);
+  expect(await saved(p)).toBe(text);
+
+  // A proposal made to add text has no words, and can still be changed.
+  const add = await propose(t.pool, store, users.reviewer.id, p.id, p.file, {
+    ...(await ends(p.file, 'Nothing else', 0)),
+    replacement: 'We measured. ',
+  });
+  await reviseProposal(t.pool, store, users.reviewer.id, p.id, add, {
+    replacement: 'We measured twice. ',
+  });
+  expect((await proposals(p)).find((x) => x.id === add)).toMatchObject({
+    expected: '',
+    replacement: 'We measured twice. ',
+  });
+});
+
+test('a proposal that lost its place finds its words again, when they are there once', async () => {
+  const p = await paper();
+  const make = async (words: string, replacement: string) =>
+    propose(t.pool, store, users.reviewer.id, p.id, p.file, {
+      ...(await ends(p.file, words)),
+      replacement,
+    });
+  const open = await make('below 40 ms', 'under 40 ms');
+  const taken = await make('Latency', 'Delay');
+  const cut = await make(' for most edits', '');
+  const done = await make('claimed', 'shown');
+  await acceptProposal(t.pool, store, users.owner.id, p.id, done);
+  await acceptProposal(t.pool, store, users.owner.id, p.id, cut);
+  await closeProposal(t.pool, users.owner.id, p.id, taken, 'rejected');
+  const get = async (id: string) => (await proposals(p)).find((x) => x.id === id)!;
+
+  // Still attached: nothing to find again.
+  expect(await code(reattachProposal(t.pool, store, users.reviewer.id, p.id, open))).toBe(
+    'invalid_input',
+  );
+
+  // An open proposal looks for what it expected.
+  await retype(p.file, 'below 40 ms');
+  expect(await get(open)).toMatchObject({ stale: true, now: '' });
+  await reattachProposal(t.pool, store, users.reviewer.id, p.id, open);
+  expect(await get(open)).toMatchObject({ stale: false, now: 'below 40 ms' });
+  await acceptProposal(t.pool, store, users.owner.id, p.id, open);
+  expect(await saved(p)).toContain('under 40 ms');
+
+  // An accepted one looks for what it put there, and can then be undone.
+  await retype(p.file, 'shown');
+  expect(await code(undoAccept(t.pool, store, users.owner.id, p.id, done))).toBe('conflict');
+  await reattachProposal(t.pool, store, users.editor.id, p.id, done);
+  expect(await get(done)).toMatchObject({ stale: false, now: 'shown' });
+  await undoAccept(t.pool, store, users.owner.id, p.id, done);
+  expect(await saved(p)).toContain('is claimed');
+
+  // Decided and rejected: no. Words that are nothing, an accepted deletion: no.
+  expect(await code(reattachProposal(t.pool, store, users.owner.id, p.id, taken))).toBe('conflict');
+  expect(await code(reattachProposal(t.pool, store, users.owner.id, p.id, cut))).toBe('conflict');
+
+  // Words in the file twice, or not at all: nothing is guessed.
+  const twice = await propose(t.pool, store, users.owner.id, p.id, p.file, {
+    ...(await ends(p.file, 'Nothing else')),
+    replacement: 'Little else',
+  });
+  await retype(p.file, 'Nothing else');
+  await change(p.file, 'is claimed', 'is claimed. Nothing else');
+  const placed = await get(twice);
+  expect(await code(reattachProposal(t.pool, store, users.owner.id, p.id, twice))).toBe('conflict');
+  expect(await get(twice)).toEqual(placed);
+  await change(p.file, 'Nothing else', 'Gone');
+  await change(p.file, 'Nothing else', 'Gone');
+  expect(await code(reattachProposal(t.pool, store, users.owner.id, p.id, twice))).toBe('conflict');
+});
+
+test('a place cannot be found again, and only its author or an editor may try', async () => {
+  const p = await paper();
+  const add = await propose(t.pool, store, users.owner.id, p.id, p.file, {
+    ...(await ends(p.file, 'Nothing else', 0)),
+    replacement: 'We measured. ',
+  });
+  expect(await code(reattachProposal(t.pool, store, users.owner.id, p.id, add))).toBe('conflict');
+
+  const mine = await propose(t.pool, store, users.owner.id, p.id, p.file, {
+    ...(await ends(p.file, 'below 40 ms')),
+    replacement: 'under 40 ms',
+  });
+  await retype(p.file, 'below 40 ms');
+  expect(await code(reattachProposal(t.pool, store, users.reviewer.id, p.id, mine))).toBe(
+    'permission_denied',
+  );
+  expect(await code(reattachProposal(t.pool, store, users.viewer.id, p.id, mine))).toBe(
+    'permission_denied',
+  );
+  expect(await code(reattachProposal(t.pool, store, users.outsider.id, p.id, mine))).toBe(
+    'not_found',
+  );
+  expect((await proposals(p))[1]).toMatchObject({ now: '' });
+  // The author of one may find it again without being able to decide anything.
+  const theirs = await propose(t.pool, store, users.reviewer.id, p.id, p.file, {
+    ...(await ends(p.file, 'Latency')),
+    replacement: 'Delay',
+  });
+  await retype(p.file, 'Latency');
+  await reattachProposal(t.pool, store, users.reviewer.id, p.id, theirs);
+  expect((await proposals(p)).find((x) => x.id === theirs)).toMatchObject({ now: 'Latency' });
 });
