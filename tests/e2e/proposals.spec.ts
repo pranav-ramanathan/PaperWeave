@@ -96,6 +96,24 @@ test('a reviewer proposes a change; the owner accepts it, undoes that, and rejec
   await panel(owner.page).getByText('Decided (1)').click();
   await expect(proposal(owner.page)).toContainText(`Accepted by ${owner.email}.`);
 
+  // Downloaded with its review and imported again, the accepted proposal still names who accepted it.
+  const copy = await owner.page.context().newPage();
+  await copy.goto(owner.page.url().replace(/\/files\/.*$/, ''));
+  const [download] = await Promise.all([
+    copy.waitForEvent('download'),
+    copy.getByRole('link', { name: 'ZIP with review data' }).click(),
+  ]);
+  await copy.goto('/projects');
+  await copy.getByLabel('Or import a ZIP of a LaTeX project').setInputFiles(await download.path());
+  await copy.getByRole('button', { name: 'Import ZIP' }).click();
+  await expect(
+    copy.getByText(/Review data came with the archive: 0 threads and 1 proposed/),
+  ).toBeVisible();
+  await copy.getByRole('link', { name: 'main.tex' }).first().click();
+  await copy.getByText('Decided (1)').click();
+  await expect(proposal(copy)).toContainText(`Accepted by ${owner.email}.`);
+  await copy.close();
+
   // Undone: the old word is back, and the proposal is open again.
   await proposal(owner.page).getByRole('button', { name: 'Undo the accept' }).click();
   await expect(owner.page.locator(SOURCE)).toContainText('below forty milliseconds');

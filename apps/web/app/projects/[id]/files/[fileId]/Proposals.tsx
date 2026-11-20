@@ -150,8 +150,8 @@ export default function Proposals(props: {
         )}
         <p className="note">
           {p.author ?? 'Someone who has left'}, {day(p.createdAt)}.{' '}
-          {p.status === 'accepted' && `Accepted by ${p.decidedBy ?? 'someone who has left'}.`}
-          {p.status === 'rejected' && `Rejected by ${p.decidedBy ?? 'someone who has left'}.`}
+          {p.status === 'accepted' && (p.decidedBy ? `Accepted by ${p.decidedBy}.` : 'Accepted.')}
+          {p.status === 'rejected' && (p.decidedBy ? `Rejected by ${p.decidedBy}.` : 'Rejected.')}
           {p.status === 'dismissed' && 'Withdrawn by its author.'}
         </p>
         {p.status === 'open' && p.stale && (

@@ -311,7 +311,7 @@ export async function listProposals(
             p.reason, p.status, p.author, p.created_at, p.decided_at,
             coalesce(a.email, p.imported_author) as author_email,
             p.origin, p.made_by, p.evidence,
-            d.email as decider_email
+            coalesce(d.email, p.imported_decider) as decider_email
      from proposals p join files f on f.id = p.file_id
      left join "user" a on a.id = p.author left join "user" d on d.id = p.decided_by
      where p.project_id = $1 and ($2::uuid is null or p.file_id = $2)

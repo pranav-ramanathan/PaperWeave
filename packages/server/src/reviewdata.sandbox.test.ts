@@ -90,6 +90,7 @@ const review = async (projectId: string, as: string) => ({
     author: p.author,
     createdAt: p.createdAt,
     decidedAt: p.decidedAt,
+    decidedBy: p.decidedBy,
     origin: p.origin,
   })),
 });
@@ -418,6 +419,28 @@ test('a review file written before these fields existed still comes in whole', a
     detached: 0,
     missing: [],
   });
+  const [arrived] = await listProposals(t.pool, store, users.importer.id, made.id);
+  expect(arrived.decidedBy).toBeNull();
+});
+
+test('who decided a proposal arrives with it', async () => {
+  const p = await paper();
+  const taken = await propose(t.pool, store, users.reviewer.id, p.id, p.file, {
+    ...(await ends(p.file, 'Nothing else')),
+    replacement: 'No more',
+  });
+  const refused = await propose(t.pool, store, users.reviewer.id, p.id, p.file, {
+    ...(await ends(p.file, 'Latency')),
+    replacement: 'Delay',
+  });
+  await acceptProposal(t.pool, store, users.owner.id, p.id, taken);
+  await closeProposal(t.pool, users.owner.id, p.id, refused, 'rejected');
+  const { id } = await trip(p.id);
+  const arrived = await listProposals(t.pool, store, users.importer.id, id);
+  expect(arrived.map((a) => [a.status, a.decidedBy]).sort()).toEqual([
+    ['accepted', users.owner.email],
+    ['rejected', users.owner.email],
+  ]);
 });
 
 test('a thread whose words were edited arrives on the words as they now read', async () => {

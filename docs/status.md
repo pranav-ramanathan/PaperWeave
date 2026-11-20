@@ -1635,7 +1635,7 @@ second one.
 | A deleted stretch; the middle of three; the first and last word      | as it was                                             | the same                              |
 | Long, multi-line and odd-charactered comments; CRLF; folders; spaces | identical                                             | the same                              |
 | Exported twice; imported twice                                       | the same file; two whole papers                       | the same                              |
-| Who accepted or rejected a proposal                                  | "someone who has left"                                | the same (next change)                |
+| Who accepted or rejected a proposal                                  | **"someone who has left"**                            | their address, as it was              |
 | Revisions, citation checks, data descriptions, charts, language      | **gone, without a word**                              | gone, and the page says so            |
 
 - **What was wrong.** The importer read the review file whole, against limits the app itself
@@ -1648,13 +1648,15 @@ second one.
   proposal is read on its own, and one that cannot be read is named and left out; names and
   quotes too long are cut, not refused; the counts it reads go to 20,000. The root file goes
   with the review and is made the root on the way in. A thread goes by how it reads now, and one
-  already detached stays so; an accepted proposal gone stale stays stale. The reviewing model's
+  already detached stays so; an accepted proposal gone stale stays stale, and who decided it
+  comes with it (`imported_decider`, as `imported_author` does for its author; a file from before
+  this says "Accepted." without a name rather than "someone who has left", which was not true). The reviewing model's
   quotes are cut to 500 where they are kept. The paper's page says, by the export and in the
   import's report, what does not go with a paper.
 - **Held by** service tests (`reviewdata.sandbox.test`, `import.sandbox.test`,
   `critique.sandbox.test`), each failed on the old code, and one that a file exported before this
   still comes in whole.
-- **Not changed:** who decided a proposal (the next change). A thread on more than 500
+- **Not changed:** a thread on more than 500
   characters comes back on its first 500. The compiler is the one the importer read from the
   files, which the root may not decide. A review file at the top of an archive of several papers
   is given to none. There is no limit on how many comments a thread may have, and sign-in takes
