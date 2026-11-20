@@ -284,6 +284,10 @@ address signed by the app reads or writes it, and each is good for minutes.
   file name (`response-content-disposition`, `inline` for a build's PDF) and type. The pages'
   content policy names the store in `connect-src` so that the PDF pane's fetch follows it
   (`apps/web/proxy.ts`).
+- **Pictures and chart images** (`/projects/[id]/picture`, a chart's PNG) are sent the same way:
+  the permission check gives the file's digest, and `sendBlob` answers from the app at 4 MB or
+  less, otherwise with the `303` and a signed address that fixes the type (`image/png` or
+  `image/jpeg`). The pages' content policy names the store in `img-src` as well, for the `<img>`.
 - **Downloads built from many files** (the paper's export, a revision's ZIP) are streamed: the
   ZIP is written to the response as it is made, not held and sent whole. The bytes are the same.
   (The files going into it are still read into the function's memory, one paper at a time.)
@@ -295,7 +299,10 @@ Browsers now reach the store, so it needs an address they can use, and CORS.
 - `S3_PUBLIC_ENDPOINT` is the store's address as browsers reach it, when that is not what the app
   uses (`S3_ENDPOINT`). On Vercel both are the tunnel's address, so it can stay unset. Signed
   addresses are made for this host, so a tunnel must pass the `Host` it was reached by on to the
-  store. The app's own routes (`/api/uploads`, the downloads) need nothing else.
+  store. The app's own routes (`/api/uploads`, the downloads) need nothing else. A picture or
+  chart image over 4 MB is shown from the store by an `<img>`, which needs no CORS; the page's
+  policy allows the store in `img-src`. On Vercel the store's address must be `https`, or the
+  browser blocks the image as mixed content (as for a PDF).
 - **CORS.** The store must answer the web app's origin (`BETTER_AUTH_URL`'s) for `PUT` and `GET`
   and `HEAD`, allow the headers the request carries (`content-type`; pdf.js also sends `range`),
   and let the browser read `content-length`, `content-range` and `etag`.
@@ -316,8 +323,6 @@ Browsers now reach the store, so it needs an address they can use, and CORS.
 
 ### What still goes through a function
 
-- **Pictures and chart images** (`/projects/[id]/picture`, `…/pictures`, a chart's PNG) are still
-  read into memory and sent whole. One over 4.5 MB fails on Vercel.
 - **A paper's import still reads the whole ZIP into one function**, and a paper that is exported
   still reads its files into one function's memory. 100 MB and 300 MB are inside the memory Vercel
   gives a function, but not tried there.
