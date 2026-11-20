@@ -273,7 +273,10 @@ export default function FileEditor(props: {
         if (oversized) throw new Error('held until the person discards them');
         // A ticket that cannot be fetched is the network or the server having a bad moment, not
         // a refusal: the attempt ends here and another is made shortly.
-        const res = await fetch(`/api/sync-ticket?file=${fileId}`).catch(() => null);
+        // Ten seconds at most: a request that never answers would otherwise hold the attempt for good.
+        const res = await fetch(`/api/sync-ticket?file=${fileId}`, {
+          signal: AbortSignal.timeout(10_000),
+        }).catch(() => null);
         const answer = res?.ok ? await res.json().catch(() => null) : null;
         // Signed out is not a refusal either: their sign-in ran out, or they signed out in
         // another tab. What they have typed stays here, and the page goes on asking, so that it
@@ -352,8 +355,11 @@ export default function FileEditor(props: {
     // was not there yet and failed, and the library took that for a failed attempt to connect.
     // A second later it dropped the connection, which was working, and made another. Whatever
     // the server answered in that moment went nowhere.
+    provider.on('authenticated', () => update({ connected: true }));
     provider.on('status', ({ status }: { status: string }) => {
-      update({ connected: status === 'connected' });
+      // "Connected" is said when the socket opens, before the ticket has been fetched and the
+      // server has accepted it: that is `authenticated`, below.
+      if (status !== 'connected') update({ connected: false });
       // The library ignores a request to connect made while a disconnect is still closing,
       // and then stays down. So whenever the connection has closed and this tab should be
       // connected, and the library is not going to try by itself, ask again.
