@@ -2396,7 +2396,10 @@ update` held the paper's file rows for **189.6 s** (until the proxy was cut; it 
     progress; it sets no header, so the store's CORS needs are those of the `fetch` it replaced.
   - **Downloads.** A revision's ZIP and the paper's ZIP are streamed, with the same bytes as
     before. A PDF over 4 MB is answered, after the check of who may see it, with a redirect to a
-    signed link that lasts five minutes and carries the file's name.
+    signed link that lasts five minutes and carries the file's name. A picture in the visual
+    editor and a chart's PNG over 4 MB are answered the same way (`pictureDigest` and
+    `chartPngDigest` give the digest after the permission check; `sendBlob` decides), with the
+    type signed as `image/png` or `image/jpeg`. The page's policy names the store in `img-src`.
   - The store's address as browsers reach it is `S3_PUBLIC_ENDPOINT`, and the page's content
     policy allows it. The store must allow the web app's origin (CORS); `infra/compose.yaml`
     sets that for local work.
@@ -2404,9 +2407,20 @@ update` held the paper's file rows for **189.6 s** (until the proxy was cut; it 
   limit refused unread; the object deleted after success and after failure; an outsider, a viewer
   and another person refused; the sweep; streamed bytes equal written bytes; signing tried against
   a store that checks signatures) and a browser test that imports a 6 MB ZIP and adds a 5 MB file
-  with no request to the app over 4.5 MB, and downloads each large thing.
-- **Not changed:** pictures and chart images still come through the web app. The streamed ZIP
-  still reads its files into memory first. Nothing here was tried on Vercel itself.
+  with no request to the app over 4.5 MB, and downloads each large thing. For pictures it
+  redirects a 6 MB picture and a 5 MB chart PNG to the store with a signed address (5 minutes,
+  `image/png`, equal bytes), checks the page policy's `img-src`, shows both in a browser (the
+  editor's picture and the chart page's, each `naturalWidth` 8), and keeps a small picture sent
+  from the app with its `etag` and a 304. An outsider gets 404 and no `Location` for both. A
+  PNG followed by 6 MB of padding decodes in Chromium. Without the `img-src` change the browser
+  blocks the redirected image; without the routes' change the answer is a 200.
+- **Cost of the picture change:** each picture request asks the store for the size first (one
+  `HEAD`), as a PDF does. A picture over 4 MB is downloaded again on each page load, because
+  the redirect is `no-store` and each load gets a new address; within a page the browser reuses
+  it by the app's address. The route's `nosniff` and sandbox headers are not on the large
+  answer; the store answers with the signed type.
+- **Not changed:** the streamed ZIP still reads its files into memory first. Nothing here was
+  tried on Vercel itself, pictures included.
 - **How it was made.** Written by an agent from a plan made with the Vercel documentation;
   checked here.
 

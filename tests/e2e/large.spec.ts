@@ -14,7 +14,24 @@ import { person, run, signIn } from './helpers';
 
 const FUNCTION_LIMIT = 4_500_000;
 const STORE = process.env.S3_ENDPOINT ?? 'http://localhost:8333';
-const MAIN = '\\documentclass{article}\n\\begin{document}\nBig.\n\\end{document}\n';
+// A small valid PNG, 8 by 8. The large pictures below are this followed by padding, which a
+// decoder ignores after the last chunk.
+const PNG = Buffer.from(
+  'iVBORw0KGgoAAAANSUhEUgAAAAgAAAAICAAAAADhZOFXAAAAFklEQVR4nGP4DwUMSAwGBgYGQgw0XQC54i/RD0GiIwAAAABJRU5ErkJggg==',
+  'base64',
+);
+const MAIN = [
+  '\\documentclass{article}',
+  '\\usepackage{graphicx}',
+  '\\begin{document}',
+  'Big.',
+  '\\begin{figure}[t]',
+  '  \\includegraphics[width=2cm]{figs/noise}',
+  '  \\caption{Large.}',
+  '\\end{figure}',
+  '\\end{document}',
+  '',
+].join('\n');
 
 /** Every request a page makes to the app that carries a body, and every PUT to the store. */
 function watch(page: Page) {
@@ -37,7 +54,7 @@ test('large uploads go to the store, and large downloads come from it or are str
   const page = owner.page;
   const sent = watch(page);
   const dir = mkdtempSync(join(tmpdir(), 'paperweave-e2e-'));
-  const noise = randomBytes(6_000_000);
+  const noise = Buffer.concat([PNG, randomBytes(6_000_000)]);
   const name = `Large ${run}`;
   const zip = join(dir, `${name}.zip`);
   writeFileSync(
@@ -45,6 +62,9 @@ test('large uploads go to the store, and large downloads come from it or are str
     await writeZip([
       { path: 'main.tex', bytes: Buffer.from(MAIN) },
       { path: 'figs/noise.png', bytes: noise },
+      { path: 'figs/dot.png', bytes: PNG },
+      // The chart page shows a chart only if the paper holds both of its files.
+      { path: 'charts/big.pdf', bytes: Buffer.from('%PDF-1.5\n') },
     ]),
   );
   expect(readFileSync(zip).length).toBeGreaterThan(FUNCTION_LIMIT);
@@ -94,6 +114,15 @@ test('large uploads go to the store, and large downloads come from it or are str
   await expect(page.getByRole('alert').filter({ hasText: 'too large' })).toBeVisible();
   expect(sent.toStore).toHaveLength(2);
 
+  // A chart's picture over the limit, added as a file like any other.
+  const bigChart = Buffer.concat([PNG, randomBytes(5_000_000)]);
+  writeFileSync(join(dir, 'chart.png'), bigChart);
+  await page.getByLabel('Name, with folders if you like').fill('charts/big.png');
+  await page.getByLabel(/^A file to upload/).setInputFiles(join(dir, 'chart.png'));
+  await page.getByRole('button', { name: 'Add file' }).click();
+  await expect(page.getByRole('status')).toHaveText('Added charts/big.png.');
+  expect(sent.toStore).toHaveLength(3);
+
   // The export is streamed: it has no length of its own, and holds every byte.
   const exported = await page.request.get(`/projects/${projectId}/export`);
   expect(exported.headers()['content-length']).toBeUndefined();
@@ -136,6 +165,14 @@ test('large uploads go to the store, and large downloads come from it or are str
     ).rows[0].id as string;
   const bigBuild = await built(pdf, revision);
   const smallBuild = await built(small, null);
+  const chartId = (
+    await pool.query(
+      `insert into charts (project_id, name, dataset_file_id, spec, status, drawn_at)
+       select $1, 'big', id, '{}', 'drawn', now() from files
+       where project_id = $1 and path = 'main.tex' returning id`,
+      [projectId],
+    )
+  ).rows[0].id as string;
   await pool.end();
 
   // The revision's PDF: a redirect to a signed address in the store, which sends it with the
@@ -175,6 +212,55 @@ test('large uploads go to the store, and large downloads come from it or are str
   expect(direct.headers()['cache-control']).toBe('private, no-cache');
   expect((await direct.body()).equals(small)).toBe(true);
 
+  // A picture and a chart's picture over the limit are redirected the same way, as images.
+  const stored = async (path: string, bytes: Buffer) => {
+    const res = await page.request.get(path, { maxRedirects: 0 });
+    expect(res.status()).toBe(303);
+    expect(res.headers()['cache-control']).toBe('no-store');
+    const at = new URL(res.headers().location);
+    expect(at.origin).toBe(STORE);
+    expect(at.searchParams.get('X-Amz-Signature')).toBeTruthy();
+    expect(at.searchParams.get('X-Amz-Expires')).toBe('300');
+    const got = await fetch(at);
+    expect(got.headers.get('content-type')).toBe('image/png');
+    expect(Buffer.from(await got.arrayBuffer()).equals(bytes)).toBe(true);
+  };
+  await stored(`/projects/${projectId}/picture?target=figs/noise`, noise);
+  await stored(`/projects/${projectId}/charts/${chartId}/png`, bigChart);
+
+  // The pages' policy lets an image come from the store.
+  const listed = await page.request.get('/projects');
+  expect(listed.headers()['content-security-policy']).toContain(
+    `img-src 'self' data: blob: ${STORE}`,
+  );
+
+  // A small picture is still sent from the app, and kept by the browser as it was.
+  const dot = await page.request.get(`/projects/${projectId}/picture?target=figs/dot`, {
+    maxRedirects: 0,
+  });
+  expect(dot.status()).toBe(200);
+  expect(dot.headers()['cache-control']).toBe('private, no-cache');
+  expect(dot.headers()['x-content-type-options']).toBe('nosniff');
+  const etag = dot.headers().etag;
+  expect(etag).toBeTruthy();
+  const again = await page.request.get(`/projects/${projectId}/picture?target=figs/dot`, {
+    headers: { 'if-none-match': etag },
+    maxRedirects: 0,
+  });
+  expect(again.status()).toBe(304);
+
+  // And the browser shows them: the editor's picture, and the chart page's.
+  await page.goto(paper);
+  await page.getByRole('link', { name: 'main.tex' }).click();
+  const shownPicture = page.locator('.editor .visual .ProseMirror').locator('img');
+  await expect
+    .poll(() => shownPicture.evaluate((img: HTMLImageElement) => img.naturalWidth))
+    .toBe(8);
+  await page.goto(`/projects/${projectId}/charts/${chartId}`);
+  await expect
+    .poll(() => page.locator('img.chart').evaluate((img: HTMLImageElement) => img.naturalWidth))
+    .toBe(8);
+
   // Someone who is not on the paper is sent nowhere: no address is made for them.
   const outsider = await person(browser, 'large-outsider');
   await outsider.page.goto('/sign-in');
@@ -185,6 +271,13 @@ test('large uploads go to the store, and large downloads come from it or are str
   );
   expect(refused.status()).toBe(404);
   expect(refused.headers().location).toBeUndefined();
+  for (const path of [`picture?target=figs/noise`, `charts/${chartId}/png`]) {
+    const no = await outsider.page.request.get(`/projects/${projectId}/${path}`, {
+      maxRedirects: 0,
+    });
+    expect(no.status()).toBe(404);
+    expect(no.headers().location).toBeUndefined();
+  }
 
   // The revision's ZIP is streamed too, and holds the same bytes.
   const revZip = await page.request.get(`/projects/${projectId}/revisions/${revision}/zip`);

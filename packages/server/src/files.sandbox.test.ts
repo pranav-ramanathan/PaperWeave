@@ -1,4 +1,5 @@
 // Needs the services in infra/compose.yaml. Run: pnpm test:sandbox
+import { createHash } from 'node:crypto';
 import { mkdirSync, mkdtempSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { dirname, join } from 'node:path';
@@ -10,6 +11,7 @@ import {
   createFile,
   deleteFile,
   picture,
+  pictureDigest,
   pictures,
   proposeFileRename,
   renameFileAndReferences,
@@ -350,6 +352,19 @@ test('a picture is served as LaTeX would find it, and only if a browser can show
     expect(Buffer.from(found.bytes).equals(PNG), target).toBe(true);
   }
   expect((await get(owner.id, 'photo')).type).toBe('image/jpeg');
+  // The lookup alone gives the stored version's digest, and the same refusals.
+  const sha = createHash('sha256').update(PNG).digest('hex');
+  for (const target of ['figures/dot', 'figures/dot.png', './figures/dot'])
+    expect(await pictureDigest(t.pool, store, owner.id, project.id, target), target).toMatchObject({
+      digest: sha,
+      type: 'image/png',
+    });
+  expect(await code(pictureDigest(t.pool, store, outsider.id, project.id, 'figures/dot'))).toBe(
+    'not_found',
+  );
+  expect(await code(pictureDigest(t.pool, store, owner.id, project.id, 'figures/plot'))).toBe(
+    'not_found',
+  );
   // A PDF figure is real, but not something to hand a browser as a picture. Nor is anything
   // that is not a picture, or not there, or outside the paper.
   for (const target of [

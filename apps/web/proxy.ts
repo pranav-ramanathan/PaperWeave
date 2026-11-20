@@ -17,10 +17,11 @@ export function pagePolicy(nonce: string, sync: string, dev: boolean, store = ''
     "style-src-attr 'unsafe-inline'",
     // For a browser that knows neither of the two above.
     "style-src 'self' 'unsafe-inline'",
-    "img-src 'self' data: blob:",
+    `img-src 'self' data: blob:${store ? ` ${store}` : ''}`,
     "font-src 'self' data:",
     // The app's own address, the sync server's, and the object store's: files are put there by
-    // the browser, and large PDFs are fetched from there. (`store` is empty if it is the app's own.)
+    // the browser, large PDFs are fetched from there, and so are large pictures (`img-src`
+    // above). (`store` is empty if it is the app's own.)
     `connect-src 'self' ${sync}${store ? ` ${store}` : ''}`,
     // The PDF pages are drawn by a worker.
     "worker-src 'self' blob:",
