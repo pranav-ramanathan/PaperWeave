@@ -19,7 +19,7 @@ import {
 } from '@paperweave/latex';
 import { Editor, Extension, type Node } from '@tiptap/core';
 import type { Node as PMNode } from '@tiptap/pm/model';
-import { Plugin, Selection, TextSelection } from '@tiptap/pm/state';
+import { NodeSelection, Plugin, Selection, TextSelection } from '@tiptap/pm/state';
 import { Decoration, DecorationSet } from '@tiptap/pm/view';
 import katex from 'katex';
 import * as Y from 'yjs';
@@ -153,8 +153,13 @@ export function createVisual(opts: {
       const a = view.posAtDOM(sel.anchorNode, sel.anchorOffset);
       const b = view.posAtDOM(sel.focusNode, sel.focusOffset);
       const { from, to } = editor.state.selection;
-      if (Math.min(a, b) !== from || Math.max(a, b) !== to)
-        editor.commands.setTextSelection({ from: Math.min(a, b), to: Math.max(a, b) });
+      if (Math.min(a, b) !== from || Math.max(a, b) !== to) {
+        const { doc, tr } = editor.state;
+        const at = (pos: number) => doc.resolve(Math.max(0, Math.min(pos, doc.content.size)));
+        view.dispatch(
+          tr.setSelection(TextSelection.between(at(Math.min(a, b)), at(Math.max(a, b)), 1)),
+        );
+      }
     } catch {
       // A selection the editor cannot place (inside a drawn formula, say): leave its own.
     }
@@ -667,7 +672,26 @@ export function createVisual(opts: {
       Extension.create({
         name: 'bridge',
         addProseMirrorPlugins: () => [
-          new Plugin({ filterTransaction: (tr, state) => !bridge || bridge.filter(tr, state) }),
+          new Plugin({
+            filterTransaction: (tr, state) => {
+              if (!bridge) return true;
+              // A key that only moves the selection must not leave the caret where nothing can
+              // be typed (the root, between blocks). A selected block is still allowed.
+              if (
+                !tr.docChanged &&
+                tr.selectionSet &&
+                !tr.getMeta('projection') &&
+                !tr.getMeta('own') &&
+                ((tr.selection instanceof TextSelection &&
+                  !tr.selection.$head.parent.inlineContent) ||
+                  // Delete at the end of a paragraph selects the list that follows: a whole
+                  // container, not a thing (a formula, a picture) the person chose.
+                  (tr.selection instanceof NodeSelection && !tr.selection.node.isAtom))
+              )
+                return false;
+              return bridge.filter(tr, state);
+            },
+          }),
           // The stretches of text that have a thread of comments, marked where they stand now.
           new Plugin({
             props: {
@@ -697,6 +721,8 @@ export function createVisual(opts: {
             (transaction.selectionSet || transaction.docChanged)
           )
             moves++;
+          // An edit going through is the answer to any note about the last refused one.
+          if (transaction.docChanged && !transaction.getMeta('projection')) say('');
           bridge?.applied(transaction);
         },
         addKeyboardShortcuts: () => ({
@@ -715,6 +741,10 @@ export function createVisual(opts: {
           'Mod-y': () => !!undo.redo() || true,
           'Mod-Shift-z': () => !!undo.redo() || true,
           'Mod-i': emph,
+          'Shift-Enter': () => {
+            say('A line break inside a paragraph is made in the source, with \\\\.');
+            return true;
+          },
           // Alt+= is the equation key in word processors; Alt+R for a reference.
           'Alt-=': () => (opts.ask && opts.editable ? (opts.ask('equation'), true) : false),
           'Alt-r': () => (opts.ask && opts.editable ? (opts.ask('reference'), true) : false),
@@ -741,6 +771,12 @@ export function createVisual(opts: {
     ],
     editorProps: {
       attributes: { 'aria-label': opts.label, role: 'textbox', 'aria-multiline': 'true' },
+      // These keys act where the caret is on the screen, even straight after a caret key.
+      handleKeyDown: (view, e) => {
+        if (!view.composing && (e.key === 'Enter' || e.key === 'Backspace' || e.key === 'Delete'))
+          catchUp();
+        return false;
+      },
       // A press of the mouse or a key in the text: the caret is the person's from then on.
       handleDOMEvents: {
         mousedown: () => {

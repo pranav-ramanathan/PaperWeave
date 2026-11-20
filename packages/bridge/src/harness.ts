@@ -117,8 +117,8 @@ export function visualOp(r: Rng, rep: Replica, only?: 'ins'): Op | null {
   const spot = locate(rep.bridge.model, rep.state.doc, pos)!;
   // Fixed width, so a failing seed replays the same edits whatever ran before it.
   const token = `v${String(serial++ % 100000).padStart(5, '0')}q`;
-  const lo = spot.base + unit(spot.pieces, off - 1)[0];
-  const roll = only ? 0 : r.int(100);
+  let lo = spot.base + unit(spot.pieces, off - 1)[0];
+  const roll = only ? 0 : r.int(160);
   const { state } = rep;
   let what = 'ins';
   let hi = spot.base + unit(spot.pieces, off)[1];
@@ -147,12 +147,43 @@ export function visualOp(r: Rng, rep: Replica, only?: 'ins'): Op | null {
     if (!next) return null;
     hi = Math.max(hi, next.base + 1);
     accepted = rep.dispatch(state.tr.join(at));
-  } else {
+  } else if (roll < 100) {
     what = 'emph';
     hi = spot.base + unit(spot.pieces, off + len)[1];
     rep.select(pos, pos + len);
     const c = rep.bridge.emphCommand(rep.state);
     accepted = !!c && rep.bridge.applyCommand(c) === 'applied';
+  } else if (roll < 140) {
+    // Delete, or type over, a selection that runs from one paragraph into a later one.
+    what = 'xdel';
+    // Selecting out of a just-opened empty paragraph removes it, and every position moves.
+    if (rep.bridge.model.phantom) return null;
+    const i = tbs.indexOf(tb);
+    const tb2 = tbs[i + 1 + r.int(Math.min(3, tbs.length - i - 1) || 1)];
+    if (!tb2) return null;
+    const off2 = r.int(tb2.size + 1);
+    const end = tb2.start + off2;
+    const spot2 = locate(rep.bridge.model, state.doc, end)!;
+    hi = spot2.base + unit(spot2.pieces, off2)[1];
+    hi += /^[ \t]*\n/.exec(rep.src.slice(hi, hi + 80))?.[0].length ?? 0;
+    rep.select(pos, end);
+    if (r.int(2)) {
+      what = 'xrep';
+      accepted = rep.dispatch(rep.state.tr.insertText(token, pos, end));
+    } else accepted = rep.dispatch(rep.state.tr.delete(pos, end));
+  } else {
+    // Enter over a selected stretch of one paragraph.
+    what = 'xenter';
+    if (rep.bridge.model.phantom || !tb.para || tb.size < 1) return null;
+    const o = r.int(tb.size);
+    const n = 1 + r.int(Math.min(4, tb.size - o));
+    const from = tb.start + o;
+    const at = locate(rep.bridge.model, state.doc, from)!;
+    lo = at.base + unit(at.pieces, o - 1)[0];
+    hi = at.base + unit(at.pieces, o + n)[1];
+    hi += /^[ \t]*\n/.exec(rep.src.slice(hi, hi + 80))?.[0].length ?? 0;
+    rep.select(from, from + n);
+    accepted = rep.dispatch(caret(rep.state.tr.delete(from, from + n).split(from), from + 2));
   }
   const whole = len === tb.size;
   return {
@@ -161,6 +192,6 @@ export function visualOp(r: Rng, rep: Replica, only?: 'ins'): Op | null {
     hi,
     accepted,
     whole,
-    token: what === 'ins' || what === 'rep' ? token : undefined,
+    token: what === 'ins' || what === 'rep' || what === 'xrep' ? token : undefined,
   };
 }
