@@ -113,3 +113,73 @@ test('a paper with a hand-written bibliography is ready once built, and offers i
   await expect(page.getByRole('link', { name: 'Download the ZIP', exact: true })).toBeVisible();
   await expect(page.getByRole('link', { name: 'Download the PDF', exact: true })).toBeVisible();
 });
+
+test('downloads are named after the paper, with its letters, and the PDF too', async ({
+  browser,
+}) => {
+  test.setTimeout(180_000);
+  const { page, email } = await person(browser, 'submit-names');
+  const main = '\\documentclass{article}\n\\begin{document}\nBonjour.\n\\end{document}\n';
+  const importAs = async (name: string) => {
+    const bytes = Buffer.from(await writeZip([{ path: 'main.tex', bytes: Buffer.from(main) }]));
+    await page.goto('/projects');
+    await page
+      .getByLabel('Or import a ZIP of a LaTeX project')
+      .setInputFiles({ name: `${name}.zip`, mimeType: 'application/zip', buffer: bytes });
+    await page.getByRole('button', { name: 'Import ZIP' }).click();
+    await expect(page).toHaveURL(/\/projects\/[0-9a-f-]{36}$/);
+    await expect(page.getByRole('heading', { level: 1 })).toHaveText(name);
+  };
+  /**
+   * What the link saves as: the name in the header (filename* read back, and the plain one for
+   * old clients), and the name the browser suggests. The test browser reports any name with a
+   * letter outside ASCII as "download", so the header is where the letters are looked for.
+   */
+  const saved = async (link: string) => {
+    const [answer, download] = await Promise.all([
+      page.waitForResponse((r) => r.headers()['content-disposition'] !== undefined),
+      page.waitForEvent('download'),
+      page.getByRole('link', { name: link, exact: true }).click(),
+    ]);
+    const header = answer.headers()['content-disposition'];
+    const parts = /^attachment; filename="([^"]*)"; filename\*=UTF-8''(\S+)$/.exec(header);
+    expect(parts, header).not.toBeNull();
+    return {
+      plain: parts![1],
+      full: decodeURIComponent(parts![2]),
+      suggested: download.suggestedFilename(),
+    };
+  };
+  await page.goto('/sign-in');
+  await signIn(page, email);
+
+  await importAs('机器学习综述');
+  expect(await saved('Download ZIP')).toMatchObject({
+    plain: 'paper.zip',
+    full: '机器学习综述.zip',
+  });
+
+  await importAs('Étude sur les réseaux');
+  expect(await saved('Download ZIP')).toMatchObject({
+    plain: '_tude sur les r_seaux.zip',
+    full: 'Étude sur les réseaux.zip',
+  });
+  await page.getByRole('link', { name: 'Check before submitting' }).click();
+  const ready = page.getByText('Nothing stands in the way.');
+  const again = page.getByRole('button', { name: 'Build the paper and check again' });
+  await expect(again.or(ready).first()).toBeVisible({ timeout: 60_000 });
+  if (!(await ready.isVisible())) await again.click();
+  await expect(ready).toBeVisible({ timeout: 90_000 });
+  expect((await saved('Download the ZIP')).full).toMatch(/^Étude sur les réseaux r\d+\.zip$/);
+  // The PDF is named after the paper and its revision, as the ZIP is.
+  expect((await saved('Download the PDF')).full).toMatch(/^Étude sur les réseaux r\d+\.pdf$/);
+
+  // A name of plain letters is what the browser suggests, for the ZIP and the PDF alike.
+  await importAs('Network study');
+  expect(await saved('Download ZIP')).toMatchObject({ suggested: 'Network study.zip' });
+  await page.getByRole('link', { name: 'Check before submitting' }).click();
+  await expect(again.or(ready).first()).toBeVisible({ timeout: 60_000 });
+  if (!(await ready.isVisible())) await again.click();
+  await expect(ready).toBeVisible({ timeout: 90_000 });
+  expect((await saved('Download the PDF')).suggested).toMatch(/^Network study r\d+\.pdf$/);
+});

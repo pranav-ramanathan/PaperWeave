@@ -11,6 +11,11 @@ import {
   labelReport,
   languageSettings,
   listCharts,
+  heldDataReadBy,
+  heldInRevisions,
+  heldLine,
+  heldNow,
+  heldReadMessage,
   listDatasets,
   listFiles,
   listInvitations,
@@ -120,6 +125,14 @@ export default async function Project({
     steps,
   ] = loaded;
   // The oldest automatic revision shown, and how many there are before it.
+  const heldAway = await heldNow(db(), user.id, id);
+  const heldReads = new Set((await heldDataReadBy(db(), blobs(), user.id, id)).map((h) => h.path));
+  const heldBy = await heldInRevisions(
+    db(),
+    user.id,
+    id,
+    revisions.map((r) => r.id),
+  );
   const oldestAuto = revisions.findLast((r) => r.kind === 'auto')?.number;
   const olderAutos = oldestAuto ? await olderAutoRevisions(db(), user.id, id, oldestAuto) : 0;
   const pending = project.role === 'owner' ? await listInvitations(db(), user.id, id) : [];
@@ -273,6 +286,13 @@ export default async function Project({
               <>
                 <a href={`/projects/${id}/export`}>Download ZIP</a>{' '}
                 <a href={`/projects/${id}/export?review`}>ZIP with review data</a>{' '}
+                {heldLine(heldAway) && (
+                  <>
+                    <br />
+                    <small>{heldLine(heldAway)}</small>
+                    <br />
+                  </>
+                )}
                 <small>
                   Comments and proposed changes come too; saved revisions, citation checks, data
                   descriptions, chart settings and language settings do not.
@@ -708,6 +728,9 @@ export default async function Project({
                       . Approved {d.approvedAt.slice(0, 10)}
                       {d.approvedBy ? ` by ${d.approvedBy}` : ''}.{' '}
                       {d.exported ? 'Included in downloads. ' : 'Not included in downloads. '}
+                      {!d.exported && heldReads.has(f.path) && (
+                        <strong>{heldReadMessage(f.path)} </strong>
+                      )}
                       {d.changed && (
                         <strong>The file has changed since: its charts are out of date. </strong>
                       )}
@@ -909,6 +932,13 @@ export default async function Project({
                         <a href={`/projects/${id}/revisions/${r.id}/zip?manifest`}>
                           ZIP with build details
                         </a>{' '}
+                        {heldLine(heldBy.get(r.id) ?? []) && (
+                          <>
+                            <br />
+                            <small>{heldLine(heldBy.get(r.id) ?? [])}</small>
+                            <br />
+                          </>
+                        )}
                       </>
                     )}
                     {r.hasPdf ? (

@@ -1,4 +1,12 @@
-import { AppError, can, type Finding, getProject, submissionChecks } from '@paperweave/server';
+import {
+  AppError,
+  can,
+  type Finding,
+  getProject,
+  heldInRevisions,
+  heldLine,
+  submissionChecks,
+} from '@paperweave/server';
 import Link from 'next/link';
 import { notFound } from 'next/navigation';
 import { blobs, db, requireUser } from '../../../../lib/server';
@@ -55,6 +63,13 @@ export default async function Submit({
       ))}
     </ul>
   );
+  const held =
+    checks.ready && checks.revisionId
+      ? heldLine(
+          (await heldInRevisions(db(), user.id, id, [checks.revisionId])).get(checks.revisionId) ??
+            [],
+        )
+      : null;
   const revision = `/projects/${id}/revisions/${checks.revisionId}`;
   return (
     <main className="page">
@@ -77,6 +92,12 @@ export default async function Submit({
               <a href={`${revision}/zip`}>Download the ZIP</a>{' '}
               <a href={`${revision}/zip?manifest`}>Download the ZIP with a toolchain manifest</a>{' '}
               <a href={`${revision}/pdf`}>Download the PDF</a>
+              {held && (
+                <>
+                  <br />
+                  <small>{held}</small>
+                </>
+              )}
             </p>
           ) : (
             <p>

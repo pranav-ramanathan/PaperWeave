@@ -64,7 +64,11 @@ test('a data file is described by its author, and leaves with the paper only if 
   await expect(listed).toContainText('latency, p95 (ms) in ms (number)');
   await expect(listed).toContainText(`by ${email}. Not included in downloads.`);
 
-  // The paper leaves without the data, until its author says otherwise.
+  // The paper leaves without the data, until its author says otherwise, and the page says so.
+  const held = page.getByText(
+    'Not in these downloads: data/latency.csv (marked as data to keep back).',
+  );
+  await expect(held).toBeVisible();
   expect((await downloaded(page)).map((e) => e.path).sort()).toEqual(['main.tex']);
   await listed.getByRole('link', { name: 'See or change its description' }).click();
   // What was approved is what is shown.
@@ -85,6 +89,7 @@ test('a data file is described by its author, and leaves with the paper only if 
   await page.getByRole('checkbox', { name: /Include this file in downloads/ }).check();
   await page.getByRole('button', { name: 'Approve this description' }).click();
   await expect(listed).toContainText('Included in downloads.');
+  await expect(held).toHaveCount(0);
   const files = await downloaded(page);
   expect(files.map((e) => e.path).sort()).toEqual(['data/latency.csv', 'main.tex']);
   expect(Buffer.from(files.find((e) => e.path === 'data/latency.csv')!.bytes).toString()).toBe(CSV);
@@ -109,4 +114,49 @@ test('a data file is described by its author, and leaves with the paper only if 
   );
   await page.getByRole('button', { name: 'Approve this description' }).click();
   await expect(listed).not.toContainText('The file has changed since');
+});
+
+test('data held from downloads that the paper reads is named beside the downloads, and stops a submission', async ({
+  browser,
+}) => {
+  const { page, email } = await person(browser, 'data-held');
+  const main =
+    '\\documentclass{article}\n\\usepackage{pgfplotstable}\n\\begin{document}\n\\pgfplotstableread{data.csv}\\table\n\\end{document}\n';
+  const zip = join(mkdtempSync(join(tmpdir(), 'paperweave-e2e-')), `Held ${run}.zip`);
+  writeFileSync(
+    zip,
+    await writeZip([
+      { path: 'main.tex', bytes: Buffer.from(main) },
+      { path: 'data.csv', bytes: Buffer.from('day,latency\n1,9\n2,38\n') },
+    ]),
+  );
+  await page.goto('/sign-in');
+  await signIn(page, email);
+  await page.getByLabel('Or import a ZIP of a LaTeX project').setInputFiles(zip);
+  await page.getByRole('button', { name: 'Import ZIP' }).click();
+  const paper = page.url();
+  const listed = page.getByRole('listitem').filter({ hasText: 'data.csv' });
+  await listed.getByRole('link', { name: 'Describe it' }).click();
+  await page.getByRole('button', { name: 'Approve this description' }).click();
+  await expect(page.getByRole('status')).toHaveText('Description approved.');
+  await page.goto(paper);
+
+  const sentence =
+    'The paper reads data.csv, which is not included in downloads: the ZIP would not build without it. Include it in downloads, or draw the chart here and include the drawing instead.';
+  await expect(listed).toContainText(`Not included in downloads. ${sentence}`);
+  await expect(
+    page.getByText('Not in these downloads: data.csv (marked as data to keep back).'),
+  ).toBeVisible();
+  await page.getByRole('link', { name: 'Check before submitting' }).click();
+  await expect(page.getByRole('listitem').filter({ hasText: sentence })).toBeVisible();
+  await expect(page.getByRole('link', { name: /Download/ })).toHaveCount(0);
+
+  // Included, the sentence goes, and so does the line.
+  await page.goto(paper);
+  await listed.getByRole('link', { name: 'See or change its description' }).click();
+  await page.getByRole('checkbox', { name: /Include this file in downloads/ }).check();
+  await page.getByRole('button', { name: 'Approve this description' }).click();
+  await expect(listed).toContainText('Included in downloads.');
+  await expect(listed).not.toContainText('is not included in downloads');
+  await expect(page.getByText('Not in these downloads')).toHaveCount(0);
 });
