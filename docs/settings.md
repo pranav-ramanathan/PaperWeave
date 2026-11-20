@@ -115,8 +115,9 @@ was tried by hand on one machine, except where it says otherwise; the details ar
   without being closed, as when something between loses it). A transaction is ended by the
   database after 15 seconds, a statement fails after 30 and a store call after 10 (see "Fixed in
   the code"), and the person gets the service's error page or a message instead of a page that
-  never finishes. A write that timed out may still have been made. What the browser says while
-  it waits is not changed by this.
+  never finishes. A write that timed out may still have been made, and the error page says
+  so. While a form or a link waits, the page says "Working…" after a second and "No answer
+  from the server yet" after eight.
 - **The object store.** Typing into a file that is already open is still saved. Pages that
   read the paper's files show the error page; "Try again" works once the store is back.
 - **The sync server.** Editors say "Offline" and keep what is typed. It is saved within

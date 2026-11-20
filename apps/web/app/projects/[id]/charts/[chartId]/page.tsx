@@ -6,7 +6,8 @@ import {
   listCharts,
   listDatasets,
 } from '@paperweave/server';
-import Link from 'next/link';
+import Link from '../../../../Go';
+import Once from '../../../../Once';
 import { notFound } from 'next/navigation';
 import { blobs, db, requireUser } from '../../../../../lib/server';
 import { removeChartAction, saveChartAction } from '../../../actions';
@@ -215,7 +216,7 @@ export default async function ChartPage({
               />
             </label>
             <small id="alt-help">Left empty, it says what kind of chart this is and of what.</small>
-            <button type="submit">{chart ? 'Draw it again' : 'Draw the chart'}</button>
+            <Once type="submit">{chart ? 'Draw it again' : 'Draw the chart'}</Once>
           </form>
         )
       )}
@@ -257,7 +258,7 @@ export default async function ChartPage({
       )}
       {chart && writer && (
         <form action={removeChartAction.bind(null, id, chart.id)}>
-          <button type="submit">Remove this chart</button>{' '}
+          <Once type="submit">Remove this chart</Once>{' '}
           <small>Its files stay in the paper until you delete them.</small>
         </form>
       )}

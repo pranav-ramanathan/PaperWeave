@@ -8,7 +8,8 @@ import {
   heldLine,
   submissionChecks,
 } from '@paperweave/server';
-import Link from 'next/link';
+import Link from '../../../Go';
+import Once from '../../../Once';
 import { notFound } from 'next/navigation';
 import { blobs, db, requireUser } from '../../../../lib/server';
 import { buildNowAction } from '../../actions';
@@ -120,7 +121,7 @@ async function Submit({
       )}
       {can(project.role, 'build.run') && !checks.building && (
         <form action={buildNowAction.bind(null, id)}>
-          <button type="submit">Build the paper and check again</button>
+          <Once type="submit">Build the paper and check again</Once>
         </form>
       )}
     </main>

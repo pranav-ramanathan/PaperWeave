@@ -1,5 +1,5 @@
 import { listProjects, TEMPLATES } from '@paperweave/server';
-import Link from 'next/link';
+import Link from '../Go';
 import { db, requireUser } from '../../lib/server';
 import DirectUpload from '../DirectUpload';
 import Once from '../Once';

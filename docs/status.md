@@ -1633,7 +1633,7 @@ update` held the paper's file rows for **189.6 s** (until the proxy was cut; it 
   - Kernel keepalive: that a dead peer is noticed in about 20 s (Node's libuv probes) is from
     memory, not confirmed. Only a kernel drop could test it.
   - A timed-out write may still have been made (an invitation row without its email); not
-    changed.
+    changed, but the error page now says that a change may or may not have been made.
   - Transactions that read many files from the store while holding no statement, such as the
     proposal's apply, can idle for as long as the reads take; none was measured near 15 s.
 - **How it was made.** Planned from the probe by one agent, written and checked here.
@@ -1656,9 +1656,10 @@ update` held the paper's file rows for **189.6 s** (until the proxy was cut; it 
     with a 500 (its own database did not answer) reset the count of polls without an answer.
     A 5xx now counts as no answer; `building.spec.ts` "a server that answers with errors is said
     so as well" failed on the old code.
-  - **Still so:** pages and actions say nothing for 30 to 36 s, then show the general error
-    page, whose "What was already saved is still saved" does not say that an invitation was
-    written but not emailed.
+  - **Since then:** while a form or a link waits, the page says "Working…" after 1 s and "No
+    answer from the server yet" after 8 s, and the error page says a change may or may not
+    have been made (see "What the browser says when the server does not answer"). The error
+    page itself still comes at 30 to 36 s.
 
 ## Undoing each thing
 
@@ -2882,6 +2883,16 @@ Changed on the way, and worth keeping:
 - Sign-in form: given up after 40 seconds, with the existing "the email service did not answer"
   message, which may then be the database. Browser tests: `recover.spec.ts`, `building.spec.ts`,
   `projects.spec.ts`.
+- Forms and links: a submit button in a server-action form (`Once`) and an in-app link (`Go`,
+  over `next/link` with `useLinkStatus`) hold the page "waiting" from the press until the answer
+  has been drawn. `Waiting` (in the layout) shows "Working…" after 1 second and "No answer from
+  the server yet. Still waiting: there is no need to press again." after 8, at the foot of the
+  page, and clears at the answer. It is not `role="status"`, which the pages already have. The
+  error page now also says that a change may or may not have been made. Browser tests:
+  `waiting.spec.ts` (a form held 9.5 s; a page held 2.5 s); unit test `lib/waiting.test.ts`. Not changed: the error page still comes after
+  the server's own limits (30 to 36 s); forms posted to routes (Add file, Import ZIP, the GET
+  form to "See what would change") rely on the browser's own loading sign; the editor's panels
+  keep their own busy states; `Fresh`'s refresh says nothing.
 
 ## Decisions waiting on the owner
 

@@ -916,3 +916,18 @@ img.chart {
   margin: 0.25rem 0 0;
   padding-left: 1.2rem;
 }
+/* Where the page says that it is waiting for the server (Waiting.tsx). Fixed, so that nothing moves. */
+.waiting {
+  position: fixed;
+  bottom: 1rem;
+  right: 1rem;
+  max-width: 24rem;
+  margin: 0;
+  padding: 0.5rem 0.75rem;
+  background: var(--warn-wash);
+  border: 1px solid var(--warn);
+  color: var(--ink);
+}
+.waiting:empty {
+  display: none;
+}

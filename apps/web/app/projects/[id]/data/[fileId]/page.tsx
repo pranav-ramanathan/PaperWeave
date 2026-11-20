@@ -1,6 +1,7 @@
 import { Wide } from '../../../../Wide';
 import { AppError, can, COLUMN_TYPES, datasetProposal, getProject } from '@paperweave/server';
-import Link from 'next/link';
+import Link from '../../../../Go';
+import Once from '../../../../Once';
 import { notFound } from 'next/navigation';
 import { blobs, db, requireUser } from '../../../../../lib/server';
 import { approveDatasetAction } from '../../../actions';
@@ -161,7 +162,7 @@ export default async function Describe({
           Include this file in downloads of the paper. Left unticked, the charts drawn from it are
           in the download and the data itself is not.
         </label>
-        {writer && <button type="submit">Approve this description</button>}
+        {writer && <Once type="submit">Approve this description</Once>}
       </form>
     </main>
   );

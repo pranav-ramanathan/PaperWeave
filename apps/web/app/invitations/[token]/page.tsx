@@ -1,5 +1,6 @@
 import { findInvitation } from '@paperweave/server';
-import Link from 'next/link';
+import Link from '../../Go';
+import Once from '../../Once';
 import { db, requireUser } from '../../../lib/server';
 import SignOut from '../../SignOut';
 import { joinAction } from '../../projects/actions';
@@ -64,7 +65,7 @@ export default async function Invitation({
         signed in as {user.email}.
       </p>
       <form action={joinAction.bind(null, token)}>
-        <button type="submit">Join this paper</button>
+        <Once type="submit">Join this paper</Once>
       </form>
     </main>
   );
