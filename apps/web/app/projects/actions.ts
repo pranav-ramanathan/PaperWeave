@@ -4,6 +4,7 @@ import {
   acceptInvitation,
   AppError,
   approveDataset,
+  cancelInvitation,
   createFromTemplate,
   createProject,
   deleteFile,
@@ -65,6 +66,19 @@ export async function inviteAction(projectId: string, form: FormData) {
       throw new AppError('unavailable', 'The invitation could not be emailed. Try again later.');
     });
     return `${back}?invited=${encodeURIComponent(email)}`;
+  });
+}
+
+export async function cancelInvitationAction(
+  projectId: string,
+  invitationId: string,
+  email: string,
+) {
+  const back = `/projects/${projectId}`;
+  const user = await requireUser(back);
+  await act(back, async () => {
+    await cancelInvitation(db(), user.id, projectId, invitationId);
+    return `${back}?cancelled=${encodeURIComponent(email)}`;
   });
 }
 

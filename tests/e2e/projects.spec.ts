@@ -60,10 +60,11 @@ test('sign in, create a paper, invite people, and keep outsiders out', async ({ 
   await owner.page.getByLabel('Their email address').fill(address('someone-else'));
   await owner.page.getByRole('button', { name: 'Send invitation' }).click();
   await outsider.page.goto(await emailedLink(address('someone-else'), '/invitations/'));
-  await outsider.page.getByRole('button', { name: 'Join this paper' }).click();
-  await expect(outsider.page.locator('main [role=alert]')).toContainText(
-    'sent to a different email address',
+  // The page says whom it is for, offers no Join, and the account has not become a member.
+  await expect(outsider.page.locator('main')).toContainText(
+    `This invitation is for ${address('someone-else')}; you are signed in as ${outsider.email}.`,
   );
+  await expect(outsider.page.getByRole('button', { name: 'Join this paper' })).toHaveCount(0);
   expect((await outsider.page.goto(paper))?.status()).toBe(404);
 
   // The owner changes the reviewer's role, then removes them: both take effect on the next request.
@@ -256,4 +257,84 @@ test('one address is sent only so many sign-in links in an hour, whoever asks fo
     await fetch(`${MAIL}/api/v1/search?query=${encodeURIComponent(`to:${inbox}`)}`)
   ).json();
   expect(mail.messages).toHaveLength(10);
+});
+
+test('the owner sees pending invitations and cancels one', async ({ browser }) => {
+  const owner = await person(browser, 'cancel-owner');
+  const guest = await person(browser, 'cancel-guest');
+  await owner.page.goto('/sign-in');
+  await signIn(owner.page, owner.email);
+  await owner.page.getByLabel('Name of a new paper').fill(`Pending ${run}`);
+  await owner.page.getByRole('button', { name: 'Create paper' }).click();
+  await expect(owner.page.getByRole('heading', { name: `Pending ${run}` })).toBeVisible();
+  await expect(owner.page.getByRole('heading', { name: 'Invited, not yet joined' })).toHaveCount(0);
+
+  await owner.page.getByLabel('Their email address').fill(guest.email);
+  await owner.page.getByRole('button', { name: 'Send invitation' }).click();
+  await expect(owner.page.getByRole('status')).toContainText(`Invitation sent to ${guest.email}`);
+  await expect(owner.page.getByRole('heading', { name: 'Invited, not yet joined' })).toBeVisible();
+  await expect(owner.page.getByText(`${guest.email}, as an editor, until`)).toBeVisible();
+  await audit(owner.page, 'the paper with a pending invitation');
+
+  const link = await emailedLink(guest.email, '/invitations/');
+  await owner.page.getByRole('button', { name: `Cancel the invitation to ${guest.email}` }).click();
+  await expect(owner.page.getByRole('status')).toContainText(
+    `Invitation to ${guest.email} cancelled`,
+  );
+  await expect(owner.page.getByRole('heading', { name: 'Invited, not yet joined' })).toHaveCount(0);
+
+  await guest.page.goto('/sign-in');
+  await signIn(guest.page, guest.email);
+  await guest.page.goto(link);
+  await expect(guest.page.getByRole('heading', { name: 'not valid any more' })).toBeVisible();
+});
+
+test('an invitation tells someone already on the paper that it changes nothing', async ({
+  browser,
+}) => {
+  const owner = await person(browser, 'member-owner');
+  const guest = await person(browser, 'member-guest');
+  await owner.page.goto('/sign-in');
+  await signIn(owner.page, owner.email);
+  await owner.page.getByLabel('Name of a new paper').fill(`Already ${run}`);
+  await owner.page.getByRole('button', { name: 'Create paper' }).click();
+  await expect(owner.page.getByRole('heading', { name: `Already ${run}` })).toBeVisible();
+  const paper = owner.page.url();
+
+  await owner.page.getByLabel('Their email address').fill(guest.email);
+  await owner.page.getByLabel('Their role').selectOption('viewer');
+  await owner.page.getByRole('button', { name: 'Send invitation' }).click();
+  await expect(owner.page.getByRole('status')).toContainText('Invitation sent');
+  await guest.page.goto('/sign-in');
+  await signIn(guest.page, guest.email);
+  const firstLink = await emailedLink(guest.email, '/invitations/');
+  await guest.page.goto(firstLink);
+  await guest.page.getByRole('button', { name: 'Join this paper' }).click();
+  await expect(guest.page.getByText('You are a viewer')).toBeVisible();
+
+  await owner.page.getByLabel('Their email address').fill(guest.email);
+  await owner.page.getByLabel('Their role').selectOption('editor');
+  await owner.page.getByRole('button', { name: 'Send invitation' }).click();
+  await expect(owner.page.getByRole('status')).toContainText('Invitation sent');
+  // The mail catcher lists both emails: the link to open is the one that is not the first.
+  let secondLink = firstLink;
+  await expect(async () => {
+    const found = await (
+      await fetch(`${MAIL}/api/v1/search?query=${encodeURIComponent(`to:${guest.email}`)}`)
+    ).json();
+    for (const m of found.messages ?? []) {
+      const { Text } = await (await fetch(`${MAIL}/api/v1/message/${m.ID}`)).json();
+      const link = /https?:\/\/\S+\/invitations\/\S+/.exec(Text as string)?.[0];
+      if (link && link !== firstLink) secondLink = link;
+    }
+    expect(secondLink).not.toBe(firstLink);
+  }).toPass();
+  await guest.page.goto(secondLink);
+  await expect(guest.page.locator('main')).toContainText(
+    'You are already on this paper as a viewer. This invitation does not change that: ask the owner to change your role.',
+  );
+  await expect(guest.page.getByRole('button', { name: 'Join this paper' })).toHaveCount(0);
+  await audit(guest.page, 'an invitation to someone already on the paper');
+  await guest.page.getByRole('link', { name: 'Open the paper' }).click();
+  await expect(guest.page).toHaveURL(paper);
 });

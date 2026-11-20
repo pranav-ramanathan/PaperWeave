@@ -13,6 +13,7 @@ import {
   listCharts,
   listDatasets,
   listFiles,
+  listInvitations,
   listMembers,
   listProposals,
   listRevisions,
@@ -26,6 +27,7 @@ import { notFound } from 'next/navigation';
 import { blobs, db, requireUser } from '../../../lib/server';
 import {
   buildRevisionAction,
+  cancelInvitationAction,
   deleteFileAction,
   lookUpDoiAction,
   recordEvidenceAction,
@@ -53,6 +55,7 @@ export default async function Project({
   searchParams: Promise<{
     error?: string;
     invited?: string;
+    cancelled?: string;
     saved?: string;
     revision?: string;
     restored?: string;
@@ -119,6 +122,7 @@ export default async function Project({
   // The oldest automatic revision shown, and how many there are before it.
   const oldestAuto = revisions.findLast((r) => r.kind === 'auto')?.number;
   const olderAutos = oldestAuto ? await olderAutoRevisions(db(), user.id, id, oldestAuto) : 0;
+  const pending = project.role === 'owner' ? await listInvitations(db(), user.id, id) : [];
   const openThreads = threads.filter((t) => t.status === 'open');
   const openProposals = proposals.filter((p) => p.status === 'open');
   const dataFiles = files.filter((f) => /\.(csv|tsv)$/i.test(f.path) && !f.readonly);
@@ -174,6 +178,7 @@ export default async function Project({
       </header>
       {error && <p role="alert">{error}</p>}
       {invited && <p role="status">Invitation sent to {invited}.</p>}
+      {query.cancelled && <p role="status">Invitation to {query.cancelled} cancelled.</p>}
       {saved && <p role="status">Role changed.</p>}
       {revision && <p role="status">Saved as revision {revision}.</p>}
       {restored && <p role="status">Restored. The paper is now revision {restored}.</p>}
@@ -1012,6 +1017,25 @@ export default async function Project({
 
       {owner && (
         <>
+          {pending.length > 0 && (
+            <section aria-labelledby="pending-heading">
+              <h2 id="pending-heading">Invited, not yet joined</h2>
+              <ul>
+                {pending.map((i) => (
+                  <li key={i.id}>
+                    {i.email}, as {i.role === 'editor' ? 'an' : 'a'} {i.role}, until{' '}
+                    {day(i.expiresAt)}{' '}
+                    <form
+                      action={cancelInvitationAction.bind(null, id, i.id, i.email)}
+                      className="inline"
+                    >
+                      <Once>Cancel the invitation to {i.email}</Once>
+                    </form>
+                  </li>
+                ))}
+              </ul>
+            </section>
+          )}
           <h2>Invite someone</h2>
           <form action={inviteAction.bind(null, id)}>
             <label>

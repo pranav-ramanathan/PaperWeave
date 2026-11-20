@@ -126,6 +126,13 @@ export async function invite(
       'conflict',
       `One person can send ${perHour} invitations in an hour, and you have sent that many. Try again in a little while.`,
     );
+  // One live link per address: an earlier, unused one is ended, so the newest role stands. It
+  // is ended rather than deleted so that it still counts against the hourly limit above.
+  await db.query(
+    `update invitations set expires_at = now()
+     where project_id = $1 and email = $2 and accepted_at is null and expires_at > now()`,
+    [projectId, email.toLowerCase()],
+  );
   const token = randomBytes(32).toString('base64url');
   await db.query(
     `insert into invitations (project_id, email, role, token_hash, invited_by, expires_at)
@@ -133,6 +140,58 @@ export async function invite(
     [projectId, email.toLowerCase(), role, hash(token), userId, INVITE_DAYS],
   );
   return { token, email: email.toLowerCase(), role };
+}
+
+export type PendingInvitation = {
+  id: string;
+  email: string;
+  role: Role;
+  createdAt: string;
+  expiresAt: string;
+};
+
+/** Invitations sent for this paper that nobody has used yet, newest first. For those who may invite. */
+export async function listInvitations(
+  db: Db,
+  userId: string,
+  projectId: string,
+): Promise<PendingInvitation[]> {
+  await authorize(db, userId, id(projectId), 'members.manage');
+  const { rows } = await db.query(
+    `select id, email, role, created_at as "createdAt", expires_at as "expiresAt" from invitations
+     where project_id = $1 and accepted_at is null and expires_at > now() order by created_at desc`,
+    [projectId],
+  );
+  return rows.map((r) => ({
+    ...r,
+    createdAt: new Date(r.createdAt).toISOString(),
+    expiresAt: new Date(r.expiresAt).toISOString(),
+  }));
+}
+
+/**
+ * Cancel an invitation nobody has used. Its link stops working at once. The row is kept but
+ * ended, so that it still counts against the hourly limit on sending.
+ */
+export async function cancelInvitation(
+  db: Db,
+  userId: string,
+  projectId: string,
+  invitationId: string,
+) {
+  await authorize(db, userId, id(projectId), 'members.manage');
+  if (!UUID.test(String(invitationId)))
+    throw new AppError('not_found', 'There is no such invitation.');
+  const { rowCount } = await db.query(
+    `update invitations set expires_at = now()
+     where id = $1 and project_id = $2 and accepted_at is null and expires_at > now()`,
+    [invitationId, projectId],
+  );
+  if (!rowCount)
+    throw new AppError(
+      'not_found',
+      'That invitation has been used, has expired or was already cancelled.',
+    );
 }
 
 /**
@@ -146,15 +205,24 @@ export async function withdrawInvitation(db: Db, token: string): Promise<void> {
   ]);
 }
 
-/** What a still-valid invitation offers, for showing before it is accepted. */
-export async function findInvitation(db: Db, token: unknown) {
+/**
+ * What a still-valid invitation offers, for showing before it is accepted. Given the person
+ * looking, it also says what part they already have in the paper, if any.
+ */
+export async function findInvitation(db: Db, token: unknown, userId?: string) {
   if (typeof token !== 'string') return null;
   const { rows } = await db.query(
-    `select p.name as project, i.role, i.email from invitations i join projects p on p.id = i.project_id
+    `select i.project_id as "projectId", p.name as project, i.role, i.email, m.role as "memberRole"
+     from invitations i join projects p on p.id = i.project_id
+     left join project_members m on m.project_id = i.project_id and m.user_id = $2
      where i.token_hash = $1 and i.accepted_at is null and i.expires_at > now()`,
-    [hash(token)],
+    [hash(token), userId ?? null],
   );
-  return (rows[0] as { project: string; role: Role; email: string } | undefined) ?? null;
+  return (
+    (rows[0] as
+      | { projectId: string; project: string; role: Role; email: string; memberRole: Role | null }
+      | undefined) ?? null
+  );
 }
 
 /** Join the project an invitation was for. Only the invited address may use it, and only once. */
@@ -220,11 +288,22 @@ export async function removeMember(db: Db, userId: string, projectId: string, me
   const role = await authorize(db, userId, id(projectId), 'project.read');
   if (memberId !== userId && role !== 'owner')
     throw new AppError('permission_denied', 'Only the owner can remove other people.');
-  const { rowCount } = await db.query(
-    "delete from project_members where project_id = $1 and user_id = $2 and role <> 'owner'",
+  // In one statement: the person's unused invitations to this paper end with their place in it.
+  // Otherwise a spare link they still hold would let them back in with nobody's say-so.
+  const { rows } = await db.query(
+    `with gone as (
+       delete from project_members where project_id = $1 and user_id = $2 and role <> 'owner'
+       returning user_id
+     ), ended as (
+       update invitations i set expires_at = now()
+       from "user" u, gone
+       where u.id = gone.user_id and i.project_id = $1 and lower(i.email) = lower(u.email)
+         and i.accepted_at is null and i.expires_at > now()
+     )
+     select count(*)::int as n from gone`,
     [projectId, id(memberId)],
   );
-  if (!rowCount)
+  if (!rows[0].n)
     throw new AppError('invalid_input', 'That person is the owner or is not in the project.');
   // Live connections are re-checked at once rather than at their next edit.
   await db.query("select pg_notify('acl', $1)", [projectId]);
