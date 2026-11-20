@@ -1,0 +1,18 @@
+# The sync server. Exactly one for a database: it takes a lock in the database before it serves.
+# Install: see docs/deploy.md. Paths and the user are for the machine it was written for; change them.
+[Unit]
+Description=PaperWeave sync server
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+User=paperweave
+WorkingDirectory=/opt/paperweave/apps/sync
+EnvironmentFile=/etc/paperweave/env
+ExecStart=/usr/bin/node src/main.ts
+# Start it again if the process ends, whatever the reason.
+Restart=always
+RestartSec=2
+
+[Install]
+WantedBy=multi-user.target

@@ -1,0 +1,20 @@
+# The build and chart worker. Any number may run. It starts Docker containers, so its user must
+# be allowed to use Docker, and the paperweave-tex image must exist (docker build -t paperweave-tex infra/tex).
+# Install: see docs/deploy.md. Paths and the user are for the machine it was written for; change them.
+[Unit]
+Description=PaperWeave workers
+After=network-online.target docker.service
+Wants=network-online.target
+Requires=docker.service
+
+[Service]
+User=paperweave
+SupplementaryGroups=docker
+WorkingDirectory=/opt/paperweave/apps/workers
+EnvironmentFile=/etc/paperweave/env
+ExecStart=/usr/bin/node src/main.ts
+Restart=always
+RestartSec=2
+
+[Install]
+WantedBy=multi-user.target

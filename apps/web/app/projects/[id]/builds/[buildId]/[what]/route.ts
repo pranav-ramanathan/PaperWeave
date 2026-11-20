@@ -2,6 +2,9 @@
 import { AppError, buildOutput, contentDisposition, getProject } from '@paperweave/server';
 import { askedForEachTime, blobs, currentUser, db } from '../../../../../../lib/server';
 
+// Vercel stops the function after this many seconds. Reading one PDF or log from the store.
+export const maxDuration = 60;
+
 const TYPES = { pdf: 'application/pdf', log: 'text/plain; charset=latin1' } as const;
 
 export async function GET(
