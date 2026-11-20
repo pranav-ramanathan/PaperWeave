@@ -3,6 +3,7 @@ import { createHash } from 'node:crypto';
 import { decodeFile } from '@paperweave/latex';
 import type pg from 'pg';
 import { checkPath, type Entry, writeZip, zipStream } from './archive.ts';
+import { mapLimit, READS, readAhead } from './batch.ts';
 import { authorize } from './authz.ts';
 import type { BlobStore } from './blobs.ts';
 import { type Db, transaction } from './db.ts';
@@ -11,7 +12,16 @@ import { removeFile } from './files.ts';
 import { recordDownload } from './metrics.ts';
 import { id } from './projects.ts';
 import * as Y from 'yjs';
-import { appendUpdates, currentBytes, editLocked, notifyEdits, openFile, TEXT } from './sync.ts';
+import {
+  appendUpdates,
+  bytesOfLog,
+  currentBytes,
+  editLocked,
+  notifyEdits,
+  openFile,
+  readLogs,
+  TEXT,
+} from './sync.ts';
 import { type DiffLine, diffLines } from './textdiff.ts';
 
 export type Revision = {
@@ -59,15 +69,18 @@ async function putEdited(pool: pg.Pool, store: BlobStore, projectId: string): Pr
      where project_id = $1 and eol is not null and head_seq > 1`,
     [projectId],
   );
+  // The logs of all of them come in one statement, and the store is sent sixteen at a time. The
+  // database and the store may be far away: one file after another, each is a wait of its own.
+  const logs = await readLogs(
+    pool,
+    rows.map((f) => f.id),
+  );
+  const bytes = rows.map((f) => bytesOfLog(f, logs.get(f.id) ?? []));
+  const digests = await mapLimit(bytes, READS, (b) => store.put(b));
   const ready: Ready = new Map();
-  for (const f of rows) {
-    const bytes = await currentBytes(pool, store, f);
-    ready.set(f.id, {
-      seq: String(f.head_seq),
-      digest: await store.put(bytes),
-      size: bytes.length,
-    });
-  }
+  rows.forEach((f, i) =>
+    ready.set(f.id, { seq: String(f.head_seq), digest: digests[i], size: bytes[i].length }),
+  );
   return ready;
 }
 
@@ -349,16 +362,18 @@ export async function exportRevision(
   /** More to put in the archive beside the paper's files. */
   extra: Entry[] = [],
 ): Promise<{ zip: Uint8Array; paper: string; number: number }> {
-  const { entries, paper, number } = await revisionEntries(
+  const { shared, rest, paper, number } = await revisionEntries(
     db,
-    store,
     userId,
     projectId,
     revisionId,
     manifest,
     extra,
   );
-  return { zip: await writeZip(entries), paper, number };
+  // Sixteen blobs at a time, and the entries in the order of the files.
+  const bytes = await mapLimit(shared, READS, (f) => blob(store, f.digest));
+  const entries = shared.map((f, i) => ({ path: f.path, bytes: bytes[i] }));
+  return { zip: await writeZip([...entries, ...rest]), paper, number };
 }
 
 /** The same archive, as a stream, for a response that may be larger than a function may send whole. */
@@ -371,28 +386,36 @@ export async function exportRevisionStream(
   manifest = false,
   extra: Entry[] = [],
 ): Promise<{ zip: ReadableStream<Uint8Array>; paper: string; number: number }> {
-  const { entries, paper, number } = await revisionEntries(
+  const { shared, rest, paper, number } = await revisionEntries(
     db,
-    store,
     userId,
     projectId,
     revisionId,
     manifest,
     extra,
   );
-  return { zip: zipStream(entries), paper, number };
+  // Each file is added as its blob arrives, in the order of the files, with sixteen being read
+  // ahead of the one being added.
+  async function* entries(): AsyncGenerator<Entry> {
+    yield* readAhead(shared, READS, async (f) => ({
+      path: f.path,
+      bytes: await blob(store, f.digest),
+    }));
+    yield* rest;
+  }
+  return { zip: zipStream(entries()), paper, number };
 }
 
+/** What goes into a revision's archive: the files, whose bytes are still to be read, and the rest. */
 async function revisionEntries(
   db: Db,
-  store: BlobStore,
   userId: string,
   projectId: string,
   revisionId: string,
   manifest = false,
   /** More to put in the archive beside the paper's files. */
   extra: Entry[] = [],
-): Promise<{ entries: Entry[]; paper: string; number: number }> {
+): Promise<{ shared: RevisionFile[]; rest: Entry[]; paper: string; number: number }> {
   await authorize(db, userId, id(projectId), 'project.export');
   const { revision, files } = await load(db, projectId, revisionId);
   // Data goes into a download only if its author has said so. A CSV file nobody has described
@@ -400,8 +423,7 @@ async function revisionEntries(
   const held = await heldFileIds(db, projectId);
   const shared = files.filter((f) => !held.has(f.file_id));
   const kept = files.filter((f) => held.has(f.file_id));
-  const entries: Entry[] = [];
-  for (const f of shared) entries.push({ path: f.path, bytes: await blob(store, f.digest) });
+  const rest: Entry[] = [];
   if (manifest) {
     const built = (
       await db.query(
@@ -455,11 +477,12 @@ async function revisionEntries(
       null,
       2,
     );
-    entries.push({ path: 'paperweave-toolchain.json', bytes: Buffer.from(text + '\n') });
+    rest.push({ path: 'paperweave-toolchain.json', bytes: Buffer.from(text + '\n') });
   }
   await recordDownload(db, projectId, 'zip');
   return {
-    entries: [...entries, ...extra],
+    shared,
+    rest: [...rest, ...extra],
     paper: revision.paper,
     number: revision.number,
   };
@@ -517,16 +540,24 @@ export async function diffRevisions(
   await authorize(db, userId, id(projectId), 'project.read');
   const a = await load(db, projectId, fromId);
   const b = await load(db, projectId, toId);
-  const text = async (digest: string) => {
+  // Both sides of every file that changed are read first, sixteen at a time.
+  const wanted = new Set<string>();
+  for (const f of b.files) {
+    const old = a.files.find((o) => o.file_id === f.file_id);
+    if (old && old.digest !== f.digest) wanted.add(old.digest).add(f.digest);
+  }
+  const read = new Map<string, string | null>();
+  await mapLimit([...wanted], READS, async (digest) => {
     const d = decodeFile(await blob(store, digest));
-    return d.editable ? d.text : null;
-  };
+    read.set(digest, d.editable ? d.text : null);
+  });
+  const text = (digest: string) => read.get(digest) ?? null;
   const files: FileDiff[] = [];
   for (const f of b.files) {
     const old = a.files.find((o) => o.file_id === f.file_id);
     if (!old) files.push({ path: f.path, status: 'added', lines: null });
     else if (old.digest !== f.digest) {
-      const [x, y] = [await text(old.digest), await text(f.digest)];
+      const [x, y] = [text(old.digest), text(f.digest)];
       const was = old.path !== f.path ? old.path : undefined;
       const lines = x != null && y != null ? diffLines(x, y) : null;
       files.push({

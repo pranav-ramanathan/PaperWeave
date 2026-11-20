@@ -2409,8 +2409,24 @@ second one.
     for every kind of change to a thread or a proposal and not otherwise; and a browser test of an
     idle editor's requests over 30 seconds. Each failed on the old code. Three browser tests that
     waited for the panels' own polling now wait for what replaced it.
-- **Next**, measured the same way: saving a revision and making a ZIP go one file at a time; the
-  pool's size is not a setting; and every request begins by looking up the sign-in.
+- **Fourth change: many files at once.** Saving a revision read each edited file's history and
+  wrote it to the store one file after another; a ZIP read each file from the store one after
+  another, and so did a comparison of two revisions. Now (`mapLimit` and `readAhead` in
+  `packages/server/src/batch.ts`; `revisions.ts`; `archive.ts`) the histories are read in one
+  statement and the store is asked sixteen at a time, with the ZIP still written in the same
+  order and to the same bytes, and streamed as its files arrive.
+  - At 50 ms, 31 edited files: saving a revision 1.75 s, where it was 5.4 s; the ZIP 1.49 s,
+    where it was 6.79 s. A comparison of 10 changed files: 0.57 s, where it was 1.56 s.
+  - **Held by** service tests with a store slowed to 30 ms a call: saving a revision makes 3
+    statements (it made 32) within 0.6 s; a revision's ZIP, the paper's ZIP and a comparison
+    each within a bound the old code missed by three times or more; never more than sixteen reads
+    at once; and the ZIP's bytes the same as before, streamed or not. Each failed on the old code.
+    One older test of a restore waited for the first read of the files' histories, which saving a
+    revision now makes too; it waits for the second.
+  - **Not changed:** a file missing from the store part way through a streamed ZIP now ends the
+    download where it is, where it used to fail before anything was sent.
+- **Next**, measured the same way: the pool's size is not a setting, and every request begins by
+  looking up the sign-in.
 - **How it was made.** Probed and planned by agents, written by another, checked here.
 
 ## When an email cannot be sent

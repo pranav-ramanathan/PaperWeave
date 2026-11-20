@@ -188,6 +188,18 @@ export function writeZip(entries: Entry[]): Promise<Uint8Array> {
  * The same bytes as `writeZip`, as a stream: for a response, which on Vercel may be larger than
  * 4.5 MB only if it is streamed.
  */
-export function zipStream(entries: Entry[]): ReadableStream<Uint8Array> {
-  return Readable.toWeb(zipOf(entries)) as ReadableStream<Uint8Array>;
+export function zipStream(entries: Entry[] | AsyncIterable<Entry>): ReadableStream<Uint8Array> {
+  if (Array.isArray(entries)) return Readable.toWeb(zipOf(entries)) as ReadableStream<Uint8Array>;
+  // Entries that are still on their way are added as they arrive, in the order they come. If one
+  // fails, the stream fails with it, and nothing more is asked for.
+  const zip = new yazl.ZipFile();
+  const out = zip.outputStream as unknown as Readable;
+  (async () => {
+    for await (const e of entries) {
+      if (out.destroyed) return;
+      zip.addBuffer(Buffer.from(e.bytes), e.path, { mtime: new Date(0) });
+    }
+    zip.end();
+  })().catch((err) => out.destroy(err));
+  return Readable.toWeb(out) as ReadableStream<Uint8Array>;
 }
