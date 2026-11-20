@@ -1,5 +1,5 @@
 import { AppError, diffRevisions } from '@paperweave/server';
-import Link from 'next/link';
+import Link from '../../../../../../Go';
 import { notFound } from 'next/navigation';
 import { blobs, db, requireUser } from '../../../../../../../lib/server';
 

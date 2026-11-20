@@ -1,5 +1,6 @@
 import { AppError, proposeLabelRename } from '@paperweave/server';
-import Link from 'next/link';
+import Link from '../../../../Go';
+import Once from '../../../../Once';
 import { notFound } from 'next/navigation';
 import { blobs, db, requireUser } from '../../../../../lib/server';
 import { renameLabelAction } from '../../../actions';
@@ -82,9 +83,9 @@ export default async function RenameLabel({
         <input type="hidden" name="from" value={proposal.from} />
         <input type="hidden" name="to" value={proposal.to} />
         <input type="hidden" name="digest" value={proposal.digest} />
-        <button type="submit">
+        <Once type="submit">
           Rename in all {files.length === 1 ? 'of it' : `${files.length} files`}
-        </button>
+        </Once>
       </form>
     </main>
   );

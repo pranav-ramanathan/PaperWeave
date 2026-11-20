@@ -5,6 +5,7 @@ import 'katex/dist/katex.min.css';
 import './globals.css';
 import Dropped from './Dropped';
 import Fresh from './Fresh';
+import Waiting from './Waiting';
 
 export const metadata = { title: 'PaperWeave' };
 
@@ -22,6 +23,7 @@ export default async function Layout({ children }: { children: ReactNode }) {
       <body>
         <Fresh />
         <Dropped />
+        <Waiting />
         {children}
       </body>
     </html>

@@ -1,5 +1,6 @@
 import { AppError, proposeFileRename } from '@paperweave/server';
-import Link from 'next/link';
+import Link from '../../../../../Go';
+import Once from '../../../../../Once';
 import { notFound } from 'next/navigation';
 import { blobs, db, requireUser } from '../../../../../../lib/server';
 import { renameFileAction } from '../../../../actions';
@@ -91,15 +92,15 @@ export default async function RenameFile({
       <form action={renameFileAction.bind(null, id, fileId)}>
         <input type="hidden" name="to" value={proposal.to} />
         <input type="hidden" name="digest" value={proposal.digest} />
-        <button type="submit" name="how" value="all">
+        <Once type="submit" name="how" value="all">
           {lines === 0
             ? 'Rename'
             : `Rename and update ${lines === 1 ? 'that line' : `those ${lines} lines`}`}
-        </button>{' '}
+        </Once>{' '}
         {lines > 0 && (
-          <button type="submit" name="how" value="only">
+          <Once type="submit" name="how" value="only">
             Rename only. The paper will not build until those lines are fixed.
-          </button>
+          </Once>
         )}
       </form>
     </main>

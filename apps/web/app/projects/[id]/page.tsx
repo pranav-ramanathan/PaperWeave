@@ -29,7 +29,7 @@ import {
   listThreads,
   modelProcessing,
 } from '@paperweave/server';
-import Link from 'next/link';
+import Link from '../../Go';
 import { notFound } from 'next/navigation';
 import { blobs, db, requireUser } from '../../../lib/server';
 import {
@@ -335,16 +335,16 @@ async function Project({
                       {f.path === project.root && 'Root file '}
                       {canWrite && f.path !== project.root && !f.readonly && TEX.test(f.path) && (
                         <form action={rootAction.bind(null, id, f.id)} className="inline">
-                          <button type="submit" aria-label={`Make ${f.path} the root file`}>
+                          <Once type="submit" aria-label={`Make ${f.path} the root file`}>
                             Make root
-                          </button>
+                          </Once>
                         </form>
                       )}{' '}
                       {canWrite && f.path !== project.root && (
                         <form action={deleteFileAction.bind(null, id, f.id)} className="inline">
-                          <button type="submit" aria-label={`Delete ${f.path}`}>
+                          <Once type="submit" aria-label={`Delete ${f.path}`}>
                             Delete
-                          </button>
+                          </Once>
                         </form>
                       )}
                       {canWrite && (
@@ -357,7 +357,7 @@ async function Project({
                               aria-label={`New name for ${f.path}`}
                               required
                             />
-                            <button type="submit">Rename</button>
+                            <Once type="submit">Rename</Once>
                           </form>
                         </details>
                       )}
@@ -607,9 +607,9 @@ async function Project({
                                   className="inline"
                                 >
                                   {' '}
-                                  <button type="submit" aria-label={`Look up the DOI of ${e.key}`}>
+                                  <Once type="submit" aria-label={`Look up the DOI of ${e.key}`}>
                                     {looked ? 'Look up again' : 'Look up DOI'}
-                                  </button>
+                                  </Once>
                                 </form>
                               )}
                             </td>
@@ -641,12 +641,12 @@ async function Project({
                                         className="inline"
                                       >
                                         {' '}
-                                        <button
+                                        <Once
                                           type="submit"
                                           aria-label={`Remove this check of ${e.key}`}
                                         >
                                           Remove
-                                        </button>
+                                        </Once>
                                       </form>
                                     )}
                                   </li>
@@ -680,7 +680,7 @@ async function Project({
                                       Note, such as where in the source
                                       <input name="note" maxLength={2000} />
                                     </label>
-                                    <button type="submit">Record</button>
+                                    <Once type="submit">Record</Once>
                                   </form>
                                 </details>
                               )}
@@ -862,7 +862,7 @@ async function Project({
             ))}
           </fieldset>
         )}
-        {canWrite && <button type="submit">Save language settings</button>}
+        {canWrite && <Once type="submit">Save language settings</Once>}
       </form>
 
       <h2 id="assistance">Writing assistance</h2>
@@ -879,7 +879,7 @@ async function Project({
             <input type="checkbox" name="allow" defaultChecked={allowModel} /> Allow passages of
             this paper to be sent to the model provider when someone asks for a review
           </label>
-          <button type="submit">Save</button>
+          <Once type="submit">Save</Once>
         </form>
       ) : (
         <p>
@@ -899,7 +899,7 @@ async function Project({
             Name for the paper as it is now
             <input name="name" required maxLength={200} placeholder="Submitted to the workshop" />
           </label>
-          <button type="submit">Save revision</button>
+          <Once type="submit">Save revision</Once>
         </form>
       )}
       {revisions.length > 0 && (
@@ -948,12 +948,9 @@ async function Project({
                     ) : (
                       can(project.role, 'build.run') && (
                         <form action={buildRevisionAction.bind(null, id, r.id)} className="inline">
-                          <button
-                            type="submit"
-                            aria-label={`Build the PDF for revision ${r.number}`}
-                          >
+                          <Once type="submit" aria-label={`Build the PDF for revision ${r.number}`}>
                             Build PDF
-                          </button>
+                          </Once>
                         </form>
                       )
                     )}
@@ -969,9 +966,9 @@ async function Project({
                     )}{' '}
                     {writer && (
                       <form action={restoreAction.bind(null, id, r.id)} className="inline">
-                        <button type="submit" aria-label={`Restore revision ${r.number}`}>
+                        <Once type="submit" aria-label={`Restore revision ${r.number}`}>
                           Restore
-                        </button>
+                        </Once>
                       </form>
                     )}
                   </td>
@@ -1025,7 +1022,7 @@ async function Project({
                           <option key={r}>{r}</option>
                         ))}
                       </select>
-                      <button type="submit">Change</button>
+                      <Once type="submit">Change</Once>
                     </form>
                   ) : (
                     m.role

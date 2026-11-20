@@ -1,6 +1,7 @@
 'use client';
 import { type ButtonHTMLAttributes, useEffect, useRef } from 'react';
 import { useFormStatus } from 'react-dom';
+import { waiting } from '../lib/waiting';
 
 /**
  * A submit button whose form is sent once per press. A second submit while the first is on
@@ -14,6 +15,10 @@ export default function Once(props: ButtonHTMLAttributes<HTMLButtonElement>) {
   // it comes back to this page with an error.
   useEffect(() => {
     if (!pending) going.current = false;
+  }, [pending]);
+  // The page says so if the answer is slow.
+  useEffect(() => {
+    if (pending) return waiting();
   }, [pending]);
   useEffect(() => {
     const form = button.current?.form;
