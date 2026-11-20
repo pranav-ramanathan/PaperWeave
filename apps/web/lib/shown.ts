@@ -11,25 +11,43 @@ export const STOP = 'stop';
 export const notTheirs = (res: Response | null) => res?.status === 404;
 
 /**
- * Do `work` now and every `ms` after, while the page is showing, and at once when it is shown
- * again. A tab left open behind others asks the server for nothing: each open editor would
- * otherwise go on asking how the builds stand every two seconds for as long as it was open.
+ * Do `work` now and again `ms` after it is done, while the page is showing, and at once when it
+ * is shown again. A tab left open behind others asks the server for nothing: each open editor
+ * would otherwise go on asking how the builds stand for as long as it was open. `ms` may be a
+ * function, asked each time, for something that wants asking sooner when more is going on.
  * When `work` gives back `STOP`, it is not done again: a page left open by someone taken off
  * the paper would otherwise ask, and be told "not found", for as long as it stayed open.
  * Returns how to stop.
  */
-export function whileShown(work: () => unknown, ms: number): () => void {
+export function whileShown(work: () => unknown, ms: number | (() => number)): () => void {
   let done = false;
+  let running = false;
+  let timer: ReturnType<typeof setTimeout> | undefined;
   const off = () => {
     done = true;
-    clearInterval(timer);
+    clearTimeout(timer);
     document.removeEventListener('visibilitychange', turn);
   };
-  const turn = () => {
-    if (done || document.hidden) return;
-    void Promise.resolve(work()).then((said) => said === STOP && off());
+  const next = () => {
+    clearTimeout(timer);
+    if (!done) timer = setTimeout(turn, typeof ms === 'number' ? ms : ms());
   };
-  const timer = setInterval(turn, ms);
+  // Hidden, it does not ask again until it is shown: the visibility change starts it up.
+  function turn() {
+    if (done || running || document.hidden) return;
+    running = true;
+    clearTimeout(timer);
+    void Promise.resolve()
+      .then(work)
+      .then(
+        (said) => (said === STOP ? off() : undefined),
+        () => undefined,
+      )
+      .finally(() => {
+        running = false;
+        next();
+      });
+  }
   document.addEventListener('visibilitychange', turn);
   turn();
   return off;

@@ -2394,9 +2394,23 @@ second one.
     files, where there were 168) and of the checks (11, where there were 106); that a viewer is
     still refused a change once their role is shared; and that nothing is shared between two
     requests or into a transaction. Each failed on the old code.
-- **Next**, measured the same way: an open editor asks three things every few seconds, each
-  with its own sign-in check; saving a revision and making a ZIP go one file at a time; and the
-  pool's size is not a setting.
+- **Third change: an open editor asks for little.** Shown, it asked for the latest build every
+  2 seconds and for the comments and the proposals every 5, each answer starting with the
+  sign-in, the reader's role and the file's history. Now (`latestBuilds` in
+  `packages/server/src/builds.ts`; `apps/web/lib/builds.ts`; `BuildPane.tsx`): the build pane asks
+  every 5 seconds, and every 2 only while a build is waited for. Its answer checks who is asking
+  in the same statement and carries two marks, one that moves when any file changes and one when
+  any thread or proposal does; the comments and proposals panels read their lists only when a
+  mark has moved, and at once after their own actions. A change by someone else still shows
+  within one poll.
+  - One editor left open and shown, a minute: 60 round trips, where it was 273; three: 180, where
+    it was 781. Hidden: none, as before.
+  - **Held by** a service test that a poll is two statements (it was four) and that the mark moves
+    for every kind of change to a thread or a proposal and not otherwise; and a browser test of an
+    idle editor's requests over 30 seconds. Each failed on the old code. Three browser tests that
+    waited for the panels' own polling now wait for what replaced it.
+- **Next**, measured the same way: saving a revision and making a ZIP go one file at a time; the
+  pool's size is not a setting; and every request begins by looking up the sign-in.
 - **How it was made.** Probed and planned by agents, written by another, checked here.
 
 ## When an email cannot be sent
