@@ -3,6 +3,9 @@
 import { AppError, contentDisposition, exportZip, getProject } from '@paperweave/server';
 import { blobs, currentUser, db } from '../../../../lib/server';
 
+// Vercel stops the function after this many seconds. Reading every file and zipping it.
+export const maxDuration = 120;
+
 export async function GET(request: Request, { params }: { params: Promise<{ id: string }> }) {
   const { id } = await params;
   const user = await currentUser();

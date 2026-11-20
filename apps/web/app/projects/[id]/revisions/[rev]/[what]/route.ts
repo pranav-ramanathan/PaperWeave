@@ -8,6 +8,9 @@ import {
 } from '@paperweave/server';
 import { askedForEachTime, blobs, currentUser, db } from '../../../../../../lib/server';
 
+// Vercel stops the function after this many seconds. Reading a revision and zipping it.
+export const maxDuration = 120;
+
 export async function GET(
   request: Request,
   { params }: { params: Promise<{ id: string; rev: string; what: string }> },

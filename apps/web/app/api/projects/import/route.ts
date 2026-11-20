@@ -3,6 +3,9 @@
 import { AppError, importZip, LIMITS } from '@paperweave/server';
 import { blobs, bounded, currentUser, db, sameOrigin, seeOther } from '../../../../lib/server';
 
+// Vercel stops the function after this many seconds. Reading and unpacking a ZIP.
+export const maxDuration = 120;
+
 const failed = (message: string) => seeOther(`/projects?error=${encodeURIComponent(message)}`);
 
 export async function POST(request: Request) {
