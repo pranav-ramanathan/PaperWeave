@@ -271,6 +271,9 @@ test('renaming a file that no line names says so first, and changes nothing unti
   await again.locator('summary').click();
   await again.getByLabel('New name for mystyle.sty').fill('styles/mystyle.sty');
   await again.getByRole('button', { name: 'Rename' }).click();
+  // Not before the confirming page is there: pressed at once, "Rename" was the paper page's own
+  // button again, which only asked a second time, and nothing was renamed.
+  await expect(page.getByText(/No line that this page can see names/)).toBeVisible();
   await page.getByRole('button', { name: 'Rename', exact: true }).click();
   await expect(page.getByRole('status')).toHaveText(
     'Renamed to styles/mystyle.sty, and no line needed changing.',

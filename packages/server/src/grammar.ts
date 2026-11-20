@@ -1,7 +1,7 @@
 // Spelling and grammar. The prose of a file is sent to a LanguageTool server we run ourselves
 // (GRAMMAR_URL); nothing goes to anyone else. Formulas, references, citations, commands and
 // code are sent as markup the checker skips, and a finding that touches any of them is dropped.
-import { inProse, prose } from '@paperweave/latex';
+import { escape, inProse, prose } from '@paperweave/latex';
 import type pg from 'pg';
 import * as Y from 'yjs';
 import { authorize } from './authz.ts';
@@ -27,8 +27,10 @@ export type LanguageFinding = {
   /** What the stretch says. */
   words: string;
   message: string;
-  /** What it could say instead, best first. May be empty. */
+  /** What it could say instead, best first, as LaTeX source: ready to put in the text. May be empty. */
   replacements: string[];
+  /** Whether `words` can be one of the paper's own words. */
+  addable: boolean;
   /** The checker's name for the rule, to switch it off by. */
   rule: string;
   kind: 'spelling' | 'grammar' | 'style';
@@ -42,6 +44,9 @@ export const NEVER = [
   ...['EN_QUOTES', 'EN_UNPAIRED_QUOTES', 'WHITESPACE_RULE', 'CONSECUTIVE_SPACES'],
   'OXFORD_SPELLING_Z_NOT_S',
 ];
+/** A word: letters, digits, and the marks that join them. No spaces. */
+const WORD = /^[\p{L}\p{N}'’.-]+$/u;
+const fits = (s: string) => s.length <= 60 && WORD.test(s);
 const RULE = /^[A-Z0-9_]{1,80}$/;
 const bad = (why: string) => new AppError('invalid_input', why);
 
@@ -78,10 +83,7 @@ export async function setLanguageSettings(
   if (input.language !== undefined && !LANGUAGES.includes(input.language as Language))
     throw bad('Choose British or American English.');
   const glossary =
-    input.glossary === undefined
-      ? now.glossary
-      : // A word: letters, digits, and the marks that join them. No spaces.
-        list(input.glossary, 'the words', (s) => s.length <= 60 && /^[\p{L}\p{N}'’.-]+$/u.test(s));
+    input.glossary === undefined ? now.glossary : list(input.glossary, 'the words', fits);
   const off = input.off === undefined ? now.off : list(input.off, 'the rules', (s) => RULE.test(s));
   await db.query(
     'update projects set language = $2, glossary = $3, grammar_off = $4 where id = $1',
@@ -169,7 +171,9 @@ export async function checkGrammar(
       to: place(to, -1),
       words,
       message: m.message,
-      replacements: m.replacements.slice(0, 5).map((r) => r.value),
+      // The checker sees plain text: "R&D", "50%". The source needs \& and \%.
+      replacements: m.replacements.slice(0, 5).map((r) => escape(r.value)),
+      addable: fits(words),
       rule: m.rule.id,
       kind: spelling
         ? 'spelling'

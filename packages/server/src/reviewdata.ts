@@ -285,12 +285,18 @@ export async function importReview(
       done.missing.push(
         `A thread on “${short(t.quote)}” had ${t.comments.length} comments; the last ${t.comments.length - MAX_COMMENTS} were left out.`,
       );
+    // The file's order is the thread's order, though listThreads sorts by time: a comment is
+    // never stored earlier than a microsecond after the one before it, so ties do not reshuffle.
+    let prev: string | null = null;
     for (const c of t.comments.slice(0, MAX_COMMENTS))
-      await pool.query(
-        `insert into thread_comments (thread_id, body, created_at, imported_author)
-         values ($1, $2, $3, $4)`,
-        [made.id, c.body, c.createdAt, c.author],
-      );
+      prev = (
+        await pool.query(
+          `insert into thread_comments (thread_id, body, created_at, imported_author)
+           values ($1, $2, greatest($3::timestamptz, $5::timestamptz + interval '1 microsecond'), $4)
+           returning created_at::text as at`,
+          [made.id, c.body, c.createdAt, c.author, prev],
+        )
+      ).rows[0].at;
     done.threads++;
   }
   for (const raw of read.data.proposals.slice(0, MAX_PROPOSALS)) {

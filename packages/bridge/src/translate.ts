@@ -1,24 +1,12 @@
 // Visual edit -> source splices. The bridge never regenerates LaTeX: it works out which source
 // characters an edit touched and replaces exactly those.
-import { NBSP, type Piece } from '@paperweave/latex';
+import { escape, type Piece } from '@paperweave/latex';
 import type { Node as PMNode } from '@tiptap/pm/model';
 import { locate, markKey, type Model, type Phantom, width } from './project.ts';
 
 /** Replace source [from, to) with insert. A list is sorted and never overlaps. */
 export type Edit = { from: number; to: number; insert: string };
 export type Translation = { edits: Edit[]; phantom: Phantom | null };
-
-const ESCAPE: Record<string, string> = {
-  '\\': '\\textbackslash{}',
-  '~': '\\textasciitilde{}',
-  '^': '\\textasciicircum{}',
-  [NBSP]: '~',
-  '\n': ' ',
-  '\r': ' ',
-  '\t': ' ',
-};
-for (const c of '%&$#_{}') ESCAPE[c] = '\\' + c;
-export const escape = (s: string) => s.replace(/[\\~^\xa0\n\r\t%&$#_{}]/g, (c) => ESCAPE[c]);
 
 // An odd run of backslashes then letters is a control word; an even run is a line break.
 const AFTER_WORD = /(^|[^\\])(\\\\)*\\[a-zA-Z]+$/;

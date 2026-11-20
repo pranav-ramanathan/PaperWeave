@@ -664,6 +664,11 @@ ordinary use. Ten ways of looking found them, and each is cheap to do again:
     keeping a correct paper from ever being ready; a reference through a macro, and a key in a
     `.bib` the paper does not name, called ready with ?? and [?] in the PDF.
 
+20. **Take up everything the checker suggests, and read the source afterwards.** Found: a
+    suggestion put into the source as plain text, so that a repeated `R\&D` became a bare `&`
+    and a `%` hid the rest of its line from the PDF, by an owner or through a reviewer; a word
+    offered for the paper's words that could not be one.
+
 Tried the same way and nothing found: thirty connections typing into one file at once (kept
 as a test in `sync.sandbox.test`); 400 threads and 400 proposals on one file, on the server
 (both lists took about 20 ms; not kept); and each tool of the visual view worked slowly
@@ -1679,6 +1684,11 @@ second one.
   is given to none. There is no limit on how many comments a thread may have, and sign-in takes
   an address longer than the 320 characters an export keeps. No browser test makes the round
   trip; the page's sentences are not under test.
+- **Found later, in CI:** an imported thread's comments came back in an order of their own
+  when two were made within one millisecond, since the file keeps times to the millisecond
+  and the database then put ties in a random order. Each imported comment is now stored after
+  the one before it, so the file's order holds. A service test with twenty comments of one
+  time held it, and failed on the old code three times in three.
 - **How it was made.** Planned by one agent, probed and written by others, checked here.
 
 ## A paper whose root file is in a folder
@@ -1835,6 +1845,42 @@ second one.
   or `\bibitem` has from the reading alone. A `\bibitem` in a file the root does not reach is
   not in the bibliography, though evidence checks can still be recorded on it. The summary
   line "There were undefined references" stays a warning, since a per-key line comes with it.
+- **How it was made.** Planned by one agent, probed and written by others, checked here.
+
+## Taking up a suggestion
+
+- **What was tried**, with a probe: fifteen cases of spelling and grammar findings on LaTeX
+  that escapes characters, uses its own typography, or holds a long file, taken up by an owner
+  and by a reviewer, with the source and the built PDF read after each.
+
+| Case                                                                          | Before                                               | Now                                        |
+| ----------------------------------------------------------------------------- | ---------------------------------------------------- | ------------------------------------------ |
+| The repeat in `R\&D R\&D` taken, as the checker offers it                     | **a bare `&` in the source**                         | `R\&D`                                     |
+| A suggestion holding `%` taken (`50\% of`)                                    | **a bare `%`: the PDF reads "We spent 50"**          | `\%`; the line is whole                    |
+| The same proposed by a reviewer and accepted                                  | **the same**, with only "The units differ" said      | the same as an owner's                     |
+| "It is a word of this paper" on `R\&D`                                        | **offered, then "One of the words cannot be used."** | not offered; the rule can still be ignored |
+| ` ``quotes'' `, `--`, `---`, `e.g.\ `, `\ldots`, `\LaTeX`, `Schr\"odinger`    | no findings                                          | the same                                   |
+| A word wrapped onto the next line; a heading, a caption, an `\emph`           | found, within the word                               | the same                                   |
+| A file of 300,000 characters                                                  | checked, in 9 seconds                                | the same                                   |
+| A suggestion taken after its word was edited, or after text was put before it | refused with a sentence; or made on the right word   | the same                                   |
+| Every rule id the checker gave                                                | can be switched off                                  | the same                                   |
+
+- **What was wrong.** The checker reads `R\&D` as "R&D" and answers in plain text. What it
+  offered was put into the source as it came, so a suggestion holding `%`, `&`, `#`, `_`, `$`
+  or a brace became LaTeX of another meaning: a comment, a table column, a subscript.
+- **Now** (`checkGrammar` in `packages/server/src/grammar.ts`): every suggestion is escaped
+  as the visual view escapes typing (`escape`, now in `packages/latex/src/escape.ts`) before it
+  leaves the server, so an owner's change and a reviewer's proposal are both source. A finding
+  says whether its words can be one of the paper's words, and the page offers that only then.
+- **Held by** a service test with the real checker on `R\&D R\&D` and a fake one for the other
+  characters, and a browser test that takes the suggestion, builds, and reads the PDF's text.
+  Both failed on the old code; the browser test's check on the paper's words failed on the old
+  page alone.
+- **Not changed:** words in a footnote or a table cell are not checked. Coarse or missed
+  findings are not a fault of this kind and were not looked into.
+- **Also fixed on the way:** `files.spec` pressed "Rename" on the confirming page before it
+  had come, and pressed the paper page's own button instead, which only asked again. It
+  failed twice in three runs on one machine, and passed in CI. The test now waits for the page.
 - **How it was made.** Planned by one agent, probed and written by others, checked here.
 
 ## When an email cannot be sent

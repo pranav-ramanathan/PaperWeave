@@ -8,3 +8,4 @@ export * from './bib.ts';
 export * from './floats.ts';
 export * from './synctex.ts';
 export * from './prose.ts';
+export * from './escape.ts';

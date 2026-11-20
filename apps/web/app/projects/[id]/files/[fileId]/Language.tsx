@@ -119,7 +119,7 @@ export default function Language(props: {
                 >
                   Show in the text
                 </button>
-                {canWrite && f.kind === 'spelling' && (
+                {canWrite && f.kind === 'spelling' && f.addable && (
                   <button
                     type="button"
                     onClick={async () => {

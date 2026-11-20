@@ -354,6 +354,53 @@ test('many comments and a long address arrive whole, the name trimmed', async ()
   expect(thread.comments[0].author).toBe(long.slice(0, 320));
 });
 
+test('comments of an imported thread keep the order the file gives, ties or not', async () => {
+  const thread = (comments: { author: null; body: string; createdAt: string }[]) => ({
+    file: 'main.tex',
+    quote: 'below 40 ms',
+    before: '',
+    after: '',
+    status: 'open',
+    startedBy: null,
+    createdAt: NOW,
+    comments,
+  });
+  const ties = Array.from({ length: 20 }, (_, i) => ({
+    author: null,
+    body: String(i + 1),
+    createdAt: NOW,
+  }));
+  const apart = [
+    '2026-01-01T00:00:00.000Z',
+    '2026-01-02T00:00:00.000Z',
+    '2026-03-01T12:00:00.000Z',
+  ];
+  const data = {
+    format: 'paperweave-review-1',
+    paper: 'Hand-written',
+    exported: NOW,
+    threads: [
+      thread(ties),
+      thread(apart.map((createdAt, i) => ({ author: null, body: `d${i}`, createdAt }))),
+    ],
+    proposals: [],
+  };
+  const [made] = await importZip(
+    t.pool,
+    store,
+    users.importer.id,
+    await zipWith(JSON.stringify(data)),
+    'Ties',
+  );
+  const threads = await listThreads(t.pool, store, users.importer.id, made.id);
+  expect(threads).toHaveLength(2);
+  const tied = threads.find((th) => th.comments[0].body === '1')!;
+  expect(tied.comments.map((c) => c.body)).toEqual(ties.map((c) => c.body));
+  const distinct = threads.find((th) => th !== tied)!;
+  expect(distinct.comments.map((c) => c.body)).toEqual(['d0', 'd1', 'd2']);
+  expect(distinct.comments.map((c) => new Date(c.createdAt).toISOString())).toEqual(apart);
+});
+
 test('an item that cannot be read costs only itself', async () => {
   const good = {
     file: 'main.tex',
