@@ -699,6 +699,12 @@ ordinary use. Ten ways of looking found them, and each is cheap to do again:
     units in `\SI` and `\qty`, names opening a sentence and number words past twelve not
     read at all.
 
+26. **Import the shapes real papers come in.** Found: a root in a folder imported without the
+    figures and bibliography beside it; an arXiv source without its `.bbl`; `.tikz`, `.pgf`,
+    `.dat` and fonts dropped; a root name with a space that could never build; the cover letter
+    taken for the paper; and refusals of a `.tar.gz`, a split root and a Latin-1 root that said
+    nothing useful.
+
 Tried the same way and nothing found: thirty connections typing into one file at once (kept
 as a test in `sync.sandbox.test`); 400 threads and 400 proposals on one file, on the server
 (both lists took about 20 ms; not kept); and each tool of the visual view worked slowly
@@ -2148,6 +2154,57 @@ second one.
   marked so. The set is still written by hand, not taken from real manuscripts.
 - **How it was made.** Planned by one agent, the order rule prototyped by it against the set;
   probed and written by others, checked here.
+
+## A real paper brought in
+
+- **What was tried**, with a probe: archives in the shapes papers really come in, imported and
+  then built: a root in a folder, two papers sharing a folder, an arXiv source, the file types
+  real papers use, the `.tar.gz` arXiv gives, two documents side by side, a split root, other
+  encodings and names, an Overleaf export and a macOS ZIP; three of them also through the page.
+
+| Archive                                                                                  | Before                                                           | Now                                              |
+| ---------------------------------------------------------------------------------------- | ---------------------------------------------------------------- | ------------------------------------------------ |
+| `src/main.tex`, with `figures/` and `refs.bib` beside `src/`                             | **only `main.tex` kept; never built**                            | imported whole, root `src/main.tex`; builds      |
+| Two papers sharing `figures/` and `refs.bib`                                             | **each without them, "outside every paper"**                     | the same, said to be shared, to add to each      |
+| An arXiv source: `main.bbl`, no `.bib`                                                   | **the `.bbl` dropped as build output; failed with no reason**    | kept, and said to be ready-made; builds          |
+| `.tikz`, `.pgf`, `.pdf_tex`, `.dat`, `.lua`, a font                                      | **dropped as "not a file type a paper uses"; never built**       | kept; builds                                     |
+| `.svg`, `.gif`                                                                           | dropped as not a type a paper uses                               | dropped: convert it to PDF or PNG                |
+| The `.tar.gz` arXiv gives; a gzipped `.tex`                                              | **"not a readable ZIP file"**                                    | says what it is, and to unpack it and make a ZIP |
+| `\documentclass` in a file the root reads                                                | **refused, with no way on**                                      | refused: put `\documentclass` in the main file   |
+| A Latin-1 root                                                                           | **refused as having no main file**                               | refused: it is not UTF-8, and how to make it so  |
+| A root named `my paper.tex` or `résumé (v2).tex`                                         | **imported, then "could not run this build. Try again", always** | builds                                           |
+| `paper.tex` with its sections beside `cover-letter.tex`                                  | **the cover letter taken as the root**                           | `paper.tex`                                      |
+| BibTeX finding no `.bib`, style or `\bibliography`                                       | **"failed without saying where"**                                | says which                                       |
+| One paper in a folder, as a Git host gives it                                            | named after the folder ("src")                                   | named after the ZIP                              |
+| A Git host's wrapping folder; an Overleaf export; a macOS ZIP; BOM, CRLF, accented names | built                                                            | the same                                         |
+
+- **What was wrong.** The importer took the folder holding a root as the paper and left the rest
+  out, though LaTeX reads `../` freely. It treated every `.bbl` as something a build makes again,
+  though arXiv ships one in place of the `.bib`. Its list of wanted file types stopped at the
+  common ones. It read only ZIPs and said nothing useful of anything else. The build refused any
+  root name that was not plain letters, digits and dashes, and said to try again. And BibTeX's
+  own sentences were never read.
+- **Now** (`packages/server/src/archive.ts`, `import.ts`; `apps/workers/src/compile.ts`): a paper
+  whose root is in a folder, with usable files beside it, is imported whole. A `.bbl` is kept when
+  the archive has no `.bib`, and latexmk runs BibTeX only where a `.bib` exists (`-bibtex-cond`,
+  in the downloaded manifest too). The types TeX reads are wanted; pictures it cannot use are
+  dropped with what to do. Gzip and tar are known by their first bytes. The root goes to latexmk
+  as `./name`, with no shell anywhere; a name that begins with `-` is built from its folder. Of
+  two roots, the one that brings in more files is taken. BibTeX's missing file, style, data and
+  citations are said. A one-paper archive is named after the ZIP.
+- **Held by** service tests of each archive above and a unit test of the three layouts; real
+  builds of the root in a folder, the arXiv source, a `.tikz` paper, and the two awkward names;
+  unit tests of each BibTeX sentence; and a browser test of the root in a folder. Each failed on
+  the old code.
+- **Not changed:**
+  - A `.tar.gz` is refused with a sentence, not read.
+  - Files shared between papers are not copied into each.
+  - A root whose name begins with `-` and that has a bibliography does not build: BibTeX takes
+    the name for an option.
+  - A kept `.bbl` is shown as a file that cannot be edited, and cannot be renamed by hand.
+  - An `output.pdf` of the paper itself is kept as one of its files.
+  - In an archive of several papers, a `.bbl` is dropped if any of them has a `.bib`.
+- **How it was made.** Planned by one agent, probed and written by others, checked here.
 
 ## When an email cannot be sent
 

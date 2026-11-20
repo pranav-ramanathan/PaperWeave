@@ -10,6 +10,7 @@ import {
   buildOutput,
   createFile,
   deleteFile,
+  importReport,
   importZip,
   invite,
   latestBuilds,
@@ -571,3 +572,93 @@ test('a point in the PDF and a line of the text are carried across the edits mad
     message: 'That part of the PDF came from a file that is no longer in the paper.',
   });
 }, 180_000);
+
+// Papers as they come from elsewhere: imported as a ZIP, then built.
+const PNG = Buffer.from(
+  'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mP8z8BQDwAEhQGAhKmMIQAAAABJRU5ErkJggg==',
+  'base64',
+);
+const BIB = '@book{k, author={A. Author}, title={A Book}, publisher={P}, year=2020}\n';
+const BBL =
+  '\\begin{thebibliography}{1}\n\\bibitem{k} A.~Author. \\newblock {\\em A Book}. \\newblock P, 2020.\n\\end{thebibliography}\n';
+const tex = (body: string, pre = '') =>
+  `\\documentclass{article}\n\\usepackage{graphicx}\n${pre}\n\\begin{document}\n${body}\n\\end{document}\n`;
+const cite = (bib: string) => `Hi \\cite{k}\n\\bibliographystyle{plain}\n\\bibliography{${bib}}`;
+
+async function importAndBuild(files: Record<string, string | Buffer>, name = 'Imported') {
+  const zip = await writeZip(
+    Object.entries(files).map(([path, b]) => ({ path, bytes: Buffer.from(b) })),
+  );
+  const [project] = await importZip(t.pool, store, owner.id, zip, name);
+  const built = await build(project.id);
+  const text = built.hasPdf
+    ? String(
+        pdfText(
+          Buffer.from(await buildOutput(t.pool, store, owner.id, project.id, built.id, 'pdf')),
+        ),
+      )
+    : '';
+  const errors = built.diagnostics.filter((d) => d.severity === 'error');
+  return { project, built, text, errors };
+}
+
+test('a root in a folder, with figures and bibliography beside the folder, builds whole', async () => {
+  const { project, built, text, errors } = await importAndBuild({
+    'src/main.tex': tex(`${cite('../refs')} \\includegraphics{../figures/a}`),
+    'figures/a.png': PNG,
+    'refs.bib': BIB,
+  });
+  expect(errors).toEqual([]);
+  expect(built).toMatchObject({ status: 'succeeded', hasPdf: true });
+  expect(text).toContain('A Book');
+  expect(project.name).toBe('Imported');
+  expect((await listFiles(t.pool, owner.id, project.id)).map((f) => f.path)).toEqual([
+    'figures/a.png',
+    'refs.bib',
+    'src/main.tex',
+  ]);
+});
+
+test('an arXiv-shaped paper, a .bbl and no .bib, builds with its citations resolved', async () => {
+  const { built, text, errors } = await importAndBuild({
+    'main.tex': tex(cite('refs')),
+    'main.bbl': BBL,
+  });
+  expect(errors).toEqual([]);
+  expect(built).toMatchObject({ status: 'succeeded', hasPdf: true });
+  expect(text).toContain('A Book');
+  expect(text).not.toContain('?');
+  expect(built.diagnostics.filter((d) => /undefined/.test(d.message))).toEqual([]);
+});
+
+test('a paper with a .tikz picture builds', async () => {
+  const { built, errors } = await importAndBuild({
+    'main.tex': tex('\\input{fig.tikz}', '\\usepackage{tikz}'),
+    'fig.tikz': '\\begin{tikzpicture}\\draw (0,0) -- (1,1);\\end{tikzpicture}\n',
+  });
+  expect(errors).toEqual([]);
+  expect(built).toMatchObject({ status: 'succeeded', hasPdf: true });
+});
+
+test.each(['my paper.tex', 'résumé (v2).tex'])(
+  'a root named %s, with a bibliography, builds',
+  async (root) => {
+    const { project, built, text, errors } = await importAndBuild({
+      [root]: tex(cite('refs')),
+      'refs.bib': BIB,
+    });
+    expect(errors).toEqual([]);
+    expect(built).toMatchObject({ status: 'succeeded', hasPdf: true });
+    expect(text).toContain('A Book');
+    expect((await importReport(t.pool, owner.id, project.id))!.root).toBe(root);
+  },
+);
+
+test('a root whose name begins with a dash is a path to latexmk, not an option', async () => {
+  // Beside its folder too: latexmk is started there, and still given "./-x.tex".
+  for (const root of ['-x.tex', 'sub/-x.tex']) {
+    const { built, errors } = await importAndBuild({ [root]: tex('Dashed.'), 'other.txt': 'x' });
+    expect(errors, root).toEqual([]);
+    expect(built, root).toMatchObject({ status: 'succeeded', hasPdf: true });
+  }
+});

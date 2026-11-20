@@ -75,34 +75,69 @@ function compilerFor(root: string): Compiler {
   return 'pdflatex';
 }
 
+const NO_ROOT =
+  'No file here has both \\documentclass and \\begin{document}. If the class is loaded from another file, put \\documentclass in the main file.';
+
 /**
  * Split an archive into the papers it holds. One wrapping folder is removed. If root files sit in
- * different top-level folders (an "export all projects" archive), each folder is a paper.
+ * different top-level folders (an "export all projects" archive), each folder is a paper. If one
+ * folder holds the root but the archive has usable files outside it (`src/main.tex` reaching for
+ * `../figures`), the whole archive is the paper, so that what the root reaches for is there.
  */
-function papers(entries: Entry[], skipped: Skipped[]) {
+export function papers(entries: Entry[], skipped: Skipped[]) {
   const text = new Map<string, string>();
+  const unreadable: string[] = [];
   for (const e of entries) {
     if (!TEXT_FILE.test(e.path)) continue;
     const d = decodeFile(e.bytes);
     if (d.editable) text.set(e.path, d.text);
+    else if (d.reason === 'not-utf8' && /\.(tex|ltx)$/i.test(e.path)) unreadable.push(e.path);
   }
   const roots = [...text]
     .filter(([path, t]) => /\.(tex|ltx)$/i.test(path) && isRoot(t))
     .map(([p]) => p);
-  if (!roots.length)
+  if (!roots.length) {
+    // A main file saved as Latin-1 is not text the editors can open. Look at it as Latin-1 for
+    // this one question, so that the refusal can say what is wrong with it.
+    const latin = unreadable
+      .filter((p) =>
+        isRoot(Buffer.from(entries.find((e) => e.path === p)!.bytes).toString('latin1')),
+      )
+      .sort()[0];
     throw new AppError(
       'invalid_input',
-      'This ZIP cannot be imported: no .tex file in it has both \\documentclass and \\begin{document}.',
+      latin
+        ? `This ZIP cannot be imported: ${latin} is the paper's main file, but it is not UTF-8 text (it may be Latin-1). Save it as UTF-8, change \\usepackage[latin1]{inputenc} to utf8, and import again.`
+        : NO_ROOT,
     );
+  }
   // The folders that hold a root file and are not inside another such folder.
   const tops = [...new Set(roots.map(dirOf))].filter(
     (d, _, all) => !all.some((o) => o !== d && d.startsWith(o)),
   );
   if (tops.length > MAX_PROJECTS)
     throw new AppError('invalid_input', `This ZIP holds more than ${MAX_PROJECTS} papers.`);
+  if (tops.length === 1 && tops[0] !== '' && entries.some((e) => !e.path.startsWith(tops[0]))) {
+    // The folder every file shares, if there is one: that is the wrapper, and only that goes.
+    const first = entries[0].path.split('/')[0] + '/';
+    const wrapper = entries.every((e) => e.path.startsWith(first)) ? first : '';
+    return [
+      {
+        dir: wrapper,
+        name: wrapper.replace(/\/$/, ''),
+        entries: entries.map((e) => ({ path: e.path.slice(wrapper.length), bytes: e.bytes })),
+        skipped: skipped.map((s) =>
+          s.path.startsWith(wrapper) ? { ...s, path: s.path.slice(wrapper.length) } : s,
+        ),
+      },
+    ];
+  }
   const outside = entries.filter((e) => !tops.some((t) => e.path.startsWith(t)));
   for (const e of outside)
-    skipped.push({ path: e.path, reason: 'outside every paper in the archive' });
+    skipped.push({
+      path: e.path,
+      reason: 'shared between the papers in this archive: add it to each paper that needs it',
+    });
   return tops.map((dir) => ({
     dir,
     name: dir.replace(/\/$/, '').split('/').pop() ?? '',
@@ -129,20 +164,19 @@ export function describeImport(
     meta.set(e.path, d);
     if (d.editable) texts[e.path] = d.text;
   }
-  const candidates = Object.keys(texts)
-    .filter((p) => /\.(tex|ltx)$/i.test(p) && isRoot(texts[p]))
-    .sort(
-      (a, b) =>
-        a.split('/').length - b.split('/').length ||
-        +!/main\./.test(a) - +!/main\./.test(b) ||
-        a.localeCompare(b),
-    );
-  const root = candidates[0];
-  const graph = includeGraph(
-    texts,
-    root,
-    entries.map((e) => e.path),
+  const paths = entries.map((e) => e.path);
+  const found = Object.keys(texts).filter((p) => /\.(tex|ltx)$/i.test(p) && isRoot(texts[p]));
+  // Of two files that could be the paper, the one that brings in more of the others is it.
+  const reach = new Map(found.map((p) => [p, includeGraph(texts, p, paths).edges.length]));
+  const candidates = found.sort(
+    (a, b) =>
+      a.split('/').length - b.split('/').length ||
+      +!/main\./.test(a) - +!/main\./.test(b) ||
+      reach.get(b)! - reach.get(a)! ||
+      a.localeCompare(b),
   );
+  const root = candidates[0];
+  const graph = includeGraph(texts, root, paths);
   const transparent = new Set([
     ...DEFAULT_TRANSPARENT,
     ...Object.values(texts).flatMap(theoremEnvs),
@@ -150,6 +184,11 @@ export function describeImport(
   const notes: string[] = [
     'A ZIP holds files only. Comments, history and sharing settings from where it came from are not in it.',
   ];
+  const bbls = entries.map((e) => e.path).filter((p) => /\.bbl$/i.test(p));
+  if (bbls.length && !entries.some((e) => /\.bib$/i.test(e.path)))
+    notes.push(
+      `The bibliography came ready-made (${bbls.map((p) => p.split('/').pop()).join(', ')}), with no .bib file: citations cannot be checked or added here.`,
+    );
   if (skipped.some((s) => s.reason.startsWith('build script')))
     notes.push(
       'The project has a latexmkrc. PaperWeave never runs it, so anything it sets up is not applied.',
@@ -216,7 +255,10 @@ export async function importZip(
   const made = await transaction(pool, async (db) => {
     const created: Project[] = [];
     for (const p of found) {
-      const name = (p.name || fallbackName || 'Imported paper').slice(0, 200);
+      // One paper is named after the ZIP it came in. Several keep the names of their folders.
+      const name = (
+        (found.length === 1 ? fallbackName || p.name : p.name || fallbackName) || 'Imported paper'
+      ).slice(0, 200);
       const project = (
         await db.query('insert into projects (name, compiler) values ($1, $2) returning id, name', [
           name,

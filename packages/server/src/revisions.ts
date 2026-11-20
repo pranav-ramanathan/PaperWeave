@@ -346,7 +346,7 @@ export async function exportRevision(
         image: built?.image ?? null,
         // PDF timestamps are set from this, so a rebuild gives the same bytes.
         sourceDateEpoch: epoch,
-        command: `SOURCE_DATE_EPOCH=${epoch} latexmk -norc -cd ${engine} -no-shell-escape -interaction=nonstopmode ${revision.root}`,
+        command: `SOURCE_DATE_EPOCH=${epoch} latexmk -norc -cd ${engine} -no-shell-escape -bibtex-cond -interaction=nonstopmode ${shellPath(revision.root)}`,
         files: Object.fromEntries(shared.map((f) => [f.path, `sha256:${f.digest}`])),
         charts,
       },
@@ -459,6 +459,10 @@ export async function renameFile(
     projectId,
   ]);
 }
+
+/** A root file's path as a shell would take it: "./" in front, and quoted if it needs to be. */
+const shellPath = (root: string) =>
+  /^[\w./-]+$/.test(root) && !root.startsWith('-') ? root : `'./${root.replaceAll("'", "'\\''")}'`;
 
 const isSpace = (c: string) => /\s/.test(c);
 

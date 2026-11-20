@@ -346,3 +346,115 @@ test("with the root in a folder, paths are the root folder's, made project paths
     },
   ]);
 });
+
+// What BibTeX and latexmk wrote when run for real on small broken papers (TeX Live 2022).
+test('BibTeX could not open the .bib file or the style, and says which', () => {
+  const nodb = [
+    'This is BibTeX, Version 0.99d (TeX Live 2022/Debian)',
+    'The top-level auxiliary file: main.aux',
+    'The style file: plain.bst',
+    "I couldn't open database file refs.bib",
+    '---line 4 of file main.aux',
+    ' : \\bibdata{refs',
+    ' :              }',
+    "I'm skipping whatever remains of this command",
+    'I found no database files---while reading file main.aux',
+    '(There were 2 error messages)',
+    'Collected error summary (may duplicate other messages):',
+    "  bibtex main: Bibtex errors: See file 'main.blg'",
+  ].join('\n');
+  expect(diagnostics('(./main.tex)', nodb)).toEqual([
+    { severity: 'error', message: 'BibTeX could not find the bibliography file refs.bib.' },
+  ]);
+  const nostyle = [
+    'The top-level auxiliary file: main.aux',
+    "I couldn't open style file nosuch.bst",
+    '---line 3 of file main.aux',
+    ' : \\bibstyle{nosuch',
+    ' :                 }',
+    "I'm skipping whatever remains of this command",
+    'I found no style file---while reading file main.aux',
+    '(There were 2 error messages)',
+  ].join('\n');
+  expect(diagnostics('(./main.tex)', nostyle)).toEqual([
+    { severity: 'error', message: 'BibTeX could not find the bibliography style nosuch.bst.' },
+  ]);
+});
+
+test.each([
+  [
+    'I found no \\citation commands---while reading file main.aux',
+    'The paper asks for a bibliography but cites nothing.',
+  ],
+  [
+    'I found no \\bibdata command---while reading file main.aux',
+    'The paper cites, but has no \\bibliography{\u2026}.',
+  ],
+  [
+    'I found no \\bibstyle command---while reading file main.aux',
+    'The paper has no \\bibliographystyle{\u2026}.',
+  ],
+])('BibTeX: %s', (said, message) => {
+  const output = [
+    'This is BibTeX, Version 0.99d (TeX Live 2022/Debian)',
+    'The top-level auxiliary file: main.aux',
+    said,
+    '(There was 1 error message)',
+  ].join('\n');
+  expect(diagnostics('(./main.tex)', output)).toEqual([{ severity: 'error', message }]);
+});
+
+test('a bibliography run that failed with no reason BibTeX gave still says it failed', () => {
+  const summary = [
+    'Latexmk: Errors, so I did not complete making targets',
+    'Collected error summary (may duplicate other messages):',
+    "  bibtex main: Bibtex errors: See file 'main.blg'",
+    'Latexmk: Undoing directory change',
+  ].join('\n');
+  expect(diagnostics('(./main.tex)', summary)).toEqual([
+    {
+      severity: 'error',
+      message: 'The bibliography could not be made. The build log has the details.',
+    },
+  ]);
+  // A reason BibTeX gave is not said twice.
+  expect(diagnostics('(./main.tex)', "I couldn't open database file r.bib\n" + summary)).toEqual([
+    { severity: 'error', message: 'BibTeX could not find the bibliography file r.bib.' },
+  ]);
+  // A .bib file that is not there: latexmk will not run BibTeX, and says so only in this.
+  expect(
+    diagnostics(
+      '(./main.tex)',
+      "Latexmk: Failure in processing file 'main.tex':\n   'bibtex main' needed too many passes",
+    ),
+  ).toEqual([
+    {
+      severity: 'error',
+      message: 'The bibliography could not be made. The build log has the details.',
+    },
+  ]);
+  // A run that did not fail has nothing to say.
+  expect(diagnostics('(./main.tex)', 'Latexmk: All targets () are up-to-date')).toEqual([]);
+  // pdflatex failing is not the bibliography failing.
+  expect(
+    diagnostics(
+      '(./main.tex)',
+      "Collected error summary (may duplicate other messages):\n  pdflatex: Run of rule 'pdflatex' gave a non-zero error code",
+    ),
+  ).toEqual([]);
+});
+
+test('when BibTeX also found no \\bibdata or \\bibstyle, "cites nothing" is not said', () => {
+  // The run latexmk makes on its stub .aux, before the paper has been typeset once.
+  const output = [
+    'The top-level auxiliary file: main.aux',
+    'I found no \\citation commands---while reading file main.aux',
+    'I found no \\bibdata command---while reading file main.aux',
+    'I found no \\bibstyle command---while reading file main.aux',
+    '(There were 3 error messages)',
+  ].join('\n');
+  expect(diagnostics('(./main.tex)', output)).toEqual([
+    { severity: 'error', message: 'The paper cites, but has no \\bibliography{\u2026}.' },
+    { severity: 'error', message: 'The paper has no \\bibliographystyle{\u2026}.' },
+  ]);
+});

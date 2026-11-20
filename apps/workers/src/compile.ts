@@ -46,6 +46,8 @@ export function sandbox(
   argv: string[],
   seconds = 60,
   env: Record<string, string> = {},
+  /** A folder of `work` to start in. */
+  cwd = '',
 ) {
   // The container user must own the work directory. As root, hand it to the image's user;
   // otherwise run as ourselves.
@@ -63,7 +65,18 @@ export function sandbox(
   const args = [
     ...['run', '--rm', '--network', 'none', '--read-only', '--tmpfs', '/tmp:rw,size=64m'],
     ...['--cap-drop', 'ALL', '--security-opt', 'no-new-privileges', '--pids-limit', '256'],
-    ...['--memory', '1g', '--cpus', '1', '--user', user, '-v', `${work}:/work`, '-w', '/work'],
+    ...[
+      '--memory',
+      '1g',
+      '--cpus',
+      '1',
+      '--user',
+      user,
+      '-v',
+      `${work}:/work`,
+      '-w',
+      `/work${cwd}`,
+    ],
     // No line wrapping in the log, so one message is one line.
     ...['-e', 'HOME=/tmp', '-e', 'TEXMFVAR=/tmp/texmf-var', '-e', 'max_print_line=10000'],
     ...Object.entries(env).flatMap(([k, v]) => ['-e', `${k}=${v}`]),
@@ -141,6 +154,7 @@ export function diagnostics(log: string, output = '', dir = ''): Diagnostic[] {
     out.push({ severity: 'error', message: 'The paper ends without \\end{document}.' });
   // BibTeX says where in its own way: "I was expecting a `,' or a `}'---line 9 of file refs.bib".
   // That is in latexmk's output and in main.blg, never in the TeX log.
+  const beforeBibtex = out.length;
   for (const m of output.matchAll(/^(.+?)---line (\d+) of file (?:\.\/)?(\S+\.bib)\r?$/gm)) {
     const d: Diagnostic = {
       severity: 'error',
@@ -150,6 +164,46 @@ export function diagnostics(log: string, output = '', dir = ''): Diagnostic[] {
     };
     if (!out.some((e) => JSON.stringify(e) === JSON.stringify(d))) out.push(d);
   }
+  // The rest of what BibTeX says is about the files it was given, not a place in one.
+  const bibtex = (re: RegExp, say: (found: string) => string) => {
+    for (const m of output.matchAll(re)) {
+      const d: Diagnostic = { severity: 'error', message: say(m[1]) };
+      if (!out.some((e) => e.message === d.message)) out.push(d);
+    }
+  };
+  bibtex(
+    /^I couldn't open database file (.+?)\r?$/gm,
+    (f) => `BibTeX could not find the bibliography file ${f}.`,
+  );
+  bibtex(
+    /^I couldn't open style file (.+?)\r?$/gm,
+    (f) => `BibTeX could not find the bibliography style ${f}.`,
+  );
+  // With no \bibdata or \bibstyle too, the citations are not what is missing (latexmk's first
+  // run of BibTeX is on a stub .aux, which has none of the three).
+  if (!/^I found no \\(?:bibdata|bibstyle) command/m.test(output))
+    bibtex(
+      /^(I found no \\citation commands)---while reading file/gm,
+      () => 'The paper asks for a bibliography but cites nothing.',
+    );
+  bibtex(
+    /^(I found no \\bibdata command)/gm,
+    () => 'The paper cites, but has no \\bibliography{\u2026}.',
+  );
+  bibtex(
+    /^(I found no \\bibstyle command)/gm,
+    () => 'The paper has no \\bibliographystyle{\u2026}.',
+  );
+  // Nothing above matched, but latexmk says a bibliography run failed: say so, not nothing.
+  if (
+    out.length === beforeBibtex &&
+    (/^Collected error summary[^\n]*\n(?:[ \t]+.*\n)*?[ \t]+(?:bibtex|biber)\b/m.test(output) ||
+      /^\s*'(?:bibtex|biber)\b[^']*' needed too many passes/m.test(output))
+  )
+    out.push({
+      severity: 'error',
+      message: 'The bibliography could not be made. The build log has the details.',
+    });
   // An error in a file that is not the author's is not placed in it.
   for (let i = 0; i < out.length; i++) {
     const { file, message } = out[i];
@@ -256,26 +310,42 @@ export async function compile(
   epoch?: number,
 ): Promise<CompileResult> {
   if (!(compiler in ENGINE)) throw new Error(`unknown compiler: ${compiler}`);
-  if (!/^[\w./-]+\.tex$/.test(root) || root.split('/').includes('..'))
+  // No shell is involved anywhere (sandbox() runs docker with execFile and an argument array),
+  // so a name needs to be a plain path and nothing more.
+  if (
+    !/\.tex$/i.test(root) ||
+    // eslint-disable-next-line no-control-regex -- control characters are exactly what is refused
+    /[\u0000-\u001f\u007f\\]/.test(root) ||
+    root.startsWith('/') ||
+    root.split('/').includes('..')
+  )
     throw new Error(`not a .tex path inside the project: ${root}`);
   // A clean copy: the build never writes into the project, and starts from nothing else.
   const work = mkdtempSync(join(tmpdir(), 'paperweave-build-'));
   try {
     cpSync(project, work, { recursive: true });
+    const dir = rootDir(root);
+    const name = root.slice(dir.length);
+    // latexmk -cd hands TeX only the file's name, so "./" would be lost and a name that begins
+    // with "-" would be an option. For such a name latexmk is started in the folder instead.
+    const dashed = name.startsWith('-');
     const run = await sandbox(
       work,
       // -norc: a project's latexmkrc is arbitrary Perl and is never read.
       // -cd: TeX runs in the root file's folder, where it writes its output and resolves
       // \input, as the rest of the app reads paths.
       [
-        ...['latexmk', '-norc', '-cd', ENGINE[compiler], '-no-shell-escape'],
-        ...['-interaction=nonstopmode'],
-        ...['-file-line-error', '-synctex=1', root],
+        ...['latexmk', '-norc', ...(dashed ? [] : ['-cd']), ENGINE[compiler], '-no-shell-escape'],
+        // -bibtex-cond: BibTeX only where there is a .bib file, so a ready-made .bbl is left be.
+        ...['-bibtex-cond', '-interaction=nonstopmode'],
+        // "./": a name that begins with "-" is a path, not an option.
+        ...['-file-line-error', '-synctex=1', `./${dashed ? name : root}`],
       ],
       seconds,
       Number.isInteger(epoch) ? { SOURCE_DATE_EPOCH: String(epoch) } : {},
+      dashed && dir ? `/${dir}` : '',
     );
-    const base = root.replace(/\.tex$/, '');
+    const base = root.replace(/\.tex$/i, '');
     const logPath = join(work, base + '.log');
     const log = existsSync(logPath) ? readFileSync(logPath, 'latin1') : run.output;
     mkdirSync(out, { recursive: true });
