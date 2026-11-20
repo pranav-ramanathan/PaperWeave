@@ -432,14 +432,13 @@ export async function removeChart(db: Db, userId: string, projectId: string, cha
   if (!gone.rowCount) throw new AppError('not_found', 'No such chart.');
 }
 
-/** A drawn chart as a PNG, for showing on a page. */
-export async function chartPng(
+/** The digest of a drawn chart's PNG, once the person is known to be allowed to read the paper. */
+export async function chartPngDigest(
   db: Db,
-  store: BlobStore,
   userId: string,
   projectId: string,
   chartId: string,
-): Promise<Uint8Array> {
+): Promise<string> {
   await authorize(db, userId, id(projectId), 'project.read');
   const found = (
     await db.query(
@@ -449,7 +448,19 @@ export async function chartPng(
       [id(chartId), projectId],
     )
   ).rows[0];
-  const bytes = found && (await store.get(found.digest));
+  if (!found) throw new AppError('not_found', 'That chart has not been drawn.');
+  return found.digest;
+}
+
+/** A drawn chart as a PNG, for showing on a page. */
+export async function chartPng(
+  db: Db,
+  store: BlobStore,
+  userId: string,
+  projectId: string,
+  chartId: string,
+): Promise<Uint8Array> {
+  const bytes = await store.get(await chartPngDigest(db, userId, projectId, chartId));
   if (!bytes) throw new AppError('not_found', 'That chart has not been drawn.');
   return bytes;
 }

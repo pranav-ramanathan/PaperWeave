@@ -1,5 +1,6 @@
 // Needs the services in infra/compose.yaml and the toolchain image. Run: pnpm test:sandbox
 import { execFileSync } from 'node:child_process';
+import { createHash } from 'node:crypto';
 import { mkdtempSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
@@ -9,6 +10,7 @@ import {
   blobStore,
   chartDraws,
   chartPng,
+  chartPngDigest,
   deleteFile,
   editFile,
   exportRevision,
@@ -123,6 +125,11 @@ test('a chart is drawn from approved data into files of the paper, which a build
   ]);
   const png = await chartPng(t.pool, store, users.viewer.id, p.id, id);
   expect(Buffer.from(png.slice(1, 4)).toString()).toBe('PNG');
+  // The lookup alone gives the digest of those bytes, and refuses someone outside the paper.
+  expect(await chartPngDigest(t.pool, users.viewer.id, p.id, id)).toBe(
+    createHash('sha256').update(png).digest('hex'),
+  );
+  expect(await code(chartPngDigest(t.pool, users.outsider.id, p.id, id))).toBe('not_found');
   const files = (await readZip(await exportZip(t.pool, store, users.owner.id, p.id))).entries;
   const pdf = files.find((f) => f.path === 'charts/latency.pdf')!;
   expect(Buffer.from(pdf.bytes.slice(0, 5)).toString()).toBe('%PDF-');

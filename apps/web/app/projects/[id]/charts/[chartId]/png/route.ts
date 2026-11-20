@@ -1,6 +1,9 @@
 // A drawn chart as a picture, for the chart's own page.
-import { AppError, chartPng } from '@paperweave/server';
-import { askedForEachTime, blobs, currentUser, db } from '../../../../../../lib/server';
+import { AppError, chartPngDigest } from '@paperweave/server';
+import { currentUser, db, sendBlob } from '../../../../../../lib/server';
+
+// Vercel stops the function after this many seconds. Asking the store how large the picture is.
+export const maxDuration = 60;
 
 export async function GET(
   request: Request,
@@ -10,8 +13,8 @@ export async function GET(
   if (!user) return new Response('Sign in first.', { status: 401 });
   const { id, chartId } = await params;
   try {
-    const png = await chartPng(db(), blobs(), user.id, id, chartId);
-    return askedForEachTime(request, png, {
+    const digest = await chartPngDigest(db(), user.id, id, chartId);
+    return await sendBlob(request, digest, {
       'content-type': 'image/png',
       'x-content-type-options': 'nosniff',
       'content-security-policy': "default-src 'none'; sandbox",

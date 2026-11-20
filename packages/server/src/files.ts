@@ -296,15 +296,16 @@ const SHOWN: Record<string, string> = {
 
 /**
  * The picture an `\\includegraphics` names, as LaTeX would find it: against the root file's
- * folder, with the extension added if it was left off. For showing in the editor.
+ * folder, with the extension added if it was left off. For showing in the editor. This is
+ * the lookup, after the check that the person may read the paper: the stored version's digest.
  */
-export async function picture(
+export async function pictureDigest(
   db: Db,
   store: BlobStore,
   userId: string,
   projectId: string,
   target: string,
-): Promise<{ bytes: Uint8Array; type: string; path: string }> {
+): Promise<{ digest: string; type: string; path: string }> {
   await authorize(db, userId, id(projectId), 'project.read');
   const { rows } = await db.query(
     `select f.path, f.digest, p.root_file_id = f.id as root from files f
@@ -324,8 +325,21 @@ export async function picture(
   const twin = path?.replace(/\.pdf$/i, '.png');
   const shown = rows.find((f) => f.path === twin) ? twin : path;
   const type = SHOWN[shown?.split('.').pop()?.toLowerCase() ?? ''];
-  const bytes = type && (await store.get(rows.find((f) => f.path === shown).digest));
-  if (!path || !bytes) throw new AppError('not_found', 'No picture of that name can be shown.');
+  if (!path || !type) throw new AppError('not_found', 'No picture of that name can be shown.');
+  return { digest: rows.find((f) => f.path === shown).digest, type, path };
+}
+
+/** The picture `pictureDigest` finds, with its bytes. */
+export async function picture(
+  db: Db,
+  store: BlobStore,
+  userId: string,
+  projectId: string,
+  target: string,
+): Promise<{ bytes: Uint8Array; type: string; path: string }> {
+  const { digest, type, path } = await pictureDigest(db, store, userId, projectId, target);
+  const bytes = await store.get(digest);
+  if (!bytes) throw new AppError('not_found', 'No picture of that name can be shown.');
   return { bytes, type, path };
 }
 
