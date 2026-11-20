@@ -32,3 +32,12 @@ test.each(['0', '-1', '2.5', 'ten', '1e3', '0x10'])('%s is refused, naming the s
   );
   expect(() => connect(url, { DATABASE_POOL_IDLE_MS: bad })).toThrow(/DATABASE_POOL_IDLE_MS/);
 });
+
+test('a statement gets 30 seconds, a connection 10, and a quiet line is noticed', () => {
+  const pool = make({});
+  expect(pool.options.query_timeout).toBe(30_000);
+  expect(pool.options.connectionTimeoutMillis).toBe(10_000);
+  expect(pool.options.keepAlive).toBe(true);
+  // The migrator may wait as long as another one runs: it has no limit.
+  expect(connect(url, {}, 0).options.query_timeout).toBe(0);
+});

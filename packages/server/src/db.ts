@@ -19,6 +19,7 @@ function positiveInteger(name: string, value: string | undefined, fallback: numb
 export const connect = (
   url = process.env.DATABASE_URL,
   env: Record<string, string | undefined> = process.env,
+  queryMs = 30_000,
 ) => {
   if (!url) throw new Error('DATABASE_URL is not set');
   const pool = new pg.Pool({
@@ -27,11 +28,24 @@ export const connect = (
     // kept before it is closed (docs/settings.md).
     max: positiveInteger('DATABASE_POOL_MAX', env.DATABASE_POOL_MAX, 10),
     idleTimeoutMillis: positiveInteger('DATABASE_POOL_IDLE_MS', env.DATABASE_POOL_IDLE_MS, 10_000),
+    // A line that has gone quiet must not hold a request for ever: a statement gets `queryMs`
+    // (0: no limit, for the migrator), and a connection, or a wait for a free one, 10 seconds.
+    query_timeout: queryMs,
+    connectionTimeoutMillis: 10_000,
+    keepAlive: true,
+    keepAliveInitialDelayMillis: 10_000,
   });
   // A connection that is lost while nobody is using it (the database restarted, something
   // between cut it) is reported here. With nobody listening, that report is an error nobody
   // caught, and ends the process. The pool makes a new connection the next time one is needed.
   pool.on('error', (err) => console.error('a database connection was lost:', err.message));
+  // A query that timed out is still waiting for its answer. The connection must not go back to
+  // the pool, where the next borrower would wait behind it.
+  pool.on('release', (err, client) => {
+    // `_getActiveQuery` is pg's own; db.sandbox.test.ts fails if it goes away.
+    if (!err && (client as unknown as { _getActiveQuery(): unknown })._getActiveQuery())
+      void client.end().catch(() => {});
+  });
   return pool;
 };
 
@@ -203,6 +217,7 @@ export async function transaction<T>(
 ): Promise<T> {
   const client = await pool.connect();
   let lost: Error | undefined;
+  let undone = true;
   const hear = (err: Error) => void (lost = err);
   client.on('error', hear);
   try {
@@ -212,12 +227,17 @@ export async function transaction<T>(
     return result;
   } catch (err) {
     // On a connection that has gone there is nothing to take back, and the error that sent us
-    // here is the one worth having.
-    await client.query('rollback').catch(() => {});
+    // here is the one worth having. Not waited for long: behind a query that timed out, a
+    // rollback would wait as long again. (pg takes the limit per query, its types do not say so.)
+    const rollback = { text: 'rollback', query_timeout: 5000 } as pg.QueryConfig;
+    undone = await client.query(rollback).then(
+      () => true,
+      () => false,
+    );
     throw err;
   } finally {
     client.removeListener('error', hear);
     // A connection that failed is thrown away, not handed to the next borrower.
-    client.release(lost);
+    client.release(lost ?? (undone ? undefined : new Error('the transaction was not taken back')));
   }
 }
