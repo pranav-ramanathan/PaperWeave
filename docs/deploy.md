@@ -87,6 +87,16 @@ Not tried: Vercel's `attachDatabasePool`, which its page says "ensures idle conn
 closed before suspension". The web app does not use it. If idle connections to the pooler cause
 trouble, it is the first thing to look at.
 
+### Limits on a quiet line
+
+The limits (`docs/settings.md`, "Fixed in the code") are not set as startup parameters of the
+connection. pgbouncer refuses a startup parameter it does not track unless it is listed in
+`ignore_startup_parameters`, and then does not apply it (from its documentation; not tried here).
+The 15-second idle limit is therefore sent inside each transaction (`set local
+idle_in_transaction_session_timeout`), which a pooler passes on as it passes any statement; the
+30-second statement limit and the 10-second connect limit are kept by the client and the pooler
+never sees them. Not tried: pgbouncer's own `idle_transaction_timeout` as a second backstop.
+
 ### Pool size on Vercel
 
 Set `DATABASE_POOL_MAX=3` and `DATABASE_POOL_IDLE_MS=5000` for the web app on Vercel. Many
