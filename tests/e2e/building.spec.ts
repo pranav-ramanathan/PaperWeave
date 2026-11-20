@@ -104,6 +104,68 @@ test('the PDF builds by itself, a broken edit says where, and the last good PDF 
   ).toBe(403);
 });
 
+test('a citation to nothing is listed on a build that worked, and a broken .bib says where', async ({
+  browser,
+}) => {
+  test.setTimeout(180_000);
+  const owner = await person(browser, 'build-warn');
+  await owner.page.goto('/sign-in');
+  await signIn(owner.page, owner.email);
+  await owner.page
+    .getByLabel('Or import a ZIP of a LaTeX project')
+    .setInputFiles(await fixtureZip('Warn'));
+  await owner.page.getByRole('button', { name: 'Import ZIP' }).click();
+  await owner.page.getByRole('link', { name: 'sections/intro.tex' }).click();
+  await showSource(owner.page);
+  await expect(buildStatus(owner.page)).toHaveText('The PDF is up to date.', { timeout: 60_000 });
+  const warnings = build(owner.page).getByRole('list', { name: 'Build warnings' });
+  await expect(warnings).toHaveCount(0);
+
+  // A citation to nothing builds, and the pane says what will show as ?? in the PDF.
+  await source(owner.page).click();
+  await owner.page.keyboard.press('ControlOrMeta+End');
+  await owner.page.keyboard.type('\\cite{nokey}');
+  await expect(warnings).toContainText(
+    /sections\/intro\.tex:\d+ Citation `nokey' on page \d+ undefined/,
+    {
+      timeout: 60_000,
+    },
+  );
+  await expect(buildStatus(owner.page)).toHaveText('The PDF is up to date.');
+  await expect(build(owner.page)).toContainText('Built, but the PDF shows ?? for:');
+
+  // A broken .bib: the build fails, and the error is in refs.bib at a line.
+  await owner.page.getByRole('link', { name: 'refs.bib' }).click();
+  await expect(owner.page.getByRole('region', { name: 'Editor for refs.bib' })).toBeVisible();
+  await expect(source(owner.page)).toContainText('Knuth},');
+  await source(owner.page).click();
+  await owner.page.keyboard.press('ControlOrMeta+Home');
+  await owner.page.keyboard.press('ArrowDown');
+  await owner.page.keyboard.press('End');
+  await owner.page.keyboard.press('Backspace');
+  await expect(source(owner.page)).not.toContainText('Knuth},');
+  await expect(buildStatus(owner.page)).toHaveText('The latest build failed.', { timeout: 60_000 });
+  await expect(build(owner.page).getByRole('list', { name: 'Build errors' })).toContainText(
+    /refs\.bib:\d+ BibTeX: /,
+  );
+
+  // Repairing both clears the lists.
+  await owner.page.keyboard.type(',');
+  await expect(buildStatus(owner.page)).toHaveText('The PDF is up to date.', { timeout: 60_000 });
+  await expect(build(owner.page).getByRole('list', { name: 'Build errors' })).toHaveCount(0);
+  await owner.page.getByRole('link', { name: 'sections/intro.tex' }).click();
+  await expect(
+    owner.page.getByRole('region', { name: 'Editor for sections/intro.tex' }),
+  ).toBeVisible();
+  // The editor takes no typing until the file has arrived: wait for its text first.
+  await expect(source(owner.page)).toContainText('\\cite{nokey}');
+  await source(owner.page).click();
+  await owner.page.keyboard.press('ControlOrMeta+End');
+  for (let i = 0; i < '\\cite{nokey}'.length; i++) await owner.page.keyboard.press('Backspace');
+  await expect(source(owner.page)).not.toContainText('nokey');
+  await expect(warnings).toHaveCount(0, { timeout: 60_000 });
+});
+
 test('the PDF is behind only when the paper has changed, and is built once for each change', async ({
   browser,
 }) => {

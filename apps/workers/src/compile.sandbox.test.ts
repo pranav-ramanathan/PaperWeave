@@ -101,6 +101,40 @@ test('errors are reported with file and line', async () => {
   });
 });
 
+test('a .bib with a missing comma fails the build and names the .bib and its line', async () => {
+  const project = tmp();
+  cpSync(join(FIXTURES, 'ieee-multifile'), project, { recursive: true });
+  const bib = join(project, 'refs.bib');
+  writeFileSync(
+    bib,
+    readFileSync(bib, 'utf8').replace(
+      'author    = {Donald E. Knuth},',
+      'author    = {Donald E. Knuth}',
+    ),
+  );
+  const r = await compile(project, 'main.tex', tmp());
+  expect(r.ok).toBe(false);
+  expect(r.diagnostics).toContainEqual(
+    expect.objectContaining({ severity: 'error', file: 'refs.bib', line: 3 }),
+  );
+});
+
+test('a bare & in a .bib title is not reported in the .bbl', async () => {
+  const project = tmp();
+  cpSync(join(FIXTURES, 'ieee-multifile'), project, { recursive: true });
+  const bib = join(project, 'refs.bib');
+  writeFileSync(
+    bib,
+    readFileSync(bib, 'utf8').replace('title     = {The {\\TeX}book}', 'title     = {Tom & jerry}'),
+  );
+  const r = await compile(project, 'main.tex', tmp());
+  expect(r.ok).toBe(false);
+  const errors = r.diagnostics.filter((d) => d.severity === 'error');
+  expect(errors.length).toBeGreaterThan(0);
+  expect(errors.map((d) => d.file ?? '')).not.toContain('main.bbl');
+  expect(errors.some((d) => d.message.startsWith('In the bibliography'))).toBe(true);
+});
+
 test('a warning is reported with the file it is in, not only the line', async () => {
   const project = tmp();
   cpSync(join(FIXTURES, 'ieee-multifile'), project, { recursive: true });

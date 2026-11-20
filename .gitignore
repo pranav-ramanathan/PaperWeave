@@ -13,5 +13,5 @@ next-env.d.ts
 test-results-bench.json
 
 # Throwaway probes: measured once, then deleted. Never kept.
-tests/e2e/zz-probe.spec.ts
+tests/e2e/zz-*.spec.ts
 **/probe.sandbox.test.ts
