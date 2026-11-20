@@ -56,7 +56,7 @@ test('an upload is put in the store by the browser, then added to the paper by i
     { kind: 'file', projectId: paperId },
     bytes.length,
   );
-  expect(key).toMatch(/^tmp\/[0-9a-f-]{36}$/);
+  expect(key).toMatch(new RegExp(`^tmp/${owner.id}/[0-9a-f-]{36}$`));
   expect((await put(url, bytes)).ok).toBe(true);
   expect(await store.uploadSize(key)).toBe(bytes.length);
   await addUploaded(t.pool, store, owner.id, paperId, key, 'figures/big.png');
@@ -147,7 +147,7 @@ test('someone who may not write to a paper gets no address and cannot take an up
   // Nor is a key anything but one this site made.
   await expect(
     addUploaded(t.pool, store, owner.id, paperId, 'sha256/00/' + '0'.repeat(64), 'x.txt'),
-  ).rejects.toThrow('not one this site made');
+  ).rejects.toThrow('not found');
 });
 
 test('uploads nobody took are swept when they are old, and not before', async () => {
@@ -193,4 +193,32 @@ test('a streamed ZIP has the bytes of the one written whole', async () => {
   const rev = await saveRevision(t.pool, store, owner.id, paperId, 'one');
   const { zip } = await exportRevisionStream(t.pool, store, owner.id, paperId, rev.id, true);
   expect((await new Response(zip).arrayBuffer()).byteLength).toBeGreaterThan(0);
+});
+
+test("one person cannot take another's upload, and it is left where it was", async () => {
+  const zip = await writeZip([{ path: 'main.tex', bytes: Buffer.from(MAIN) }]);
+  const a = await startUpload(t.pool, store, owner.id, { kind: 'zip' }, zip.length);
+  await put(a.url, zip);
+  await expect(importUploaded(t.pool, store, outsider.id, a.key, 'Stolen')).rejects.toThrow(
+    'not found',
+  );
+  // Even a member of the paper, who may write to it, cannot add a key that is not theirs.
+  const f = await startUpload(t.pool, store, owner.id, { kind: 'file', projectId: paperId }, 4);
+  await put(f.url, Buffer.from('abcd'));
+  const editor = outsider;
+  await expect(addUploaded(t.pool, store, editor.id, paperId, f.key, 'x.txt')).rejects.toThrow();
+  const { token } = await invite(t.pool, owner.id, paperId, 'ed@example.org', 'editor');
+  const ed = await t.signIn('ed@example.org');
+  await acceptInvitation(t.pool, ed.id, token);
+  await expect(addUploaded(t.pool, store, ed.id, paperId, f.key, 'x.txt')).rejects.toThrow(
+    'not found',
+  );
+  expect(await store.uploadSize(a.key)).toBe(zip.length);
+  expect(await store.uploadSize(f.key)).toBe(4);
+  // The maker still can, and the sweep finds nested keys.
+  expect(await store.uploadSweep(3600_000)).toBe(0);
+  await new Promise((r) => setTimeout(r, 1100));
+  expect(await store.uploadSweep(500)).toBeGreaterThanOrEqual(2);
+  expect(await gone(a.key)).toBe(true);
+  expect(await gone(f.key)).toBe(true);
 });

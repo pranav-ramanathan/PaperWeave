@@ -37,7 +37,7 @@ export async function startUpload(
   const max = what.kind === 'zip' ? limits.archiveBytes : limits.fileBytes;
   if (size !== undefined && size > max)
     throw new AppError('invalid_input', what.kind === 'zip' ? ZIP_TOO_LARGE : FILE_TOO_LARGE);
-  return store.uploadUrl(size);
+  return store.uploadUrl(userId, size);
 }
 
 /**
@@ -46,13 +46,19 @@ export async function startUpload(
  */
 async function takeUpload<T>(
   store: BlobStore,
+  userId: string,
   key: string,
   max: number,
   tooLarge: string,
   use: (bytes: Uint8Array) => Promise<T>,
 ): Promise<T> {
-  if (typeof key !== 'string' || !/^tmp\/[0-9a-f-]{36}$/.test(key))
-    throw new AppError('invalid_input', 'That upload is not one this site made.');
+  // An upload is its maker's: someone else's key is not found, and nothing is read or removed.
+  if (
+    typeof key !== 'string' ||
+    !/^tmp\/[0-9a-f-]{36}\/[0-9a-f-]{36}$/.test(key) ||
+    !key.startsWith(`tmp/${userId}/`)
+  )
+    throw new AppError('not_found', 'That upload was not found.');
   try {
     const size = await store.uploadSize(key);
     if (size === null)
@@ -73,7 +79,7 @@ export function importUploaded(
   fallbackName: string,
   limits: Limits = LIMITS,
 ) {
-  return takeUpload(store, key, limits.archiveBytes, ZIP_TOO_LARGE, (zip) =>
+  return takeUpload(store, userId, key, limits.archiveBytes, ZIP_TOO_LARGE, (zip) =>
     importZip(pool, store, userId, zip, fallbackName, limits),
   );
 }
@@ -91,7 +97,7 @@ export async function addUploaded(
   // Before anything is read, and before the upload is touched: someone with no right to the
   // paper removes nothing.
   await authorize(db, userId, id(projectId), 'file.write');
-  return takeUpload(store, key, limits.fileBytes, FILE_TOO_LARGE, (bytes) =>
+  return takeUpload(store, userId, key, limits.fileBytes, FILE_TOO_LARGE, (bytes) =>
     createFile(db, store, userId, projectId, path, bytes, limits),
   );
 }

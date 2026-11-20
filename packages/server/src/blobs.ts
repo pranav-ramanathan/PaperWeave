@@ -23,7 +23,7 @@ export type BlobStore = {
    * stored under until it is taken. With `size` the address accepts only a body of exactly that
    * length. The object is private: only a signed address reads it.
    */
-  uploadUrl(size?: number): Promise<{ key: string; url: string }>;
+  uploadUrl(userId: string, size?: number): Promise<{ key: string; url: string }>;
   /** The size of an object put through `uploadUrl`, or null if nothing was put. */
   uploadSize(key: string): Promise<number | null>;
   /** The bytes of an object put through `uploadUrl`. */
@@ -35,7 +35,7 @@ export type BlobStore = {
 };
 
 /** Where uploads wait between the browser's PUT and the call that takes them. */
-const UPLOAD_KEY = /^tmp\/[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/;
+const UPLOAD_KEY = /^tmp\/[0-9a-f-]{36}\/[0-9a-f-]{36}$/;
 
 export const sha256 = (bytes: Uint8Array) => createHash('sha256').update(bytes).digest('hex');
 
@@ -115,9 +115,10 @@ export function blobStore(env: Record<string, string | undefined> = process.env)
         'response-content-disposition': disposition,
       });
     },
-    async uploadUrl(size) {
+    async uploadUrl(userId, size) {
       await bucketReady();
-      const key = `tmp/${randomUUID()}`;
+      if (!/^[0-9a-f-]{36}$/.test(userId)) throw new Error('not a user id');
+      const key = `tmp/${userId}/${randomUUID()}`;
       const headers: Record<string, string> =
         size === undefined ? {} : { 'content-length': String(size) };
       return { key, url: await signed(`${publicBucket}/${key}`, 'PUT', 600, {}, headers) };
