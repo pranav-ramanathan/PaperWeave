@@ -1,6 +1,6 @@
 // One output of a build: the PDF or the log.
-import { AppError, buildOutput, contentDisposition, getProject } from '@paperweave/server';
-import { askedForEachTime, blobs, currentUser, db } from '../../../../../../lib/server';
+import { AppError, buildOutputDigest, contentDisposition, getProject } from '@paperweave/server';
+import { currentUser, db, sendBlob } from '../../../../../../lib/server';
 
 // Vercel stops the function after this many seconds. Reading one PDF or log from the store.
 export const maxDuration = 60;
@@ -16,15 +16,8 @@ export async function GET(
   if (!user) return new Response('Sign in first.', { status: 401 });
   if (!(what in TYPES)) return new Response('Not found.', { status: 404 });
   try {
-    const bytes = await buildOutput(
-      db(),
-      blobs(),
-      user.id,
-      id,
-      buildId,
-      what as keyof typeof TYPES,
-    );
-    return askedForEachTime(request, bytes, {
+    const digest = await buildOutputDigest(db(), user.id, id, buildId, what as keyof typeof TYPES);
+    return sendBlob(request, digest, {
       'content-type': TYPES[what as keyof typeof TYPES],
       'x-content-type-options': 'nosniff',
       // The pages embed this PDF and open it in a tab of its own: shown, not saved, but a save

@@ -2,11 +2,11 @@
 import {
   AppError,
   contentDisposition,
-  exportRevision,
-  revisionPdf,
+  exportRevisionStream,
+  revisionPdfDigest,
   revisionTitle,
 } from '@paperweave/server';
-import { askedForEachTime, blobs, currentUser, db } from '../../../../../../lib/server';
+import { blobs, currentUser, db, sendBlob } from '../../../../../../lib/server';
 
 // Vercel stops the function after this many seconds. Reading a revision and zipping it.
 export const maxDuration = 120;
@@ -20,17 +20,24 @@ export async function GET(
   if (!user) return new Response('Sign in first.', { status: 401 });
   try {
     if (what === 'pdf') {
-      const pdf = await revisionPdf(db(), blobs(), user.id, id, rev);
+      const digest = await revisionPdfDigest(db(), user.id, id, rev);
       const { paper, number } = await revisionTitle(db(), user.id, id, rev);
-      return askedForEachTime(request, pdf, {
+      return sendBlob(request, digest, {
         'content-type': 'application/pdf',
         'content-disposition': contentDisposition(paper, 'pdf', { suffix: ` r${number}` }),
       });
     }
     if (what !== 'zip') return new Response('Not found.', { status: 404 });
     const manifest = new URL(request.url).searchParams.has('manifest');
-    const { zip, paper, number } = await exportRevision(db(), blobs(), user.id, id, rev, manifest);
-    return new Response(zip as BodyInit, {
+    const { zip, paper, number } = await exportRevisionStream(
+      db(),
+      blobs(),
+      user.id,
+      id,
+      rev,
+      manifest,
+    );
+    return new Response(zip, {
       headers: {
         'content-type': 'application/zip',
         'content-disposition': contentDisposition(paper, 'zip', { suffix: ` r${number}` }),

@@ -1,3 +1,4 @@
+import DirectUpload from '../../DirectUpload';
 import Once from '../../Once';
 import { Wide } from '../../Wide';
 import {
@@ -368,7 +369,7 @@ export default async function Project({
         </>
       )}
       {canWrite && (
-        <form method="post" action={`/projects/${id}/files`} encType="multipart/form-data">
+        <DirectUpload action={`/projects/${id}/files`} kind="file" projectId={id} field="file">
           <h3>Add a file</h3>
           <label>
             Name, with folders if you like
@@ -379,7 +380,7 @@ export default async function Project({
             <input type="file" name="file" />
           </label>
           <Once>Add file</Once>
-        </form>
+        </DirectUpload>
       )}
       {report && (
         <>

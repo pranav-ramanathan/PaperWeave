@@ -4,7 +4,7 @@
 import { type NextRequest, NextResponse } from 'next/server';
 
 /** The policy for one request. Next.js reads the number from it and marks its own scripts. */
-export function pagePolicy(nonce: string, sync: string, dev: boolean) {
+export function pagePolicy(nonce: string, sync: string, dev: boolean, store = '') {
   return [
     "default-src 'self'",
     // React needs eval in development only, to show server errors in the browser.
@@ -19,8 +19,9 @@ export function pagePolicy(nonce: string, sync: string, dev: boolean) {
     "style-src 'self' 'unsafe-inline'",
     "img-src 'self' data: blob:",
     "font-src 'self' data:",
-    // The app's own address, and the sync server's.
-    `connect-src 'self' ${sync}`,
+    // The app's own address, the sync server's, and the object store's: files are put there by
+    // the browser, and large PDFs are fetched from there. (`store` is empty if it is the app's own.)
+    `connect-src 'self' ${sync}${store ? ` ${store}` : ''}`,
     // The PDF pages are drawn by a worker.
     "worker-src 'self' blob:",
     "object-src 'none'",
@@ -33,7 +34,17 @@ export function pagePolicy(nonce: string, sync: string, dev: boolean) {
 export function proxy(request: NextRequest) {
   const nonce = Buffer.from(crypto.randomUUID()).toString('base64');
   const sync = new URL(process.env.SYNC_URL ?? 'ws://localhost:4100').origin;
-  const policy = pagePolicy(nonce, sync, process.env.NODE_ENV === 'development');
+  // Where the browser reaches the object store. Named only if it is not this site itself.
+  const storeOrigin = new URL(
+    process.env.S3_PUBLIC_ENDPOINT || process.env.S3_ENDPOINT || 'http://localhost:8333',
+  ).origin;
+  const own = process.env.BETTER_AUTH_URL ? new URL(process.env.BETTER_AUTH_URL).origin : '';
+  const policy = pagePolicy(
+    nonce,
+    sync,
+    process.env.NODE_ENV === 'development',
+    storeOrigin === own ? '' : storeOrigin,
+  );
   // On the request, for the page being rendered to read; on the answer, for the browser.
   const headers = new Headers(request.headers);
   headers.set('Content-Security-Policy', policy);

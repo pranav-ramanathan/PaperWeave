@@ -321,7 +321,7 @@ test('saving a revision does not hold up editing while the store is slow', async
   const held = new Promise<void>((r) => (letGo = r));
   let asked = 0;
   const slow = {
-    get: store.get,
+    ...store,
     async put(bytes: Uint8Array) {
       asked++;
       await held;

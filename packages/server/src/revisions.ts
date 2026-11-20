@@ -2,7 +2,7 @@
 import { createHash } from 'node:crypto';
 import { decodeFile } from '@paperweave/latex';
 import type pg from 'pg';
-import { checkPath, type Entry, writeZip } from './archive.ts';
+import { checkPath, type Entry, writeZip, zipStream } from './archive.ts';
 import { authorize } from './authz.ts';
 import type { BlobStore } from './blobs.ts';
 import { type Db, transaction } from './db.ts';
@@ -348,6 +348,50 @@ export async function exportRevision(
   /** More to put in the archive beside the paper's files. */
   extra: Entry[] = [],
 ): Promise<{ zip: Uint8Array; paper: string; number: number }> {
+  const { entries, paper, number } = await revisionEntries(
+    db,
+    store,
+    userId,
+    projectId,
+    revisionId,
+    manifest,
+    extra,
+  );
+  return { zip: await writeZip(entries), paper, number };
+}
+
+/** The same archive, as a stream, for a response that may be larger than a function may send whole. */
+export async function exportRevisionStream(
+  db: Db,
+  store: BlobStore,
+  userId: string,
+  projectId: string,
+  revisionId: string,
+  manifest = false,
+  extra: Entry[] = [],
+): Promise<{ zip: ReadableStream<Uint8Array>; paper: string; number: number }> {
+  const { entries, paper, number } = await revisionEntries(
+    db,
+    store,
+    userId,
+    projectId,
+    revisionId,
+    manifest,
+    extra,
+  );
+  return { zip: zipStream(entries), paper, number };
+}
+
+async function revisionEntries(
+  db: Db,
+  store: BlobStore,
+  userId: string,
+  projectId: string,
+  revisionId: string,
+  manifest = false,
+  /** More to put in the archive beside the paper's files. */
+  extra: Entry[] = [],
+): Promise<{ entries: Entry[]; paper: string; number: number }> {
   await authorize(db, userId, id(projectId), 'project.export');
   const { revision, files } = await load(db, projectId, revisionId);
   // Data goes into a download only if its author has said so. A CSV file nobody has described
@@ -414,7 +458,7 @@ export async function exportRevision(
   }
   await recordDownload(db, projectId, 'zip');
   return {
-    zip: await writeZip([...entries, ...extra]),
+    entries: [...entries, ...extra],
     paper: revision.paper,
     number: revision.number,
   };
@@ -428,6 +472,16 @@ export async function revisionPdf(
   projectId: string,
   revisionId: string,
 ): Promise<Uint8Array> {
+  return blob(store, await revisionPdfDigest(db, userId, projectId, revisionId));
+}
+
+/** Which blob is that PDF. For a download that is sent from the store, not through the app. */
+export async function revisionPdfDigest(
+  db: Db,
+  userId: string,
+  projectId: string,
+  revisionId: string,
+): Promise<string> {
   await authorize(db, userId, id(projectId), 'project.read');
   const { rows } = await db.query(
     `select b.pdf_digest from builds b where b.revision_id = $1 and b.project_id = $2
@@ -436,7 +490,7 @@ export async function revisionPdf(
   );
   if (!rows[0]) throw new AppError('not_found', 'This revision has not been built.');
   await recordDownload(db, projectId, 'pdf');
-  return blob(store, rows[0].pdf_digest);
+  return rows[0].pdf_digest;
 }
 
 export type FileDiff = {

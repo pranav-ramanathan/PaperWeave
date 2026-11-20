@@ -1,6 +1,7 @@
 import { listProjects, TEMPLATES } from '@paperweave/server';
 import Link from 'next/link';
 import { db, requireUser } from '../../lib/server';
+import DirectUpload from '../DirectUpload';
 import Once from '../Once';
 import SignOut from '../SignOut';
 import { createAction } from './actions';
@@ -76,13 +77,13 @@ export default async function Projects({
         <Once>Create paper</Once>
         <small id="template-help">{TEMPLATES.map((t) => `${t.name}: ${t.about}`).join(' ')}</small>
       </form>
-      <form action="/api/projects/import" method="post" encType="multipart/form-data">
+      <DirectUpload action="/api/projects/import" kind="zip" field="zip">
         <label>
           Or import a ZIP of a LaTeX project
           <input type="file" name="zip" accept=".zip,application/zip" required />
         </label>
         <Once>Import ZIP</Once>
-      </form>
+      </DirectUpload>
     </main>
   );
 }

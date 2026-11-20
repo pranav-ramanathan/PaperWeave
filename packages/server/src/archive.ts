@@ -1,5 +1,6 @@
 // Reading and writing project ZIPs. An uploaded archive is untrusted: nothing in it is believed
 // until checked, and nothing is written anywhere by its own say-so.
+import { Readable } from 'node:stream';
 import { constants, gunzipSync } from 'node:zlib';
 import yauzl from 'yauzl';
 import yazl from 'yazl';
@@ -165,15 +166,28 @@ export function readZip(
   });
 }
 
-export function writeZip(entries: Entry[]): Promise<Uint8Array> {
+/** The archive as yazl writes it. A fixed date, so the same files always give the same archive. */
+function zipOf(entries: Entry[]) {
   const zip = new yazl.ZipFile();
-  // A fixed date, so the same files always give the same archive.
   for (const e of entries) zip.addBuffer(Buffer.from(e.bytes), e.path, { mtime: new Date(0) });
   zip.end();
+  return zip.outputStream;
+}
+
+export function writeZip(entries: Entry[]): Promise<Uint8Array> {
+  const out = zipOf(entries);
   return new Promise((resolve, reject) => {
     const chunks: Buffer[] = [];
-    zip.outputStream.on('data', (c: Buffer) => chunks.push(c));
-    zip.outputStream.on('error', reject);
-    zip.outputStream.on('end', () => resolve(Buffer.concat(chunks)));
+    out.on('data', (c: Buffer) => chunks.push(c));
+    out.on('error', reject);
+    out.on('end', () => resolve(Buffer.concat(chunks)));
   });
+}
+
+/**
+ * The same bytes as `writeZip`, as a stream: for a response, which on Vercel may be larger than
+ * 4.5 MB only if it is streamed.
+ */
+export function zipStream(entries: Entry[]): ReadableStream<Uint8Array> {
+  return Readable.toWeb(zipOf(entries)) as ReadableStream<Uint8Array>;
 }
