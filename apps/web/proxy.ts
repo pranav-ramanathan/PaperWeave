@@ -61,10 +61,10 @@ export const config = {
     {
       // Pages only. Not the API or the app's own files, which run nothing; and not a PDF or a
       // ZIP asked for by its address (/builds/…/pdf, /revisions/…/zip), which the browser's own
-      // viewer shows; nor a file being uploaded, which the proxy would cut at 10 MB. Those keep the
-      // plain policy in next.config.ts.
+      // viewer shows; nor a file being uploaded, which the proxy would cut at 10 MB; nor a picture,
+      // which has a policy of its own in next.config.ts. Those keep the plain policy there.
       source:
-        '/((?!api/|_next/static|_next/image|favicon.ico|projects/[^/]+/(?:builds|revisions)/[^/]+/[^/]+$|projects/[^/]+/files$).*)',
+        '/((?!api/|_next/static|_next/image|favicon.ico|projects/[^/]+/(?:builds|revisions)/[^/]+/[^/]+$|projects/[^/]+/files$|projects/[^/]+/picture$|projects/[^/]+/charts/[^/]+/png$).*)',
       missing: [
         { type: 'header', key: 'next-router-prefetch' },
         { type: 'header', key: 'purpose', value: 'prefetch' },

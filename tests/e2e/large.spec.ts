@@ -241,6 +241,7 @@ test('large uploads go to the store, and large downloads come from it or are str
   expect(dot.status()).toBe(200);
   expect(dot.headers()['cache-control']).toBe('private, no-cache');
   expect(dot.headers()['x-content-type-options']).toBe('nosniff');
+  expect(dot.headers()['content-security-policy']).toBe("default-src 'none'; sandbox");
   const etag = dot.headers().etag;
   expect(etag).toBeTruthy();
   const again = await page.request.get(`/projects/${projectId}/picture?target=figs/dot`, {

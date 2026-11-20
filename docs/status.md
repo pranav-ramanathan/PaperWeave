@@ -2417,8 +2417,9 @@ update` held the paper's file rows for **189.6 s** (until the proxy was cut; it 
 - **Cost of the picture change:** each picture request asks the store for the size first (one
   `HEAD`), as a PDF does. A picture over 4 MB is downloaded again on each page load, because
   the redirect is `no-store` and each load gets a new address; within a page the browser reuses
-  it by the app's address. The route's `nosniff` and sandbox headers are not on the large
-  answer; the store answers with the signed type.
+  it by the app's address. The route's `nosniff` header is not on the large
+  answer; the store answers with the signed type. (The sandbox policy was not on the small
+  one either until the entry "What the picture routes answer with".)
 - **Not changed:** the streamed ZIP still reads its files into memory first. Nothing here was
   tried on Vercel itself, pictures included.
 - **How it was made.** Written by an agent from a plan made with the Vercel documentation;
@@ -2712,6 +2713,23 @@ Built after the security review, which had it as its first open item.
   paper that is not the person's to see. The framework's own page brings an inline style sheet.
 - In development the policy also allows `eval`, which React uses there to show server errors,
   and style sheets without the number, which the framework's own tools add there.
+
+## What the picture routes answer with
+
+- **What was wrong.** `picture` and `charts/[chartId]/png` set `default-src 'none'; sandbox`
+  themselves, but the answers carried the page policy. The first header on an answer wins over a
+  route handler's: `next.config.ts` sets one on every answer, and `proxy.ts` replaces it for
+  every address its matcher takes. Measured on the built app before the change: both routes
+  answered `default-src 'self'; script-src 'self' 'nonce-…' …`.
+- **The change.** `next.config.ts` sets `default-src 'none'; sandbox` for those two addresses
+  (the last matching entry wins), and the matcher in `proxy.ts` leaves them out. The chart's
+  page and `/projects` keep the page policy. The routes keep their own header line, same value.
+- **Held by** `projects.spec.ts` ("every answer says how it may be used…": both routes, even
+  unsigned-in, and the chart page's policy) and `large.spec.ts` (the small picture's answer).
+  Both fail on the old files; with only the matcher changed they still fail, the answer then
+  having the plain policy.
+- **Not tried on Vercel.** Firefox may show a picture opened in its own tab without its viewer
+  styling; `<img>` is not affected.
 
 ## Browser tests that failed once in a while
 

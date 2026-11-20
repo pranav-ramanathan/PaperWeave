@@ -17,6 +17,7 @@ export async function GET(request: Request, { params }: { params: Promise<{ id: 
       'content-type': found.type,
       // An upload is whatever someone uploaded: it is shown as a picture and as nothing else.
       'x-content-type-options': 'nosniff',
+      // next.config.ts is what sends this: a header already on the answer wins over this one.
       'content-security-policy': "default-src 'none'; sandbox",
     });
   } catch (err) {

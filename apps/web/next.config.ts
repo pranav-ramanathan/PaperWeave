@@ -29,6 +29,12 @@ const config: NextConfig = {
         { key: 'Permissions-Policy', value: 'camera=(), microphone=(), geolocation=()' },
       ],
     },
+    // An upload shown as a picture is shown as nothing else. Set here, not in the routes: a
+    // header already on the answer wins over a route handler's own. Later entries win.
+    ...['/projects/:id/picture', '/projects/:id/charts/:chartId/png'].map((source) => ({
+      source,
+      headers: [{ key: 'Content-Security-Policy', value: "default-src 'none'; sandbox" }],
+    })),
   ],
 };
 

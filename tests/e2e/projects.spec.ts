@@ -191,6 +191,15 @@ test('every answer says how it may be used: not in a frame, not guessed at, not 
     expect(headers['content-security-policy'], path).toContain("form-action 'self'");
     policies.set(path, headers['content-security-policy']);
   }
+  // A picture is shown as a picture and as nothing else; the chart's page is still a page.
+  for (const path of ['/projects/x/picture?target=a', '/projects/x/charts/y/png']) {
+    const headers = (await request.get(path, { maxRedirects: 0 })).headers();
+    expect(headers['content-security-policy'], path).toBe("default-src 'none'; sandbox");
+    expect(headers['x-content-type-options'], path).toBe('nosniff');
+    expect(headers['x-frame-options'], path).toBe('DENY');
+  }
+  const chartPage = await request.get('/projects/x/charts/y', { maxRedirects: 0 });
+  expect(chartPage.headers()['content-security-policy']).toContain("script-src 'self' 'nonce-");
   // A page also says which scripts may run on it: those marked with a number made up for that
   // one answer, and what they load. Nothing else, and nothing from anywhere else.
   const page = policies.get('/sign-in')!;
