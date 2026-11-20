@@ -2,11 +2,12 @@
 // silenced by the paper's own words and rules, and proposed rather than made by a reviewer.
 // Needs the services (the grammar checker among them) and the sync server.
 import { expect, type Page, test } from '@playwright/test';
+import { execFileSync } from 'node:child_process';
 import { mkdtempSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { writeZip } from '../../packages/server/src/archive';
-import { emailedLink, person, run, signIn } from './helpers';
+import { emailedLink, person, run, showSource, signIn } from './helpers';
 
 const MAIN = [
   '\\documentclass{article}',
@@ -102,4 +103,59 @@ test('findings are shown in the prose, taken up, silenced, and proposed by a rev
   await owner.page.getByRole('link', { name: 'main.tex' }).first().click();
   await expect(finding(owner.page, 'Spelling: “colour”')).toBeVisible({ timeout: 30_000 });
   await expect(finding(owner.page, /“We we”/)).toBeVisible();
+});
+
+test('a suggestion is taken as LaTeX source, so the build keeps the rest of the line', async ({
+  browser,
+}) => {
+  test.setTimeout(180_000);
+  const owner = await person(browser, 'grammar-escape');
+  const main = [
+    '\\documentclass{article}',
+    '\\begin{document}',
+    'We fund R\\&D R\\&D every year and nothing else.',
+    '\\end{document}',
+    '',
+  ].join('\n');
+  const dir = mkdtempSync(join(tmpdir(), 'paperweave-e2e-'));
+  const zip = join(dir, `Escape ${run}.zip`);
+  writeFileSync(zip, await writeZip([{ path: 'main.tex', bytes: Buffer.from(main) }]));
+  await owner.page.goto('/sign-in');
+  await signIn(owner.page, owner.email);
+  await owner.page.getByLabel('Or import a ZIP of a LaTeX project').setInputFiles(zip);
+  await owner.page.getByRole('button', { name: 'Import ZIP' }).click();
+  await expect(owner.page.getByRole('heading', { name: 'Language' })).toBeVisible();
+
+  // Made to look like a misspelling, a finding over R\&D is not offered for the paper's words.
+  await owner.page.route(/\/projects\/[^/]+\/grammar\?file=/, async (r) => {
+    const found = (await (await r.fetch()).json()) as { kind: string }[];
+    for (const f of found) f.kind = 'spelling';
+    await r.fulfill({ json: found });
+  });
+  await owner.page.getByRole('link', { name: 'main.tex' }).first().click();
+  const f = finding(owner.page, /“R\\&D R\\&D”/);
+  await expect(f).toBeVisible({ timeout: 30_000 });
+  await expect(f.getByRole('button', { name: 'It is a word of this paper' })).toHaveCount(0);
+  await expect(f.getByRole('button', { name: 'Change to “R\\&D”' })).toBeVisible();
+  await owner.page.unroute(/\/projects\/[^/]+\/grammar\?file=/);
+
+  // Taking the suggestion leaves \& in the source, and the build keeps "every year".
+  await expect(finding(owner.page, /“R\\&D R\\&D”/)).toBeVisible({ timeout: 30_000 });
+  await finding(owner.page, /“R\\&D R\\&D”/)
+    .getByRole('button', { name: 'Change to “R\\&D”' })
+    .click();
+  await expect(finding(owner.page, /“R\\&D R\\&D”/)).toHaveCount(0);
+  await showSource(owner.page);
+  const src = owner.page.locator('.editor .cm-content');
+  await expect(src).toContainText('We fund R\\&D every year');
+  const status = owner.page.locator('.build').getByRole('status');
+  await expect(status).toHaveText('The PDF is up to date.', { timeout: 90_000 });
+  const href = await owner.page
+    .locator('.build')
+    .getByRole('link', { name: 'Open the PDF by itself' })
+    .getAttribute('href');
+  const pdf = join(dir, 'out.pdf');
+  writeFileSync(pdf, await (await owner.page.request.get(href!)).body());
+  const text = execFileSync('pdftotext', ['-layout', pdf, '-'], { encoding: 'utf8' });
+  expect(text.replace(/\s+/g, ' ')).toContain('We fund R&D every year and nothing else.');
 });

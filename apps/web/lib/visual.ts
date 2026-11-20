@@ -4,7 +4,6 @@ import {
   Bridge,
   type Command,
   type CommandResult,
-  escape,
   extensions,
   fromSrc,
   toSrc,
@@ -12,6 +11,7 @@ import {
 import {
   altEdit,
   cellText,
+  escape,
   floatParts,
   type Span,
   tableEdit,

@@ -42,9 +42,9 @@ const MAIN = [
   '\\end{document}',
   '',
 ].join('\n');
-async function paper() {
+async function paper(main = MAIN) {
   const zip = await writeZip([
-    { path: 'main.tex', bytes: Buffer.from(MAIN) },
+    { path: 'main.tex', bytes: Buffer.from(main) },
     { path: 'notes.txt', bytes: Buffer.from('teh recieve\n') },
   ]);
   const [project] = await importZip(t.pool, store, users.owner.id, zip, 'Grammar');
@@ -159,4 +159,39 @@ test('checking keeps to the paper, to LaTeX files, and says when no checker answ
       }),
     ),
   ).toBe('unavailable');
+});
+
+const wrap = (body: string) =>
+  `\\documentclass{article}\n\\begin{document}\n${body}\n\\end{document}\n`;
+
+test('a replacement comes back as LaTeX source, and a word that is not a glossary word is said so', async () => {
+  // The real checker offers "R&D" for a repeated R\&D. Written into the source as it is, that
+  // is a bare & and the build breaks.
+  const p = await paper(wrap('We fund R\\&D R\\&D every year, and a sentense.'));
+  const found = await check(p, 'owner');
+  const repeat = found.find((f) => f.rule === 'ENGLISH_WORD_REPEAT_RULE');
+  expect(repeat).toMatchObject({ words: 'R\\&D R\\&D', replacements: ['R\\&D'] });
+  // A plain word can be one of the paper's own; R\&D cannot, for the glossary does not take \ or &.
+  expect(found.find((f) => f.words === 'sentense')?.addable).toBe(true);
+  expect(repeat?.addable).toBe(false);
+
+  // A checker that suggests a % or an &, which the real one does not do on this text.
+  const q = await paper(wrap('We spent half of the R\\&D budget, a sentense here.'));
+  const src = wrap('We spent half of the R\\&D budget, a sentense here.');
+  const at = src.indexOf('half');
+  const fetcher = (async () =>
+    Response.json({
+      matches: [
+        {
+          offset: at,
+          length: 4,
+          message: 'm',
+          replacements: [{ value: '50% of R&D' }, { value: 'a_b {c} $d #e' }],
+          rule: { id: 'FAKE', category: { id: 'STYLE' } },
+        },
+      ],
+    })) as unknown as typeof fetch;
+  const [fake] = await checkGrammar(t.pool, store, users.owner.id, q.id, q.file, { url, fetcher });
+  expect(fake.words).toBe('half');
+  expect(fake.replacements).toEqual(['50\\% of R\\&D', 'a\\_b \\{c\\} \\$d \\#e']);
 });
