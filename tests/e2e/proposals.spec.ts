@@ -24,6 +24,8 @@ const MAIN = [
   'Latency stays below forty milliseconds for most edits.',
   '',
   'Nothing else is claimed here.',
+  '',
+  'Under load the latency is high.',
   '\\end{document}',
   '',
 ].join('\n');
@@ -192,6 +194,18 @@ test('a reviewer proposes a change; the owner accepts it, undoes that, and rejec
   ).toHaveCount(0);
   await expect(lost(owner.page).getByRole('button', { name: 'Accept' })).toBeEnabled();
   await expect(lost(owner.page).getByRole('button', { name: 'Change the proposal' })).toBeVisible();
+
+  // One word for its opposite changes more than the wording, though the words alone say nothing
+  // of it: the owner is told, because the flag is read in the sentence the word stands in.
+  await selectWord(reviewer.page, VISUAL, 'high');
+  await panel(reviewer.page).getByRole('button', { name: 'Propose a change here' }).click();
+  await panel(reviewer.page).getByLabel('Replace it with').fill('low');
+  await panel(reviewer.page).getByRole('button', { name: 'Propose', exact: true }).click();
+  const flipped = (page: Page) => page.getByRole('article', { name: 'Proposal to change “high”' });
+  await expect(flipped(owner.page)).toContainText('Proposed: low', { timeout: 15_000 });
+  await expect(flipped(owner.page)).toContainText('This changes more than the wording.');
+  await expect(flipped(owner.page)).toContainText('Which way a comparison goes may have changed');
+  await expect(panel(owner.page)).toContainText('This changes more than the wording');
 
   // A review by a model is not offered until the paper's owner allows text to be sent.
   const ask = (page: Page) =>

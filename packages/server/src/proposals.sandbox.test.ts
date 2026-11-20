@@ -415,3 +415,51 @@ test('a place cannot be found again, and only its author or an editor may try', 
   await reattachProposal(t.pool, store, users.reviewer.id, p.id, theirs);
   expect((await proposals(p)).find((x) => x.id === theirs)).toMatchObject({ now: 'Latency' });
 });
+
+test('a change is judged in its sentence; with no sentence to find, in its words alone', async () => {
+  const p = await paper();
+  await change(
+    p.file,
+    'Nothing else is claimed.',
+    'Under load the latency is high and the cache is small.',
+  );
+  const high = async () => ({
+    ...(await ends(p.file, 'high')),
+    replacement: 'low',
+  });
+  const flagsOf = async (id: string) => (await proposals(p)).find((x) => x.id === id)!.flags;
+
+  // One word for its opposite says nothing alone, and a direction flag in its sentence.
+  const id = await propose(t.pool, store, users.reviewer.id, p.id, p.file, await high());
+  expect((await proposals(p)).find((x) => x.id === id)!.expected).toBe('high');
+  expect(await flagsOf(id)).toEqual([
+    expect.stringMatching(
+      /^Which way a comparison goes may have changed: .*up cache.* → .*down cache/,
+    ),
+  ]);
+  // Decided, a proposal shows no flags.
+  await closeProposal(t.pool, users.owner.id, p.id, id, 'rejected');
+  expect(await flagsOf(id)).toEqual([]);
+
+  // Once its words are not the ones it was made on, it is flagged on its words alone.
+  const moved = await propose(t.pool, store, users.reviewer.id, p.id, p.file, await high());
+  expect(await flagsOf(moved)).toHaveLength(1);
+  await change(p.file, 'high', 'tall');
+  expect((await proposals(p)).find((x) => x.id === moved)).toMatchObject({
+    stale: true,
+    flags: ['Which way a comparison goes may have changed: up → down.'],
+  });
+
+  // Where its place is gone altogether, likewise: the numbers it changes are still flagged.
+  const gone = await propose(t.pool, store, users.reviewer.id, p.id, p.file, {
+    ...(await ends(p.file, '40 ms')),
+    replacement: '45 ms',
+  });
+  expect(await flagsOf(gone)).toEqual(['The numbers differ: 40 → 45.']);
+  await change(p.file, 'below 40 ms', '');
+  expect((await proposals(p)).find((x) => x.id === gone)).toMatchObject({
+    stale: true,
+    now: '',
+    flags: ['The numbers differ: 40 → 45.'],
+  });
+});

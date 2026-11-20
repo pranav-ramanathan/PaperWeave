@@ -153,7 +153,7 @@ test('a review sends the passage alone and comes back as proposals and questions
       reason: 'Says the same more directly.',
       status: 'open',
       origin: 'critique',
-      madeBy: 'test-model with claims-1',
+      madeBy: 'test-model with claims-2',
       evidence: ['shapiro2011'],
       author: 'reviewer@example.org',
     },
