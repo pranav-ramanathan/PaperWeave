@@ -17,7 +17,7 @@ const QUIET_EVERY_MS = 5000;
 
 /** A build takes a minute at most once it starts. Waiting twice that, it has not started. */
 const STUCK_AFTER_MS = 120_000;
-// Said when the builds have twice not been answered.
+// Said when the builds have twice in a row not been answered, or answered with a server error.
 const NO_ANSWER = 'The server is not answering. What is shown here may be out of date.';
 
 /** Said after a place that is the nearest one, because the PDF is of text since edited. */
@@ -75,7 +75,8 @@ export default function BuildPane({
       const res = await fetch(url, { signal: AbortSignal.timeout(15_000) }).catch(() => null);
       if (notTheirs(res)) return STOP;
       if (stop) return;
-      silent = res ? 0 : silent + 1;
+      // A 5xx counts as no answer: it is what the server says when the database did not answer.
+      silent = res && res.status < 500 ? 0 : silent + 1;
       if (silent >= 2) setProblem(NO_ANSWER);
       if (!res?.ok) return;
       setProblem((p) => (p === NO_ANSWER ? '' : p));

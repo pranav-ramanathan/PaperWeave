@@ -1628,9 +1628,7 @@ update` held the paper's file rows for **189.6 s** (until the proxy was cut; it 
   limits), `blobs.test.ts` (a failed first call is asked again; a store that never answers
   fails with `unavailable` after 10 s, tried with fake timers).
 - **Not tried or not measured.**
-  - The probe was not re-run after the change: the end-to-end numbers for cases 4, 6 and 7 wait
-    for the browser half. Until then a person at an open editor is still not told the server
-    is not answering.
+  - The probe was re-run once with both halves in (below); not again after the build-pane fix.
   - Vercel and pgbouncer. How the 15-second limit passes through a pooler was not tried.
   - Kernel keepalive: that a dead peer is noticed in about 20 s (Node's libuv probes) is from
     memory, not confirmed. Only a kernel drop could test it.
@@ -1639,6 +1637,28 @@ update` held the paper's file rows for **189.6 s** (until the proxy was cut; it 
   - Transactions that read many files from the store while holding no statement, such as the
     proposal's apply, can idle for as long as the reads take; none was measured near 15 s.
 - **How it was made.** Planned from the probe by one agent, written and checked here.
+- **Re-run with both halves in** (server limits and the browser's), the same cases, proxy drop
+  except the store case:
+  - Save, restore and rename while the line went quiet: another person's letters went unsaved
+    for **14.2, 14.5 and 14.1 s** (were 189.6 s), and the transaction was gone at +18 s. The
+    owner's page showed "This page could not be shown… What was already saved is still saved"
+    at +36 s (was nothing for 190 s).
+  - Builds queued behind that: another paper's waited 7.7 s (was still queued at +76 s).
+  - Editor whose ticket hung: "Offline. Your edits are waiting to be saved." from +4 to +28 s
+    (was "Saving your edits…" to +142 s); the letters reached the database by +32 s (was +144 s).
+  - Store port dropped by the kernel: the add said "The file store did not answer. Try again in
+    a moment." at 11.8 s, the ZIP was a 503 at 11.7 s; 65 s after the line returned both worked
+    (before: both still failed).
+  - A page load lost with a warm pool: the error page at 30.2 s (was pending at +95 s).
+  - An invitation whose line went quiet after its row was written: the error page at +31 s;
+    the row is there and no email was sent. Pressing again sends one email and ends the first.
+  - **Found and fixed after:** the build pane never warned, because a poll the server answered
+    with a 500 (its own database did not answer) reset the count of polls without an answer.
+    A 5xx now counts as no answer; `building.spec.ts` "a server that answers with errors is said
+    so as well" failed on the old code.
+  - **Still so:** pages and actions say nothing for 30 to 36 s, then show the general error
+    page, whose "What was already saved is still saved" does not say that an invitation was
+    written but not emailed.
 
 ## Undoing each thing
 
@@ -2855,7 +2875,7 @@ Changed on the way, and worth keeping:
   "Offline." until the sync server has accepted the ticket (`authenticated`); the library's
   "connected" comes when the socket opens, before the ticket is fetched, and no longer counts.
 - Build pane: each poll and the compile request are given up after 15 seconds. After two polls
-  in a row with no answer it shows "The server is not answering. What is shown here may be out
+  in a row with no answer, or with a server error, it shows "The server is not answering. What is shown here may be out
   of date." and removes it at the next answer.
 - Spelling and grammar: given up after 25 seconds, and says "The spelling and grammar checker
   did not answer." (also shown when the browser has no network).

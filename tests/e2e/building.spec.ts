@@ -355,6 +355,33 @@ test('a server that stops answering is said so, and the pane carries on when it 
   await expect(buildStatus(page)).toHaveText('The PDF is up to date.');
 });
 
+test('a server that answers with errors is said so as well', async ({ browser }) => {
+  test.setTimeout(150_000);
+  const { page, email } = await person(browser, 'build-erring');
+  await page.goto('/sign-in');
+  await signIn(page, email);
+  await page
+    .getByLabel('Or import a ZIP of a LaTeX project')
+    .setInputFiles(await fixtureZip('Erring'));
+  await page.getByRole('button', { name: 'Import ZIP' }).click();
+  await page.getByRole('link', { name: 'main.tex' }).first().click();
+  await expect(buildStatus(page)).toHaveText('The PDF is up to date.', { timeout: 60_000 });
+
+  // What the server answers when its own database does not answer in time.
+  const builds = /\/projects\/[0-9a-f-]+\/builds$/;
+  await page.route(builds, (r) =>
+    r.request().method() === 'GET' ? r.fulfill({ status: 500, body: '' }) : r.fallback(),
+  );
+  const alert = build(page).getByRole('alert');
+  await expect(alert).toHaveText(
+    'The server is not answering. What is shown here may be out of date.',
+    { timeout: 30_000 },
+  );
+  await page.unroute(builds);
+  await expect(alert).toHaveCount(0, { timeout: 30_000 });
+  await expect(buildStatus(page)).toHaveText('The PDF is up to date.');
+});
+
 test('a paper whose root file is in a folder builds', async ({ browser }) => {
   test.setTimeout(120_000);
   const { page, email } = await person(browser, 'folder-root');
