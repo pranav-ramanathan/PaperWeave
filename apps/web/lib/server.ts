@@ -79,6 +79,35 @@ export function askedForEachTime(
 }
 
 /**
+ * What a function may answer with in one piece is 4.5 MB (docs/deploy.md). A blob larger than
+ * this is not read here: the browser is sent to the store for it, with an address good for five
+ * minutes. Only for someone already found to be allowed it.
+ */
+export const DIRECT_MAX = 4_000_000;
+
+/**
+ * A stored file as the answer: from here if it is small (and kept by the browser as
+ * `askedForEachTime` says), otherwise by a 303 to a signed address in the store.
+ */
+export async function sendBlob(request: Request, digest: string, headers: Record<string, string>) {
+  const size = await blobs().size(digest);
+  if (size === null) throw new AppError('not_found', 'No such file.');
+  if (size > DIRECT_MAX) {
+    const to = await blobs().link(digest, {
+      type: headers['content-type'],
+      disposition: headers['content-disposition'] ?? 'inline',
+    });
+    return new Response(null, {
+      status: 303,
+      headers: { Location: to, 'cache-control': 'no-store' },
+    });
+  }
+  const bytes = await blobs().get(digest);
+  if (!bytes) throw new AppError('not_found', 'No such file.');
+  return askedForEachTime(request, bytes, headers);
+}
+
+/**
  * Send the browser on to a path of this site after a form is posted to a route handler. The
  * path goes out as it is. An address made from the request's own would be the one this
  * process listens on, which behind a proxy is not the one people use: the browser would be

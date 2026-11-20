@@ -165,6 +165,19 @@ export async function buildOutput(
   buildId: string,
   what: 'pdf' | 'log' | 'synctex',
 ): Promise<Uint8Array> {
+  const bytes = await store.get(await buildOutputDigest(db, userId, projectId, buildId, what));
+  if (!bytes) throw new AppError('not_found', 'No such build output.');
+  return bytes;
+}
+
+/** Which blob is that output. For a download that is sent from the store, not through the app. */
+export async function buildOutputDigest(
+  db: Db,
+  userId: string,
+  projectId: string,
+  buildId: string,
+  what: 'pdf' | 'log' | 'synctex',
+): Promise<string> {
   // `what` names a column, so it must be one of these three and nothing else.
   if (!['pdf', 'log', 'synctex'].includes(what))
     throw new AppError('not_found', 'No such build output.');
@@ -173,9 +186,8 @@ export async function buildOutput(
     `select ${what}_digest as digest from builds where id = $1 and project_id = $2`,
     [id(buildId), projectId],
   );
-  const bytes = rows[0]?.digest && (await store.get(rows[0].digest));
-  if (!bytes) throw new AppError('not_found', 'No such build output.');
-  return bytes;
+  if (!rows[0]?.digest) throw new AppError('not_found', 'No such build output.');
+  return rows[0].digest;
 }
 
 /**

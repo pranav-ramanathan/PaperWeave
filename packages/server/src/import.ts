@@ -25,7 +25,7 @@ import {
   REVIEW_FILE,
   type ReviewImport,
 } from './reviewdata.ts';
-import { cutRevision, exportRevision } from './revisions.ts';
+import { cutRevision, exportRevision, exportRevisionStream } from './revisions.ts';
 
 const MAX_PROJECTS = 50;
 
@@ -380,6 +380,29 @@ export async function exportZip(
   /** Also put the paper's threads and proposed changes in, as a file of their own. */
   opts: { review?: boolean } = {},
 ): Promise<Uint8Array> {
+  const { revisionId, extra } = await cutForExport(pool, store, userId, projectId, opts);
+  return (await exportRevision(pool, store, userId, projectId, revisionId, false, extra)).zip;
+}
+
+/** The same ZIP as a stream, for a response that may be larger than a function may send whole. */
+export async function exportZipStream(
+  pool: pg.Pool,
+  store: BlobStore,
+  userId: string,
+  projectId: string,
+  opts: { review?: boolean } = {},
+): Promise<ReadableStream<Uint8Array>> {
+  const { revisionId, extra } = await cutForExport(pool, store, userId, projectId, opts);
+  return (await exportRevisionStream(pool, store, userId, projectId, revisionId, false, extra)).zip;
+}
+
+async function cutForExport(
+  pool: pg.Pool,
+  store: BlobStore,
+  userId: string,
+  projectId: string,
+  opts: { review?: boolean },
+) {
   await authorize(pool, userId, id(projectId), 'project.export');
   const revision = await cutRevision(pool, store, userId, projectId);
   const extra = opts.review
@@ -392,5 +415,5 @@ export async function exportZip(
         },
       ]
     : [];
-  return (await exportRevision(pool, store, userId, projectId, revision.id, false, extra)).zip;
+  return { revisionId: revision.id as string, extra };
 }

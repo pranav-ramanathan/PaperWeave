@@ -1,5 +1,5 @@
 // The worker: builds and draws whatever is queued, then waits to be told there is more.
-import { blobStore, connect, listen } from '@paperweave/server';
+import { blobStore, connect, listen, UPLOAD_KEEP_MS } from '@paperweave/server';
 import { buildNext, imageId } from './builder.ts';
 import { drawNext } from './charts.ts';
 
@@ -12,8 +12,16 @@ let wake: () => void = () => {};
 await listen(process.env.DATABASE_URL, ['builds', 'charts'], () => wake());
 console.log(`build worker ready, toolchain ${image.slice(0, 19)}`);
 
+// Uploads that were put in the store and never taken (the person closed the page): removed
+// when they are a day old. Checked every hour, and once at the start.
+let swept = 0;
 for (;;) {
   try {
+    if (Date.now() - swept > 3600_000) {
+      swept = Date.now();
+      const n = await store.uploadSweep(UPLOAD_KEEP_MS);
+      if (n) console.log(`removed ${n} old uploads`);
+    }
     while ((await buildNext(pool, store, image)) || (await drawNext(pool, store, image)));
   } catch (err) {
     console.error('worker error:', (err as Error).message);

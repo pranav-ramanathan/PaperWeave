@@ -29,3 +29,4 @@ export * from './commands.ts';
 export * from './files.ts';
 export * from './grammar.ts';
 export * from './download.ts';
+export * from './uploads.ts';

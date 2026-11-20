@@ -204,29 +204,81 @@ To put a new version in place: update the checkout, migrate, then `systemctl res
 paperweave-sync paperweave-workers`. A second sync server waits for the first (`docs/settings.md`),
 so a new one may also be started before the old one is stopped.
 
-## What does not work yet
+## Large uploads and downloads
 
 Vercel's page on function limits says: "The maximum payload size for the request body or the
 response body of a Vercel Function is **4.5 MB**. The response body limit doesn't apply to
 streamed responses." Over it, the function "will return an error 413: `FUNCTION_PAYLOAD_TOO_LARGE`".
+This app allows a ZIP up to 100 MB and a file up to 50 MB (`packages/server/src/archive.ts`), so
+none of those bytes pass through a function in one piece. Vercel's own advice (its page on
+bypassing the limit) is to upload "directly to a media host from your browser" and to make assets
+"retrievable with a pre-signed URL". That is what is done. The store stays private: only an
+address signed by the app reads or writes it, and each is good for minutes.
 
-This app was written for a server with no such limit (`packages/server/src/archive.ts`: a ZIP up
-to 100 MB, a file up to 50 MB). On Vercel:
+- **Uploads** (a ZIP to import; a file added to a paper). The form asks `POST /api/uploads` for
+  an address (`kind`, and for a file the paper, and the file's size). The app checks the person
+  may do it (anyone signed in for a ZIP; someone who may write to the paper for a file) and that
+  the size is within the limit, and returns a signed `PUT` address for a new key `tmp/<uuid>`
+  that is good for 10 minutes and takes a body of exactly that size, and the key. The browser
+  `PUT`s the file there, then posts the form to `/api/projects/import` or `/projects/[id]/files`
+  with only the key and the file's name. That route asks the store for the object's size first and
+  refuses one over the limit without reading it; then it runs the same code as before (`importZip`,
+  `createFile`: the same checks, a hostile archive refused as a whole) and deletes the temporary
+  object, whether or not that worked.
+  - The old way is still there, and is what the forms do for a file of 4 MB or less
+    (`apps/web/app/DirectUpload.tsx`): a form posted with the file in it (`zip`, `file`) is taken,
+    with its `bounded()` cap. So does a browser without scripts. On Vercel that works up to 4.5 MB
+    only.
+  - **Objects nobody took** (the person closed the page after the `PUT`) are removed by the
+    workers, which every hour delete what is under `tmp/` and over a day old (`apps/workers/src/main.ts`).
+- **Downloads of one stored file** (a revision's PDF, a build's PDF and log). After the permission
+  check the app asks the store for the file's size. At most 4 MB: sent from the app as before. Over
+  that: a `303` to an address signed for 5 minutes, which makes the store answer with the paper's
+  file name (`response-content-disposition`, `inline` for a build's PDF) and type. The pages'
+  content policy names the store in `connect-src` so that the PDF pane's fetch follows it
+  (`apps/web/proxy.ts`).
+- **Downloads built from many files** (the paper's export, a revision's ZIP) are streamed: the
+  ZIP is written to the response as it is made, not held and sent whole. The bytes are the same.
+  (The files going into it are still read into the function's memory, one paper at a time.)
 
-- **Uploads over 4.5 MB fail:** a ZIP import (`/api/projects/import`) and a file added to a paper
-  (`/projects/[id]/files`).
-- **Downloads over 4.5 MB fail:** the export (`/projects/[id]/export`), a revision's ZIP and PDF,
-  a build's PDF, and the pictures and chart images, when they are that large. Each is read into
-  memory and sent as one `Response`, not streamed.
+### Making the store reachable from browsers
+
+Browsers now reach the store, so it needs an address they can use, and CORS.
+
+- `S3_PUBLIC_ENDPOINT` is the store's address as browsers reach it, when that is not what the app
+  uses (`S3_ENDPOINT`). On Vercel both are the tunnel's address, so it can stay unset. Signed
+  addresses are made for this host, so a tunnel must pass the `Host` it was reached by on to the
+  store. The app's own routes (`/api/uploads`, the downloads) need nothing else.
+- **CORS.** The store must answer the web app's origin (`BETTER_AUTH_URL`'s) for `PUT` and `GET`
+  and `HEAD`, allow the headers the request carries (`content-type`; pdf.js also sends `range`),
+  and let the browser read `content-length`, `content-range` and `etag`.
+  - SeaweedFS (as in `infra/compose.yaml`): the server's flag `-s3.allowedOrigins=https://your.app`.
+    With the flag unset it is `*`, which also works but allows every site to try (it still cannot
+    do anything without a signed address). The compose file lists the two local origins. It answers
+    `GET, PUT, POST, DELETE, HEAD` and reflects the request's headers; tried with `OPTIONS` on
+    version 4.54: an allowed origin gets `200` with `Access-Control-Allow-Origin` set to it, and
+    any other `403`.
+  - Amazon S3, R2 and others: the bucket's CORS rule, for example `AllowedOrigins` the app's
+    origin, `AllowedMethods` `GET`, `PUT`, `HEAD`, `AllowedHeaders` `*`, `ExposeHeaders`
+    `Content-Length`, `Content-Range`, `ETag`. Not tried here.
+- **The bucket is never made public.** The local store in `infra/compose.yaml` has no identities
+  and takes any request, signed or not. That is for local work only; production must have a
+  store that checks signatures. Tried against a SeaweedFS started with `-s3.config` holding one
+  identity: it refused a read with no signature and a `PUT` whose body was not the signed length.
+  An expired address was not tried.
+
+### What still goes through a function
+
+- **Pictures and chart images** (`/projects/[id]/picture`, `…/pictures`, a chart's PNG) are still
+  read into memory and sent whole. One over 4.5 MB fails on Vercel.
+- **A paper's import still reads the whole ZIP into one function**, and a paper that is exported
+  still reads its files into one function's memory. 100 MB and 300 MB are inside the memory Vercel
+  gives a function, but not tried there.
 - Anything else that sends more than 4.5 MB through a function.
 
-Small papers work. Big ones do not, and the person sees Vercel's error, not this app's.
-Vercel's own advice (its page on bypassing the limit) is to upload "directly to a media host
-from your browser", and to "store those assets in a dedicated media host and make them
-retrievable with a pre-signed URL". That is the next change.
-
 Not tried on Vercel at all: everything on this page that needs a Vercel project. The build, the
-pooler, the migrations and the two services were tried on one machine.
+pooler, the migrations and the two services were tried on one machine, and so were the signed
+uploads and downloads, against a SeaweedFS on that machine.
 
 ## Pages read
 
