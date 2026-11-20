@@ -460,6 +460,93 @@ export async function renameFile(
   ]);
 }
 
+const isSpace = (c: string) => /\s/.test(c);
+
+/**
+ * The deletes and inserts that turn `have` into `want`, last first, so each position is in terms of
+ * `have` and can be applied in the order given. Each changed stretch is replaced on its own, so
+ * everything between two changes keeps the identity it has, and with it whatever is anchored there.
+ */
+export function restoreEdits(
+  have: string,
+  want: string,
+): { at: number; del: number; ins: string }[] {
+  const diff = diffLines(have, want);
+  if (!diff) {
+    // Too large to compare line by line: one span, as whole lines.
+    let p = 0;
+    while (p < have.length && p < want.length && have[p] === want[p]) p++;
+    let s = 0;
+    while (s < have.length - p && s < want.length - p && have.at(-1 - s) === want.at(-1 - s)) s++;
+    while (p > 0 && have[p - 1] !== '\n') p--;
+    while (s > 0 && have[have.length - s - 1] !== '\n') s--;
+    return [{ at: p, del: have.length - p - s, ins: want.slice(p, want.length - s) }];
+  }
+  const hl = have.split('\n');
+  const wl = want.split('\n');
+  // Where each line starts: its length plus one for the newline after it, where there is one.
+  // The place after the last line is counted as if it had one too, which clamping undoes.
+  const starts = (lines: string[]) => {
+    const out = [0];
+    for (const l of lines) out.push(out.at(-1)! + l.length + 1);
+    return out;
+  };
+  const hs = starts(hl);
+  const edits: { at: number; del: number; ins: string }[] = [];
+  let h = 0; // next line of have
+  let w = 0; // next line of want
+  for (let i = 0; i < diff.length;) {
+    if (diff[i].op === ' ') {
+      h++;
+      w++;
+      i++;
+      continue;
+    }
+    let removed = 0;
+    let added = 0;
+    for (; i < diff.length && diff[i].op !== ' '; i++) {
+      if (diff[i].op === '-') removed++;
+      else added++;
+    }
+    const [a, b, c, d] = [h, h + removed, w, w + added];
+    h = b;
+    w = d;
+    if (removed === added) {
+      for (let k = 0; k < removed; k++) {
+        const [o, n] = [hl[a + k], wl[c + k]];
+        if (o === n) continue;
+        let cp = 0;
+        while (cp < o.length && cp < n.length && o[cp] === n[cp]) cp++;
+        let cs = 0;
+        while (cs < o.length - cp && cs < n.length - cp && o.at(-1 - cs) === n.at(-1 - cs)) cs++;
+        // Never inside a word: the change starts after a space and the kept end starts at one.
+        while (cp > 0 && !isSpace(o[cp - 1])) cp--;
+        while (cs > 0 && !isSpace(o[o.length - cs])) cs--;
+        edits.push({
+          at: hs[a + k] + cp,
+          del: o.length - cs - cp,
+          ins: n.slice(cp, n.length - cs),
+        });
+      }
+      continue;
+    }
+    const last = b === hl.length; // the hunk runs to the end of the text, which has no newline
+    const text = added ? wl.slice(c, d).join('\n') + (d < wl.length ? '\n' : '') : '';
+    if (last && a > 0 && (removed === 0 || added === 0)) {
+      // The newline before the stretch goes (or comes) with it, as there is none after.
+      const at = hs[a] - 1;
+      edits.push({
+        at,
+        del: Math.min(hs[b], have.length + 1) - 1 - at,
+        ins: added ? '\n' + text : '',
+      });
+    } else {
+      edits.push({ at: hs[a], del: Math.min(hs[b], have.length) - hs[a], ins: text });
+    }
+  }
+  return edits.reverse();
+}
+
 /**
  * Put the paper back to how it was in a revision, as new edits on top of what is there now.
  * Nothing is erased: the restore is itself a new revision, and the ones in between remain.
@@ -511,19 +598,10 @@ export async function restoreRevision(
       if (decoded?.editable) {
         const want = decoded.text;
         await editLocked(db, store, file.id, userId, (text) => {
-          const have = text.toString();
-          // Replace only the part that differs, so people editing elsewhere are not disturbed.
-          let p = 0;
-          while (p < have.length && p < want.length && have[p] === want[p]) p++;
-          let s = 0;
-          while (s < have.length - p && s < want.length - p && have.at(-1 - s) === want.at(-1 - s))
-            s++;
-          // Whole lines only. An edit made offline before the restore is merged in at an edge of
-          // the replaced part; this way it lands between two lines, never inside one.
-          while (p > 0 && have[p - 1] !== '\n') p--;
-          while (s > 0 && have[have.length - s - 1] !== '\n') s--;
-          text.delete(p, have.length - p - s);
-          text.insert(p, want.slice(p, want.length - s));
+          for (const e of restoreEdits(text.toString(), want)) {
+            if (e.del) text.delete(e.at, e.del);
+            if (e.ins) text.insert(e.at, e.ins);
+          }
         });
       } else if (file.digest !== target.digest)
         await db.query('update files set digest = $2, size = $3 where id = $1', [

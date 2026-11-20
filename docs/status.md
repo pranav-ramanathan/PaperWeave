@@ -111,7 +111,10 @@ Read this first. Update it in every pull request.
     while offline are confirmed after the count was reset. The status line, the warning on
     closing the tab, and the hold after a restore all use the exact answer.
   - Restores replace whole lines. An edit made offline before a restore is merged in at an edge
-    of the replaced part, and used to be able to land in the middle of a line.
+    of the replaced part, and used to be able to land in the middle of a line. (Since changed:
+    each changed stretch is replaced on its own, and a line changed in place word by word; an
+    editor now holds edits made offline across a restore and asks. See "What a restore does to
+    what is attached to the text".)
   - The editor reconnects whenever it should be connected. The library ignores a request to
     connect made while a disconnect is still closing, which could leave a tab offline for good.
   - Monitoring: the sync server serves `/metrics` (Prometheus text) to whoever sends
@@ -684,6 +687,11 @@ ordinary use. Ten ways of looking found them, and each is cheap to do again:
     could be typed, after Delete before a list or Backspace at a list's start; a refused
     selection kept, so that every key after it was refused; a selection across paragraphs that
     could not be deleted or typed over; a note that stayed after the next key worked.
+
+24. **Restore, then look at everything that hangs off the text.** Found: threads and proposals on
+    words a restore did not change cut loose, an accept that could no longer be undone, a second
+    person's typing split and moved, and a lost proposal that could be saved as an insertion in
+    the wrong place.
 
 Tried the same way and nothing found: thirty connections typing into one file at once (kept
 as a test in `sync.sandbox.test`); 400 threads and 400 proposals on one file, on the server
@@ -2041,6 +2049,48 @@ second one.
   - A space left where a formula or a word was deleted is left: LaTeX ignores it.
 - **How it was made.** Planned by one agent, probed and written by others, and the fast-key
   case timed by the planner; checked here.
+
+## What a restore does to what is attached to the text
+
+- **What was tried**, with a probe: a file of five paragraphs with a thread and a proposed change
+  on the middle one, a revision, then edits above, below, and on the same line, and a restore;
+  restores back again; renames and deletions; and in the browser, a second person typing in the
+  middle paragraph, or with a reply or a changed proposal half written, as the restore landed.
+
+| Case                                                                    | Before                                                                        | Now                                                                                                     |
+| ----------------------------------------------------------------------- | ----------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------- |
+| Edits above and below a paragraph with a thread and a proposal; restore | **thread detached; proposal out of date and refused, though its words stood** | both as they were                                                                                       |
+| The same with a proposal accepted before the revision                   | **"Undo the accept" refused for good**                                        | can be undone                                                                                           |
+| A word changed on the same line as a proposal; restore                  | **the proposal out of date**                                                  | as it was                                                                                               |
+| Restore, then restore what that restore kept                            | the text back; **the thread and proposal not**                                | both back                                                                                               |
+| A second person typing in a paragraph the restore left alone            | **half lost, half glued to the start of the first paragraph**                 | in that paragraph, in order                                                                             |
+| A proposal whose words are gone, changed and saved                      | **turned into an insertion at another place, with Accept offered**            | refused: "The words this was about are no longer in the file. Find them again, or make a new proposal." |
+| "Show in the text" on such a proposal                                   | **said nothing, and put the caret elsewhere**                                 | "Those words are no longer in the file."                                                                |
+| Such a proposal, its words still in the file once                       | **nothing to do but reject it**                                               | "Find these words again"                                                                                |
+| A thread on a word the edit changed, after the restore brings it back   | detached, with "Attach to the same words again"                               | the same                                                                                                |
+| A file the restore did not change; a rename; a delete and re-add        | untouched; threads and proposals kept                                         | the same                                                                                                |
+| Fifteen cases at the edges of a file, with and without a final newline  | the bytes restored exactly                                                    | the same                                                                                                |
+| A reply or a changed proposal half written as the restore lands         | kept                                                                          | the same                                                                                                |
+
+- **What was wrong.** A restore found the first and the last place the file differed from the
+  revision, widened both to whole lines, and replaced everything between them. Text between two
+  changes was deleted and written again as new characters, and what was attached to the old ones
+  (a thread, a proposal, someone's caret) had nothing left to stand on. Proposals, unlike threads,
+  had no way to be found again, and one whose place had closed up could be saved as an insertion.
+- **Now** (`restoreEdits` in `packages/server/src/revisions.ts`; `reviseProposal` and
+  `reattachProposal` in `proposals.ts`; `Proposals.tsx`): each changed stretch is replaced on
+  its own, from the last to the first, and a line changed in place is replaced word by word. A
+  file too large to compare is replaced as before. A proposal whose words are gone cannot be
+  changed into an insertion, says so when shown, and can be found again where its words stand
+  once in the file.
+- **Held by** service tests of each case above, a random check outside the repository that the
+  edits rebuild the revision byte for byte in 20,000 cases, and browser tests of a proposal whose
+  words are gone and of a second person typing through a restore. Each failed on the old code,
+  except the one that holds a file too large to compare, which behaves as before.
+- **Not changed:** letters typed into a paragraph before the restore reaches it are an edit like
+  any other, and the restore takes them back. A thread or proposal on text that really changed
+  still has to be found again, and only where its words stand once.
+- **How it was made.** Planned by one agent, probed and written by others, checked here.
 
 ## When an email cannot be sent
 

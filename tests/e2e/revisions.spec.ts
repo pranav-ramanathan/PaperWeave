@@ -6,7 +6,17 @@ import { mkdtempSync, readdirSync, readFileSync, statSync, writeFileSync } from 
 import { tmpdir } from 'node:os';
 import { join, relative } from 'node:path';
 import { writeZip } from '../../packages/server/src/archive';
-import { audit, person, run, showSource, signIn } from './helpers';
+import { readZip } from '../../packages/server/src/archive';
+import {
+  audit,
+  emailedLink,
+  person,
+  run,
+  selectWord,
+  showSource,
+  signIn,
+  typingSaved,
+} from './helpers';
 
 const FIXTURE = join(import.meta.dirname, '../../fixtures/article-basic');
 const source = (page: Page) => page.locator('.editor .cm-content');
@@ -121,4 +131,82 @@ test('save a revision, build and download it, compare, restore and rename', asyn
   await expect(page.locator('.build').getByRole('status')).toHaveText('The PDF is up to date.', {
     timeout: 60_000,
   });
+});
+
+test("a second person's typing in an untouched paragraph survives a restore in order", async ({
+  browser,
+}) => {
+  test.setTimeout(180_000);
+  const paras = [
+    'P1 alpha foxes jump over fences.',
+    'P2 beta cats sleep all day.',
+    'P3 gamma wolves howl loudly at night.',
+    'P4 delta owls watch the dark.',
+    'P5 epsilon bears wait for spring.',
+  ];
+  const main = `\\documentclass{article}\n\\begin{document}\n${paras.join('\n\n')}\n\\end{document}\n`;
+  const owner = await person(browser, 'typ-owner');
+  const editor = await person(browser, 'typ-editor');
+  const zip = join(mkdtempSync(join(tmpdir(), 'paperweave-e2e-')), `Typing ${run}.zip`);
+  writeFileSync(zip, await writeZip([{ path: 'main.tex', bytes: Buffer.from(main) }]));
+  await owner.page.goto('/sign-in');
+  await signIn(owner.page, owner.email);
+  await owner.page.getByLabel('Or import a ZIP of a LaTeX project').setInputFiles(zip);
+  await owner.page.getByRole('button', { name: 'Import ZIP' }).click();
+  const paper = owner.page.url();
+  await owner.page.getByLabel('Their email address').fill(editor.email);
+  await owner.page.getByLabel('Their role').selectOption('editor');
+  await owner.page.getByRole('button', { name: 'Send invitation' }).click();
+  await expect(owner.page.getByRole('status')).toContainText(editor.email);
+  await editor.page.goto(await emailedLink(editor.email, '/invitations/'));
+  await signIn(editor.page, editor.email);
+  await editor.page.getByRole('button', { name: 'Join this paper' }).click();
+  await expect(editor.page.getByText('You are an editor')).toBeVisible();
+
+  // Revision 1 is the paper as it is; then the owner changes the first and last paragraphs.
+  await owner.page.getByLabel('Name for the paper as it is now').fill('A');
+  await owner.page.getByRole('button', { name: 'Save revision' }).click();
+  await expect(owner.page.getByRole('status')).toHaveText('Saved as revision 1.');
+  await owner.page.getByRole('link', { name: 'main.tex' }).first().click();
+  await showSource(owner.page);
+  await selectWord(owner.page, '.editor .cm-content', 'jump');
+  await owner.page.keyboard.type('sprint');
+  await selectWord(owner.page, '.editor .cm-content', 'wait');
+  await owner.page.keyboard.type('hibernate');
+  await typingSaved(owner.page);
+  const file = owner.page.url();
+
+  await editor.page.goto(file);
+  await showSource(editor.page);
+  await expect(source(editor.page)).toContainText('bears hibernate', { timeout: 15_000 });
+  await editor.page.locator('.cm-line', { hasText: 'P3 gamma wolves' }).click();
+  await editor.page.keyboard.press('Home');
+  for (let i = 0; i < 16; i++) await editor.page.keyboard.press('ArrowRight');
+
+  // They type while the owner restores revision 1.
+  const paperPage = await owner.page.context().newPage();
+  await paperPage.goto(paper);
+  const typing = editor.page.keyboard.type('abcdefgh', { delay: 150 });
+  await editor.page.waitForTimeout(430);
+  await paperPage.getByRole('button', { name: 'Restore revision 1' }).click();
+  await expect(paperPage.getByRole('status').first()).toContainText('Restored. The paper is now');
+  await typing;
+  await expect(source(editor.page)).toContainText('foxes jump', { timeout: 15_000 });
+  await typingSaved(editor.page);
+
+  // Letters typed before the restore were part of the paper it replaced, and go with it. The rest
+  // are where they were typed, in order, inside that paragraph, and nothing else differs.
+  await paperPage.goto(paper);
+  const [download] = await Promise.all([
+    paperPage.waitForEvent('download'),
+    paperPage.getByRole('link', { name: 'Download ZIP' }).click(),
+  ]);
+  const saved = Buffer.from(
+    (await readZip(readFileSync(await download.path()))).entries.find((e) => e.path === 'main.tex')!
+      .bytes,
+  ).toString();
+  const kept = /^P3 gamma wolves ([a-h]*)howl loudly/m.exec(saved)?.[1];
+  expect(kept, 'the letters in P3').toBeDefined();
+  expect('abcdefgh'.endsWith(kept!)).toBe(true);
+  expect(saved).toBe(main.replace('P3 gamma wolves ', `P3 gamma wolves ${kept}`));
 });

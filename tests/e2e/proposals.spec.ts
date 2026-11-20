@@ -168,6 +168,31 @@ test('a reviewer proposes a change; the owner accepts it, undoes that, and rejec
   await expect(added(owner.page)).toContainText(`Rejected by ${owner.email}.`);
   await expect(owner.page.locator(SOURCE)).not.toContainText('So far.');
 
+  // Someone types over the words a proposal is about. They are the same words again, but not the
+  // ones it was made on: it cannot be changed, and it can be pointed at them again.
+  await selectWord(reviewer.page, VISUAL, 'claimed');
+  await panel(reviewer.page).getByRole('button', { name: 'Propose a change here' }).click();
+  await panel(reviewer.page).getByLabel('Replace it with').fill('shown');
+  await panel(reviewer.page).getByRole('button', { name: 'Propose', exact: true }).click();
+  const lost = (page: Page) => page.getByRole('article', { name: 'Proposal to change “claimed”' });
+  await expect(lost(owner.page)).toContainText('Proposed: shown', { timeout: 15_000 });
+  await selectWord(owner.page, SOURCE, 'claimed');
+  await owner.page.keyboard.type('claimed');
+  await typingSaved(owner.page);
+  await expect(lost(owner.page)).toContainText('Out of date.', { timeout: 15_000 });
+  await expect(lost(owner.page).getByRole('button', { name: 'Change the proposal' })).toHaveCount(
+    0,
+  );
+  await lost(owner.page).getByRole('button', { name: 'Show in the text' }).click();
+  await expect(panel(owner.page)).toContainText('Those words are no longer in the file.');
+  await lost(owner.page).getByRole('button', { name: 'Find these words again' }).click();
+  await expect(lost(owner.page)).not.toContainText('Out of date.', { timeout: 15_000 });
+  await expect(
+    lost(owner.page).getByRole('button', { name: 'Find these words again' }),
+  ).toHaveCount(0);
+  await expect(lost(owner.page).getByRole('button', { name: 'Accept' })).toBeEnabled();
+  await expect(lost(owner.page).getByRole('button', { name: 'Change the proposal' })).toBeVisible();
+
   // A review by a model is not offered until the paper's owner allows text to be sent.
   const ask = (page: Page) =>
     panel(page).getByRole('button', { name: 'Ask a model to review the selected text' });
