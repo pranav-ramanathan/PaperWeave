@@ -16,9 +16,15 @@ import { authorize } from './authz.ts';
 import type { BlobStore } from './blobs.ts';
 import { type Db, transaction } from './db.ts';
 import { AppError } from './errors.ts';
-import { TEXT_FILE } from './files.ts';
+import { setRootFile, TEXT_FILE } from './files.ts';
 import { id, mayStartPapers, type Project } from './projects.ts';
-import { importReview, REVIEW_FILE, type ReviewImport, exportReview } from './reviewdata.ts';
+import {
+  carriedRoot,
+  exportReview,
+  importReview,
+  REVIEW_FILE,
+  type ReviewImport,
+} from './reviewdata.ts';
 import { cutRevision, exportRevision } from './revisions.ts';
 
 const MAX_PROJECTS = 50;
@@ -262,11 +268,36 @@ export async function importZip(
       // Reported by importReview as unreadable.
     }
     const brought = await importReview(pool, store, made[i].id, parsed);
-    await pool.query(
-      `update import_reports set report = jsonb_set(report, '{review}', $2::jsonb)
-       where project_id = $1`,
-      [made[i].id, JSON.stringify(brought)],
-    );
+    const report: ImportReport = { ...p.report, review: brought };
+    // The paper's root where it came from, if the archive says: a plain ZIP leaves that to the
+    // importer's guess, which can be another file.
+    const carried = carriedRoot(parsed);
+    if (carried && carried !== report.root) {
+      const target = (
+        await pool.query(
+          `select id from files where project_id = $1 and path = $2 and eol is not null
+             and path ~* '\\.(tex|ltx)$'`,
+          [made[i].id, carried],
+        )
+      ).rows[0];
+      if (target) {
+        await setRootFile(pool, userId, made[i].id, target.id);
+        report.otherRoots = [report.root, ...report.otherRoots.filter((r) => r !== carried)];
+        report.root = carried;
+        report.notes = [
+          ...report.notes,
+          `The root file is ${carried}, as it was where this came from.`,
+        ];
+      } else
+        report.notes = [
+          ...report.notes,
+          `Where this came from, the root file was ${carried}, but the paper has no such .tex file. ${report.root} is the root instead.`,
+        ];
+    }
+    await pool.query('update import_reports set report = $2::jsonb where project_id = $1', [
+      made[i].id,
+      JSON.stringify(report),
+    ]);
   }
   return made;
 }

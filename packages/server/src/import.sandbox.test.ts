@@ -6,7 +6,8 @@ import { afterAll, beforeAll, expect, test } from 'vitest';
 import { type Entry, LIMITS, readZip, writeZip } from './archive.ts';
 import { blobStore } from './blobs.ts';
 import { exportZip, importReport, importZip, listFiles } from './import.ts';
-import { acceptInvitation, createProject, invite, listProjects } from './projects.ts';
+import { setRootFile } from './files.ts';
+import { acceptInvitation, createProject, invite, listProjects, getProject } from './projects.ts';
 import { TEST_ENV, testDb } from './testing.ts';
 
 const FIXTURES = join(import.meta.dirname, '../../../fixtures');
@@ -284,4 +285,61 @@ test('files and exports are only for people on the paper', async () => {
   expect(await code(listFiles(t.pool, outsider.id, project.id))).toBe('not_found');
   expect(await code(importReport(t.pool, outsider.id, project.id))).toBe('not_found');
   expect(await code(exportZip(t.pool, store, outsider.id, project.id))).toBe('not_found');
+});
+
+test('the root file travels with the review data', async () => {
+  const doc = (word: string) =>
+    Buffer.from(`\\documentclass{article}\n\\begin{document}\n${word}\n\\end{document}\n`);
+  const [original] = await importZip(
+    t.pool,
+    store,
+    owner.id,
+    await writeZip([
+      { path: 'main.tex', bytes: doc('Spare') },
+      { path: 'paper.tex', bytes: doc('The paper') },
+    ]),
+    'Rooted',
+  );
+  // The importer prefers main.tex; the author made paper.tex the root.
+  expect((await importReport(t.pool, owner.id, original.id))!.root).toBe('main.tex');
+  const files = await listFiles(t.pool, owner.id, original.id);
+  await setRootFile(t.pool, owner.id, original.id, files.find((f) => f.path === 'paper.tex')!.id);
+  const zip = await exportZip(t.pool, store, owner.id, original.id, { review: true });
+  const [arrived] = await importZip(t.pool, store, owner.id, zip, 'Arrived');
+  expect((await getProject(t.pool, owner.id, arrived.id)).root).toBe('paper.tex');
+  const report = (await importReport(t.pool, owner.id, arrived.id))!;
+  expect(report).toMatchObject({ root: 'paper.tex', otherRoots: ['main.tex'] });
+  expect(report.notes).toContain('The root file is paper.tex, as it was where this came from.');
+  // A plain ZIP is as it was.
+  const [plain] = await importZip(
+    t.pool,
+    store,
+    owner.id,
+    await exportZip(t.pool, store, owner.id, original.id),
+    'Plain',
+  );
+  expect((await getProject(t.pool, owner.id, plain.id)).root).toBe('main.tex');
+  // A root the paper does not have is said, and the importer's choice stands.
+  const review = JSON.stringify({
+    format: 'paperweave-review-1',
+    paper: 'x',
+    exported: '2026-01-01T00:00:00.000Z',
+    root: 'gone.tex',
+    threads: [],
+    proposals: [],
+  });
+  const [odd] = await importZip(
+    t.pool,
+    store,
+    owner.id,
+    await writeZip([
+      { path: 'main.tex', bytes: doc('Spare') },
+      { path: 'paperweave-review.json', bytes: Buffer.from(review) },
+    ]),
+    'Odd',
+  );
+  expect((await getProject(t.pool, owner.id, odd.id)).root).toBe('main.tex');
+  expect((await importReport(t.pool, owner.id, odd.id))!.notes.join('\n')).toContain(
+    'the root file was gone.tex, but the paper has no such .tex file',
+  );
 });

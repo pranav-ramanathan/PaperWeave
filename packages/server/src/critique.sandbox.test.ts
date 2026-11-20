@@ -206,3 +206,25 @@ test('a review is asked for by people who may propose, of a passage of a sensibl
   expect(await limited()).toBe('conflict');
   expect(sent).toHaveLength(2);
 });
+
+test('evidence is stored cut to 500 characters each, and ten of them', async () => {
+  const p = await paper();
+  await setModelProcessing(t.pool, users.owner.id, p.id, true);
+  const { ask } = fake({
+    suggestions: [
+      {
+        before: 'We think it scales.',
+        after: 'We expect it to scale.',
+        reason: 'Says the same more directly.',
+        evidence: Array.from({ length: 12 }, (_, i) => `${i}`.repeat(501)),
+      },
+    ],
+    questions: [],
+  });
+  await reviewPassage(t.pool, store, users.reviewer.id, p.id, p.file, await ends(p.file, PASSAGE), {
+    ask,
+  });
+  const [proposal] = await listProposals(t.pool, store, users.owner.id, p.id);
+  expect(proposal.evidence).toHaveLength(10);
+  expect(proposal.evidence.every((e: string) => e.length === 500)).toBe(true);
+});

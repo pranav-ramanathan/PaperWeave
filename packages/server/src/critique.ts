@@ -206,7 +206,11 @@ export async function reviewPassage(
     });
     await pool.query(
       "update proposals set origin = 'critique', made_by = $2, evidence = $3 where id = $1",
-      [made, `${model} with ${CLAIM_RULES}`, JSON.stringify(s.evidence.slice(0, 10))],
+      [
+        made,
+        `${model} with ${CLAIM_RULES}`,
+        JSON.stringify(s.evidence.slice(0, 10).map((e) => e.slice(0, 500))),
+      ],
     );
     done.proposed++;
   }
