@@ -51,6 +51,8 @@ const Proposal = z.object({
   author: who,
   createdAt: when,
   decidedAt: when.nullable(),
+  /** Absent in files written before this was kept. */
+  decidedBy: who.optional(),
   origin: z.enum(['person', 'critique']),
   madeBy: text(200).nullable(),
   evidence: z.array(z.string().transform((s) => s.slice(0, 500))).transform((e) => e.slice(0, 10)),
@@ -175,6 +177,7 @@ export async function exportReview(
       author: p.author,
       createdAt: p.createdAt,
       decidedAt: p.decidedAt,
+      decidedBy: p.decidedBy,
       origin: p.origin,
       madeBy: p.madeBy,
       evidence: p.evidence,
@@ -315,8 +318,8 @@ export async function importReview(
     const length = stale ? (p.replacement === '' ? Math.min(1, f.text.length) : 0) : stands.length;
     await pool.query(
       `insert into proposals (project_id, file_id, anchor_from, anchor_to, expected, replacement,
-         reason, status, created_at, decided_at, origin, made_by, evidence, imported_author)
-       values ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14)`,
+         reason, status, created_at, decided_at, origin, made_by, evidence, imported_author, imported_decider)
+       values ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15)`,
       [
         projectId,
         f.id,
@@ -332,6 +335,7 @@ export async function importReview(
         p.madeBy,
         JSON.stringify(p.evidence),
         p.author,
+        p.decidedBy ?? null,
       ],
     );
     done.proposals++;
