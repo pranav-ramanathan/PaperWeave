@@ -17,6 +17,7 @@ export async function GET(
     return await sendBlob(request, digest, {
       'content-type': 'image/png',
       'x-content-type-options': 'nosniff',
+      // next.config.ts is what sends this: a header already on the answer wins over this one.
       'content-security-policy': "default-src 'none'; sandbox",
     });
   } catch (err) {
