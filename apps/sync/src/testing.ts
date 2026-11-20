@@ -76,6 +76,9 @@ export async function until(what: string, ok: () => boolean | Promise<boolean>, 
  * Wait until the server holds everything these clients have changed. Each asks, the way the
  * editor does, and asks again until the answer is yes to all of it.
  */
+/** Ports browsers and Node's WebSocket refuse to connect to (the web's "bad ports"), in our range. */
+const BLOCKED = new Set([5060, 5061, 6000, 6566, 6665, 6666, 6667, 6668, 6669, 6697]);
+
 export const saved = (...cs: Client[]) => {
   /** Where the last look at each client got to, for when the wait runs out. */
   const state = cs.map(() => 'not looked at');
@@ -126,7 +129,13 @@ function reachable(address: string): Promise<string> {
       resolve(`${hostname}:${port} ${said}`);
     };
     socket.setTimeout(1000, () => done('did not answer a new connection within a second'));
-    socket.once('connect', () => done('accepts connections'));
+    socket.once('connect', () =>
+      done(
+        BLOCKED.has(Number(port))
+          ? `accepts connections, but ${port} is a port WebSocket clients will not connect to`
+          : 'accepts connections',
+      ),
+    );
     socket.once('error', (e) => done(`refuses connections (${(e as NodeJS.ErrnoException).code})`));
   });
 }

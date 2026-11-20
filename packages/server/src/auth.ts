@@ -1,12 +1,29 @@
 // Sign-in. Better Auth owns the user, session, account and verification tables.
 import { betterAuth, type BetterAuthOptions } from 'better-auth';
 import { APIError } from 'better-auth/api';
+import { parseSetCookieHeader, toCookieOptions } from 'better-auth/cookies';
 import { magicLink } from 'better-auth/plugins';
 import { createHash } from 'node:crypto';
 import type pg from 'pg';
 
 type Env = Record<string, string | undefined>;
 export type SendLink = (to: { email: string; url: string }) => Promise<void>;
+
+export const SESSION_CACHE_SECONDS = 60;
+
+/**
+ * The cookies a call to the sign-in library asked to set, as a browser-ready list. A page cannot
+ * set cookies, so the cache that `getSession` renews once it has run out is only renewed where
+ * the caller can pass these on.
+ */
+export const cookiesToSet = (headers: Headers) => {
+  // One cookie may be expired and then set again in one answer: the last is what a browser keeps.
+  const last = new Map<string, { name: string; value: string; options: object }>();
+  for (const line of headers.getSetCookie())
+    for (const [name, c] of parseSetCookieHeader(line))
+      last.set(name, { name, value: c.value, options: toCookieOptions(c) });
+  return [...last.values()];
+};
 
 export const authOptions = (pool: pg.Pool, sendLink: SendLink, env: Env = process.env) =>
   ({
@@ -15,6 +32,16 @@ export const authOptions = (pool: pg.Pool, sendLink: SendLink, env: Env = proces
     baseURL: env.BETTER_AUTH_URL,
     // UUIDs, so our own tables can reference users with a real foreign key type.
     advanced: { database: { generateId: 'uuid' } },
+    session: {
+      // Pages and actions are read with the session as the browser last kept it, for up to
+      // this many seconds, without asking the database who is signed in. It costs this: a
+      // session ended on another device goes on working in this browser for pages and actions
+      // for up to this long. What it does not touch: who may do what on a paper (`authorize`
+      // reads the database each time), the sync server (it checks the database itself), and
+      // signing out in this browser (the cookies are cleared, and without the session cookie
+      // the cache is not read). A fixed value, not a setting: docs/settings.md.
+      cookieCache: { enabled: true, maxAge: SESSION_CACHE_SECONDS },
+    },
     plugins: [
       magicLink({
         // The link is the credential: store only its hash.

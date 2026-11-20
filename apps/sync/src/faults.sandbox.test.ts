@@ -71,8 +71,8 @@ test(`${STEPS} steps of typing through faults lose nothing (seed ${SEED})`, asyn
 
   // The server runs as a process of its own so that it can be killed without warning. It
   // compacts often, so that compaction is one of the things that happens mid-run.
-  // Clear of the ports the other file of sync tests uses (4200 to 5400), which runs at the
-  // same time as this one.
+  // Clear of the ports the other file of sync tests uses (4200 to 5050), which runs at the
+  // same time as this one, and of those WebSocket clients refuse (5060, 5061, 6000).
   const port = 5600 + Math.floor(Math.random() * 400);
   const env = {
     ...process.env,

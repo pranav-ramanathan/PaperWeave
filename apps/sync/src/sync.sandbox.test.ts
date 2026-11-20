@@ -89,7 +89,10 @@ beforeAll(async () => {
     pool: t.pool,
     store,
     secret: SECRET,
-    port: 4200 + Math.floor(Math.random() * 500),
+    // Up to 4349, so that the servers some tests start at +600 and +700 stay below 5060 and 5061:
+    // WebSocket clients refuse those ports (they are on the web's list of ports never to connect
+    // to), and a client pointed at one stays "connecting" for ever.
+    port: 4200 + Math.floor(Math.random() * 150),
     databaseUrl: t.url,
     // Small, so that a test can type its way past it.
     compactEvery: 20,

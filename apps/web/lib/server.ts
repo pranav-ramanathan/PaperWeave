@@ -5,10 +5,11 @@ import {
   blobStore,
   type BlobStore,
   connect,
+  cookiesToSet,
   createAuth,
   type Auth,
 } from '@paperweave/server';
-import { headers } from 'next/headers';
+import { cookies, headers } from 'next/headers';
 import { createHash } from 'node:crypto';
 import { notFound, redirect } from 'next/navigation';
 import nodemailer from 'nodemailer';
@@ -151,9 +152,38 @@ export const readJson = async (request: Request, max = 200_000) =>
 export const safePath = (next: unknown, fallback = '/projects') =>
   typeof next === 'string' && /^\/(?!\/)/.test(next) && !next.includes('\\') ? next : fallback;
 
+/**
+ * Who is signed in, and the sign-in itself. The session is read from the cookie the browser
+ * keeps of it for up to a minute (`session.cookieCache` in `createAuth`) without asking the
+ * database. When that has run out the database is asked, and the cookie is made again: only
+ * here is it passed on to the browser, and only where a response can set cookies (a route
+ * handler, an action). A page cannot, so a page that is the only thing a browser asks for
+ * goes back to the database every time the minute is up. The editor's build poll is what
+ * keeps it going for someone who has an editor open.
+ *
+ * `fresh` reads the database whatever the cookie says, for what must not go on for even a
+ * minute after the sign-in ended: the ticket for the sync server.
+ */
+export async function currentSession({ fresh = false } = {}) {
+  const found = await auth().api.getSession({
+    headers: await headers(),
+    returnHeaders: true,
+    ...(fresh && { query: { disableCookieCache: true } }),
+  });
+  const set = cookiesToSet(found.headers);
+  if (set.length) {
+    try {
+      const store = await cookies();
+      for (const { name, value, options } of set) store.set(name, value, options);
+    } catch {
+      // Not somewhere that can set cookies: the browser keeps what it has.
+    }
+  }
+  return found.response;
+}
+
 export async function currentUser() {
-  const session = await auth().api.getSession({ headers: await headers() });
-  return session?.user ?? null;
+  return (await currentSession())?.user ?? null;
 }
 
 /** The signed-in user, or a trip to the sign-in page and back to `returnTo`. */

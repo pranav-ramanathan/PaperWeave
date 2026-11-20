@@ -2425,8 +2425,24 @@ second one.
     revision now makes too; it waits for the second.
   - **Not changed:** a file missing from the store part way through a streamed ZIP now ends the
     download where it is, where it used to fail before anything was sent.
-- **Next**, measured the same way: the pool's size is not a setting, and every request begins by
-  looking up the sign-in.
+- **Fifth change: the sign-in is kept in the browser for a minute, and the pool is a setting.**
+  Every request looked the sign-in up in the database, two round trips before anything else.
+  Now Better Auth keeps it in a cookie for 60 seconds (`auth.ts`), renewed wherever an answer can
+  set a cookie (`currentSession` in `apps/web/lib/server.ts`), which an open editor's poll does
+  every few seconds. A sync ticket is always looked up afresh, and signing out clears the cookie
+  at once. `DATABASE_POOL_MAX` and `DATABASE_POOL_IDLE_MS` size the pool (`docs/deploy.md`
+  suggests 3 and 5000 on Vercel behind a pooler).
+  - One idle editor, a minute at 50 ms: 35 round trips and no sign-in lookups, where it was 59
+    with 24. Three: 98, where they were 180.
+  - **The cost:** a session ended from another device keeps working in this browser, for pages
+    and actions, for up to a minute. Editing stops at once: the sync server hears of the ended
+    session from the database. Taking someone off a paper, or changing their role, is immediate.
+  - **Held by** service tests that a second request inside the minute makes no sign-in
+    statements, that the cookie is renewed after the minute, that signing out clears both
+    cookies, and that the pool takes its settings and refuses bad ones; and a browser test that
+    after signing out the next page asks for sign-in. Each new one failed on the old code.
+- **Left:** a person who only reads pages, never opening an editor, still looks the sign-in up
+  again once the minute is up, since a page cannot set a cookie. Nothing here was run on Vercel.
 - **How it was made.** Probed and planned by agents, written by another, checked here.
 
 ## When an email cannot be sent
@@ -2738,23 +2754,21 @@ Changed on the way, and worth keeping:
   worker running the code from before: a change to how builds are read is then not tried at
   all. Stop `next start`, the sync server and the worker (`pkill -f '@paperweave/workers'`).
 
-### A sync test that failed once and is not explained
+### A sync test that failed now and then: a port WebSocket clients refuse
 
-- On 19 November, in one of eight runs of the whole service suite that day, "what someone
-  typed as they left reaches whoever opens the file next" failed at its first step: a client
-  of the second server that test starts had still not connected after fifteen seconds
-  ("socket connecting, closed 0 times, refused false"). Six runs of that file alone and five
-  more of the whole suite then passed, and so did CI.
-- Tried again with every processor kept busy: fourteen runs of that file, none failed.
-- It first happened on the day the server's database connections were reworked (see "When the
-  database is lost for a while"), so that change is not cleared. Nothing connecting the two
-  was found: the ports the test files can pick do not overlap each other or the local
-  services, and the test before it stops its server.
-- The message is the one a client gives when nothing is listening at its address, which was
-  checked by pointing one at an empty port. The test's failure message now also says whether
-  anything accepts connections there, so the next one will say whether the server was up.
-  On the machine this was run on, only the database listens anywhere in the range these
-  tests take their ports from, and it is outside what this test can pick.
+- "What someone typed as they left reaches whoever opens the file next" failed twice, on 19
+  November and on 20 November, with its client "connecting" and never closing. The second time
+  the message said the server accepted connections on 127.0.0.1:5060.
+- **Cause.** The file picked a base port from 4200 to 4699, and this test starts a server 700
+  above it (another, 600). Bases 4360, 4361, 4460 and 4461 put that server on 5060 or 5061, the
+  SIP ports, which are on the web's list of ports a WebSocket client will not connect to. Node's
+  `WebSocket` follows it: it sends nothing, and the client waits for ever. About one run in 125.
+  A server on 5060 with a plain WebSocket and the editor's own provider pointed at it: no
+  connection arrived, and the provider stayed "connecting"; on 5059 both connected. Forcing the
+  base to 4360 failed the test every time, and 4450 passed.
+- **Now** the base is 4200 to 4349, so no server any test starts is on a refused port; the
+  failure message says when a port is one of them; and `docs/settings.md` warns against such a
+  `SYNC_PORT`. It had nothing to do with the database connection work of 19 November.
 
 ### A service test that ended other tests' connections
 

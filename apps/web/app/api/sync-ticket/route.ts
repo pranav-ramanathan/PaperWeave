@@ -3,13 +3,13 @@
 // says when that file's paper was last restored, so that a client coming back online can tell
 // that the text it was editing has been replaced.
 import { AppError, lastRestore, syncTicket } from '@paperweave/server';
-import { headers } from 'next/headers';
-import { auth, db } from '../../../lib/server';
+import { currentSession, db } from '../../../lib/server';
 
 export const dynamic = 'force-dynamic';
 
 export async function GET(request: Request) {
-  const signedIn = await auth().api.getSession({ headers: await headers() });
+  // Not from the cookie cache: a sign-in that has ended may not be given a ticket.
+  const signedIn = await currentSession({ fresh: true });
   if (!signedIn) return Response.json({ error: 'Sign in first.' }, { status: 401 });
   const { user, session } = signedIn;
   const file = new URL(request.url).searchParams.get('file');
