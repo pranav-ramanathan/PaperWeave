@@ -73,10 +73,10 @@ test('an edit the visual editor cannot express is refused and changes nothing', 
   const [a, b] = textblocks(r);
   let refused = 0;
   r.bridge.onReject = () => refused++;
-  // Deleting across two paragraphs, and deleting a whole block.
-  expect(r.dispatch(r.state.tr.delete(a.start + 2, b.start + 2))).toBe(false);
-  expect(r.dispatch(r.state.tr.delete(0, r.state.doc.child(0).nodeSize))).toBe(false);
-  expect(refused).toBe(2);
+  // Deleting from inside a styled run to the next paragraph, selected as it would be.
+  r.select(a.start + 20, b.start + 2);
+  expect(r.dispatch(r.state.tr.delete(a.start + 20, b.start + 2))).toBe(false);
+  expect(refused).toBe(1);
   expect(r.src).toBe(DOC);
   r.check();
 });
@@ -156,7 +156,7 @@ test(`${N} generated visual edits stay inside their intended range`, () => {
         expect(textblocks(rep).filter((t) => t.para).length, where).toBeLessThanOrEqual(paras);
     }
   }
-  for (const k of ['ins', 'del', 'rep', 'enter', 'join', 'emph'])
+  for (const k of ['ins', 'del', 'rep', 'enter', 'join', 'emph', 'xdel', 'xrep', 'xenter'])
     expect(counts[k], k).toBeGreaterThan(N / 100);
 });
 
@@ -495,4 +495,79 @@ test('a caret whose paragraph is removed by another origin stays where text can 
   expect(sel.$head.parent.inlineContent).toBe(true);
   // In the paragraph before, not on the table.
   expect(sel.$head.parent.textContent).toBe('One.');
+});
+
+/** A fresh replica of src and the visual positions of display offsets in two of its text blocks. */
+function span(src: string, i: number, off: number, k: number, offEnd: number) {
+  const r = replica(src);
+  const tbs = textblocks(r);
+  const from = tbs[i].start + off;
+  const to = tbs[k].start + offEnd;
+  // As in the editor, the text is selected when a key deletes it.
+  r.select(from, to);
+  return { r, from, to };
+}
+const THREE = 'Alpha beta gamma.\n\nDelta epsilon zeta.\n\nEta theta iota.\n';
+
+test('deleting or typing across paragraphs joins them in one splice', () => {
+  // From the middle of one paragraph to the middle of the next.
+  let { r, from, to } = span(THREE, 0, 6, 1, 6);
+  expect(r.dispatch(r.state.tr.delete(from, to))).toBe(true);
+  expect(r.src).toBe('Alpha epsilon zeta.\n\nEta theta iota.\n');
+  r.check();
+  // Across three paragraphs.
+  ({ r, from, to } = span(THREE, 0, 6, 2, 4));
+  expect(r.dispatch(r.state.tr.delete(from, to))).toBe(true);
+  expect(r.src).toBe('Alpha theta iota.\n');
+  r.check();
+  // With a word typed over the selection.
+  ({ r, from, to } = span(THREE, 0, 6, 1, 6));
+  expect(r.dispatch(r.state.tr.insertText('new ', from, to))).toBe(true);
+  expect(r.src).toBe('Alpha new epsilon zeta.\n\nEta theta iota.\n');
+  r.check();
+});
+
+test('an edit across paragraphs that ends inside a style, or reaches a heading, is refused', () => {
+  let { r, from, to } = span('Alpha \\emph{beta} gamma.\n\nDelta epsilon.\n', 0, 8, 1, 2);
+  let refused = 0;
+  r.bridge.onReject = () => refused++;
+  expect(r.dispatch(r.state.tr.delete(from, to))).toBe(false);
+  expect(refused).toBe(1);
+  expect(r.src).toBe('Alpha \\emph{beta} gamma.\n\nDelta epsilon.\n');
+  const head = '\\section{Head}\n\nBody text.\n\nMore text.\n';
+  ({ r, from, to } = span(head, 0, 2, 1, 2));
+  r.bridge.onReject = () => refused++;
+  expect(r.dispatch(r.state.tr.delete(from, to))).toBe(false);
+  expect(refused).toBe(2);
+  expect(r.src).toBe(head);
+  // The same keys between two paragraphs, outside any style, are fine.
+  ({ r, from, to } = span(head, 1, 2, 2, 2));
+  expect(r.dispatch(r.state.tr.delete(from, to))).toBe(true);
+  expect(r.src).toBe('\\section{Head}\n\nBore text.\n');
+  ({ r, from, to } = span('Alpha \\emph{beta} gamma.\n\nDelta epsilon.\n', 0, 0, 1, 2));
+  expect(r.dispatch(r.state.tr.delete(from, to))).toBe(true);
+  expect(r.src).toBe('lta epsilon.\n');
+});
+
+test('Enter over a selected word replaces it with a paragraph break', () => {
+  const { r, from, to } = span('Alpha beta gamma.\n', 0, 6, 0, 10);
+  const tr = r.state.tr.delete(from, to).split(from);
+  expect(r.dispatch(tr.setSelection(TextSelection.near(tr.doc.resolve(from + 2))))).toBe(true);
+  expect(r.src).toBe('Alpha \n\n gamma.\n');
+  r.check();
+});
+
+test('Backspace at the start of a paragraph after a heading does nothing and says nothing', () => {
+  const r = replica('\\section{Head}\n\nBody text.\n');
+  let refused = 0;
+  r.bridge.onReject = () => refused++;
+  const body = textblocks(r)[1];
+  r.select(body.start);
+  // What Backspace tries: delete the two positions between the heading and the paragraph.
+  expect(r.dispatch(r.state.tr.delete(body.start - 2, body.start))).toBe(false);
+  expect(refused).toBe(0);
+  // The same deletion over a selection still says why.
+  r.select(body.start - 3, body.start);
+  expect(r.dispatch(r.state.tr.delete(body.start - 3, body.start))).toBe(false);
+  expect(refused).toBe(1);
 });

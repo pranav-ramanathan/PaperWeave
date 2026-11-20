@@ -172,7 +172,7 @@ export function translate(
   // Comparing documents cannot tell where "ab" went into "abab". When the editor says exactly
   // where it replaced text, use that, so the splice lands under the caret and nowhere else.
   const $from = hint && before.resolve(hint.from);
-  if ($from?.parent.isTextblock && $from.sameParent(before.resolve(hint!.to)))
+  if ($from?.parent.isTextblock && before.resolve(hint!.to).parent.isTextblock)
     Object.assign(dd, { a: hint!.from, endA: hint!.to, endB: hint!.from + hint!.size });
   const { a, endA, endB } = dd;
   const src = m.parsed.src;
@@ -232,6 +232,66 @@ export function translate(
     const from = x.base + x.text.length;
     const insert = guard(src.slice(0, from), src[y.base] ?? '');
     return { edits: [{ from, to: y.base, insert }], phantom: m.phantom };
+  }
+
+  // Delete or type across paragraphs: one splice from the first end to the second, joining them.
+  if ($a.depth === 1 && $endA.depth === 1 && !$a.sameParent($endA)) {
+    const i = $a.index(0);
+    const j = $endA.index(0);
+    if (m.phantom && m.phantom.index >= i && m.phantom.index <= j) return null;
+    for (let k = i; k <= j; k++) if (!para(before.child(k))) return null;
+    let text = '';
+    let plain = true;
+    after.slice(a, endB).content.forEach((n) => {
+      if (!n.isText || n.marks.length) plain = false;
+      text += n.text ?? '';
+    });
+    if (!plain) return null;
+    const x = locate(m, before, a)!;
+    const y = locate(m, before, endA)!;
+    const gx = gapFor(x.pieces, x.off, '');
+    const gy = gapFor(y.pieces, y.off, '');
+    if (!gx || !gy) return null;
+    const from = x.base + gx.at;
+    const to = y.base + gy.at;
+    // A macro definition inside what goes can break the whole build: only the source editor may.
+    const hasDef = (pieces: Piece[], lo: number, hi: number) =>
+      pieces.some((p) => p.type === 'def' && p.e > lo && p.s < hi);
+    if (hasDef(x.pieces, gx.at, Infinity) || hasDef(y.pieces, 0, gy.at)) return null;
+    for (let k = i + 1; k < j; k++) {
+      const body = m.blocks[m.phantom && k > m.phantom.index ? k - 1 : k].body;
+      if (body.kind !== 'para' || hasDef(body.pieces, 0, Infinity)) return null;
+    }
+    const insert = text ? escape(text) : '';
+    const lead = guard(src.slice(0, from), insert || src[to] || '');
+    return { edits: [{ from, to, insert: lead + insert }], phantom: m.phantom };
+  }
+
+  // Enter over a selection inside one paragraph: the selected text goes and a break takes its place.
+  if (
+    endA > a &&
+    endB === a + 2 &&
+    $a.depth === 1 &&
+    $endA.depth === 1 &&
+    $a.sameParent($endA) &&
+    para($a.parent) &&
+    !$x.sameParent($y) &&
+    para($x.parent) &&
+    para($y.parent) &&
+    $x.parentOffset === $x.parent.content.size &&
+    !$y.parentOffset
+  ) {
+    const x = locate(m, before, a)!;
+    const y = locate(m, before, endA)!;
+    if (x.block < 0) return null;
+    const gx = gapFor(x.pieces, x.off, '');
+    const gy = gapFor(y.pieces, y.off, '');
+    if (!gx || !gy) return null;
+    if (x.pieces.some((p) => p.type === 'def' && p.e > gx.at && p.s < gy.at)) return null;
+    return {
+      edits: abs(x.base, [{ from: gx.at, to: gy.at, insert: '\n\n' }]),
+      phantom: m.phantom,
+    };
   }
 
   // Typing, deleting or replacing text inside one text block.

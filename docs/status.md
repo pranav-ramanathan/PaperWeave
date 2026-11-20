@@ -680,6 +680,11 @@ ordinary use. Ten ways of looking found them, and each is cheap to do again:
     put ten lines early with nothing said; a renamed file named by its old name, and a deleted
     one answered for.
 
+23. **Press the ordinary keys everywhere in the visual view.** Found: a caret left where nothing
+    could be typed, after Delete before a list or Backspace at a list's start; a refused
+    selection kept, so that every key after it was refused; a selection across paragraphs that
+    could not be deleted or typed over; a note that stayed after the next key worked.
+
 Tried the same way and nothing found: thirty connections typing into one file at once (kept
 as a test in `sync.sandbox.test`); 400 threads and 400 proposals on one file, on the server
 (both lists took about 20 ms; not kept); and each tool of the visual view worked slowly
@@ -1985,6 +1990,57 @@ second one.
   approximate, though the PDF is behind.
 - **How it was made.** Planned by one agent, probed and written by others, and the cause of
   the first fix's regression found by the planner from the records themselves; checked here.
+
+## The keys a person presses without thinking
+
+- **What was tried**, with a probe: Enter, Backspace, Delete, select-and-type, Ctrl+A, cut and
+  paste, Tab and Shift+Enter in the visual view, in paragraphs, a heading, a list, emphasised
+  text and next to formulas, a citation, an equation and a figure, each on a fresh copy of a
+  paper and with the source read after every key; and once more with a second person in the
+  file. Then the same keys pressed with no pause between them, and with pauses of 10 to 150 ms.
+
+| Case                                                                                         | Before                                                                                   | Now                                             |
+| -------------------------------------------------------------------------------------------- | ---------------------------------------------------------------------------------------- | ----------------------------------------------- |
+| Delete at the end of the paragraph before a list, then typing                                | **the whole list selected; typing went nowhere**                                         | nothing happens; the caret stays                |
+| Backspace at the start of the first list item, then typing                                   | **a new paragraph in front of the one before the list**                                  | nothing happens; typing goes in the item        |
+| Select from one paragraph into the next; Delete, or type over it                             | refused, "Make it in the source editor"; **still selected, so typing was refused again** | the paragraphs are joined, or the typing put in |
+| The same across three paragraphs, or with a second person in between                         | the same                                                                                 | the same as above                               |
+| Select a word, Enter                                                                         | refused                                                                                  | a paragraph break in its place                  |
+| Backspace or Delete next to a heading, list, equation or figure                              | refused, eight ways                                                                      | nothing happens, and nothing is said            |
+| A note about a refused key, after the next key that worked                                   | **still shown**                                                                          | gone                                            |
+| Shift+Enter                                                                                  | **nothing, and nothing said**                                                            | says a line break is made in the source         |
+| Ctrl+A, then Delete or typing                                                                | refused                                                                                  | the same: it would take the preamble too        |
+| Triple-click a paragraph, then Delete or typing; a formula or citation deleted or typed over | made                                                                                     | the same                                        |
+| Enter, Backspace, Delete pressed under 5 ms after Home, End or an arrow                      | **made where the caret had been**                                                        | made where the caret is                         |
+| Characters, accented and not, typed in                                                       | put in as typed                                                                          | the same                                        |
+
+- **What was wrong.** The visual view took a fixed set of shapes of edit and sent the rest to
+  the source. A key that moved only the selection could leave it where no text can go: between
+  blocks, or around a whole list, so that the next key did nothing. A refused selection stayed
+  as it was, so that every key after it was refused too. And the editor learns of a caret moved
+  by the browser a few milliseconds late, so Enter pressed at once acted at the old place.
+- **Now** (`translate` in `packages/bridge/src/translate.ts`; `Bridge.filter`;
+  `apps/web/lib/visual.ts`): a selection between paragraphs, with only whole paragraphs in it, is
+  deleted or typed over in one change to the source, and Enter over a selection in one paragraph
+  breaks it there. A key that would leave the caret where nothing can be typed, or a container
+  selected, does nothing. Backspace or Delete with nothing to join does nothing and says
+  nothing. The note goes when an edit goes through. Enter, Backspace and Delete first catch up
+  with where the caret is. The random-operation test makes the new kinds of edit too.
+- **Held by** bridge tests of each new edit and of what is still refused, a filter test, the
+  random-operation and convergence tests with the new edits among them, and a browser test of the
+  keys. Each failed on the old code. One older bridge test deleted across two paragraphs to show
+  a refusal; it now starts inside emphasised text, which is still refused.
+- **Not changed:**
+  - Enter at the end of a list item, inside emphasised text or in the middle of a heading,
+    and Ctrl+A, are still sent to the source. Ctrl+X across paragraphs, refused before, was
+    not tried again.
+  - Enter at the start of a paragraph does nothing: an extra blank line means nothing in LaTeX.
+  - Tab leaves the editor, so that the keyboard is never caught in it.
+  - Characters pdfLaTeX cannot print (你好, 😀) are put in as typed. The build then names each
+    one, its file and line; XeLaTeX and LuaLaTeX papers need them.
+  - A space left where a formula or a word was deleted is left: LaTeX ignores it.
+- **How it was made.** Planned by one agent, probed and written by others, and the fast-key
+  case timed by the planner; checked here.
 
 ## When an email cannot be sent
 

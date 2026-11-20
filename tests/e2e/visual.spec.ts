@@ -426,3 +426,99 @@ test('undo leaves a caret that can be typed at', async ({ browser }) => {
   const t = await text();
   expect(t).toMatch(/charlieend\. preQQ\s*\\begin\{table\}/);
 });
+
+test('the ordinary keys', async ({ browser }) => {
+  const { page, email } = await person(browser, 'vis-keys');
+  const main = [
+    '\\documentclass{article}',
+    '\\begin{document}',
+    'Alpha one two alphaend.',
+    '',
+    'Bravo three four bravoend.',
+    '',
+    'Charlie five six charlieend.',
+    '',
+    '\\begin{itemize}',
+    '  \\item item uno',
+    '  \\item item dos',
+    '\\end{itemize}',
+    '',
+    'Delta seven eight deltaend.',
+    '\\end{document}',
+    '',
+  ].join('\n');
+  const zip = join(mkdtempSync(join(tmpdir(), 'paperweave-e2e-')), `Keys ${run}.zip`);
+  writeFileSync(zip, await writeZip([{ path: 'main.tex', bytes: Buffer.from(main) }]));
+  await page.goto('/sign-in');
+  await signIn(page, email);
+  await page.getByLabel('Or import a ZIP of a LaTeX project').setInputFiles(zip);
+  await page.getByRole('button', { name: 'Import ZIP' }).click();
+  await page.getByRole('link', { name: 'main.tex' }).first().click();
+  await expect(status(page)).toHaveText('All edits saved.');
+  await expect(page.locator(VISUAL)).toContainText('deltaend');
+  const note = page.locator('.editor .toolbar .note');
+  const text = async () => {
+    await expect(status(page)).toHaveText('All edits saved.');
+    await showSource(page);
+    await page.waitForTimeout(800);
+    const t = (await page.locator(SOURCE).innerText()).replace(/⁠/g, '');
+    await view(page, 'Visual').click();
+    await expect(page.locator(VISUAL)).toBeVisible();
+    return t;
+  };
+
+  // A selection from one paragraph into the next, deleted: the two join.
+  await clickAfter(page, VISUAL, 'Alpha');
+  await page.keyboard.down('Shift');
+  await clickAfter(page, VISUAL, 'Bravo');
+  await page.keyboard.up('Shift');
+  await page.keyboard.press('Delete');
+  await expect(page.locator(VISUAL)).not.toContainText('alphaend');
+  expect(await text()).toMatch(/^Alpha three four bravoend\.$/m);
+  await expect(note).toHaveText('');
+
+  // Delete at the end of the paragraph before a list: nothing happens, and the caret can type.
+  await clickAfter(page, VISUAL, 'charlieend');
+  await page.keyboard.press('End');
+  await page.keyboard.press('Delete');
+  await page.keyboard.type('ZZ');
+  await expect(page.locator(VISUAL)).toContainText('charlieend.ZZ');
+  expect(await text()).toMatch(/charlieend\.ZZ\s*\\begin\{itemize\}/);
+
+  // Backspace at the start of the first list item: nothing happens, and the caret can type.
+  await clickAfter(page, VISUAL, 'item uno');
+  await page.keyboard.press('Home');
+  await page.keyboard.press('Backspace');
+  await page.keyboard.type('ZZ');
+  await expect(page.locator(VISUAL)).toContainText('ZZitem uno');
+  expect(await text()).toMatch(/\\item ZZitem uno/);
+  await expect(note).toHaveText('');
+
+  // A key that cannot be done says why; the next edit that goes through clears the note.
+  await clickAfter(page, VISUAL, 'charlieend');
+  await page.keyboard.down('Shift');
+  await clickAfter(page, VISUAL, 'ZZitem');
+  await page.keyboard.up('Shift');
+  await page.keyboard.press('Delete');
+  await expect(note).toHaveText('That edit spans LaTeX structure. Make it in the source editor.');
+  await page.keyboard.press('ArrowRight');
+  // The editor hears of the collapsed selection a moment after it happens.
+  await page.waitForTimeout(500);
+  await page.keyboard.type('q');
+  await expect(note).toHaveText('');
+
+  // Shift+Enter says where a line break is made.
+  await clickAfter(page, VISUAL, 'deltaend');
+  await page.keyboard.press('Shift+Enter');
+  await expect(note).toHaveText(
+    'A line break inside a paragraph is made in the source, with \\\\.',
+  );
+
+  // Click, End and Enter with no wait between them: the new paragraph is after the full stop.
+  await clickAfter(page, VISUAL, 'deltaend');
+  await page.keyboard.press('End');
+  await page.keyboard.press('Enter');
+  await page.keyboard.type('NEW');
+  await expect(page.locator(VISUAL)).toContainText('NEW');
+  expect(await text()).toMatch(/deltaend\.\s*\n\s*\nNEW/);
+});

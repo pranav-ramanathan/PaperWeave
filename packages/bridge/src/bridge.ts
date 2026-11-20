@@ -68,7 +68,9 @@ export class Bridge {
     const hint = plain ? { from: step.from, to: step.to, size: step.slice.size } : undefined;
     const t = translate(this.model, state.doc, tr.doc, hint);
     if (!t) {
-      this.onReject();
+      // Backspace or Delete at an edge that cannot be joined, with nothing selected: nothing to say.
+      const quiet = step instanceof ReplaceStep && step.slice.size === 0 && state.selection.empty;
+      if (!quiet) this.onReject();
       return false;
     }
     this.pending.set(tr, t);
