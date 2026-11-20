@@ -13,6 +13,7 @@ import {
   person,
   run,
   showSource,
+  sourceText,
   showVisual,
   signIn,
 } from './helpers';
@@ -109,9 +110,10 @@ test('visual edits reach the source through the server, byte for byte', async ({
 
   // Typing in the visual view arrives in the other person's source.
   await typeAfter(owner.page, VISUAL, 'opposite', ' and simpler');
-  await expect(editor.page.locator(SOURCE)).toContainText(
-    'takes the opposite and simpler approach',
-  );
+  // The owner's caret is drawn there too, with their name.
+  await expect
+    .poll(() => sourceText(editor.page))
+    .toContain('takes the opposite and simpler approach');
 
   // The owner goes offline and edits visually while the editor edits the same sentence in source.
   await owner.page.context().setOffline(true);
@@ -123,16 +125,16 @@ test('visual edits reach the source through the server, byte for byte', async ({
   await expect(status(owner.page)).toHaveText('All edits saved.', { timeout: 30_000 });
   const both = 'a splice (visual) of a few characters (source), ';
   await expect(owner.page.locator(VISUAL)).toContainText(both);
-  await expect(editor.page.locator(SOURCE)).toContainText(both);
+  await expect.poll(() => sourceText(editor.page)).toContain(both);
 
   // Emphasis is a structural edit: the server checks and makes it, and it can be undone.
   await pick(owner.page, VISUAL, 'Reviewers');
   await owner.page.getByRole('button', { name: 'Emphasise' }).click();
-  await expect(editor.page.locator(SOURCE)).toContainText('\\emph{Reviewers} then see');
+  await expect.poll(() => sourceText(editor.page)).toContain('\\emph{Reviewers} then see');
   await expect(owner.page.locator(`${VISUAL} em`, { hasText: 'Reviewers' })).toBeVisible();
   await owner.page.getByRole('button', { name: 'Undo' }).click();
-  await expect(editor.page.locator(SOURCE)).not.toContainText('\\emph{Reviewers}');
-  await expect(editor.page.locator(SOURCE)).toContainText(both);
+  await expect.poll(() => sourceText(editor.page)).not.toContain('\\emph{Reviewers}');
+  await expect.poll(() => sourceText(editor.page)).toContain(both);
 
   // Switching views carries the selection across, both ways.
   await pick(owner.page, VISUAL, 'organised');
