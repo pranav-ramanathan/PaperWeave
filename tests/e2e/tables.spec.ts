@@ -5,7 +5,17 @@ import { mkdtempSync, readdirSync, readFileSync, statSync, writeFileSync } from 
 import { tmpdir } from 'node:os';
 import { join, relative } from 'node:path';
 import { readZip, writeZip } from '../../packages/server/src/archive';
-import { person, run, selectWord, showSource, showVisual, signIn, typingSaved } from './helpers';
+import {
+  clickAfter,
+  person,
+  run,
+  selectWord,
+  showSource,
+  showVisual,
+  signIn,
+  slowPaper,
+  typingSaved,
+} from './helpers';
 
 const FIXTURE = join(import.meta.dirname, '../../fixtures/ieee-multifile');
 const VISUAL = '.editor .visual .ProseMirror';
@@ -159,4 +169,30 @@ test('a table cell and a caption are edited in place, byte for byte', async ({ b
       'Latency, to be measured.',
     ),
   );
+});
+
+test('a cell slow to be changed does not take the keyboard back', async ({ browser }) => {
+  test.setTimeout(150_000);
+  const { page, line } = await slowPaper(browser, 'table-slow');
+  const status = page.getByRole('region', { name: /^Editor for/ }).getByRole('status');
+  line.each = 1000;
+  const table = page.locator(VISUAL).getByRole('group', { name: 'Table' });
+  await table.getByRole('button', { name: /^Row 2, column 2:/ }).click();
+  await table.getByLabel('Row 2, column 2', { exact: true }).fill('7777');
+  await page.keyboard.press('Enter');
+  // The person goes on typing above the table before the answer arrives (some of it, so that
+  // the table has moved down by the time it does).
+  await clickAfter(page, VISUAL, 'charlieend');
+  await page.keyboard.type('ab');
+  // The answer comes while the person is still typing.
+  await expect(table.getByRole('button', { name: /^Row 2, column 2: 7777/ })).toBeVisible({
+    timeout: 15_000,
+  });
+  await page.keyboard.type('cd');
+  await expect(status).toHaveText('All edits saved.', { timeout: 60_000 });
+  line.each = 0;
+  await showSource(page);
+  const text = await page.locator('.editor .cm-content').innerText();
+  expect(text).toContain('charlieendabcd.');
+  expect(text).toContain('7777');
 });

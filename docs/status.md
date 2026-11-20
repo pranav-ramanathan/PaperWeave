@@ -628,6 +628,11 @@ ordinary use. Ten ways of looking found them, and each is cheap to do again:
     with a sentence about something else; a note with line breaks refused at a length its
     field allowed; a caption too long told it held the wrong characters.
 
+13. **Make every answer slow.** Every message to and from the sync server held back a second
+    each way, and once ten. Found: typing carried on elsewhere pulled back beside an insertion
+    once its answer came; a full stop of the person's own deleted after a table cell was
+    changed; an edit said to have failed that had been made, and made twice when tried again.
+
 Tried the same way and nothing found: thirty connections typing into one file at once (kept
 as a test in `sync.sandbox.test`); 400 threads and 400 proposals on one file, on the server
 (both lists took about 20 ms; not kept); and each tool of the visual view worked slowly
@@ -1442,6 +1447,58 @@ second one.
   tests ("How often the expensive things can be asked for"). A 49 MB file was added by the
   probe, not by a kept test.
 - **How it was made.** Planned by one agent, probed and written by others, checked here.
+
+## From far away
+
+- **What was tried**, with a probe: every message between the browser and the sync server
+  held back one second each way, as on a slow line far from the server (a delay of the
+  browser's own frames, on one machine, not a real network); and once ten seconds, past the
+  editor's limit. In each case the person did something, then at once clicked elsewhere and
+  went on typing, or waited.
+
+| Done over the slow line                                          | Before                                                                         | Now                               |
+| ---------------------------------------------------------------- | ------------------------------------------------------------------------------ | --------------------------------- |
+| A citation, reference or formula inserted, then typing elsewhere | **the rest of the typing pulled back beside the insertion**                    | typing stays where it was put     |
+| Two paragraphs pasted, then typing elsewhere                     | the same, less often                                                           | the same as above                 |
+| A table cell or caption changed, then typing elsewhere           | **letters lost, and a full stop of the person's own deleted**                  | typing kept, the full stop too    |
+| An edit whose answer takes ten seconds                           | **"could not be made" said of an edit that was made; tried again, made twice** | "Still trying", then "made", once |
+| Typing steadily, in either view                                  | in order                                                                       | the same                          |
+| A proposal accepted, then typing at once                         | both kept                                                                      | the same                          |
+| A comment posted, then another thread shown                      | both                                                                           | the same                          |
+| Compile asked for                                                | waiting, then up to date                                                       | the same                          |
+| Typing while the file is opening                                 | not taken; the status says "Opening…"                                          | the same, by design               |
+
+- **What was wrong.**
+  - **The caret put back.** Once an insertion's answer came, the editor put the caret just
+    after it, wherever the person had gone since.
+  - **A character taken.** A table cell or caption, once changed, selected its table again
+    at the place it had been when the field was opened. Text typed above it since had moved
+    the table on, so that place was now a character of the person's own, which the next key
+    replaced; and the keyboard was taken back from where they were typing.
+  - **Failed, then made.** After eight seconds without an answer the editor gave up and said
+    the edit could not be made. The edit was still on its way; the server made it, and a
+    person who did as they were told made it again, under a new name the server could not
+    know for the same edit.
+- **Now** the caret and the keyboard are moved after an answer only if the person has not
+  moved them, or typed, meanwhile (`moves` in `apps/web/lib/visual.ts`), and a table or
+  figure is found where it is now. An edit not answered is asked for again every three seconds
+  under the same name, which the server makes once, and is never said to have failed while
+  it may still be made: after eight seconds the note says "No answer yet to that change.
+  Still trying: it will be made once, so do not make it again.", then "That change has now
+  been made." (`run` in `FileEditor.tsx`). The insert windows cannot be sent again while
+  their answer is awaited (`Tools.tsx`).
+- **Held by** browser tests, each failed on the old code: `insert.spec` "an insertion slow to
+  arrive leaves the caret where its person put it"; `tables.spec` "a cell slow to be changed
+  does not take the keyboard back"; `recover.spec` "a change whose answer is late is made
+  once" (steady three runs in a row). The slow line is `slowLine` in `tests/e2e/helpers.ts`.
+- **Not changed:** emphasis given to a selected word and then typed straight after, before
+  its answer, puts the letters before the word, or some before it and some inside
+  (`abc\emph{bravoend}`, `abcd\emph{bravoendefgh}`): nothing is lost, and it is not
+  understood. An insert window waiting for its answer stays open, and says nothing until
+  eight seconds have passed. Closing an insert window with Escape puts the keyboard back in
+  the text where it was, which a click made at the same instant can lose to.
+- **How it was made.** Planned and its faults explained by one agent, probed and written by
+  others, checked here.
 
 ## When an email cannot be sent
 

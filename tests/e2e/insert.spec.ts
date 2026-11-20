@@ -5,7 +5,7 @@ import { mkdtempSync, readdirSync, readFileSync, statSync, writeFileSync } from 
 import { tmpdir } from 'node:os';
 import { join, relative } from 'node:path';
 import { readZip, writeZip } from '../../packages/server/src/archive';
-import { clickAfter, person, run, showSource, signIn } from './helpers';
+import { clickAfter, person, run, showSource, signIn, slowPaper } from './helpers';
 
 const FIXTURE = join(import.meta.dirname, '../../fixtures/ieee-multifile');
 const VISUAL = '.editor .visual .ProseMirror';
@@ -250,4 +250,44 @@ test('after an equation is put on a line of its own, typing carries on after it'
     '\\end{equation}',
     '\\end{document}',
   ]);
+});
+
+test('an insertion slow to arrive leaves the caret where its person put it', async ({
+  browser,
+}) => {
+  test.setTimeout(150_000);
+  const { page, line } = await slowPaper(browser, 'insert-slow');
+  const status = page.getByRole('region', { name: /^Editor for/ }).getByRole('status');
+  await clickAfter(page, VISUAL, 'alphaend');
+  line.each = 1000;
+  await page.keyboard.press('Alt+c');
+  const citing = page.getByRole('dialog', { name: 'Insert a citation' });
+  await citing.getByLabel(/^Find an entry/).fill('knuth');
+  await expect(citing.getByRole('option')).toHaveCount(1);
+  await page.keyboard.press('Enter');
+  // The window is dismissed and the caret put at the end of another paragraph before the
+  // answer arrives, and typed in as slowly as a person does.
+  await page.keyboard.press('Escape');
+  // The keyboard goes back to the text when the window has closed; then the person clicks.
+  await expect(citing).toBeHidden();
+  await expect(page.locator(VISUAL)).toBeFocused();
+  await clickAfter(page, VISUAL, 'charlieend');
+  for (const ch of 'ab') {
+    await page.keyboard.type(ch);
+    await page.waitForTimeout(500);
+  }
+  // The answer comes while the person is still typing.
+  await expect(
+    page.locator(`${VISUAL} p`, { hasText: 'alphaend' }).locator('.pw-cite'),
+  ).toHaveCount(1, { timeout: 15_000 });
+  for (const ch of 'cd') {
+    await page.keyboard.type(ch);
+    await page.waitForTimeout(500);
+  }
+  await expect(status).toHaveText('All edits saved.', { timeout: 60_000 });
+  line.each = 0;
+  await showSource(page);
+  const text = await page.locator('.editor .cm-content').innerText();
+  expect(text).toContain('charlieendabcd');
+  expect(text).toMatch(/alphaend\\cite\{knuth1984\}\./);
 });
