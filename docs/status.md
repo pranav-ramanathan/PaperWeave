@@ -2425,8 +2425,24 @@ second one.
     revision now makes too; it waits for the second.
   - **Not changed:** a file missing from the store part way through a streamed ZIP now ends the
     download where it is, where it used to fail before anything was sent.
-- **Next**, measured the same way: the pool's size is not a setting, and every request begins by
-  looking up the sign-in.
+- **Fifth change: the sign-in is kept in the browser for a minute, and the pool is a setting.**
+  Every request looked the sign-in up in the database, two round trips before anything else.
+  Now Better Auth keeps it in a cookie for 60 seconds (`auth.ts`), renewed wherever an answer can
+  set a cookie (`currentSession` in `apps/web/lib/server.ts`), which an open editor's poll does
+  every few seconds. A sync ticket is always looked up afresh, and signing out clears the cookie
+  at once. `DATABASE_POOL_MAX` and `DATABASE_POOL_IDLE_MS` size the pool (`docs/deploy.md`
+  suggests 3 and 5000 on Vercel behind a pooler).
+  - One idle editor, a minute at 50 ms: 35 round trips and no sign-in lookups, where it was 59
+    with 24. Three: 98, where they were 180.
+  - **The cost:** a session ended from another device keeps working in this browser, for pages
+    and actions, for up to a minute. Editing stops at once: the sync server hears of the ended
+    session from the database. Taking someone off a paper, or changing their role, is immediate.
+  - **Held by** service tests that a second request inside the minute makes no sign-in
+    statements, that the cookie is renewed after the minute, that signing out clears both
+    cookies, and that the pool takes its settings and refuses bad ones; and a browser test that
+    after signing out the next page asks for sign-in. Each new one failed on the old code.
+- **Left:** a person who only reads pages, never opening an editor, still looks the sign-in up
+  again once the minute is up, since a page cannot set a cookie. Nothing here was run on Vercel.
 - **How it was made.** Probed and planned by agents, written by another, checked here.
 
 ## When an email cannot be sent
