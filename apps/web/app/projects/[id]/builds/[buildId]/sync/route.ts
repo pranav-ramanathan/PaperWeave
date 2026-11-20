@@ -15,7 +15,17 @@ export async function GET(
   try {
     const found = q.has('file')
       ? await sourceToPdf(db(), blobs(), user.id, id, buildId, q.get('file')!, n('line'))
-      : await pdfToSource(db(), blobs(), user.id, id, buildId, n('page'), n('x'), n('y'));
+      : await pdfToSource(
+          db(),
+          blobs(),
+          user.id,
+          id,
+          buildId,
+          n('page'),
+          n('x'),
+          n('y'),
+          q.get('nearest') === '1',
+        );
     return askedForEachTime(request, JSON.stringify(found), { 'content-type': 'application/json' });
   } catch (err) {
     if (err instanceof AppError)

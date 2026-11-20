@@ -5,7 +5,7 @@ import { mkdtempSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { writeZip } from '../../packages/server/src/archive';
-import { caretLine, clickAfter, person, run, showSource, signIn } from './helpers';
+import { caretLine, clickAfter, person, run, showSource, signIn, typingSaved } from './helpers';
 
 // Two pages: the second section starts the second page, and is in a file of its own.
 const MAIN = [
@@ -149,4 +149,129 @@ test('a line is shown in the PDF, and a place in the PDF leads back to its line'
   await go.focus();
   await page.keyboard.press('Enter');
   await expect(page.getByRole('region', { name: 'Editor for second.tex' })).toBeVisible();
+});
+
+// A two-column paper whose paragraphs wrap: each is three lines of text, with a marker word on the
+// second, so that the PDF has several lines for each of them.
+const paragraph = (m: string) =>
+  `Para line one before the marker, with enough ordinary words to fill a column line here.\nThe word ${m} sits on the second line of this paragraph with more words after it to wrap.\nA third line closes the paragraph, nothing special about it at all, just filler text.\n`;
+const WRAPPED = [
+  '\\documentclass[twocolumn]{article}',
+  '\\begin{document}',
+  '\\section{Wrapped}',
+  '',
+  paragraph('MARKERA'),
+  paragraph('MARKERB'),
+  '\\end{document}',
+  '',
+].join('\n');
+const lineOf = (word: string) => WRAPPED.split('\n').findIndex((l) => l.includes(word)) + 1;
+
+async function openWrapped(browser: Parameters<typeof person>[0], who: string) {
+  const { page, email } = await person(browser, who);
+  const zip = join(mkdtempSync(join(tmpdir(), 'paperweave-e2e-')), `Wrapped ${run}.zip`);
+  writeFileSync(zip, await writeZip([{ path: 'main.tex', bytes: Buffer.from(WRAPPED) }]));
+  await page.goto('/sign-in');
+  await signIn(page, email);
+  await page.getByLabel('Or import a ZIP of a LaTeX project').setInputFiles(zip);
+  await page.getByRole('button', { name: 'Import ZIP' }).click();
+  await page.getByRole('link', { name: 'main.tex' }).first().click();
+  await expect(page.getByRole('region', { name: 'Editor for main.tex' })).toBeVisible();
+  await showSource(page);
+  await expect(build(page).getByRole('status')).toHaveText('The PDF is up to date.', {
+    timeout: 120_000,
+  });
+  const holder = build(page).locator('.pdf-page[data-page="1"]');
+  await holder.evaluate((el) => el.scrollIntoView({ block: 'center' }));
+  await expect(holder).toHaveAttribute('data-drawn', 'yes', { timeout: 30_000 });
+  return page;
+}
+
+/**
+ * Double-click the left edge of the line of the PDF a word is on, where the line's own first
+ * word begins: a place that is before everything the line made.
+ */
+async function pickLeftEdge(page: Page, word: string) {
+  const holder = build(page).locator('.pdf-page[data-page="1"]');
+  const at = await holder.evaluate((el, w) => {
+    const walker = document.createTreeWalker(el, NodeFilter.SHOW_TEXT);
+    for (let n = walker.nextNode(); n; n = walker.nextNode()) {
+      const i = n.textContent!.indexOf(w);
+      if (i < 0) continue;
+      const range = document.createRange();
+      range.setStart(n, i);
+      range.setEnd(n, i + w.length);
+      const word = range.getBoundingClientRect();
+      // The line the word is on: the first thing on it begins at its left edge.
+      let left = Infinity;
+      const all = document.createTreeWalker(el, NodeFilter.SHOW_TEXT);
+      for (let m = all.nextNode(); m; m = all.nextNode()) {
+        const r = document.createRange();
+        r.selectNodeContents(m);
+        for (const q of r.getClientRects())
+          if (Math.abs(q.y + q.height / 2 - (word.y + word.height / 2)) < 2 && q.x <= word.x)
+            left = Math.min(left, q.x);
+      }
+      const h = el.getBoundingClientRect();
+      return { x: left + 1.5 - h.x, y: word.y + word.height / 2 - h.y, w: h.width, h: h.height };
+    }
+    return null;
+  }, word);
+  expect(at).not.toBeNull();
+  // Bring the place to the middle of the pane and of the window, then click it.
+  await holder.evaluate((el, y) => {
+    const c = el.closest('.pdf') as HTMLElement;
+    const h = el.getBoundingClientRect();
+    c.scrollBy(0, h.y + y - (c.getBoundingClientRect().y + c.clientHeight / 2));
+    const h2 = el.getBoundingClientRect();
+    window.scrollBy(0, h2.y + y - window.innerHeight / 2);
+  }, at!.y);
+  const box = (await holder.boundingBox())!;
+  await page.mouse.dblclick(
+    box.x + (at!.x / at!.w) * box.width,
+    box.y + (at!.y / at!.h) * box.height,
+  );
+}
+
+test('a double-click at the left edge of a wrapped line of the PDF is on the line of its words', async ({
+  browser,
+}) => {
+  test.setTimeout(240_000);
+  const page = await openWrapped(browser, 'synctex-edge');
+  for (const m of ['MARKERA', 'MARKERB']) {
+    await pickLeftEdge(page, m);
+    await expect(build(page).locator('.pdf-said')).toHaveText(
+      `That is line ${lineOf(m)} of main.tex.`,
+    );
+    await expect.poll(() => caretLine(page)).toBe(lineOf(m));
+  }
+});
+
+test('with the PDF not rebuilt after typing above, a click goes to the line the words are on now', async ({
+  browser,
+}) => {
+  test.setTimeout(240_000);
+  const page = await openWrapped(browser, 'synctex-behind');
+  await build(page).getByLabel('Compile automatically').uncheck();
+  // Ten lines on the blank line above the second paragraph: its marker is ten lines further down.
+  const marker = await page.evaluate(() =>
+    [...document.querySelectorAll('.editor .cm-line')].findIndex((l) =>
+      l.textContent!.includes('MARKERB'),
+    ),
+  );
+  const blank = page.locator('.editor .cm-line').nth(marker - 2);
+  expect(await blank.textContent()).toBe('');
+  await blank.click();
+  for (let i = 1; i <= 10; i++) {
+    await page.keyboard.type(`% typed ${i}`);
+    await page.keyboard.press('Escape');
+    await page.keyboard.press('Enter');
+  }
+  await typingSaved(page);
+  await expect(build(page).getByRole('status')).toHaveText('The PDF is behind the text.');
+  await pickLeftEdge(page, 'MARKERB');
+  await expect(build(page).locator('.pdf-said')).toHaveText(
+    `That is line ${lineOf('MARKERB') + 10} of main.tex.`,
+  );
+  await expect.poll(() => caretLine(page)).toBe(lineOf('MARKERB') + 10);
 });

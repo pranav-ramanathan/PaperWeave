@@ -12,6 +12,15 @@ type Builds = { latest: Build | null; lastGood: Build | null; edits: string };
 /** A build takes a minute at most once it starts. Waiting twice that, it has not started. */
 const STUCK_AFTER_MS = 120_000;
 
+/** Said after a place that is the nearest one, because the PDF is of text since edited. */
+const NEAREST = ' The PDF is from before your latest edits, so this is the nearest place.';
+const GONE = /no longer in the paper/;
+const refusal = (res: Response) =>
+  res
+    .json()
+    .then((b: { error?: string }) => b.error ?? '')
+    .catch(() => '');
+
 const time = (iso: string) =>
   new Date(iso).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
 
@@ -98,23 +107,29 @@ export default function BuildPane({
   const ask = useCallback(
     async (query: string) => {
       const res = await fetch(`${url}/${pdf}/sync?${query}`).catch(() => null);
-      return res?.ok ? res.json() : null;
+      // A refusal says why in a sentence of its own, which is shown when it is the file's going.
+      return res?.ok ? res.json() : res?.status === 404 ? { error: await refusal(res) } : null;
     },
     [url, pdf],
   );
   useEffect(() => {
     if (!pdf) return;
     return onShow('pdf', async ({ fileId, line }) => {
-      const place: Mark | null = await ask(`file=${fileId}&line=${line}`);
-      if (!place) return setSaid('The PDF does not say where that line is.');
+      const place: (Mark & { moved?: boolean; error?: string }) | null = await ask(
+        `file=${fileId}&line=${line}`,
+      );
+      if (!place || place.error) return setSaid('The PDF does not say where that line is.');
       setMark({ ...place, pdf });
-      setSaid(`Shown on page ${place.page} of the PDF.`);
+      setSaid(`Shown on page ${place.page} of the PDF.${place.moved ? NEAREST : ''}`);
     });
   }, [pdf, ask]);
-  const pick = async (page: number, x: number, y: number) => {
-    const place = await ask(`page=${page}&x=${x.toFixed(2)}&y=${y.toFixed(2)}`);
-    if (!place) return setSaid('The PDF does not say where that came from.');
-    setSaid(`That is line ${place.line} of ${place.path}.`);
+  const pick = async (page: number, x: number, y: number, nearest = false) => {
+    const place = await ask(
+      `page=${page}&x=${x.toFixed(2)}&y=${y.toFixed(2)}${nearest ? '&nearest=1' : ''}`,
+    );
+    if (place?.error && GONE.test(place.error)) return setSaid(place.error);
+    if (!place || place.error) return setSaid('The PDF does not say where that came from.');
+    setSaid(`That is line ${place.line} of ${place.path}.${place.moved ? NEAREST : ''}`);
     showInEditor(place);
   };
   const building = latest?.status === 'queued';
