@@ -304,3 +304,45 @@ test('guard: an ordinary error in the paper, and a package of its own, keep thei
     { severity: 'error', file: 'local.sty', line: 3, message: 'Package local Error: Mine.' },
   ]);
 });
+
+test("with the root in a folder, paths are the root folder's, made project paths", () => {
+  const log = [
+    '(./main.tex (../shared/macros.tex',
+    "LaTeX Warning: Reference `a' on page 1 undefined on input line 3.",
+    ') (./sections/intro.tex',
+    "LaTeX Warning: Reference `b' on page 1 undefined on input line 8.",
+    ')',
+    './sections/intro.tex:8: Undefined control sequence.',
+    '../shared/macros.tex:2: Undefined control sequence.',
+    '../../outside.tex:5: Undefined control sequence.',
+    '/usr/share/texlive/texmf-dist/tex/latex/base/article.cls:12: Oops.',
+    './main.bbl:4: Missing } inserted.',
+    './main.aux:2: Bad.',
+  ].join('\n');
+  const out = diagnostics(log, '', 'paper/');
+  expect(out.map((d) => [d.file, d.line, d.message.split(' ')[0]])).toEqual([
+    ['paper/sections/intro.tex', 8, 'Undefined'],
+    ['shared/macros.tex', 2, 'Undefined'],
+    [undefined, 5, 'Undefined'],
+    [undefined, undefined, 'In'],
+    [undefined, undefined, 'In'],
+    [undefined, undefined, 'In'],
+    ['shared/macros.tex', 3, 'Reference'],
+    ['paper/sections/intro.tex', 8, 'Reference'],
+  ]);
+  expect(out[3].message).toBe('In article.cls: Oops.');
+  expect(out[4].message).toMatch(/^In the bibliography/);
+  expect(out[5].message).toMatch(/^In what the last pass left .*\(main\.aux\)/);
+  expect(out[2]).not.toHaveProperty('file');
+  // BibTeX's output is paths in the same folder.
+  expect(
+    diagnostics('', "I was expecting a `,' or a `}'---line 9 of file refs.bib\n", 'paper/'),
+  ).toEqual([
+    {
+      severity: 'error',
+      file: 'paper/refs.bib',
+      line: 9,
+      message: "BibTeX: I was expecting a `,' or a `}'.",
+    },
+  ]);
+});

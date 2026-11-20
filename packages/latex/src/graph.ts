@@ -56,7 +56,7 @@ export function findRoot(files: Record<string, string>): string | null {
   );
 }
 
-const norm = (path: string) => {
+export const norm = (path: string) => {
   const out: string[] = [];
   for (const part of path.split('/')) {
     if (part === '..') out.pop();

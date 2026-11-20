@@ -1664,6 +1664,28 @@ second one.
   trip; the page's sentences are not under test.
 - **How it was made.** Planned by one agent, probed and written by others, checked here.
 
+## A paper whose root file is in a folder
+
+- **What was wrong.** A paper whose root file was in a folder (`paper/main.tex`) never built,
+  and the build said only that it had failed without saying where. The compiler was run from the
+  top of the paper, so it wrote its PDF and log beside the top and looked for them beside the root
+  file; and TeX read the paper's paths from the top, while every other part of the app (the
+  include graph, renames, pictures) reads them from the root file's folder. A root gets into a
+  folder by "Make … the root file", by a rename, or carried by an archive. Found by the probe of
+  renames, which moved a root.
+- **Now** the compiler runs in the root file's folder (`latexmk -cd`, `apps/workers/src/compile.ts`):
+  paths are read from there, as the rest of the app reads them, and the PDF, log and SyncTeX land
+  where they are looked for. The places in the log, written from that folder, are given back as
+  the paper's paths (`../shared/macros.tex` from `paper/` is `shared/macros.tex`); one that climbs
+  out of the paper is given no file. SyncTeX's paths are read the same way. The command a saved
+  revision records is the one that runs.
+- **Held by** a real build of a paper under `paper/` that reads a file above it, with an error
+  placed in `paper/sections/intro.tex` (`compile.sandbox.test`); unit tests of the places in the log
+  and of SyncTeX's paths; and a browser test that makes a file in a folder the root and builds it.
+  Each failed on the old code. The builds of papers whose root is at the top are unchanged.
+- **The convention**, for anyone writing a paper here: its paths are read from the folder of its
+  root file, as when LaTeX is run in that folder.
+
 ## When an email cannot be sent
 
 - **An invitation** whose email could not be sent ended in an error page, and left an

@@ -346,7 +346,7 @@ export async function exportRevision(
         image: built?.image ?? null,
         // PDF timestamps are set from this, so a rebuild gives the same bytes.
         sourceDateEpoch: epoch,
-        command: `SOURCE_DATE_EPOCH=${epoch} latexmk -norc ${engine} -no-shell-escape -interaction=nonstopmode ${revision.root}`,
+        command: `SOURCE_DATE_EPOCH=${epoch} latexmk -norc -cd ${engine} -no-shell-escape -interaction=nonstopmode ${revision.root}`,
         files: Object.fromEntries(shared.map((f) => [f.path, `sha256:${f.digest}`])),
         charts,
       },
