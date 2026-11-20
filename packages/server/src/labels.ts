@@ -8,7 +8,8 @@ import type { BlobStore } from './blobs.ts';
 import { type Db, transaction } from './db.ts';
 import { AppError } from './errors.ts';
 import { id } from './projects.ts';
-import { appendUpdate, currentBytes, loadUpdates, TEXT } from './sync.ts';
+import { remembered } from './scope.ts';
+import { appendUpdate, bytesOfLog, loadUpdates, readLogs, TEXT } from './sync.ts';
 
 export type LabelPlace = { key: string; fileId: string; path: string; line: number };
 export type LabelReport = {
@@ -42,7 +43,7 @@ export function lineNumbers(text: string): (at: number) => number {
 }
 
 /** The text of every editable .tex file of a paper, by path, with each file's ID. */
-export async function texFiles(
+export function texFiles(
   pool: Db,
   store: BlobStore,
   projectId: string,
@@ -51,6 +52,20 @@ export async function texFiles(
   /** Which files, by the end of their path. */
   ending = '\\.(tex|ltx)$',
 ) {
+  // Locking is never answered from memory.
+  if (lock) return readTexFiles(pool, store, projectId, true, ending);
+  return remembered(pool, ['tex', projectId, ending], () =>
+    readTexFiles(pool, store, projectId, false, ending),
+  );
+}
+
+async function readTexFiles(
+  pool: Db,
+  store: BlobStore,
+  projectId: string,
+  lock: boolean,
+  ending: string,
+) {
   const { rows } = await pool.query(
     `select f.id, f.path, f.digest, f.eol, f.bom, f.head_seq, p.root_file_id = f.id as root
      from files f join projects p on p.id = f.project_id
@@ -58,12 +73,25 @@ export async function texFiles(
      ${lock ? 'for update of f' : ''}`,
     [projectId, ending],
   );
+  // The first log entry is the upload itself, so a file is untouched until there is a second.
+  // The logs of those that are edited come in one statement; the rest are read from the store.
+  const edited = rows.filter((f) => Number(f.head_seq) > 1);
+  const logs = await readLogs(
+    pool,
+    edited.map((f) => f.id),
+  );
   const files: { id: string; path: string; root: boolean; text: string }[] = [];
+  const bytesOf = async (f: (typeof rows)[number]) => {
+    if (Number(f.head_seq) > 1) return bytesOfLog(f, logs.get(f.id) ?? []);
+    const bytes = await store.get(f.digest);
+    if (!bytes) throw new Error(`blob ${f.digest} is missing`);
+    return bytes;
+  };
   // Sixteen at a time. One after another, a paper of many files waits on the store once for
   // each, and every page of the paper reads them all.
   for (let i = 0; i < rows.length; i += 16) {
     const read = await Promise.all(
-      rows.slice(i, i + 16).map(async (f) => decodeFile(await currentBytes(pool, store, f))),
+      rows.slice(i, i + 16).map(async (f) => decodeFile(await bytesOf(f))),
     );
     read.forEach((decoded, n) => {
       const f = rows[i + n];

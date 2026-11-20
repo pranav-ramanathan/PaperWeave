@@ -8,7 +8,7 @@ import { type BlobStore, sha256 } from './blobs.ts';
 import type { Db } from './db.ts';
 import { AppError } from './errors.ts';
 import { id } from './projects.ts';
-import { loadUpdates, TEXT } from './sync.ts';
+import { docsOf, loadUpdates, TEXT } from './sync.ts';
 
 export type ThreadComment = {
   id: string;
@@ -50,9 +50,17 @@ const CONTEXT = 80;
 const bad = (why: string) => new AppError('invalid_input', why);
 
 /** A file's text as the log has it. */
-async function textOf(pool: pg.Pool, store: BlobStore, fileId: string) {
+async function textOf(
+  pool: pg.Pool,
+  store: BlobStore,
+  fileId: string,
+  logs?: Map<string, Uint8Array[]>,
+) {
   const doc = new Y.Doc();
-  for (const update of await loadUpdates(pool, store, fileId)) Y.applyUpdate(doc, update);
+  // A paper's listing reads every log in one statement; a file with none opens as it always did.
+  const logged = logs?.get(fileId);
+  for (const update of logged?.length ? logged : await loadUpdates(pool, store, fileId))
+    Y.applyUpdate(doc, update);
   return { doc, text: doc.getText(TEXT) };
 }
 /** Where an encoded position is in a document now, or -1 if the document does not know it. */
@@ -297,10 +305,12 @@ export async function listThreads(
       [rows.map((r) => r.id)],
     )
   ).rows;
+  // For the whole paper, every log is read in one statement; for one file, only its own.
+  const logs = rows.length && fileId === undefined ? await docsOf(pool, projectId) : undefined;
   const texts = new Map<string, Awaited<ReturnType<typeof textOf>>>();
   const out: Thread[] = [];
   for (const r of rows) {
-    if (!texts.has(r.file_id)) texts.set(r.file_id, await textOf(pool, store, r.file_id));
+    if (!texts.has(r.file_id)) texts.set(r.file_id, await textOf(pool, store, r.file_id, logs));
     const { doc, text } = texts.get(r.file_id)!;
     const [from, to] = [locate(doc, text, r.anchor_from), locate(doc, text, r.anchor_to)];
     const now = from >= 0 && to > from ? text.toString().slice(from, to) : '';

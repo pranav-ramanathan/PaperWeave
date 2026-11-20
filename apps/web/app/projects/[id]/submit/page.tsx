@@ -1,5 +1,6 @@
 import {
   AppError,
+  withScope,
   can,
   type Finding,
   getProject,
@@ -15,7 +16,7 @@ import { buildNowAction } from '../../actions';
 export const dynamic = 'force-dynamic';
 
 /** Everything known to be wrong with the paper, and its files once nothing is. */
-export default async function Submit({
+async function Submit({
   params,
   searchParams,
 }: {
@@ -124,4 +125,9 @@ export default async function Submit({
       )}
     </main>
   );
+}
+
+// What this page reads about the paper, it reads once.
+export default function Scoped(props: Parameters<typeof Submit>[0]) {
+  return withScope(() => Submit(props));
 }

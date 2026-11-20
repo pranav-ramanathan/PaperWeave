@@ -2377,9 +2377,26 @@ second one.
   saved just before, and only that file is worked out again. Each failed on the old code. The
   existing tests of restoring, the fault suite and the attached threads and proposals are
   unchanged and pass.
-- **Next**, measured the same way: a paper's page reads each file's history four times; an open
-  editor asks three things every few seconds, each with its own sign-in check; saving a revision
-  and making a ZIP go one file at a time; and the pool's size is not a setting.
+- **Second change: a page reads each file once.** A paper's page asked fifteen things at once,
+  and each that needed the files read every file's history again: four times over, through the
+  labels, the citations, the citation checks and the held data, besides the threads and the
+  proposals. Now a page, and the read-only answers its panels ask for, run in one scope
+  (`withScope` in `packages/server/src/scope.ts`) in which the paper's files, their histories and
+  the reader's role are read once and shared. The role is shared, not the permission: each action
+  is still checked against it, and nothing done inside a transaction or with a lock uses the
+  shared copy. The histories of all the edited files are read in one statement. The checks
+  before submitting run their parts side by side.
+  - A paper's page, 31 edited files: 0.63 s (1.78 s) to the first byte, and 27 round trips,
+    where it was 1.58 s (4.65 s) and 180. With 3 files: 1.07 s (2.04 s).
+  - Checks before submitting, 31 edited files: 0.40 s (1.10 s), and 14 round trips, where it was
+    1.63 s (4.95 s) and 113.
+  - **Held by** service tests that count the statements of the page's reads (25 for 30 edited
+    files, where there were 168) and of the checks (11, where there were 106); that a viewer is
+    still refused a change once their role is shared; and that nothing is shared between two
+    requests or into a transaction. Each failed on the old code.
+- **Next**, measured the same way: an open editor asks three things every few seconds, each
+  with its own sign-in check; saving a revision and making a ZIP go one file at a time; and the
+  pool's size is not a setting.
 - **How it was made.** Probed and planned by agents, written by another, checked here.
 
 ## When an email cannot be sent
