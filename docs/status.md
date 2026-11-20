@@ -2310,6 +2310,35 @@ second one.
   - Links emailed before this change land on the old error for the 15 minutes they last.
 - **How it was made.** Planned by one agent, probed and written by others, checked here.
 
+## Large files past a hosting limit
+
+- **Why.** On Vercel a function takes and gives at most 4.5 MB, except a streamed answer
+  (`docs/deploy.md`). A ZIP to import, a file to add, a revision's PDF or ZIP: any of them can be
+  larger, and each went through the web app whole.
+- **Now:**
+  - **Uploads over 4 MB go to the store.** The browser asks `POST /api/uploads` for a link
+    (`startUpload`), which checks who is asking and the size, and gives a signed PUT that lasts ten
+    minutes and takes only that many bytes. The file goes to the store under
+    `tmp/<person>/<id>`; the import or the add then names the key, and the server checks its size
+    before reading it, runs the import or the add as before, and deletes it. Only the person who
+    asked can use a key. What is left is swept after a day by the workers. A smaller file, or a
+    form sent without scripts, goes the old way.
+  - **Downloads.** A revision's ZIP and the paper's ZIP are streamed, with the same bytes as
+    before. A PDF over 4 MB is answered, after the check of who may see it, with a redirect to a
+    signed link that lasts five minutes and carries the file's name.
+  - The store's address as browsers reach it is `S3_PUBLIC_ENDPOINT`, and the page's content
+    policy allows it. The store must allow the web app's origin (CORS); `infra/compose.yaml`
+    sets that for local work.
+- **Held by** service tests (a link, then an add or an import, through the store; a size over the
+  limit refused unread; the object deleted after success and after failure; an outsider, a viewer
+  and another person refused; the sweep; streamed bytes equal written bytes; signing tried against
+  a store that checks signatures) and a browser test that imports a 6 MB ZIP and adds a 5 MB file
+  with no request to the app over 4.5 MB, and downloads each large thing.
+- **Not changed:** pictures and chart images still come through the web app. The streamed ZIP
+  still reads its files into memory first. Nothing here was tried on Vercel itself.
+- **How it was made.** Written by an agent from a plan made with the Vercel documentation;
+  checked here.
+
 ## When an email cannot be sent
 
 - **An invitation** whose email could not be sent ended in an error page, and left an
