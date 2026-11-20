@@ -5,9 +5,11 @@ import { createAuth, forgetSignInLink, maySendSignInLink } from './auth.ts';
 import { migrate } from './migrate.ts';
 import {
   acceptInvitation,
+  cancelInvitation,
   createProject,
   findInvitation,
   invite,
+  listInvitations,
   listMembers,
   listProjects,
   removeMember,
@@ -253,4 +255,107 @@ test('a changed role and a removal take effect at once', async () => {
   expect(
     (await listMembers(t.pool, users.owner.id, project)).some((m) => m.userId === who.id),
   ).toBe(false);
+});
+
+/** A link kept live behind the API's back, as one made by an older version would be. */
+const heldLink = (paper: string, email: string, token: string) =>
+  t.pool.query(
+    `insert into invitations (project_id, email, role, token_hash, invited_by, expires_at)
+     values ($1, $2, 'editor', encode(sha256($3::bytea), 'hex'), $4, now() + interval '14 days')`,
+    [paper, email, token, users.owner.id],
+  );
+
+test('someone removed cannot come back on an invitation they still hold', async () => {
+  const b = await t.signIn('held-removed@example.org');
+  const paper = (await createProject(t.pool, users.owner.id, 'Held links')).id;
+  const first = await invite(t.pool, users.owner.id, paper, b.email, 'editor');
+  const second = await invite(t.pool, users.owner.id, paper, b.email, 'editor');
+  await heldLink(paper, b.email, 'held-token-1');
+  await acceptInvitation(t.pool, b.id, second.token);
+  await removeMember(t.pool, users.owner.id, paper, b.id);
+  expect(await code(acceptInvitation(t.pool, b.id, first.token))).toBe('not_found');
+  expect(await code(acceptInvitation(t.pool, b.id, 'held-token-1'))).toBe('not_found');
+  expect((await listMembers(t.pool, users.owner.id, paper)).map((m) => m.email)).not.toContain(
+    b.email,
+  );
+});
+
+test('someone who left cannot come back on an invitation they still hold', async () => {
+  const b = await t.signIn('held-left@example.org');
+  const paper = (await createProject(t.pool, users.owner.id, 'Held links 2')).id;
+  const first = await invite(t.pool, users.owner.id, paper, b.email, 'editor');
+  const second = await invite(t.pool, users.owner.id, paper, b.email, 'editor');
+  await heldLink(paper, b.email, 'held-token-2');
+  await acceptInvitation(t.pool, b.id, second.token);
+  await removeMember(t.pool, b.id, paper, b.id);
+  expect(await code(acceptInvitation(t.pool, b.id, first.token))).toBe('not_found');
+  expect(await code(acceptInvitation(t.pool, b.id, 'held-token-2'))).toBe('not_found');
+});
+
+test('someone removed can be invited again and join', async () => {
+  const b = await t.signIn('again@example.org');
+  const paper = (await createProject(t.pool, users.owner.id, 'Again')).id;
+  const first = await invite(t.pool, users.owner.id, paper, b.email, 'editor');
+  await acceptInvitation(t.pool, b.id, first.token);
+  await removeMember(t.pool, users.owner.id, paper, b.id);
+  const second = await invite(t.pool, users.owner.id, paper, b.email, 'viewer');
+  expect((await acceptInvitation(t.pool, b.id, second.token)).role).toBe('viewer');
+});
+
+test('a spare invitation does not raise a lowered role', async () => {
+  const b = await t.signIn('lowered@example.org');
+  const paper = (await createProject(t.pool, users.owner.id, 'Lowered')).id;
+  const first = await invite(t.pool, users.owner.id, paper, b.email, 'editor');
+  await acceptInvitation(t.pool, b.id, first.token);
+  await setRole(t.pool, users.owner.id, paper, b.id, 'viewer');
+  const spare = await invite(t.pool, users.owner.id, paper, b.email, 'editor');
+  await acceptInvitation(t.pool, b.id, spare.token);
+  expect(
+    (await listMembers(t.pool, users.owner.id, paper)).find((m) => m.userId === b.id)?.role,
+  ).toBe('viewer');
+});
+
+test('pending invitations can be listed and cancelled by those who may invite', async () => {
+  const b = await t.signIn('pending@example.org');
+  const paper = (await createProject(t.pool, users.owner.id, 'Pending')).id;
+  await t.pool.query(
+    'insert into project_members (project_id, user_id, role) values ($1, $2, $3)',
+    [paper, users.viewer.id, 'viewer'],
+  );
+  const made = await invite(t.pool, users.owner.id, paper, b.email, 'reviewer');
+  const list = await listInvitations(t.pool, users.owner.id, paper);
+  expect(list).toHaveLength(1);
+  expect(list[0]).toMatchObject({ email: b.email, role: 'reviewer' });
+  expect(await code(listInvitations(t.pool, users.viewer.id, paper))).toBe('permission_denied');
+  expect(await code(listInvitations(t.pool, users.outsider.id, paper))).toBe('not_found');
+  expect(await code(cancelInvitation(t.pool, users.viewer.id, paper, list[0].id))).toBe(
+    'permission_denied',
+  );
+
+  await cancelInvitation(t.pool, users.owner.id, paper, list[0].id);
+  expect(await listInvitations(t.pool, users.owner.id, paper)).toEqual([]);
+  expect(await code(acceptInvitation(t.pool, b.id, made.token))).toBe('not_found');
+  expect(await findInvitation(t.pool, made.token)).toBeNull();
+
+  const used = await invite(t.pool, users.owner.id, paper, b.email, 'viewer');
+  await acceptInvitation(t.pool, b.id, used.token);
+  const row = await t.pool.query(
+    'select id from invitations where accepted_at is not null and project_id = $1',
+    [paper],
+  );
+  expect(await code(cancelInvitation(t.pool, users.owner.id, paper, row.rows[0].id))).toBe(
+    'not_found',
+  );
+});
+
+test('a second invitation to the same address leaves one live invitation, with the later role', async () => {
+  const b = await t.signIn('twice@example.org');
+  const paper = (await createProject(t.pool, users.owner.id, 'Twice')).id;
+  const first = await invite(t.pool, users.owner.id, paper, b.email, 'editor');
+  const second = await invite(t.pool, users.owner.id, paper, b.email.toUpperCase(), 'viewer');
+  const list = await listInvitations(t.pool, users.owner.id, paper);
+  expect(list).toHaveLength(1);
+  expect(list[0].role).toBe('viewer');
+  expect(await code(acceptInvitation(t.pool, b.id, first.token))).toBe('not_found');
+  expect((await acceptInvitation(t.pool, b.id, second.token)).role).toBe('viewer');
 });

@@ -653,6 +653,12 @@ ordinary use. Ten ways of looking found them, and each is cheap to do again:
     found through `\graphicspath` not followed; a label's `\hyperref`, `\fref` and `\zcref` left
     behind, and the PDF's ?? not said.
 
+18. **Follow one person in and out of a paper.** Found: someone removed, or who had left,
+    joining again on a spare invitation; invitations that could not be seen or cancelled, so a
+    mistyped address could join; a second invitation not replacing the first; an invitation
+    page that said a member would become an editor, and one that left the wrong account with
+    no way on.
+
 Tried the same way and nothing found: thirty connections typing into one file at once (kept
 as a test in `sync.sandbox.test`); 400 threads and 400 proposals on one file, on the server
 (both lists took about 20 ms; not kept); and each tool of the visual view worked slowly
@@ -1737,6 +1743,50 @@ second one.
   nothing, and renaming another label to its name is not refused. The list of pictures offered
   for insertion still names them from the root's folder, which builds. The page's warning before
   a rename that sees no line stays, for whatever is still not read.
+- **How it was made.** Planned by one agent, probed and written by others, checked here.
+
+## Someone coming onto a paper, and leaving it
+
+- **What was tried**, with a probe: fifteen cases of one person invited, joining, removed,
+  leaving and invited again, reading the page and the rows of invitations and members after
+  every step.
+
+| Case                                                            | Before                                                         | Now                                                          |
+| --------------------------------------------------------------- | -------------------------------------------------------------- | ------------------------------------------------------------ |
+| Invited twice, joined on one link, removed; the other link used | **joined again, with the role it named**                       | "not valid any more"                                         |
+| The same after leaving                                          | **joined again**                                               | "not valid any more"                                         |
+| Removed, then invited again on purpose                          | joined, with the new role                                      | the same                                                     |
+| An invitation to a mistyped address                             | **not to be seen or cancelled; its owner joined as an editor** | listed under "Invited, not yet joined", and can be cancelled |
+| Invited as editor, then again as viewer; the first link used    | **an editor**; the second link still live                      | the first link is ended; the later role stands               |
+| A viewer invited as editor                                      | **"You were invited as an editor"**, then still a viewer       | "You are already on this paper as a viewer…", no Join        |
+| A link opened by another account                                | **Join, then refused, with no way on**                         | who it is for, who is signed in, and a way to sign out       |
+| Signed out: the link, sign-in, back to the link                 | back on the link                                               | the same                                                     |
+| A link used twice; a link fifteen days old                      | "not valid any more"                                           | the same                                                     |
+| A role lowered while a spare invitation of a higher one is held | the lower role stays                                           | the same                                                     |
+| The owner's own address invited; the owner leaving or removed   | still the owner; refused                                       | the same                                                     |
+| A viewer or reviewer sending an invitation                      | not offered; refused                                           | the same                                                     |
+| A removed person's comments and proposals                       | kept, with their name                                          | the same                                                     |
+
+- **What was wrong.** Removing a person deleted their place in the paper and nothing else, and
+  an invitation could be used by its address until it was used or fourteen days old. So a
+  spare one let the person back in without the owner. Nothing showed the invitations an owner
+  had sent, so one to a mistyped address could not be stopped. The invitation's page did not
+  look at who was reading it beyond their address.
+- **Now** (`packages/server/src/projects.ts`; the paper's page; the invitation's page):
+  removing or leaving ends the person's unused invitations to that paper, in the same statement
+  as their place in it. The owner sees "Invited, not yet joined", each with its role and the
+  day it ends, and can cancel each. A new invitation to an address ends its earlier one. Ended
+  invitations are kept, so that they still count against the hourly limit on sending. The
+  invitation's page says when the reader is already on the paper, or is signed in as someone
+  else, and does not offer to join.
+- **Held by** service tests (`projects.sandbox.test`: removed and left, each unable to come
+  back on a spare link; pending invitations listed and cancelled, by the owner only; a second
+  invitation leaving one), which failed on the old code; two that pass on both and keep what
+  was right (invited again after removal; a spare invitation not raising a lowered role); and
+  browser tests of the list and its cancelling, and of the invitation's page for a member and
+  for another account.
+- **Not changed:** an invitation lasts fourteen days. A paper cannot change owner. Everyone on
+  a paper sees the others' addresses.
 - **How it was made.** Planned by one agent, probed and written by others, checked here.
 
 ## When an email cannot be sent

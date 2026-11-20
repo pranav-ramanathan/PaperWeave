@@ -1,6 +1,6 @@
 'use client';
 
-export default function SignOut() {
+export default function SignOut({ next }: { next?: string }) {
   return (
     <button
       type="button"
@@ -10,7 +10,7 @@ export default function SignOut() {
           headers: { 'content-type': 'application/json' },
           body: '{}',
         });
-        window.location.href = '/sign-in';
+        window.location.href = next ? `/sign-in?next=${encodeURIComponent(next)}` : '/sign-in';
       }}
     >
       Sign out

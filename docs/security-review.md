@@ -124,6 +124,15 @@ What it found is fixed in the same change, or listed under "Open" with what to d
   browser test asks from three clients, each under its own limit, and sees ten emails arrive
   and the rest refused.
 
+- **Someone taken off a paper could put themselves back.** Removing a person deleted their
+  place in the paper but not the invitations they had not used: one sent twice left a spare
+  link, valid for 14 days, and the person removed (or who had left) could join again with it,
+  with the role it named, and nobody's say-so. Removing or leaving now ends a person's unused
+  invitations to that paper in the same statement; an owner can see every invitation not yet
+  used and cancel it; a second invitation to an address ends the first. A mistyped address no
+  longer leaves an owner unable to stop whoever owns it from joining. Service tests hold each,
+  and failed on the old code.
+
 ## Open
 
 In rough order of how much they matter.
