@@ -88,14 +88,62 @@ const WARNING =
   /^(?:LaTeX(?: Font)?|Package \S+|Class \S+) Warning: (.+(?:\n\([A-Za-z0-9@-]+\)[ \t]+.*)*)$/gm;
 const CONTINUED = /\n\([A-Za-z0-9@-]+\)[ \t]+/g;
 
-export function diagnostics(log: string): Diagnostic[] {
-  const out: Diagnostic[] = [];
+/** TeX announcing that it gave up; the cause is the entry before it. */
+const STOP = /^\s*(?:Emergency stop\.?|==> Fatal error occurred)/;
+
+export function diagnostics(log: string, output = ''): Diagnostic[] {
+  // Errors in the order the log has them, so the cause is not listed after the stop.
+  const found: { at: number; d: Diagnostic }[] = [];
   for (const m of log.matchAll(ERROR))
-    out.push({ severity: 'error', file: m[1], line: Number(m[2]), message: m[3] });
+    found.push({
+      at: m.index,
+      d: { severity: 'error', file: m[1], line: Number(m[2]), message: m[3] },
+    });
   // An error that stops the engine outright (a picture it cannot read, say) has no file and
   // line in front of it, only an exclamation mark.
-  for (const m of log.matchAll(/^!\s?(?:pdfTeX error: |LuaTeX error |)(.+)$/gm))
-    out.push({ severity: 'error', message: m[1].trim() });
+  for (const m of log.matchAll(/^!\s?(?:pdfTeX error: |LuaTeX error |)(.+)$/gm)) {
+    const d: Diagnostic = { severity: 'error', message: m[1].trim() };
+    // "File not found" is followed by the stop in nonstop mode, "main.tex:5: Emergency stop."
+    // That names the file, but its line is where TeX gave up, not where the file was asked for.
+    const stop = /^(?:\.\/)?([^:\n]+?\.\w+):\d+: Emergency stop/m.exec(
+      log
+        .slice(m.index + m[0].length)
+        .split('\n', 16)
+        .join('\n'),
+    );
+    if (stop) d.file = stop[1];
+    found.push({ at: m.index, d });
+  }
+  const out = found
+    .filter(({ d }) => !STOP.test(d.message))
+    .sort((x, y) => x.at - y.at)
+    .map(({ at, d }) => runaway(log, at, d));
+  // The paper ends before \end{document}: TeX's own words for it are about its input.
+  if (/^\*\*\* \(job aborted, no legal \\end found\)/m.test(log))
+    out.push({ severity: 'error', message: 'The paper ends without \\end{document}.' });
+  // BibTeX says where in its own way: "I was expecting a `,' or a `}'---line 9 of file refs.bib".
+  // That is in latexmk's output and in main.blg, never in the TeX log.
+  for (const m of output.matchAll(/^(.+?)---line (\d+) of file (?:\.\/)?(\S+\.bib)\r?$/gm)) {
+    const d: Diagnostic = {
+      severity: 'error',
+      file: m[3],
+      line: Number(m[2]),
+      message: `BibTeX: ${m[1]}.`,
+    };
+    if (!out.some((e) => JSON.stringify(e) === JSON.stringify(d))) out.push(d);
+  }
+  // An error in a file that is not the author's is not placed in it.
+  for (let i = 0; i < out.length; i++) {
+    const { file, message } = out[i];
+    if (file === undefined) continue;
+    const base = file.split('/').at(-1);
+    const own = (text: string) => (out[i] = { severity: 'error', message: text });
+    if (file.startsWith('/')) own(`In ${base}: ${message}`);
+    else if (file.endsWith('.bbl'))
+      own(`In the bibliography (an entry of a .bib file, as LaTeX reads it): ${message}`);
+    else if (/\.(aux|toc|out|lof|lot|nav|snm)$/.test(file))
+      own(`In what the last pass left for this one (${base}): ${message}`);
+  }
   // A warning gives a line but not the file the line is in. That is whichever of the paper's
   // files TeX was reading when it wrote the warning.
   const reading = readingAt(log);
@@ -113,6 +161,15 @@ export function diagnostics(log: string): Diagnostic[] {
     if (!out.some((d) => JSON.stringify(d) === JSON.stringify(warning))) out.push(warning);
   }
   return out;
+}
+
+/** "Runaway argument?" and the next line say how an unfinished argument began. */
+function runaway(log: string, at: number, d: Diagnostic): Diagnostic {
+  if (!/^(?:File ended while scanning|Paragraph ended before)/.test(d.message)) return d;
+  const before = log.slice(0, at).split('\n').slice(-6);
+  const i = before.findLastIndex((t) => t.startsWith('Runaway argument?'));
+  const began = i >= 0 ? before[i + 1]?.split('\\par')[0].slice(0, 40).trim() : undefined;
+  return began ? { ...d, message: `${d.message} It began: \u201c${began}\u201d.` } : d;
 }
 
 /**
@@ -211,7 +268,7 @@ export async function compile(
       ok: !!pdf,
       // `timeout -s KILL` reports 137.
       timedOut: run.code === 137,
-      diagnostics: diagnostics(log),
+      diagnostics: diagnostics(log, run.output),
       log,
       pdf,
       synctex: pdf && keep('.synctex.gz'),

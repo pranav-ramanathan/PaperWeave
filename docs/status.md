@@ -637,6 +637,11 @@ ordinary use. Ten ways of looking found them, and each is cheap to do again:
     begun, the caret left where nothing can be typed, and what was typed next lost; undo in a
     paragraph just opened with Enter taking back the thing before it.
 
+15. **Break the paper the ways authors do, and read what the page says.** Found: a mistake in
+    the `.bib` failing the build with nothing listed; the stop listed as if it were the cause,
+    and before it; errors placed in files the paper does not have; a PDF with ?? in it called
+    up to date without a word in the editor.
+
 Tried the same way and nothing found: thirty connections typing into one file at once (kept
 as a test in `sync.sandbox.test`); 400 threads and 400 proposals on one file, on the server
 (both lists took about 20 ms; not kept); and each tool of the visual view worked slowly
@@ -1562,6 +1567,49 @@ second one.
   here. The cause first given for the caret at the start of the file was looked for and not
   found, which is how it was seen not to be a fault.
 
+## A paper that does not compile
+
+- **What was tried**, with a probe: eighteen mistakes authors make, each compiled for real in
+  the sandbox and four of them through the page, reading what the build listed and what the
+  page said.
+
+| Mistake                                                          | Before                                                             | Now                                                            |
+| ---------------------------------------------------------------- | ------------------------------------------------------------------ | -------------------------------------------------------------- |
+| An unknown command; `R&D` bare; a file named `my intro (v2).tex` | its file and line                                                  | the same                                                       |
+| A `.bib` entry without its closing brace, or its comma           | **"The latest build failed.", nothing listed**                     | `refs.bib:11 BibTeX: Illegal end of database file.`, and so on |
+| `\end{document}` taken out                                       | **only "Emergency stop" and "Fatal error occurred"**               | "The paper ends without \end{document}."                       |
+| A package or an `\input` file that does not exist                | **the stop first, then the cause, with no file**                   | the cause alone, with its file                                 |
+| 150 unknown commands                                             | a hundred errors, **then "Fatal error occurred" as one more**      | the hundred                                                    |
+| A bare `&` in a `.bib` title                                     | **`main.bbl:29`, a file the paper does not have**                  | "In the bibliography (an entry of a .bib file, …)"             |
+| `fontspec` under pdfLaTeX                                        | **a path inside TeX's own installation, then the stop**            | "In fontspec.sty: …"                                           |
+| A `\textbf{` never closed                                        | the `\input` line of the file it was in                            | the same, and "It began: “{never closed”."                     |
+| A `\cite` or `\ref` to nothing                                   | **"up to date", nothing in the editor** (the paper's page said it) | "Built, but the PDF shows ?? for:" and each, with its line     |
+| A loop that never ends                                           | "The latest build ran out of time."                                | the same                                                       |
+| A list begun and never ended                                     | at `\end{document}`, saying "on input line 15"                     | the same                                                       |
+| A mistake inside a command defined in the preamble               | where the command is used                                          | the same                                                       |
+
+- **What was wrong.** The build's list was read from TeX's log alone. BibTeX writes its
+  complaints elsewhere, so a broken `.bib` failed the build with nothing to say why. The lines
+  in which TeX announces that it has stopped were listed as errors of their own, before the
+  cause they followed. An error in a file the build makes for itself (the bibliography as LaTeX
+  reads it) or in TeX's own packages was placed in that file. And a build that worked was
+  "up to date" even with question marks in the PDF where citations and references should be.
+- **Now** (`diagnostics` in `apps/workers/src/compile.ts`, the build pane in `BuildPane.tsx`):
+  errors are listed in the order the log has them, without TeX's announcements of stopping;
+  BibTeX's own errors are read from what the build printed, with their line of the `.bib`; a
+  missing `\end{document}` is said in words; an error in a file not the author's is described,
+  not placed. A failed build with nothing listed says so, and a built paper with ?? in it lists
+  what is missing, the first ten, the rest on the paper's page.
+- **Held by** unit tests on real excerpts of the logs (`diagnostics.test.ts`), two real
+  compiles (`compile.sandbox.test.ts`: a `.bib` missing a comma; a `&` in a `.bib` title) and a
+  browser test (`building.spec`), each failed on the old code.
+- **Not changed:** a list left open is reported at the end of the paper, with the line but not
+  the file it was opened in. A mistake inside a command is placed where the command is used. A
+  missing package or file is given its file but not its line. A package of TeX's own is named
+  without the line that loads it. Biber's errors are not read. The lists are not links to the
+  lines. BibTeX's own words are not in the build log a person can open.
+- **How it was made.** Planned by one agent, probed and written by others, checked here.
+
 ## When an email cannot be sent
 
 - **An invitation** whose email could not be sent ended in an error page, and left an
@@ -1866,6 +1914,10 @@ Changed on the way, and worth keeping:
   page did on the wire did.
 - Locally, the database logs lock waits and statements over 150 ms. That is a setting of the
   local container (`alter system`), not of the repository.
+- **Stop the build worker too before a local browser run.** Outside CI the tests reuse the
+  servers already running, the build worker among them. Killing only the web server leaves a
+  worker running the code from before: a change to how builds are read is then not tried at
+  all. Stop `next start`, the sync server and the worker (`pkill -f '@paperweave/workers'`).
 
 ### A sync test that failed once and is not explained
 

@@ -138,6 +138,21 @@ export default function BuildPane({
             : 'The PDF is up to date.';
   const errors =
     latest?.status === 'failed' ? latest.diagnostics.filter((d) => d.severity === 'error') : [];
+  // A build that worked but left ?? in the PDF: a citation or reference to nothing.
+  const loose =
+    latest && latest.status !== 'failed' && latest.status !== 'queued'
+      ? latest.diagnostics.filter(
+          (d) =>
+            d.severity === 'warning' &&
+            /^(Citation|Reference) .+ undefined|^Label .+ multiply defined/.test(d.message),
+        )
+      : [];
+  const place = (d: { file?: string; line?: number }) => (
+    <code>
+      {d.file}
+      {d.line ? `:${d.line}` : ''}
+    </code>
+  );
   return (
     <section className="build" aria-label="Compiled PDF">
       <div className="editor-bar">
@@ -161,14 +176,26 @@ export default function BuildPane({
         <ul className="diagnostics" aria-label="Build errors">
           {errors.map((d, i) => (
             <li key={i}>
-              <code>
-                {d.file}
-                {d.line ? `:${d.line}` : ''}
-              </code>{' '}
-              {d.message}
+              {place(d)} {d.message}
             </li>
           ))}
         </ul>
+      )}
+      {latest?.status === 'failed' && !latest.timedOut && errors.length === 0 && (
+        <p role="alert">The build failed without saying where. The build log has the details.</p>
+      )}
+      {loose.length > 0 && (
+        <>
+          <p>Built, but the PDF shows ?? for:</p>
+          <ul className="diagnostics" aria-label="Build warnings">
+            {loose.slice(0, 10).map((d, i) => (
+              <li key={i}>
+                {place(d)} {d.message}
+              </li>
+            ))}
+          </ul>
+          {loose.length > 10 && <p>and {loose.length - 10} more: see the paper&apos;s page.</p>}
+        </>
       )}
       {latest && latest.status !== 'queued' && (
         <p className="build-links">
