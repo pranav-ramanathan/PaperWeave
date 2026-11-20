@@ -83,6 +83,8 @@ the keyboard (`insert.spec`).
 - A claim flag is a bordered box that begins "This changes more than the wording".
 - Saved, offline, held and refused states of the editor are sentences in a live region.
 - The band that shows a line in the PDF has an outline, and the place is also said in words.
+- Another person's caret in the visual view carries their name (drawn by the stylesheet, not in
+  the text) and is `aria-hidden`; the "Also here" line is what a screen reader gets.
 
 ## Not checked
 

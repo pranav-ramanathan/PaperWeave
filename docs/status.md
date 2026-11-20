@@ -85,8 +85,8 @@ Read this first. Update it in every pull request.
     took back the wrong thing), so it was removed.
   - Found and fixed on the way: after a file's text first arrived, the visual editor's selection
     was the whole document, and keys pressed before the first click registered were refused.
-  - Not built: other people's carets in the visual view (the source view has them), structural
-    edits other than emphasis, and remembering which view a person last used.
+  - Not built: structural edits other than emphasis, and remembering which view a person last
+    used.
   - Whether a file is "definitions, source only" comes from the import report, so a file added
     later is never marked that way.
 - **C8, first part: edits made offline across a restore.** Someone who comes back online to a
@@ -2730,6 +2730,28 @@ Built after the security review, which had it as its first open item.
   having the plain policy.
 - **Not tried on Vercel.** Firefox may show a picture opened in its own tab without its viewer
   styling; `<img>` is not affected.
+
+## Where the others are, in the visual view
+
+- **Why.** A `.tex` file opens in the visual view, where nobody could see anyone else's caret.
+  The source editor publishes its caret to awareness only while it has focus, so a person in
+  the visual view showed none (or a stale one) to everyone.
+- **What is published and drawn.** The visual view writes the same awareness `cursor` field
+  (Yjs relative positions in the file's text) whenever its selection or text changes while it
+  has focus, and does not write it when unchanged. It draws each other person's caret as an
+  empty `aria-hidden` span with their name in CSS (`data-name`), and their selection as
+  `.remote-selection`. Nothing is added to the sync protocol or the server. Names and colours
+  come from the other person's browser: the colour must be `#rrggbb` (else the first presence
+  colour), the name is cut to 80 characters, and neither goes into HTML.
+- **Held by** `visual.spec.ts` ("each person sees where the other is, in either view"): the
+  caret is drawn after the right word in the visual view, stays there when someone types
+  before it, follows arrow keys, is not in the text, a selection across it or `getSelection`,
+  shows in the source view, shows the source view's caret and selection in the visual view,
+  reaches a reviewer, passes axe, and goes when the person leaves. On the old files the test
+  fails at its first check (no caret element).
+- **Not done.** A caret in the preamble or inside a formula's source is not drawn. A caret is
+  kept at its last place after focus leaves, as in the source view. Names and colours are
+  unverified.
 
 ## Browser tests that failed once in a while
 
