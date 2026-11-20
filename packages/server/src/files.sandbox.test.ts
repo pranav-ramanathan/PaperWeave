@@ -406,7 +406,7 @@ test('a picture under \\graphicspath is found, and renaming it keeps the paper b
   );
   expect(await buildsFine(project.id)).toBe('ok');
 
-  // A package is named by \\usepackage, which a rename does not read: no line, and no surprise.
+  // No \\usepackage names this package: a rename has no line to change, and no surprise.
   const sty = await proposeFileRename(
     t.pool,
     store,
@@ -428,5 +428,63 @@ test('a picture under \\graphicspath is found, and renaming it keeps the paper b
   expect(await buildsFine(project.id)).toBe('ok');
   // Out of the folder: relative to the root's folder instead.
   expect(await move('img/plot.png')).toEqual(['\\includegraphics[width=1cm]{img/plot}']);
+  expect(await buildsFine(project.id)).toBe('ok');
+});
+
+const SUPPORT = [
+  '\\documentclass{article}',
+  '\\usepackage{amsmath,styles/mine}',
+  '\\usepackage{listings,pgfplots,csvsimple}',
+  '\\pgfplotsset{compat=1.17}',
+  '\\begin{document}',
+  '\\lstinputlisting{code/a.txt}',
+  '\\begin{tikzpicture}\\begin{axis}\\addplot table[col sep=comma,x=a,y=b]{data.csv};\\end{axis}\\end{tikzpicture}',
+  '\\csvautotabular{data.csv}',
+  '\\mineword',
+  '\\end{document}',
+  '',
+].join('\n');
+
+test('renaming a style, a listing and a data file follows the lines that name them, and the paper builds', async () => {
+  const zip = await writeZip([
+    { path: 'main.tex', bytes: Buffer.from(SUPPORT) },
+    {
+      path: 'styles/mine.sty',
+      bytes: Buffer.from('\\ProvidesPackage{mine}\n\\newcommand{\\mineword}{styled}\n'),
+    },
+    { path: 'code/a.txt', bytes: Buffer.from('listing line\n') },
+    { path: 'data.csv', bytes: Buffer.from('a,b\n1,2\n2,3\n') },
+  ]);
+  const [project] = await importZip(t.pool, store, owner.id, zip, 'Support');
+  const ids = Object.fromEntries(
+    (await listFiles(t.pool, owner.id, project.id)).map((f) => [f.path, f.id]),
+  );
+  expect(await buildsFine(project.id)).toBe('ok');
+  const rename = async (from: string, to: string) => {
+    const proposal = await proposeFileRename(t.pool, store, owner.id, project.id, ids[from], to);
+    await renameFileAndReferences(
+      t.pool,
+      store,
+      owner.id,
+      project.id,
+      ids[from],
+      to,
+      proposal.digest,
+    );
+    return proposal.changes.map((c) => `${c.line} ${c.after}`);
+  };
+  // Only the one name in the list changes, and the extension is left off.
+  expect(await rename('styles/mine.sty', 'sty/theirs.sty')).toEqual([
+    '2 \\usepackage{amsmath,sty/theirs}',
+  ]);
+  expect(await buildsFine(project.id)).toBe('ok');
+  expect(await rename('code/a.txt', 'listings/b.txt')).toEqual([
+    '6 \\lstinputlisting{listings/b.txt}',
+  ]);
+  expect(await buildsFine(project.id)).toBe('ok');
+  expect((await rename('data.csv', 'data/d.csv')).map((l) => l.replace(/ %.*/, ''))).toEqual([
+    '7 \\begin{tikzpicture}\\begin{axis}\\addplot table[col sep=comma,x=a,y=b]{data/d.csv};\\end{axis}\\end{tikzpicture}',
+    '8 \\csvautotabular{data/d.csv}',
+  ]);
   expect(await buildsFine(project.id)).toBe('ok');
 });
