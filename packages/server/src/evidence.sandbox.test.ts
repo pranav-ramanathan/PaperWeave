@@ -246,3 +246,239 @@ test('an evidence check is about one quoted claim, and is kept apart from the en
   await removeEvidence(t.pool, users.owner.id, p.id, owners.id);
   expect((await citationChecks(t.pool, store, users.owner.id, p.id)).evidence).toEqual({});
 });
+
+// Entries as real bibliographies hold them, looked up against a stand-in registry.
+async function paperOf(bib: string, main = 'Hello~\\cite{k}.') {
+  const files = {
+    'main.tex': `\\documentclass{article}\n\\begin{document}\n${main}\n\\bibliography{refs}\n\\end{document}\n`,
+    'refs.bib': bib,
+  };
+  const zip = await writeZip(
+    Object.entries(files).map(([path, text]) => ({ path, bytes: Buffer.from(text) })),
+  );
+  const [project] = await importZip(t.pool, store, users.owner.id, zip, 'Lookup');
+  return project.id as string;
+}
+/** Look up entry `k` of `bib`; the registry answers `record` (or a status), and the URLs asked are kept. */
+async function lookup(bib: string, record: object | number) {
+  const asked: string[] = [];
+  const fetcher = async (url: string) => {
+    asked.push(url);
+    return typeof record === 'number'
+      ? new Response('{}', { status: record })
+      : Response.json({ status: 'ok', message: record });
+  };
+  const result = await lookUpDoi(t.pool, store, users.owner.id, await paperOf(bib), 'k', {
+    fetcher,
+    registry: 'https://registry.test',
+  });
+  return { ...result, asked };
+}
+const entry = (fields: string) => `@article{k, doi={10.1000/x}, ${fields}}`;
+const seen = (r: { comparison: { field: string; same: boolean }[] }) =>
+  Object.fromEntries(r.comparison.map((c) => [c.field, c.same]));
+
+test('1. a DOI is looked up as a person would read it, not as it was typed', async () => {
+  const underscore = await lookup('@article{k, title={T}, doi = {10.1007/978-3-540-74958-5\\_1}}', {
+    title: ['T'],
+  });
+  expect(underscore.asked).toEqual(['https://registry.test/works/10.1007%2F978-3-540-74958-5_1']);
+  expect(underscore).toMatchObject({ doi: '10.1007/978-3-540-74958-5_1', outcome: 'matches' });
+  for (const written of [
+    'doi:10.1000/x',
+    'DOI 10.1000/x',
+    '10.1000/x.',
+    'https://dx.doi.org/10.1000/x',
+  ]) {
+    const r = await lookup(`@article{k, title={T}, doi = {${written}}}`, { title: ['T'] });
+    expect([written, r.asked, r.doi]).toEqual([
+      written,
+      ['https://registry.test/works/10.1000%2Fx'],
+      '10.1000/x',
+    ]);
+  }
+  const fromUrl = await lookup('@article{k, title={T}, url = {https://doi.org/10.1000/x}}', {
+    title: ['T'],
+  });
+  expect(fromUrl).toMatchObject({ doi: '10.1000/x', outcome: 'matches' });
+  expect(fromUrl.asked).toEqual(['https://registry.test/works/10.1000%2Fx']);
+  // A URL that is not a DOI is no DOI.
+  expect(
+    await code(lookup('@article{k, title={T}, url = {https://example.org/10.1000/x}}', {})),
+  ).toBe('invalid_input');
+  // The cleaned DOI is the one stored.
+  const p = await paperOf('@article{k, title={T}, doi = {doi:10.1000/x.}}');
+  await lookUpDoi(t.pool, store, users.owner.id, p, 'k', {
+    fetcher: async () => Response.json({ message: { title: ['T'] } }),
+    registry: 'https://registry.test',
+  });
+  expect((await citationChecks(t.pool, store, users.owner.id, p)).lookups.k.doi).toBe('10.1000/x');
+});
+
+test('2. a Crossref 404 is still "not found"', async () => {
+  const r = await lookup('@article{k, title={Attention}, doi={10.48550/arXiv.1706.03762}}', 404);
+  expect(r).toMatchObject({ outcome: 'not_found', comparison: [] });
+  expect(r.asked).toEqual(['https://registry.test/works/10.48550%2FarXiv.1706.03762']);
+});
+
+test('3. text in other scripts is compared, not squashed to nothing', async () => {
+  const chinese = await lookup(entry('title={机器学习}'), { title: ['深度学习'] });
+  expect(chinese.outcome).toBe('differs');
+  expect(seen(chinese)).toEqual({ title: false });
+  expect((await lookup(entry('title={机器学习}'), { title: ['机器学习'] })).outcome).toBe(
+    'matches',
+  );
+  const russian = await lookup(entry('title={Квантовая механика}'), {
+    title: ['Теория относительности'],
+  });
+  expect(russian.outcome).toBe('differs');
+  expect(
+    (await lookup(entry('title={Quantum mechanics}'), { title: ['Quantum Mechanics'] })).outcome,
+  ).toBe('matches');
+  expect(
+    seen(
+      await lookup(entry('title={T}, author={M{\\"u}ller, A.}'), {
+        title: ['T'],
+        author: [{ family: 'Müller' }],
+      }),
+    )['first author'],
+  ).toBe(true);
+
+  // A claim in Chinese is said only while it is in the paper.
+  const p = await paperOf(entry('title={T}'), '机器学习改变了世界~\\cite{k}.');
+  const claim = '机器学习改变了世界';
+  await recordEvidence(t.pool, store, users.owner.id, p, 'k', { claim, verdict: 'supports' });
+  await recordEvidence(t.pool, store, users.owner.id, p, 'k', {
+    claim: '完全不同的句子',
+    verdict: 'supports',
+  });
+  await recordEvidence(t.pool, store, users.owner.id, p, 'k', {
+    claim: 'the method works well',
+    verdict: 'supports',
+  });
+  const said = async () =>
+    (await citationChecks(t.pool, store, users.owner.id, p)).evidence.k.map((c) => c.stillSaid);
+  expect(await said()).toEqual([true, false, false]);
+  const [main] = (await listFiles(t.pool, users.owner.id, p)).filter((f) => f.path === 'main.tex');
+  await editFile(t.pool, store, main.id, users.owner.id, (text) => {
+    const at = text.toString().indexOf(claim);
+    text.delete(at, claim.length);
+  });
+  expect(await said()).toEqual([false, false, false]);
+});
+
+test('4. markup in the registry is not a difference', async () => {
+  const coli = await lookup(entry('title={Growth of E. coli \\& others}'), {
+    title: ['Growth of <i>E. coli</i> &amp; others'],
+  });
+  expect(coli.outcome).toBe('matches');
+  expect(coli.comparison[0].registry).toBe('Growth of E. coli & others');
+  const water = await lookup(entry('title={H$_2$O at high pressure}'), {
+    title: ['H<sub>2</sub>O at high pressure'],
+  });
+  expect(water.outcome).toBe('matches');
+  const refs = await lookup(entry('title={A &lt; B &#39;quoted&#39; &#x41;}'), {
+    title: ['A &lt; B &#39;quoted&#39; &#x41;'],
+  });
+  expect(refs.comparison[0].registry).toBe("A < B 'quoted' A");
+});
+
+test('5. the first author is the same person however the entry writes the name', async () => {
+  const author = async (name: string, registryAuthor: object) =>
+    seen(
+      await lookup(entry(`title={T}, author={${name}}`), {
+        title: ['T'],
+        author: [registryAuthor],
+      }),
+    )['first author'];
+  const waals = { family: 'van der Waals', given: 'Johannes' };
+  expect(await author('Johannes van der Waals', waals)).toBe(true);
+  expect(await author('van der Waals, Johannes', waals)).toBe(true);
+  expect(await author('Martin Luther King, Jr.', { family: 'King' })).toBe(true);
+  expect(await author('King, Jr., Martin Luther', { family: 'King' })).toBe(true);
+  expect(await author('{World Health Organization}', { name: 'World Health Organization' })).toBe(
+    true,
+  );
+  expect(await author('M{\\"u}ller, A.', { family: 'Müller' })).toBe(true);
+  expect(await author('Ørsted, H.', { family: 'Ørsted' })).toBe(true);
+  expect(await author('Leslie Lamport', { family: 'Lamport' })).toBe(true);
+  expect(await author('Johannes van der Waals', { family: 'Lamport' })).toBe(false);
+  expect(await author('Martin Luther King, Jr.', { family: 'Luther' })).toBe(false);
+  expect(await author('{World Health Organization}', { name: 'Red Cross' })).toBe(false);
+});
+
+test('6. a title and its subtitle may be given together or apart', async () => {
+  const record = { title: ['Attention'], subtitle: ['all you need'] };
+  const together = await lookup(entry('title={Attention: all you need}'), record);
+  expect(together.outcome).toBe('matches');
+  expect((await lookup(entry('title={Attention}'), record)).outcome).toBe('matches');
+  expect((await lookup(entry('title={Something else}'), record)).outcome).toBe('differs');
+});
+
+test("7. the year may be any of the record's dates", async () => {
+  const record = {
+    title: ['T'],
+    issued: { 'date-parts': [[2021]] },
+    'published-print': { 'date-parts': [[2020]] },
+    'published-online': { 'date-parts': [[2019]] },
+  };
+  for (const year of ['2021', '2020', '2019']) {
+    const r = await lookup(entry(`title={T}, year={${year}}`), record);
+    expect([year, r.outcome, r.comparison.find((c) => c.field === 'year')?.registry]).toEqual([
+      year,
+      'matches',
+      year,
+    ]);
+  }
+  const wrong = await lookup(entry('title={T}, year={2000}'), record);
+  expect(wrong.comparison.find((c) => c.field === 'year')).toEqual({
+    field: 'year',
+    entry: '2000',
+    registry: '2021',
+    same: false,
+  });
+});
+
+test('8. the venue may be the full or the short title', async () => {
+  const record = {
+    title: ['T'],
+    'container-title': ['Physical Review Letters'],
+    'short-container-title': ['Phys. Rev. Lett.'],
+  };
+  expect((await lookup(entry('title={T}, journal={Phys. Rev. Lett.}'), record)).outcome).toBe(
+    'matches',
+  );
+  expect(
+    (await lookup(entry('title={T}, journal={Physical Review Letters}'), record)).outcome,
+  ).toBe('matches');
+  expect((await lookup(entry('title={T}, journal={Nature}'), record)).outcome).toBe('differs');
+});
+
+test('9. a claim copied from the PDF is still said while the sentence stands', async () => {
+  const p = await paperOf(
+    entry('title={T}'),
+    [
+      'As shown in prior work~\\cite{k}, the method works well.',
+      'See Figure~\\ref{f} for the first example, an exam-\nple of caching.',
+      'The cache grew by 15 percent.',
+    ].join('\n'),
+  );
+  const claims = [
+    'As shown in prior work [3], the method works well.',
+    'As shown in prior work [3, 4], the method works well.',
+    'As shown in prior work [3–5], the method works well.',
+    'See Figure 2 for the first example',
+    'See Figure 2 for the ﬁrst example',
+    'an example of caching',
+    // A changed quantity is a changed claim.
+    'The cache grew by 20 percent.',
+    'The cache grew by 15 percent.',
+    'See Figure 2 for another example',
+  ];
+  for (const claim of claims)
+    await recordEvidence(t.pool, store, users.owner.id, p, 'k', { claim, verdict: 'supports' });
+  const result = (await citationChecks(t.pool, store, users.owner.id, p)).evidence.k;
+  expect(result.map((c) => [c.claim, c.stillSaid])).toEqual(
+    claims.map((c) => [c, !/20 percent|another/.test(c)]),
+  );
+});

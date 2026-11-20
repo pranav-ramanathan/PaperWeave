@@ -14,7 +14,7 @@ const FILES = {
     '\\begin{document}',
     '\\emph{Literate programming} treats a program as a work of literature~\\cite{knuth1984}.',
     'LaTeX was first released in 1984~\\cite{lamport1994}.',
-    '\\nocite{nodoi}',
+    '\\nocite{nodoi,escaped,datacite}',
     '\\bibliography{refs}',
     '\\end{document}',
     '',
@@ -23,11 +23,14 @@ const FILES = {
     '@article{knuth1984, author = {Knuth, Donald E.}, title = {Literate {P}rogramming}, journal = {The Computer Journal}, year = {1984}, doi = {10.1093/comjnl/27.2.97}}',
     '@book{lamport1994, author = {Leslie Lamport}, title = {LaTeX: A Document Preparation System}, year = {1993}, doi = {10.5555/lamport}}',
     '@misc{nodoi, title = {No DOI here}}',
+    '@inbook{escaped, title = {A Springer chapter}, doi = {10.1007/978-3-540-74958-5\\_1}}',
+    '@misc{datacite, title = {Attention is all you need}, doi = {10.48550/arXiv.1706.03762}}',
     '@misc{spare, title = {Kept for another paper}}',
     '',
   ].join('\n'),
 };
 const RECORDS: Record<string, object> = {
+  '10.1007/978-3-540-74958-5_1': { title: ['A Springer chapter'] },
   '10.1093/comjnl/27.2.97': {
     title: ['Literate Programming'],
     author: [{ family: 'Knuth' }],
@@ -74,7 +77,7 @@ test('an entry is checked against the registry, and a claim against its source, 
   await signIn(page, owner.email);
   await page.getByLabel('Or import a ZIP of a LaTeX project').setInputFiles(zip);
   await page.getByRole('button', { name: 'Import ZIP' }).click();
-  await expect(page.getByText('4 entries. Every citation has one.')).toBeVisible();
+  await expect(page.getByText('6 entries. Every citation has one.')).toBeVisible();
   // The table is of what the paper cites. An entry it never names is counted, not listed: a
   // .bib file kept for many papers can hold thousands of those. They can be asked for.
   await expect(
@@ -109,6 +112,16 @@ test('an entry is checked against the registry, and a claim against its source, 
     'year: the entry says “1993”, the registry “1994”',
   );
   await expect(row(page, 'lamport1994')).not.toContainText('title:');
+
+  // A DOI written as BibTeX wants it (\_) is asked for as the DOI it is. A 404 is not proof the
+  // DOI is wrong: it may be registered with another agency.
+  await page.getByRole('button', { name: 'Look up the DOI of escaped' }).click();
+  await expect(row(page, 'escaped')).toContainText('Matches the registry.');
+  expect(asked).toContain('GET /works/10.1007%2F978-3-540-74958-5_1');
+  await page.getByRole('button', { name: 'Look up the DOI of datacite' }).click();
+  await expect(row(page, 'datacite')).toContainText(
+    'Crossref has no record of this DOI. It may be wrong, or registered elsewhere: arXiv and Zenodo DOIs, for example, are registered with DataCite.',
+  );
 
   // Does the source support the claim? A reviewer says so about one quoted claim.
   await reviewer.page.goto(await emailedLink(reviewer.email, '/invitations/'));

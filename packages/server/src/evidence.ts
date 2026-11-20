@@ -2,7 +2,7 @@
 // whether an entry's details are right (a DOI lookup), and whether the source supports a
 // particular claim the paper makes (a person's judgement, about one quoted claim).
 import { createHash } from 'node:crypto';
-import { type BibEntry, bibEntries, bibItems, plainText } from '@paperweave/latex';
+import { type BibEntry, bibEntries, bibItems, cleanDoi, plainText } from '@paperweave/latex';
 import type pg from 'pg';
 import { authorize, can } from './authz.ts';
 import type { BlobStore } from './blobs.ts';
@@ -38,17 +38,61 @@ export type EvidenceCheck = {
   mine: boolean;
 };
 
-/** Letters and digits only, lower case: what two spellings of a title have in common. */
-const squash = (text: string) =>
+/** Letters and digits of every script, lower case, accents off: what two spellings have in common. */
+export const squash = (text: string) =>
   plainText(text)
     .normalize('NFKD')
     .toLowerCase()
-    .replace(/[^a-z0-9]+/g, '');
-const firstAuthor = (entry: BibEntry) => {
+    .replace(/\p{M}+/gu, '')
+    .replace(/[^\p{L}\p{N}]+/gu, '');
+/** Two squashed texts are the same only if there is something in them. */
+const alike = (a: string, b: string) => {
+  const x = squash(a);
+  return x !== '' && x === squash(b);
+};
+
+/** A registry's string as text: tags taken out, the common entities decoded. */
+const ENTITIES: Record<string, string> = {
+  amp: '&',
+  lt: '<',
+  gt: '>',
+  quot: '"',
+  apos: "'",
+  nbsp: ' ',
+};
+const unmarked = (text: string) =>
+  text
+    .replace(/<[^>]*>/g, '')
+    .replace(/&(?:#(\d+)|#[xX]([0-9a-fA-F]+)|([a-zA-Z]+));/g, (all, dec, hex, name) => {
+      if (name) return ENTITIES[name] ?? all;
+      const code = dec ? Number(dec) : Number.parseInt(hex, 16);
+      return code > 0 && code <= 0x10ffff ? String.fromCodePoint(code) : all;
+    })
+    .replace(/\s+/g, ' ')
+    .trim();
+
+/** The first author's name as far as the family name goes: "Family" of "Family, Given", else all of it. */
+const authorHead = (entry: BibEntry) => {
   const first = plainText(
     (entry.fields.author ?? entry.fields.editor ?? '').split(/\s+and\s+/i)[0],
   );
-  return first.includes(',') ? first.slice(0, first.indexOf(',')) : (first.split(' ').at(-1) ?? '');
+  return { head: first.split(',')[0].trim(), comma: first.includes(',') };
+};
+/** The entry's first author, as it reads when the registry's family name is not known. */
+const firstAuthor = (entry: BibEntry) => {
+  const { head, comma } = authorHead(entry);
+  return comma ? head : (head.split(' ').at(-1) ?? '');
+};
+/** The same person: the whole names agree, or the entry's name ends with the registry's family name. */
+const sameAuthor = (entry: BibEntry, registry: string) => {
+  const words = (t: string) => t.split(/\s+/).filter(Boolean).map(squash).filter(Boolean);
+  const theirs = words(registry);
+  const mine = words(authorHead(entry).head.replace(/(?:\s+|^)(?:jr|sr|ii|iii|iv)\.?$/i, ''));
+  return (
+    theirs.length > 0 &&
+    mine.length >= theirs.length &&
+    mine.slice(-theirs.length).join(' ') === theirs.join(' ')
+  );
 };
 /** The parts of an entry a registry can confirm, as the entry gives them. */
 const comparable = (entry: BibEntry) => ({
@@ -59,9 +103,30 @@ const comparable = (entry: BibEntry) => ({
     entry.fields.journal ?? entry.fields.journaltitle ?? entry.fields.booktitle ?? '',
   ),
 });
+/** Citation numbers in brackets, and the number after Figure, Table, Section...: they follow the paper's numbering. */
+const dropNumbers = (text: string) =>
+  text
+    .replace(/\[\s*\d+(?:\s*[,;–—-]\s*\d+)*\s*\]/g, '')
+    .replace(
+      /\b(Figure|Fig\.?|Table|Section|Sec\.?|Equation|Eq\.?|Appendix)(?:\s|~)*\(?\d+(?:\.\d+)*[a-z]?\)?/gi,
+      '$1',
+    );
+/** The paper's source without its citation and reference commands, arguments and all. */
+const dropReferences = (tex: string) =>
+  dropNumbers(
+    tex.replace(
+      /\\(?:[a-zA-Z]*cite[a-zA-Z]*|[a-zA-Z]*ref|label)\*?\s*(?:\[[^\]]*\]\s*)*\{[^}]*\}/gi,
+      '',
+    ),
+  );
+/** Whether a claim's words are in the paper's (squashed) words. A claim with no words is not. */
+const stillSaid = (said: string, claim: string) => {
+  const words = squash(dropNumbers(claim));
+  return words !== '' && said.includes(words);
+};
 const digestOf = (entry: BibEntry) =>
   createHash('sha256')
-    .update(JSON.stringify([entry.fields.doi, comparable(entry)]))
+    .update(JSON.stringify([cleanDoi(entry), comparable(entry)]))
     .digest('hex');
 
 /** The paper's entries by key. Of several with one key, the first: that is the one BibTeX keeps. */
@@ -102,7 +167,7 @@ export async function lookUpDoi(
   await authorize(pool, userId, id(projectId), 'comment.write');
   const entry = (await entriesByKey(pool, store, projectId)).get(key);
   if (!entry) throw new AppError('invalid_input', `The bibliography has no entry called ${key}.`);
-  const doi = (entry.fields.doi ?? '').replace(/^https?:\/\/(dx\.)?doi\.org\//i, '').trim();
+  const doi = cleanDoi(entry);
   if (!/^10\.\d{4,9}\/\S+$/.test(doi))
     throw new AppError('invalid_input', 'That entry has no DOI that can be looked up.');
   const registry = opts.registry ?? process.env.CROSSREF_URL ?? 'https://api.crossref.org';
@@ -122,23 +187,47 @@ export async function lookUpDoi(
     const record = ((await res.json().catch(() => null)) as { message?: Record<string, unknown> })
       ?.message;
     if (!record) throw unreachable;
-    const first = <T>(v: unknown) => (Array.isArray(v) ? (v[0] as T | undefined) : undefined);
-    const issued = (record.issued ?? record.published) as { 'date-parts'?: number[][] } | undefined;
-    const theirs: Record<string, string> = {
-      title: first<string>(record.title) ?? '',
-      year: String(issued?.['date-parts']?.[0]?.[0] ?? ''),
-      'first author': first<{ family?: string; name?: string }>(record.author)?.family ?? '',
-      venue: first<string>(record['container-title']) ?? '',
+    const list = (v: unknown) => (Array.isArray(v) ? v : []);
+    const texts = (v: unknown) =>
+      list(v)
+        .filter((x): x is string => typeof x === 'string')
+        .map(unmarked);
+    const years = (v: unknown) => {
+      const y = (v as { 'date-parts'?: unknown[][] } | undefined)?.['date-parts']?.[0]?.[0];
+      return typeof y === 'number' ? String(y) : '';
     };
     const ours = comparable(entry);
+    const [title = ''] = texts(record.title);
+    const [subtitle = ''] = texts(record.subtitle);
+    const withSub = subtitle ? `${title}: ${subtitle}` : '';
+    const author = list(record.author)[0] as { family?: string; name?: string } | undefined;
+    const family = unmarked(author?.family || author?.name || '');
+    const issued = years(record.issued ?? record.published);
+    const dated = [issued, years(record['published-print']), years(record['published-online'])];
+    const venues = [...texts(record['container-title']), ...texts(record['short-container-title'])];
+    const pick = (mine: string, options: string[], fallback: string) =>
+      options.find((o) => alike(mine, o)) ?? fallback;
+    const theirs: Record<string, string> = {
+      title: pick(ours.title, [title, withSub], title),
+      year: pick(ours.year, dated.filter(Boolean), issued || dated.find(Boolean) || ''),
+      'first author': family,
+      venue: pick(ours.venue, venues, venues[0] ?? ''),
+    };
+    const same: Record<string, boolean> = {
+      title: alike(ours.title, theirs.title),
+      year: alike(ours.year, theirs.year),
+      'first author': sameAuthor(entry, family),
+      venue: alike(ours.venue, theirs.venue),
+    };
     comparison = Object.entries(ours)
       // A part neither side gives cannot be compared, and is not held against the entry.
       .filter(([field, mine]) => mine || theirs[field])
       .map(([field, mine]) => ({
         field,
-        entry: mine,
+        // An author who is the registry's author is shown as the registry spells the family name.
+        entry: field === 'first author' && same[field] ? theirs[field] : mine,
         registry: theirs[field],
-        same: squash(mine) === squash(theirs[field]),
+        same: same[field],
       }));
   }
   const outcome =
@@ -228,7 +317,9 @@ export async function citationChecks(
     };
   }
   // The paper's words, with LaTeX markup taken away, to see whether a quoted claim is still there.
-  const said = squash((await texFiles(pool, store, projectId)).map((f) => f.text).join('\n'));
+  const said = squash(
+    dropReferences((await texFiles(pool, store, projectId)).map((f) => f.text).join('\n')),
+  );
   const evidence: Record<string, EvidenceCheck[]> = {};
   const checks = await pool.query(
     `select c.id, c.key, c.claim, c.verdict, c.note, c.checked_at, c.checked_by, u.email
@@ -245,7 +336,7 @@ export async function citationChecks(
       note: r.note,
       checkedBy: r.email,
       checkedAt: r.checked_at.toISOString(),
-      stillSaid: said.includes(squash(r.claim)),
+      stillSaid: stillSaid(said, r.claim),
       mine: r.checked_by === userId || can(role, 'file.write'),
     });
   return { lookups, evidence };

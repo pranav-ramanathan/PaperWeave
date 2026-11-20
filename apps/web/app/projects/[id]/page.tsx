@@ -551,7 +551,7 @@ export default async function Project({
                                 <>
                                   {looked.outcome === 'matches' && 'Matches the registry.'}
                                   {looked.outcome === 'not_found' &&
-                                    'The registry has no record of this DOI.'}
+                                    'Crossref has no record of this DOI. It may be wrong, or registered elsewhere: arXiv and Zenodo DOIs, for example, are registered with DataCite.'}
                                   {looked.outcome === 'differs' && (
                                     <>
                                       Differs from the registry:

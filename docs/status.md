@@ -669,6 +669,11 @@ ordinary use. Ten ways of looking found them, and each is cheap to do again:
     and a `%` hid the rest of its line from the PDF, by an owner or through a reviewer; a word
     offered for the paper's words that could not be one.
 
+21. **Give the checks the entries real bibliographies hold.** Found: a DOI written for BibTeX
+    said not to exist; an arXiv DOI said to have no record, as if wrong; two different titles
+    in Chinese said to match, and a deleted Chinese claim said to be still in the paper; the
+    same title, author, year or venue said to differ for the registry's markup or spelling.
+
 Tried the same way and nothing found: thirty connections typing into one file at once (kept
 as a test in `sync.sandbox.test`); 400 threads and 400 proposals on one file, on the server
 (both lists took about 20 ms; not kept); and each tool of the visual view worked slowly
@@ -1881,6 +1886,49 @@ second one.
 - **Also fixed on the way:** `files.spec` pressed "Rename" on the confirming page before it
   had come, and pressed the paper page's own button instead, which only asked again. It
   failed twice in three runs on one machine, and passed in CI. The test now waits for the page.
+- **How it was made.** Planned by one agent, probed and written by others, checked here.
+
+## Is the entry right?
+
+- **What was tried**, with a probe: "Look up DOI" and evidence checks on the entries real
+  bibliographies hold, against a stand-in for the registry that answered as Crossref does.
+
+| Case                                                                         | Before                                        | Now                                       |
+| ---------------------------------------------------------------------------- | --------------------------------------------- | ----------------------------------------- |
+| `doi = {10.1007/978-3-540-74958-5\_1}`                                       | **sent with its backslash: "no record"**      | looked up as `…5_1`; matches              |
+| `doi:10.1000/x`, `DOI 10.1000/x`; a DOI only in `url`                        | **"no DOI that can be looked up"**            | looked up                                 |
+| `10.1000/x.`                                                                 | **looked up with the full stop**              | without it                                |
+| An arXiv DOI, which Crossref does not hold                                   | **"The registry has no record of this DOI."** | says it may be registered with DataCite   |
+| Two different titles in Chinese, or in Russian                               | **"Matches the registry"**                    | differs                                   |
+| `Growth of <i>E. coli</i> &amp; others`; `H<sub>2</sub>O`, from the registry | **differs**                                   | matches                                   |
+| `Johannes van der Waals`; `Martin Luther King, Jr.`; an organisation         | **the first author differs**                  | the same                                  |
+| A title with a subtitle the registry gives apart                             | **differs**                                   | matches                                   |
+| The print year, where the registry's first date is a year earlier            | **differs**                                   | matches                                   |
+| `Phys. Rev. Lett.`, given by the registry as its short title                 | **differs**                                   | matches                                   |
+| A claim in Chinese, deleted from the paper, or never in it                   | **"still said"**                              | not                                       |
+| A claim copied from the PDF, with `[3]` or `Figure 2` in it                  | **"no longer said"** while the sentence stood | still said; a changed number still is not |
+| The registry answering with a page, 429, 500, or too slowly                  | "did not answer", nothing recorded            | the same                                  |
+
+- **What was wrong.** The DOI was taken from the entry as written, with BibTeX's escapes in
+  it. Text was compared after keeping only `a` to `z` and digits, so every other script
+  compared as nothing, and nothing equals nothing. The registry's own markup was compared as
+  words. Names, subtitles, dates and venues were read one way only.
+- **Now** (`cleanDoi` in `packages/latex/src/bib.ts`; `packages/server/src/evidence.ts`): the
+  DOI is cleaned of escapes, prefixes and trailing marks, and found in `url` when there is no
+  `doi`. Text keeps the letters and digits of every script, and nothing with no letters is
+  ever the same as anything. The registry's tags and entities are taken out. An author is the
+  same when the entry's name ends with the registry's family name, or the organisation's name;
+  a title with or without its subtitle, any of the registry's dates, and its full or short
+  venue all count. Whether a claim is still said is read without citation and reference
+  commands, and without the numbers the paper's own numbering puts in a copied sentence.
+  `plainText` reads `\o`, `\ae`, `\ss` and their kin as letters.
+- **Held by** service tests, one for each rule, with guards for what was right; unit tests of
+  `cleanDoi` and `squash`; and a browser step for the escaped DOI and the DataCite sentence.
+  Each failed on the old code, but the one that holds an arXiv DOI's outcome, which was right.
+- **Not changed:** only Crossref is asked. "Fig. 2" in a claim is not "Figure" in the
+  paper. An entry whose DOI was written as an address reads as changed since its last
+  lookup, once, because what is compared is now the cleaned DOI. "Check before submitting"
+  does not list lookups or evidence checks.
 - **How it was made.** Planned by one agent, probed and written by others, checked here.
 
 ## When an email cannot be sent

@@ -1,6 +1,13 @@
 // A paper's bibliography: the entries in its .bib files and the citations in its text, read
 // from both as they stand now. Nothing here writes to a .bib file.
-import { bibEntries, bibItems, citeIndex, describeEntry, includeGraph } from '@paperweave/latex';
+import {
+  bibEntries,
+  bibItems,
+  citeIndex,
+  cleanDoi,
+  describeEntry,
+  includeGraph,
+} from '@paperweave/latex';
 import type pg from 'pg';
 import { authorize } from './authz.ts';
 import type { BlobStore } from './blobs.ts';
@@ -42,7 +49,7 @@ export async function citationReport(
         key: e.key,
         type: e.type,
         description: describeEntry(e),
-        doi: e.fields.doi?.replace(/^https?:\/\/(dx\.)?doi\.org\//i, '') || null,
+        doi: cleanDoi(e) || null,
         cited: false,
         fileId: file.id,
         path: file.path,
