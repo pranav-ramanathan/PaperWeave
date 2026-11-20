@@ -267,7 +267,11 @@ export default async function Project({
             {can(project.role, 'project.export') && (
               <>
                 <a href={`/projects/${id}/export`}>Download ZIP</a>{' '}
-                <a href={`/projects/${id}/export?review`}>ZIP with review data</a>
+                <a href={`/projects/${id}/export?review`}>ZIP with review data</a>{' '}
+                <small>
+                  Comments and proposed changes come too; saved revisions, citation checks, data
+                  descriptions, chart settings and language settings do not.
+                </small>
               </>
             )}{' '}
             <Link prefetch={false} href={`/projects/${id}/submit`}>
@@ -366,7 +370,9 @@ export default async function Project({
                 proposed {report.review.proposals === 1 ? 'change' : 'changes'} were brought in
                 {report.review.detached > 0 &&
                   `, ${report.review.detached} of the threads about text that is no longer in the paper`}
-                . See Review below.
+                . See Review below. Files, comments and proposed changes came with the archive.
+                Saved revisions, checked citations, data descriptions, chart settings and language
+                settings stay with the paper they were made in.
               </li>
             )}
             {report.review?.missing.map((m) => (

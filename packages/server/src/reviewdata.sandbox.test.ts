@@ -5,7 +5,7 @@ import { readZip, writeZip } from './archive.ts';
 import { blobStore } from './blobs.ts';
 import { exportZip, importReport, importZip, listFiles } from './import.ts';
 import { acceptInvitation, invite } from './projects.ts';
-import { acceptProposal, closeProposal, listProposals, propose } from './proposals.ts';
+import { acceptProposal, closeProposal, listProposals, propose, undoAccept } from './proposals.ts';
 import { exportReview, locateQuote, REVIEW_FILE } from './reviewdata.ts';
 import { editFile, loadUpdates, TEXT } from './sync.ts';
 import { TEST_ENV, testDb } from './testing.ts';
@@ -154,6 +154,11 @@ test('a paper leaves with its review and arrives with it', async () => {
   });
   const was = await review(p.id, users.owner.id);
   const now = await review(arrived.id, users.importer.id);
+  // A thread arrives with what stands around its words now (the accepted change is in it), not
+  // with what stood there when it was started.
+  expect(now.threads[0].after).toContain('No more is cla');
+  expect(was.threads[0].after).toContain('Nothing else i');
+  for (const side of [was, now]) for (const th of side.threads) th.after = th.before = '';
   expect(now).toEqual(was);
   // What that covers, spelt out: states, the people as names, and the flags.
   expect(now.threads.map((th) => [th.state, th.status, th.startedBy])).toEqual([
@@ -274,4 +279,191 @@ test('words are found where they stand, or by what stands around them', () => {
   // A place with no words of its own: between what stood before and after it.
   expect(locateQuote(text, '', 'slow. ', 'The second')).toBe(24);
   expect(locateQuote(text, '', '', '')).toBe(-1);
+});
+
+// ---- What the app can write must come back in whole; what travels is how it reads now. ----
+
+const NOW = '2026-01-01T00:00:00.000Z';
+/** A ZIP of the paper with the given text as its review file. */
+const zipWith = (review: string) =>
+  writeZip([
+    { path: 'main.tex', bytes: Buffer.from(MAIN) },
+    { path: REVIEW_FILE, bytes: Buffer.from(review) },
+  ]);
+/** The paper exported with its review and imported again by someone else. */
+async function trip(projectId: string) {
+  const zip = await exportZip(t.pool, store, users.owner.id, projectId, { review: true });
+  const [arrived] = await importZip(t.pool, store, users.importer.id, zip, 'Arrived');
+  return {
+    id: arrived.id,
+    report: (await importReport(t.pool, users.importer.id, arrived.id))!,
+  };
+}
+const replaceIn = (file: string, from: string, to: string) =>
+  editFile(t.pool, store, file, users.owner.id, (text) => {
+    const at = text.toString().indexOf(from);
+    text.delete(at, from.length);
+    text.insert(at, to);
+  });
+
+test('a critique proposal with long evidence does not cost the file its threads', async () => {
+  const p = await paper();
+  for (const words of ['below 40 ms', 'Nothing else'])
+    await startThread(t.pool, store, users.reviewer.id, p.id, p.file, {
+      ...(await ends(p.file, words)),
+      body: 'Hm.',
+    });
+  const made = await propose(t.pool, store, users.reviewer.id, p.id, p.file, {
+    ...(await ends(p.file, 'Nothing else')),
+    replacement: 'No more',
+  });
+  await t.pool.query("update proposals set origin = 'critique', evidence = $2 where id = $1", [
+    made,
+    JSON.stringify(['k'.repeat(501)]),
+  ]);
+  const { id, report } = await trip(p.id);
+  expect(report.review).toMatchObject({ threads: 2, proposals: 1, missing: [] });
+  const [arrived] = await listProposals(t.pool, store, users.importer.id, id);
+  expect(arrived.evidence).toEqual(['k'.repeat(500)]);
+});
+
+test('many comments and a long address arrive whole, the name trimmed', async () => {
+  const p = await paper();
+  const long = `${'a'.repeat(309)}@example.org`;
+  expect(long.length).toBe(321);
+  const author = await t.signIn(long);
+  await t.pool.query(
+    "insert into project_members (project_id, user_id, role) values ($1,$2,'reviewer')",
+    [p.id, author.id],
+  );
+  const { id } = await startThread(t.pool, store, author.id, p.id, p.file, {
+    ...(await ends(p.file, 'below 40 ms')),
+    body: 'First.',
+  });
+  await t.pool.query(
+    `insert into thread_comments (thread_id, author, body)
+     select $1, $2, 'More ' || n from generate_series(1, 500) n`,
+    [id, users.owner.id],
+  );
+  const { id: arrived, report } = await trip(p.id);
+  expect(report.review).toMatchObject({ threads: 1, missing: [] });
+  const [thread] = await listThreads(t.pool, store, users.importer.id, arrived);
+  expect(thread.comments).toHaveLength(501);
+  expect(thread.startedBy).toBe(long.slice(0, 320));
+  expect(thread.comments[0].author).toBe(long.slice(0, 320));
+});
+
+test('an item that cannot be read costs only itself', async () => {
+  const good = {
+    file: 'main.tex',
+    quote: 'below 40 ms',
+    before: '',
+    after: '',
+    status: 'open',
+    startedBy: null,
+    createdAt: NOW,
+    comments: [{ author: null, body: 'Fine.', createdAt: NOW }],
+  };
+  const data = {
+    format: 'paperweave-review-1',
+    paper: 'Hand-written',
+    exported: NOW,
+    threads: [good, { ...good, comments: [] }],
+    proposals: [
+      {
+        file: 'main.tex',
+        expected: 'Nothing else',
+        replacement: 'No more',
+        before: '',
+        after: '',
+        reason: '',
+        status: 'open',
+        author: null,
+        createdAt: NOW,
+        decidedAt: null,
+        origin: 'person',
+        madeBy: null,
+        evidence: [],
+      },
+    ],
+  };
+  const [made] = await importZip(
+    t.pool,
+    store,
+    users.importer.id,
+    await zipWith(JSON.stringify(data)),
+    'H',
+  );
+  expect((await importReport(t.pool, users.importer.id, made.id))!.review).toEqual({
+    threads: 1,
+    proposals: 1,
+    detached: 0,
+    missing: ['A thread in the archive could not be read, and was left out.'],
+  });
+});
+
+test('a review file written before these fields existed still comes in whole', async () => {
+  const old =
+    '{"format":"paperweave-review-1","paper":"Old","exported":"2026-01-01T00:00:00.000Z",' +
+    '"threads":[{"file":"main.tex","quote":"below 40 ms","before":"stays ","after":" for most",' +
+    '"status":"resolved","startedBy":"a@example.org","createdAt":"2026-01-01T00:00:00.000Z",' +
+    '"comments":[{"author":"a@example.org","body":"Hm.","createdAt":"2026-01-01T00:00:00.000Z"}]}],' +
+    '"proposals":[{"file":"main.tex","expected":"Nothing else","replacement":"No more","before":"",' +
+    '"after":" is claimed","reason":"Short.","status":"open","author":null,' +
+    '"createdAt":"2026-01-01T00:00:00.000Z","decidedAt":null,"origin":"person","madeBy":null,"evidence":[]}]}';
+  const [made] = await importZip(t.pool, store, users.importer.id, await zipWith(old), 'Old');
+  expect((await importReport(t.pool, users.importer.id, made.id))!.review).toEqual({
+    threads: 1,
+    proposals: 1,
+    detached: 0,
+    missing: [],
+  });
+});
+
+test('a thread whose words were edited arrives on the words as they now read', async () => {
+  const p = await paper();
+  await startThread(t.pool, store, users.reviewer.id, p.id, p.file, {
+    ...(await ends(p.file, 'below 40 ms')),
+    body: 'Median or tail?',
+  });
+  await replaceIn(p.file, '40', '45');
+  const was = (await listThreads(t.pool, store, users.owner.id, p.id))[0];
+  expect([was.state, was.now]).toEqual(['changed', 'below 45 ms']);
+  const { id } = await trip(p.id);
+  const [now] = await listThreads(t.pool, store, users.importer.id, id);
+  expect([now.state, now.now]).toEqual(['attached', 'below 45 ms']);
+});
+
+test('a thread detached where it came from is not caught by words typed elsewhere', async () => {
+  const p = await paper();
+  await startThread(t.pool, store, users.reviewer.id, p.id, p.file, {
+    ...(await ends(p.file, 'will be cut')),
+    body: 'Do we need this?',
+  });
+  await replaceIn(p.file, 'This sentence will be cut.\n', '');
+  await replaceIn(p.file, 'Nothing else is claimed.', 'Nothing else is claimed; it will be cut.');
+  expect((await listThreads(t.pool, store, users.owner.id, p.id))[0].state).toBe('detached');
+  const { id, report } = await trip(p.id);
+  expect(report.review).toMatchObject({ threads: 1, detached: 1 });
+  const [now] = await listThreads(t.pool, store, users.importer.id, id);
+  expect([now.state, now.excerpt]).toEqual(['detached', 'will be cut']);
+});
+
+test('an accepted proposal that had gone stale arrives stale', async () => {
+  const p = await paper();
+  const made = await propose(t.pool, store, users.reviewer.id, p.id, p.file, {
+    ...(await ends(p.file, 'Nothing else')),
+    replacement: 'No more',
+  });
+  await acceptProposal(t.pool, store, users.owner.id, p.id, made);
+  await replaceIn(p.file, 'No more', 'No less');
+  expect((await listProposals(t.pool, store, users.owner.id, p.id))[0]).toMatchObject({
+    status: 'accepted',
+    stale: true,
+  });
+  const { id } = await trip(p.id);
+  const [now] = await listProposals(t.pool, store, users.importer.id, id);
+  expect(now).toMatchObject({ status: 'accepted', stale: true, replacement: 'No more' });
+  // Undoing the accept is refused here as it is where this came from.
+  expect(await code(undoAccept(t.pool, store, users.importer.id, id, now.id))).toBe('conflict');
 });

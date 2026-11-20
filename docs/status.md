@@ -642,6 +642,11 @@ ordinary use. Ten ways of looking found them, and each is cheap to do again:
     and before it; errors placed in files the paper does not have; a PDF with ?? in it called
     up to date without a word in the editor.
 
+16. **Take a paper out and bring it back, and compare everything.** Found: one item the
+    importer would not read losing the whole review; the root file not carried, so the paper
+    built a different document; a thread on edited words coming back detached; a stale accept
+    coming back fresh; who decided a proposal not carried.
+
 Tried the same way and nothing found: thirty connections typing into one file at once (kept
 as a test in `sync.sandbox.test`); 400 threads and 400 proposals on one file, on the server
 (both lists took about 20 ms; not kept); and each tool of the visual view worked slowly
@@ -1608,6 +1613,53 @@ second one.
   missing package or file is given its file but not its line. A package of TeX's own is named
   without the line that loads it. Biber's errors are not read. The lists are not links to the
   lines. BibTeX's own words are not in the build log a person can open.
+- **How it was made.** Planned by one agent, probed and written by others, checked here.
+
+## A paper taken out and brought back
+
+- **What was tried**, with a probe: sixteen kinds of paper exported as "ZIP with review data"
+  and imported again, comparing threads, proposals and the import report; and one paper with
+  everything a paper can have taken out and brought back through the pages, its page read
+  beside the original's, section by section, and both built.
+
+| Taken out and brought back                                           | Before                                                | Now                                   |
+| -------------------------------------------------------------------- | ----------------------------------------------------- | ------------------------------------- |
+| A model-made proposal with one quote of 501 characters               | **no thread or proposal at all**: "could not be read" | everything; the quote cut to 500      |
+| A thread of 501 comments; a starter's address of 321 characters      | **nothing**                                           | everything; the address cut to 320    |
+| 2,001 threads, or proposals                                          | **nothing**                                           | everything (up to 20,000 each)        |
+| One unreadable item among good ones                                  | **nothing**                                           | the rest, and one line saying so      |
+| A paper whose root file is not the one the importer would pick       | **the other root, building another document**         | the same root, and the report says so |
+| A thread on words edited since ("40 ms" made "45 ms")                | **detached**                                          | on the words as they read             |
+| A detached thread whose words were later typed again elsewhere       | **attached to them**                                  | detached                              |
+| An accepted proposal whose words were changed since                  | **fresh, its undo allowed**                           | stale, as it was                      |
+| A deleted stretch; the middle of three; the first and last word      | as it was                                             | the same                              |
+| Long, multi-line and odd-charactered comments; CRLF; folders; spaces | identical                                             | the same                              |
+| Exported twice; imported twice                                       | the same file; two whole papers                       | the same                              |
+| Who accepted or rejected a proposal                                  | "someone who has left"                                | the same (next change)                |
+| Revisions, citation checks, data descriptions, charts, language      | **gone, without a word**                              | gone, and the page says so            |
+
+- **What was wrong.** The importer read the review file whole, against limits the app itself
+  does not keep: one quote too long from the reviewing model, one thread with many replies, one
+  long address, and nothing came at all. The root file was not in the archive, so the importer
+  chose its own, and the paper built something else. A thread was written out by the words it
+  began on, not those it now covered. And what a paper has besides its files and its review
+  stayed behind without the page saying so.
+- **Now** (`packages/server/src/reviewdata.ts`, `import.ts`, `critique.ts`): each thread and
+  proposal is read on its own, and one that cannot be read is named and left out; names and
+  quotes too long are cut, not refused; the counts it reads go to 20,000. The root file goes
+  with the review and is made the root on the way in. A thread goes by how it reads now, and one
+  already detached stays so; an accepted proposal gone stale stays stale. The reviewing model's
+  quotes are cut to 500 where they are kept. The paper's page says, by the export and in the
+  import's report, what does not go with a paper.
+- **Held by** service tests (`reviewdata.sandbox.test`, `import.sandbox.test`,
+  `critique.sandbox.test`), each failed on the old code, and one that a file exported before this
+  still comes in whole.
+- **Not changed:** who decided a proposal (the next change). A thread on more than 500
+  characters comes back on its first 500. The compiler is the one the importer read from the
+  files, which the root may not decide. A review file at the top of an archive of several papers
+  is given to none. There is no limit on how many comments a thread may have, and sign-in takes
+  an address longer than the 320 characters an export keeps. No browser test makes the round
+  trip; the page's sentences are not under test.
 - **How it was made.** Planned by one agent, probed and written by others, checked here.
 
 ## When an email cannot be sent
