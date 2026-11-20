@@ -2,11 +2,11 @@
 // silenced by the paper's own words and rules, and proposed rather than made by a reviewer.
 // Needs the services (the grammar checker among them) and the sync server.
 import { expect, type Page, test } from '@playwright/test';
-import { execFileSync } from 'node:child_process';
 import { mkdtempSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { writeZip } from '../../packages/server/src/archive';
+import { pdfText } from '../../packages/server/src/pdftext';
 import { emailedLink, person, run, showSource, signIn } from './helpers';
 
 const MAIN = [
@@ -154,8 +154,7 @@ test('a suggestion is taken as LaTeX source, so the build keeps the rest of the 
     .locator('.build')
     .getByRole('link', { name: 'Open the PDF by itself' })
     .getAttribute('href');
-  const pdf = join(dir, 'out.pdf');
-  writeFileSync(pdf, await (await owner.page.request.get(href!)).body());
-  const text = execFileSync('pdftotext', ['-layout', pdf, '-'], { encoding: 'utf8' });
-  expect(text.replace(/\s+/g, ' ')).toContain('We fund R&D every year and nothing else.');
+  // Read here, not with a tool the machine running the tests may not have.
+  const text = pdfText(await (await owner.page.request.get(href!)).body());
+  expect(text).toContain('We fund R&D every year and nothing else.');
 });

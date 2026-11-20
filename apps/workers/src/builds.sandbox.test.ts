@@ -1,7 +1,6 @@
 // Needs Docker, the TeX image and the services in infra/compose.yaml. Run: pnpm test:sandbox
 import { readdirSync, readFileSync, statSync } from 'node:fs';
 import { join, relative } from 'node:path';
-import { inflateSync } from 'node:zlib';
 import {
   acceptInvitation,
   appendUpdate,
@@ -29,6 +28,7 @@ import { afterAll, beforeAll, expect, test } from 'vitest';
 import * as Y from 'yjs';
 import { labelIndex } from '../../../packages/latex/src/labels.ts';
 import { FIXTURES } from '../../../packages/latex/src/testutil.ts';
+import { pdfText } from '../../../packages/server/src/pdftext.ts';
 import { TEST_ENV, testDb } from '../../../packages/server/src/testing.ts';
 import { buildNext, imageId } from './builder.ts';
 
@@ -247,33 +247,6 @@ test('a burst of requests is one build, and a paper cannot build without limit',
   expect(await buildNext(t.pool, store, image)).toBe(true);
   expect(await code(requestBuild(t.pool, owner.id, project, { perHour: 2 }))).toBe('conflict');
 });
-
-/** The words on a PDF's pages, read from its text-showing operators. Enough for plain prose. */
-function pdfText(pdf: Buffer) {
-  let text = '';
-  for (let at = 0; ;) {
-    const start = pdf.indexOf('stream', at);
-    if (start < 0) break;
-    const from = pdf[start + 6] === 13 ? start + 8 : start + 7;
-    const end = pdf.indexOf('endstream', from);
-    at = end + 9;
-    let body: string;
-    try {
-      body = inflateSync(pdf.subarray(from, end)).toString('latin1');
-    } catch {
-      continue;
-    }
-    for (const m of body.matchAll(/\[((?:\((?:\\.|[^)\\])*\)|[^\]])*)\]\s*TJ/g)) {
-      // Strings are words or parts of words; a large negative number between them is a space.
-      for (const part of m[1].matchAll(/\(((?:\\.|[^)\\])*)\)|(-?\d+(?:\.\d+)?)/g))
-        text += part[1] !== undefined ? part[1] : Number(part[2]) < -200 ? ' ' : '';
-      text += ' ';
-    }
-  }
-  return text
-    .replace(/\\(\d{3})/g, (_, octal) => String.fromCharCode(parseInt(octal, 8)))
-    .replace(/\s+/g, ' ');
-}
 
 test('the number stored for each label is the one printed in the PDF', async () => {
   for (const name of ['ieee-multifile', 'article-basic']) {
