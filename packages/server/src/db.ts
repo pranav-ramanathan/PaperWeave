@@ -191,14 +191,22 @@ export async function onlyOne(
  * listens to the ones it is holding. Unheard, a connection lost in the middle of a transaction
  * (the database restarted during a build, say) is an error nobody caught, and ends the process.
  * It is heard here. The query that was running fails as well, which is how `fn` finds out.
+ *
+ * The database ends the transaction, and frees what it holds, if it is left `idleMs` between two
+ * statements (0: never), as when whoever runs it has lost the line. It is set in the
+ * transaction, not on the connection, because a pooler in between does not pass settings on.
  */
-export async function transaction<T>(pool: pg.Pool, fn: (db: Db) => Promise<T>): Promise<T> {
+export async function transaction<T>(
+  pool: pg.Pool,
+  fn: (db: Db) => Promise<T>,
+  idleMs = 15_000,
+): Promise<T> {
   const client = await pool.connect();
   let lost: Error | undefined;
   const hear = (err: Error) => void (lost = err);
   client.on('error', hear);
   try {
-    await client.query('begin');
+    await client.query(`begin; set local idle_in_transaction_session_timeout = ${idleMs}`);
     const result = await fn(client);
     await client.query('commit');
     return result;

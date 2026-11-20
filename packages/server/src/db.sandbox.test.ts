@@ -125,3 +125,41 @@ test('only one process does a job at a time, and the next takes over when it sto
   await second!();
   await third!();
 });
+
+const took = async (what: Promise<unknown>) => {
+  const start = Date.now();
+  await what.catch(() => {});
+  return Date.now() - start;
+};
+
+test('a transaction left quiet is ended by the database, and what it held is free', async () => {
+  await t.pool.query('create table held (n int)');
+  await t.pool.query('insert into held values (1)');
+  const holder = transaction(
+    t.pool,
+    async (db) => {
+      await db.query('select * from held for update');
+      await new Promise((r) => setTimeout(r, 3000));
+      await db.query('select 1');
+    },
+    500,
+  );
+  const failed = expect(holder).rejects.toThrow(/./);
+  await new Promise((r) => setTimeout(r, 100));
+  const waited = await took(t.pool.query('select * from held for update'));
+  expect(waited).toBeLessThan(2000);
+  await failed;
+});
+
+test('a transaction ends after 15 seconds of quiet unless it is told otherwise', async () => {
+  const shown = (idle?: number) =>
+    transaction(
+      t.pool,
+      async (db) =>
+        (await db.query('show idle_in_transaction_session_timeout')).rows[0]
+          .idle_in_transaction_session_timeout,
+      idle,
+    );
+  expect(await shown()).toBe('15s');
+  expect(await shown(0)).toBe('0');
+});

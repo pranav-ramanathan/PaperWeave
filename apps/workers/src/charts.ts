@@ -8,6 +8,7 @@ import {
   type BlobStore,
   chartPath,
   datasetTable,
+  type Db,
   putFile,
   recordDraw,
   transaction,
@@ -51,7 +52,9 @@ export async function render(vl: object): Promise<{ pdf: Uint8Array; png: Uint8A
  * while it is drawn: if this process dies, the lock goes and another worker takes it.
  */
 export function drawNext(pool: pg.Pool, store: BlobStore, image: string): Promise<boolean> {
-  return transaction(pool, async (db) => {
+  // The row is taken `skip locked`, so nobody waits on it, and this worker is next to the
+  // database: it may sit between statements for a whole render.
+  const run = async (db: Db) => {
     const job = (
       await db.query(
         `select id, project_id, name, dataset_file_id, spec from charts
@@ -98,5 +101,6 @@ export function drawNext(pool: pg.Pool, store: BlobStore, image: string): Promis
       ]);
     }
     return true;
-  });
+  };
+  return transaction(pool, run, 0);
 }
