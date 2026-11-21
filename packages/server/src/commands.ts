@@ -42,7 +42,8 @@ function check(input: unknown): Command & { at: [Y.RelativePosition, Y.RelativeP
   if (typeof c.key !== 'string' || !UUID.test(c.key)) throw bad('its key is not valid');
   if (typeof c.expected !== 'string' || typeof c.replacement !== 'string')
     throw bad('its text is missing');
-  if (c.contained !== undefined && typeof c.contained !== 'boolean') throw bad('its flag is invalid');
+  if (c.contained !== undefined && typeof c.contained !== 'boolean')
+    throw bad('its flag is invalid');
   if (c.expected.length > MAX_TEXT || c.replacement.length > MAX_TEXT) throw bad('it is too large');
   // Stored text has LF line ends only; the file's own style is put back on export.
   if (c.replacement.includes('\r')) throw bad('it has a carriage return');

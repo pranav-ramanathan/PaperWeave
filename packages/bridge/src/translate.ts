@@ -1,6 +1,6 @@
 // Visual edit -> source splices. The bridge never regenerates LaTeX: it works out which source
 // characters an edit touched and replaces exactly those.
-import { escape, type Parsed, type Piece, textblocks } from '@paperweave/latex';
+import { escape, type Piece } from '@paperweave/latex';
 import type { Node as PMNode } from '@tiptap/pm/model';
 import { locate, markKey, type Model, type Phantom, width } from './project.ts';
 
