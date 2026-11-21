@@ -260,3 +260,57 @@ test('a proposal marks only the words it changes', async ({ browser }) => {
   await expect(one.locator('ins')).toHaveText('more');
   await audit(owner.page, 'a proposal with only its changed words marked');
 });
+
+test('text added at the caret is out of date once the owner retypes the sentence around it', async ({
+  browser,
+}) => {
+  test.setTimeout(120_000);
+  const owner = await person(browser, 'place-owner');
+  const reviewer = await person(browser, 'place-reviewer');
+  const zip = join(mkdtempSync(join(tmpdir(), 'paperweave-e2e-')), `Place ${run}.zip`);
+  writeFileSync(zip, await writeZip([{ path: 'main.tex', bytes: Buffer.from(MAIN) }]));
+  await owner.page.goto('/sign-in');
+  await signIn(owner.page, owner.email);
+  await owner.page.getByLabel('Or import a ZIP of a LaTeX project').setInputFiles(zip);
+  await owner.page.getByRole('button', { name: 'Import ZIP' }).click();
+  await owner.page.getByLabel('Their email address').fill(reviewer.email);
+  await owner.page.getByLabel('Their role').selectOption('reviewer');
+  await owner.page.getByRole('button', { name: 'Send invitation' }).click();
+  await expect(owner.page.getByRole('status')).toContainText(reviewer.email);
+  await reviewer.page.goto(await emailedLink(reviewer.email, '/invitations/'));
+  await signIn(reviewer.page, reviewer.email);
+  await reviewer.page.getByRole('button', { name: 'Join this paper' }).click();
+  await expect(reviewer.page.getByText('You are a reviewer')).toBeVisible();
+  await owner.page.getByRole('link', { name: 'main.tex' }).first().click();
+  await showSource(owner.page);
+  await expect(owner.page.locator(SOURCE)).toContainText('below forty milliseconds');
+
+  // The reviewer puts the caret before a word and proposes adding text there.
+  await reviewer.page.getByRole('link', { name: 'main.tex' }).first().click();
+  await selectWord(reviewer.page, VISUAL, 'milliseconds');
+  await reviewer.page.keyboard.press('ArrowLeft');
+  await panel(reviewer.page).getByRole('button', { name: 'Propose a change here' }).click();
+  await panel(reviewer.page).getByLabel('Text to add at the caret').fill('whole ');
+  await panel(reviewer.page).getByRole('button', { name: 'Propose', exact: true }).click();
+  const proposal = (page: Page) =>
+    page.getByRole('article', { name: 'Proposal to change nothing' });
+  await expect(proposal(reviewer.page)).toContainText('Proposed: whole');
+  await expect(proposal(owner.page)).toContainText('Proposed: whole', { timeout: 15_000 });
+  await expect(proposal(owner.page).getByRole('button', { name: 'Accept' })).toBeEnabled();
+
+  // The owner deletes the sentence and types another in its place.
+  await selectWord(owner.page, SOURCE, 'Latency');
+  await owner.page.keyboard.press('Shift+End');
+  await owner.page.keyboard.type('We found no effect.');
+  await typingSaved(owner.page);
+  await expect(owner.page.locator(SOURCE)).toContainText('We found no effect.');
+  await expect(proposal(owner.page)).toContainText('Out of date.', { timeout: 15_000 });
+  await expect(proposal(owner.page)).toContainText(
+    'The place this was to be added at is no longer in the file. Make a new proposal.',
+  );
+  await expect(proposal(owner.page).getByRole('button', { name: 'Accept' })).toBeDisabled();
+  await expect(
+    proposal(owner.page).getByRole('button', { name: 'Change the proposal' }),
+  ).toHaveCount(0);
+  await expect(owner.page.locator(SOURCE)).not.toContainText('whole');
+});
