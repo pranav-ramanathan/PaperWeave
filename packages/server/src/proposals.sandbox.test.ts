@@ -463,3 +463,99 @@ test('a change is judged in its sentence; with no sentence to find, in its words
     flags: ['The numbers differ: 40 → 45.'],
   });
 });
+
+/** A place at an index of the saved text, as an editor with the caret there would send it. */
+async function caret(file: string, index: number | 'end') {
+  const doc = new Y.Doc();
+  for (const u of await loadUpdates(t.pool, store, file)) Y.applyUpdate(doc, u);
+  const text = doc.getText(TEXT);
+  const i = index === 'end' ? text.length : index;
+  return {
+    from: Y.encodeRelativePosition(Y.createRelativePositionFromTypeIndex(text, i, 0)),
+    to: Y.encodeRelativePosition(Y.createRelativePositionFromTypeIndex(text, i, -1)),
+  };
+}
+test('an insertion whose surroundings are retyped is stale and cannot be accepted', async () => {
+  const p = await paper();
+  const id = await propose(t.pool, store, users.reviewer.id, p.id, p.file, {
+    ...(await ends(p.file, ' for most edits', 0)),
+    replacement: ' not',
+  });
+  expect(await proposals(p)).toMatchObject([{ stale: false, placeLost: false }]);
+  await change(p.file, LINE, 'We found no effect.');
+  const after = await saved(p);
+  expect(await proposals(p)).toMatchObject([{ stale: true, placeLost: true, now: '' }]);
+  expect(await code(acceptProposal(t.pool, store, users.owner.id, p.id, id))).toBe('conflict');
+  expect(await saved(p)).toBe(after);
+  expect((await proposals(p))[0].status).toBe('open');
+});
+
+test('an insertion is stale when only the word after it is replaced', async () => {
+  const p = await paper();
+  const id = await propose(t.pool, store, users.reviewer.id, p.id, p.file, {
+    ...(await ends(p.file, ' for most edits', 0)),
+    replacement: ' not',
+  });
+  await change(p.file, ' for most', ' per most');
+  const after = await saved(p);
+  expect(await proposals(p)).toMatchObject([{ stale: true, placeLost: true }]);
+  expect(await code(acceptProposal(t.pool, store, users.owner.id, p.id, id))).toBe('conflict');
+  expect(await saved(p)).toBe(after);
+});
+
+test('an accepted deletion whose surroundings are retyped is stale and cannot be undone', async () => {
+  const p = await paper();
+  const id = await propose(t.pool, store, users.reviewer.id, p.id, p.file, {
+    ...(await ends(p.file, ' for most edits')),
+    replacement: '',
+  });
+  await acceptProposal(t.pool, store, users.owner.id, p.id, id);
+  expect(await proposals(p)).toMatchObject([{ status: 'accepted', stale: false }]);
+  await change(p.file, 'Latency stays below 40 ms.', 'We found no effect.');
+  const after = await saved(p);
+  expect(await proposals(p)).toMatchObject([{ status: 'accepted', stale: true, placeLost: true }]);
+  expect(await code(undoAccept(t.pool, store, users.owner.id, p.id, id))).toBe('conflict');
+  expect(await saved(p)).toBe(after);
+  expect((await proposals(p))[0].status).toBe('accepted');
+});
+
+test('reviseProposal on a lost place is refused', async () => {
+  const p = await paper();
+  const id = await propose(t.pool, store, users.reviewer.id, p.id, p.file, {
+    ...(await ends(p.file, ' for most edits', 0)),
+    replacement: ' not',
+  });
+  await change(p.file, LINE, 'We found no effect.');
+  await expect(
+    reviseProposal(t.pool, store, users.reviewer.id, p.id, id, { replacement: ' never' }),
+  ).rejects.toMatchObject({
+    code: 'conflict',
+    message: 'The place this was to be added at is no longer in the file. Make a new proposal.',
+  });
+});
+
+test('an insertion stays fresh when the file is edited elsewhere, and at either end of the file', async () => {
+  const p = await paper();
+  const mid = await propose(t.pool, store, users.reviewer.id, p.id, p.file, {
+    ...(await ends(p.file, ' for most edits', 0)),
+    replacement: ' not',
+  });
+  const first = await propose(t.pool, store, users.reviewer.id, p.id, p.file, {
+    ...(await caret(p.file, 0)),
+    replacement: '% top\n',
+  });
+  const last = await propose(t.pool, store, users.reviewer.id, p.id, p.file, {
+    ...(await caret(p.file, 'end')),
+    replacement: '% bottom\n',
+  });
+  await change(p.file, 'Nothing else is claimed.', 'Something else.');
+  expect((await proposals(p)).map((x) => [x.stale, x.placeLost])).toEqual([
+    [false, false],
+    [false, false],
+    [false, false],
+  ]);
+  for (const x of [mid, first, last]) await acceptProposal(t.pool, store, users.owner.id, p.id, x);
+  expect(await saved(p)).toBe(
+    `% top\n${MAIN.replace(' for most', ' not for most').replace('Nothing else is claimed.', 'Something else.')}% bottom\n`,
+  );
+});
