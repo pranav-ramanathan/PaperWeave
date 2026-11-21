@@ -722,3 +722,40 @@ test(`${N} rewrites of an inline atom change its bytes and nothing else, or are 
   expect(yes).toBeGreaterThan(N / 100);
   expect(no).toBeGreaterThan(N / 100);
 });
+
+const HALVES = /[\ud800-\udbff](?![\udc00-\udfff])|(?<![\ud800-\udbff])[\udc00-\udfff]/;
+
+test('an edit between the two halves of an emoji is refused and the source is left alone', () => {
+  const src = 'a\u{1F600}\u{1F601}b\n';
+  const tries = [
+    (r: ReturnType<typeof replica>, s: number) => r.state.tr.insertText('z', s + 2),
+    (r: ReturnType<typeof replica>, s: number) => r.state.tr.delete(s + 2, s + 3),
+    (r: ReturnType<typeof replica>, s: number) => r.state.tr.delete(s + 1, s + 2),
+    (r: ReturnType<typeof replica>, s: number) =>
+      r.state.tr.insertText('\u{1F601}', s + 1, s + 3).insertText('q', s + 4),
+  ];
+  for (const mk of tries) {
+    const r = replica(src);
+    const s = textblocks(r)[0].start;
+    expect(r.dispatch(mk(r, s))).toBe(false);
+    expect(r.src).toBe(src);
+    r.check();
+  }
+  // Whole characters still go: delete the first emoji, replace one, type after one.
+  expect(typed(src, 1, '', 2)).toBe('a\u{1F601}b\n');
+  expect(typed(src, 1, '\u{1F601}', 2)).toBe('a\u{1F601}\u{1F601}b\n');
+  expect(typed(src, 3, 'z')).toBe('a\u{1F600}z\u{1F601}b\n');
+});
+
+test('a backslash and an emoji is one atom, and typing beside it leaves no half emoji', () => {
+  const src = 'x \\\u{1F600} y\n';
+  const r = replica(src);
+  const s = textblocks(r)[0].start;
+  expect(shown(r)).not.toMatch(HALVES);
+  const at = 3;
+  expect(r.dispatch(r.state.tr.insertText('z', s + at))).toBe(true);
+  r.check();
+  expect(r.src).toBe('x \\\u{1F600}z y\n');
+  expect(r.src).not.toMatch(HALVES);
+  expect(typed(src, 0, 'q')).toBe('qx \\\u{1F600} y\n');
+});

@@ -106,6 +106,12 @@ const ABORT = Symbol('abort');
 const isL = (c: string | undefined) => !!c && ((c >= 'a' && c <= 'z') || (c >= 'A' && c <= 'Z'));
 const isW = (c: string | undefined) => c === ' ' || c === '\t' || c === '\n';
 const isS = (c: string | undefined) => c === ' ' || c === '\t';
+/** Length in UTF-16 units of the character at i: 2 for a surrogate pair, so no boundary splits one. */
+const cpLen = (s: string, i: number) => {
+  const c = s.charCodeAt(i);
+  const d = s.charCodeAt(i + 1);
+  return c >= 0xd800 && c < 0xdc00 && d >= 0xdc00 && d < 0xe000 ? 2 : 1;
+};
 
 export function parse(src: string, transparent: ReadonlySet<string> = DEFAULT_TRANSPARENT): Parsed {
   const blocks: Block[] = [];
@@ -201,7 +207,7 @@ function parseInto(
   const word = (i: number) => {
     let j = i + 1;
     if (j >= n) return j;
-    if (!isL(src[j])) return j + 1;
+    if (!isL(src[j])) return j + cpLen(src, j);
     while (isL(src[j])) j++;
     return j;
   };
@@ -283,8 +289,9 @@ function parseInto(
       if (src[k] === '{') return rawGroup(k, lim);
     }
     const nl = eol(k);
-    const close = k < n ? src.indexOf(src[k], k + 1) : -1;
-    return close >= 0 && close < nl ? close + 1 : nl;
+    const w = cpLen(src, k);
+    const close = k < n ? src.indexOf(src.slice(k, k + w), k + w) : -1;
+    return close >= 0 && close < nl ? close + w : nl;
   };
   /** End of the control sequence at i, with the verbatim argument of one that has such. */
   const cmdEnd = (i: number, lim = n) => {

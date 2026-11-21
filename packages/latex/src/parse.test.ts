@@ -15,7 +15,15 @@ import {
   REFS,
   reparse,
 } from './index.ts';
-import { assertLossless, FIXTURES, fixtureFiles, fragment, rng, soup } from './testutil.ts';
+import {
+  assertLossless,
+  assertNoSplitPair,
+  FIXTURES,
+  fixtureFiles,
+  fragment,
+  rng,
+  soup,
+} from './testutil.ts';
 
 const files = fixtureFiles();
 const texts = Object.fromEntries(
@@ -298,4 +306,24 @@ test('rewriting $\\delta$ to $\\d}\\(lta$ after such a formula parses as a full 
   assertLossless(full);
   expect(full.blocks.map((b) => b.body.kind)).toEqual(['para', 'ws', 'para', 'ws']);
   expect(JSON.stringify(reparse(parse(old), src).blocks)).toBe(JSON.stringify(full.blocks));
+});
+
+test('a backslash before an emoji takes the whole character', () => {
+  const src = 'a \\😀 x \\verb😀y😀 z \\\u{1F600}\n\n\\😀\n';
+  const p = parse(src);
+  assertLossless(p);
+  assertNoSplitPair(p);
+  expect(p.blocks.map((b) => b.body.text).join('')).toBe(src);
+  const para = p.blocks[0].body;
+  if (para.kind !== 'para') throw new Error('not a paragraph');
+  const atoms = para.pieces.filter((x) => x.k === 'atom').map((x) => para.text.slice(x.s, x.e));
+  expect(atoms).toEqual(['\\😀', '\\verb😀y😀', '\\😀']);
+  for (const s of ['\\😀 x', 'x\\😀', '\\😀', '$\\😀$', '\\verb😀', '\\(😀\\)']) {
+    assertLossless(parse(s));
+    expect(
+      parse(s)
+        .blocks.map((b) => b.body.text)
+        .join(''),
+    ).toBe(s);
+  }
 });
