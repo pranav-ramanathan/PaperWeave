@@ -41,8 +41,7 @@ All are in the toolchain image:
 - Files that are not UTF-8, or that mix line endings: kept byte for byte and built, but not
   editable here.
 - Comments, history and sharing settings from another service: a ZIP does not hold them.
-- Fonts the image does not have: `libertine`, `newtxtext`, `newtxmath`, `inconsolata`. A class that
-  asks for them (`acmart`) warns and builds with Computer Modern.
+- Packages the image does not have: `pstricks`, `CJKutf8`. A paper that loads one gets no PDF.
 
 ## Shown as LaTeX, edited in the source view
 

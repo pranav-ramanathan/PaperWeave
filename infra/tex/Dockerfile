@@ -8,12 +8,19 @@ RUN apt-get update \
       latexmk biber \
       texlive-latex-base texlive-latex-recommended texlive-latex-extra \
       texlive-xetex texlive-luatex \
-      texlive-publishers texlive-science texlive-fonts-recommended texlive-bibtex-extra \
+      texlive-publishers texlive-science texlive-fonts-recommended texlive-fonts-extra \
+      texlive-bibtex-extra \
       cm-super texlive-plain-generic \
       texlive-lang-german texlive-lang-french texlive-lang-spanish texlive-lang-italian \
       texlive-lang-portuguese texlive-lang-european texlive-lang-polish texlive-lang-cyrillic \
       librsvg2-bin fonts-dejavu-core \
  && rm -rf /var/lib/apt/lists/*
+
+# XeLaTeX finds fonts by name through fontconfig, which does not know the TeX Live font folders.
+# Register them and build the cache now, as the root is read-only when jobs run.
+RUN printf '<?xml version="1.0"?>\n<fontconfig>\n  <dir>/usr/share/texlive/texmf-dist/fonts/opentype</dir>\n  <dir>/usr/share/texlive/texmf-dist/fonts/truetype</dir>\n</fontconfig>\n' \
+      > /etc/fonts/conf.d/09-texlive-fonts.conf \
+ && fc-cache -f
 
 # Jobs run as an unprivileged user with a read-only root; only /work and /tmp are writable.
 RUN useradd --uid 10001 --no-create-home tex

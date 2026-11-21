@@ -44,8 +44,8 @@ Read this first. Update it in every pull request.
     others), polish and cyrillic. Image size 1.49 GB to 1.61 GB (content size 412 MB to 448 MB;
     `cm-super-minimal` was later replaced by the full `cm-super`, see "Five papers written the way
     real ones are");
-    a clean build of the image took about 2m40 here. Left out: texlive-fonts-extra (newtxtext,
-    libertine, inconsolata), very large and not needed by acmart sigconf. The toolchain image ID
+    a clean build of the image took about 2m40 here. Left out then: texlive-fonts-extra (newtxtext,
+    libertine, inconsolata); added later, see "`texlive-fonts-extra` added to the image". The toolchain image ID
     is in the cache key, so builds cached before this are not reused. Sandbox tests build a T1
     paper (no `mktexpk` in the log) and papers in german, french, spanish and russian.
   - The editor page shows the PDF beside the source. It compiles by itself once typing has paused,
@@ -3344,8 +3344,9 @@ selected splits the paragraph there, as it does for any selected thing. Prose ed
 
 - **Run:** unit 166 (29 files), sandbox 261 passed and 1 skipped (33 files), lint and typecheck
   clean, browser suite 119 of 119 (16 minutes), including the new import test.
-- **Not changed.** `acmart` with the fonts it asks for (`libertine`, `newtxmath`, `inconsolata`):
-  adding `texlive-fonts-extra` is 1.4 GB installed.
+- `acmart` with the fonts it asks for (`libertine`, `newtxmath`, `inconsolata`) was left without
+  them then, for size; `texlive-fonts-extra` was added later, see "`texlive-fonts-extra` added to the
+  image".
 
 ## Inline atoms opened from the visual view
 
@@ -3464,7 +3465,8 @@ nested sub-import are now in `graph.order`, so labels, citations and import see 
   that already built: the full sandbox suite, including the ZIP rebuild tests, passes.
 
 Not changed: still not installed, checked with `kpsewhich` on the new image: `pstricks.sty`,
-`CJKutf8.sty`, `dsfont.sty`, `bbm.sty`, `newtxtext.sty`.
+`CJKutf8.sty`. (`dsfont.sty`, `bbm.sty` and `newtxtext.sty` came with `texlive-fonts-extra`, see
+"`texlive-fonts-extra` added to the image".)
 
 ## Program source files are kept on import
 
@@ -3488,6 +3490,34 @@ Not changed:
 - Files without an extension (`Makefile`) and `.ipynb` are still skipped.
 - Papers imported before this change lack these files; they can now be added by hand.
 - `\inputminted` still does not build, because shell escape is off, but its file is now kept.
+
+## `texlive-fonts-extra` added to the image
+
+- Papers that load `inconsolata` (the ACL template), `bbm`, `dsfont`, `newtxtext`/`newtxmath`,
+  `libertine`, `fontawesome5`, `mathabx` or `bbold` got no PDF ("File `X.sty' not found"), and
+`acmart`set its text in Computer Modern instead of Libertine.`texlive-fonts-extra`is now in`infra/tex/Dockerfile`; `kpsewhich`finds all nine`.sty` files (`newtxtext`and`newtxmath`are
+two). Sandbox tests in`compile.sandbox.test.ts`build each one, build XeLaTeX and LuaLaTeX
+papers with`\setmainfont{Libertinus Serif}`(a font from fonts-extra), and check that an`acmart`
+sigconf PDF embeds a Libertine font (`pdffonts`). The 11 of them failed on the old image.
+- **Size:** image 1.78 GB to 4.15 GB (content size 506 MB to 1.2 GB). This is more than the 1.4 GB
+  noted earlier, which was the package's installed size alone and not the image layer apt adds.
+  A clean build of the image took about 5m15 here (2m40 before), most of it the download and unpack.
+- **XeLaTeX by font name** did not work at first: fontconfig in the image did not list the TeX Live
+  font folders, so `\setmainfont{Libertinus Serif}` failed. The Dockerfile now writes
+  `/etc/fonts/conf.d/09-texlive-fonts.conf` and runs `fc-cache -f` at build time, so the cache is in
+  the read-only image (1815 fonts listed). Build time of that paper: 1.4 s.
+- **LuaLaTeX** builds its font-name database in `/tmp/texmf-var` on every build. Measured in the
+  sandbox limits (read-only root, 64 MB `/tmp`, 1 CPU): 8.5 s for the Libertinus paper, 4.4 MB of
+  `/tmp`. That is under the 20 s I set as the line, so the database is not baked into the image.
+- **The image ID is part of the build cache key, so every paper rebuilds once.** CI builds the image
+  on each run, so it is slower by the extra download. Output bytes of papers that already built do
+  not change: the full sandbox suite (284 passed, 1 skipped), including the five `real-*` papers
+  and the ZIP rebuild tests, passes, with no expectation changed.
+- The sentence in `docs/import-matrix.md` that said the image lacks these fonts is replaced (source:
+  `packages/server/src/matrix.test.ts`, regenerated with `WRITE_MATRIX=1`).
+- Not changed: still not installed, checked with `kpsewhich`: `pstricks.sty` and `CJKutf8.sty`.
+- This is one commit (the Dockerfile), so it can be dropped if the owner finds the size too much;
+  the tests for these fonts would then be dropped with it.
 
 ## Decisions waiting on the owner
 
