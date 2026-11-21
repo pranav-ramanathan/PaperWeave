@@ -3695,6 +3695,24 @@ as well as the pool. Test: `reviewdata.sandbox.test.ts` types between the cut an
   restore. The message says "its data has changed", which does not fit, so the spec is not
   compared; a restored drawing of an older spec still shows as fresh.
 
+## A repeated label counts when TeX says it is defined twice
+
+The pre-submission checks treated every label written twice in the source as a problem. Text TeX
+skips (an old paragraph in `\iffalse ... \fi`, the other arm of an `\ifwide ... \else ... \fi`)
+defines nothing, so such papers could never be ready though TeX builds them without a warning.
+Like undefined labels, missing citations and missing files, a duplicate now defers to TeX when the
+newest build is of the paper as it stands: if TeX did not warn "multiply defined" for the label,
+it is a warning. A stale or missing build still reads the source alone. With cleveref, TeX also
+warns about `key@cref`; that is now counted as the same label, so it is listed once.
+
+| Paper                                                         | Before               | After                         |
+| ------------------------------------------------------------- | -------------------- | ----------------------------- |
+| Same label inside `\iffalse ... \fi`, built                   | problem, never ready | warning, ready                |
+| Same label in both arms of `\ifwide ... \else ... \fi`, built | problem, never ready | warning, ready                |
+| Label really defined twice, built                             | one problem          | one problem                   |
+| `\iffalse` paper edited and not rebuilt                       | problem              | problem (and the stale build) |
+| cleveref, label really defined twice                          | two problems         | one problem                   |
+
 ## Decisions waiting on the owner
 
 See "What I need from you" in `docs/plan.md`. None blocks C1.

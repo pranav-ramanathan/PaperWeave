@@ -145,7 +145,11 @@ async function checksOf(
   const fresh = !!latest && !queued && !latest.stale && latest.status === 'succeeded';
   const unresolved = { citation: new Set<string>(), label: new Set<string>() };
   const notFound: string[] = [];
+  // Labels TeX itself says it defined twice (cleveref adds a second warning, "key@cref").
+  const multiply = new Set<string>();
   for (const d of fresh ? latest.diagnostics : []) {
+    const dup = MULTIPLY.exec(d.message);
+    if (dup) multiply.add(dup[1].replace(/@cref$/, ''));
     const undef = UNDEFINED.exec(d.message);
     if (undef) unresolved[undef[1] === 'Citation' ? 'citation' : 'label'].add(undef[2]);
     const gone = NOT_FOUND.exec(d.message);
@@ -208,10 +212,17 @@ async function checksOf(
         at(r),
       );
     }
-  for (const d of labels.duplicates) {
-    reported.add(`label:${d.key}`);
-    problem('label', `The label "${d.key}" is given ${d.places.length} times.`, at(d.places[1]));
-  }
+  for (const d of labels.duplicates)
+    if (fresh && !multiply.has(d.key))
+      warning(
+        'label',
+        `The label "${d.key}" is written ${d.places.length} times; LaTeX defined it once.`,
+        at(d.places[1]),
+      );
+    else {
+      reported.add(`label:${d.key}`);
+      problem('label', `The label "${d.key}" is given ${d.places.length} times.`, at(d.places[1]));
+    }
   for (const m of cited.missing)
     if (fresh && !unresolved.citation.has(m.key))
       warning(
@@ -294,7 +305,7 @@ async function checksOf(
       const named = fresh ? (UNDEFINED.exec(d.message) ?? MULTIPLY.exec(d.message)) : null;
       if (named) {
         const kind = named[1] === 'Citation' ? 'citation' : 'label';
-        const key = named.at(-1)!;
+        const key = named.at(-1)!.replace(/@cref$/, '');
         if (!reported.has(`${kind}:${key}`)) problem(kind, d.message, where);
         continue;
       }
