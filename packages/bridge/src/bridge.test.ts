@@ -688,6 +688,17 @@ function inlineAtoms(r: ReturnType<typeof replica>) {
   });
   return found;
 }
+/** The display formulas of a replica, listed like the inline atoms. */
+function mathBlocks(r: ReturnType<typeof replica>) {
+  const found: { pos: number; src: string; type: string }[] = [];
+  r.state.doc.descendants((node, pos) => {
+    if (node.type.name === 'math_block' && typeof node.attrs.src === 'string' && node.attrs.src)
+      found.push({ pos, src: node.attrs.src, type: node.type.name });
+  });
+  return found;
+}
+/** Everything the formula box and the atom window can edit. */
+const editable = (r: ReturnType<typeof replica>) => [...inlineAtoms(r), ...mathBlocks(r)];
 function rewrite(r: ReturnType<typeof replica>, old: string, now: string) {
   const a = inlineAtoms(r).find((x) => x.src === old)!;
   expect(a, old).toBeDefined();
@@ -782,8 +793,25 @@ test('an inline atom is rewritten to exactly the new bytes, or the rewrite is re
   expect(s.bridge.rewriteCommand(c, '\\citep{b}')).toBe('conflict');
 });
 
+test('a display formula rewritten to another display formula is contained; one that loses its end is not', () => {
+  const r = replica('Before.\n\n\\begin{equation}\nx = 1\n\\end{equation}\n\nAfter.\n');
+  const a = mathBlocks(r)[0];
+  const c = r.bridge.atomCommand(r.state, a.pos, a.src)!;
+  const out = r.bridge.rewriteCommand(c, '\\begin{equation}\ny = 2\n\\end{equation}');
+  expect(out).toMatchObject({ contained: true });
+  expect(r.bridge.rewriteCommand(c, '\\begin{equation}\ny = 2')).toBe('spills');
+  expect(r.bridge.rewriteCommand(c, '$$ y $$ and $$ z $$')).toBe('spills');
+  expect(
+    r.bridge.rewriteCommand(
+      c,
+      '\\begin{equation}\nx\n\\end{equation}\n\n\\begin{equation}\ny\n\\end{equation}',
+    ),
+  ).toBe('spills');
+});
+
 test('every inline atom of every fixture can be rewritten to what it already says', () => {
   let n = 0;
+  let blocks = 0;
   for (const [path, text] of Object.entries(fixtures)) {
     const r = replica(text);
     for (const a of inlineAtoms(r)) {
@@ -800,8 +828,17 @@ test('every inline atom of every fixture can be rewritten to what it already say
       expect(typeof out, `${path}: ${a.src.slice(0, 40)}`).toBe('object');
       n++;
     }
+    // A display formula too: it is contained, and the command says so.
+    for (const a of mathBlocks(r)) {
+      const c = r.bridge.atomCommand(r.state, a.pos, a.src)!;
+      const out = r.bridge.rewriteCommand(c, a.src);
+      expect(typeof out, `${path}: ${a.src.slice(0, 40)}`).toBe('object');
+      expect((out as Command).contained).toBe(true);
+      blocks++;
+    }
   }
   expect(n).toBeGreaterThan(20);
+  expect(blocks).toBeGreaterThan(0);
 });
 
 test(`${N} rewrites of an inline atom change its bytes and nothing else, or are refused`, () => {
@@ -811,7 +848,7 @@ test(`${N} rewrites of an inline atom change its bytes and nothing else, or are 
   for (let seed = 0, done = 0; done < N; seed++) {
     const r = rng(seed);
     const rep = replica(fixtures[paths[seed % paths.length]]);
-    const atoms = inlineAtoms(rep);
+    const atoms = editable(rep);
     if (!atoms.length) continue;
     for (let step = 0; step < 8 && done < N && atoms.length; step++, done++) {
       const a = r.pick(atoms);
@@ -825,7 +862,7 @@ test(`${N} rewrites of an inline atom change its bytes and nothing else, or are 
         const c = rep.bridge.atomCommand(rep.state, a.pos, a.src);
         if (!c) {
           // The atoms were listed before an earlier rewrite moved them: list again.
-          atoms.splice(0, atoms.length, ...inlineAtoms(rep));
+          atoms.splice(0, atoms.length, ...editable(rep));
           done--;
           continue;
         }
@@ -850,7 +887,7 @@ test(`${N} rewrites of an inline atom change its bytes and nothing else, or are 
           if (res === 'conflict') {
             expect(rep.src, where).toBe(mid);
             rep.check();
-            atoms.splice(0, atoms.length, ...inlineAtoms(rep));
+            atoms.splice(0, atoms.length, ...editable(rep));
             continue;
           }
           expect(res).toBe('applied');
@@ -862,7 +899,7 @@ test(`${N} rewrites of an inline atom change its bytes and nothing else, or are 
           expect(rep.src.slice(0, at2), where).toBe(mid.slice(0, at2));
           expect(rep.src.slice(at2 + now.length), where).toBe(mid.slice(at2 + a.src.length));
           rep.check();
-          atoms.splice(0, atoms.length, ...inlineAtoms(rep));
+          atoms.splice(0, atoms.length, ...editable(rep));
           continue;
         }
         expect(rep.bridge.applyCommand(out)).toBe('applied');
@@ -873,7 +910,7 @@ test(`${N} rewrites of an inline atom change its bytes and nothing else, or are 
         expect(rep.src.slice(at + now.length), where).toBe(was.slice(at + a.src.length));
         expect(rep.src.slice(at, at + now.length), where).toBe(now);
         rep.check();
-        atoms.splice(0, atoms.length, ...inlineAtoms(rep));
+        atoms.splice(0, atoms.length, ...editable(rep));
       } catch (err) {
         throw new Error(`${where}: ${(err as Error).message}`, { cause: err });
       }

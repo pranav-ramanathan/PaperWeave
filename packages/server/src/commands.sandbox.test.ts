@@ -302,3 +302,26 @@ test('a contained command in a large file is checked on a window and still appli
   );
   expect((await runCommand(t.pool, store, owner.id, file, spill)).result).toBe('conflict');
 });
+
+test('a contained command on a display formula is applied', async () => {
+  const zip = await writeZip([
+    {
+      path: 'main.tex',
+      bytes: Buffer.from(
+        '\\documentclass{article}\n\\begin{document}\n\nBefore.\n\n\\begin{equation}\nx = 1\n\\end{equation}\n\nAfter.\n',
+      ),
+    },
+  ]);
+  const [project] = await importZip(t.pool, store, owner.id, zip, 'Display');
+  const file = (await listFiles(t.pool, owner.id, project.id))[0].id;
+  const was = '\\begin{equation}\nx = 1\n\\end{equation}';
+  const now = '\\begin{equation}\ny = 2\n\\end{equation}';
+  const flagged = { ...replace(await open(file), was, now), contained: true };
+  expect(await runCommand(t.pool, store, owner.id, file, flagged)).toMatchObject({
+    result: 'applied',
+  });
+  expect((await open(file)).toString()).toContain(`Before.\n\n${now}\n\nAfter.`);
+  // Losing its end swallows the paragraph after it, and is refused.
+  const spill = { ...replace(await open(file), now, '\\begin{equation}\nz'), contained: true };
+  expect((await runCommand(t.pool, store, owner.id, file, spill)).result).toBe('conflict');
+});
