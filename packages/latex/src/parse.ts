@@ -148,6 +148,23 @@ export function reparse(prev: Parsed, src: string): Parsed {
   if (k < 0) k = ob.length;
   // A block's end can depend on the first token of what follows it, so back up past that reach.
   k = Math.max(0, k - 3);
+  // Inline math that is unclosed or has braces that never balance is decided by scanning ahead
+  // as far as the next blank line or heading, which can be past the end of its own block. So an
+  // edit can change any block back to there: restart at the last such boundary before the edit.
+  // The margin keeps a boundary that the edit itself touches from counting.
+  const cut = Math.max(0, p - 24);
+  let bb = -1;
+  for (let j = old.lastIndexOf('\n', cut); j > 0 && bb < 0; j = old.lastIndexOf('\n', j - 1)) {
+    let q = j - 1;
+    while (old[q] === ' ' || old[q] === '\t') q--;
+    if (old[q] === '\n') bb = q;
+  }
+  let reach = Math.max(bb, 0);
+  HARD.lastIndex = reach;
+  for (let h = HARD.exec(old); h && h.index + h[0].length <= cut; h = HARD.exec(old))
+    reach = h.index;
+  const kb = ob.findIndex((b) => b.start + b.body.text.length > reach);
+  if (kb >= 0) k = Math.min(k, kb);
   // A frozen block was decided by scanning to the end of the file, so any edit can change it.
   const err = ob.findIndex((b) => b.body.kind === 'error');
   if (err >= 0) k = Math.min(k, err);
