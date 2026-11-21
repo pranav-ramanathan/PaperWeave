@@ -151,6 +151,53 @@ test('a line is shown in the PDF, and a place in the PDF leads back to its line'
   await expect(page.getByRole('region', { name: 'Editor for second.tex' })).toBeVisible();
 });
 
+test('a long PDF read to its end keeps pictures only of the pages near the window', async ({
+  browser,
+}) => {
+  test.setTimeout(300_000);
+  const { page, email } = await person(browser, 'synctex-long');
+  const LONG = [
+    '\\documentclass{article}',
+    '\\begin{document}',
+    ...Array.from({ length: 30 }, (_, i) => `Page ${i + 1}.\n\\newpage`),
+    '\\end{document}',
+    '',
+  ].join('\n');
+  const zip = join(mkdtempSync(join(tmpdir(), 'paperweave-e2e-')), `Long ${run}.zip`);
+  writeFileSync(zip, await writeZip([{ path: 'main.tex', bytes: Buffer.from(LONG) }]));
+  await page.goto('/sign-in');
+  await signIn(page, email);
+  await page.getByLabel('Or import a ZIP of a LaTeX project').setInputFiles(zip);
+  await page.getByRole('button', { name: 'Import ZIP' }).click();
+  await page.getByRole('link', { name: 'main.tex' }).first().click();
+  await expect(page.getByRole('region', { name: 'Editor for main.tex' })).toBeVisible();
+  await expect(build(page).getByRole('status')).toHaveText('The PDF is up to date.', {
+    timeout: 120_000,
+  });
+  await expect(build(page).getByRole('group', { name: 'Page 30 of 30' })).toBeAttached({
+    timeout: 120_000,
+  });
+  const holder = (n: number) => build(page).locator(`.pdf-page[data-page="${n}"]`);
+  const pictures = () =>
+    build(page)
+      .locator('.pdf-page canvas')
+      .evaluateAll((all) => all.filter((c) => (c as HTMLCanvasElement).width > 0).length);
+  // Read it through, a page at a time.
+  for (let n = 1; n <= 30; n++) {
+    await holder(n).evaluate((el) => el.scrollIntoView({ block: 'center' }));
+    await expect(holder(n)).toHaveAttribute('data-drawn', 'yes', { timeout: 30_000 });
+  }
+  // The pages far behind have let go of their pictures; the one at the end has its own.
+  await expect.poll(pictures).toBeLessThanOrEqual(8);
+  await expect(holder(30).locator('canvas')).not.toHaveJSProperty('width', 0);
+  // Back at the first: drawn again, with its words once and still readable.
+  await holder(1).evaluate((el) => el.scrollIntoView({ block: 'center' }));
+  await expect(holder(1)).toHaveAttribute('data-drawn', 'yes', { timeout: 30_000 });
+  await expect(holder(1).locator('canvas')).not.toHaveJSProperty('width', 0);
+  await expect(holder(1).locator('.textLayer')).toHaveCount(1);
+  await expect(holder(1)).toContainText('Page 1.');
+});
+
 // A two-column paper whose paragraphs wrap: each is three lines of text, with a marker word on the
 // second, so that the PDF has several lines for each of them.
 const paragraph = (m: string) =>

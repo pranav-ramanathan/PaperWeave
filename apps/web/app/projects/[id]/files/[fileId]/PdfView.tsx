@@ -42,16 +42,40 @@ export default function PdfView(props: {
       // The new pages are made beside the old and swapped in whole, so that a rebuilt PDF
       // appears where the old one was scrolled to.
       const pages = document.createElement('div');
+      // Only the pages near the window keep their picture: a page is a large canvas, and a long
+      // paper read through would otherwise hold every one of them.
+      const near = new Set<HTMLElement>();
+      const busy = new Set<HTMLElement>();
       const watch = new IntersectionObserver(
         (seen) => {
           for (const s of seen) {
-            if (!s.isIntersecting) continue;
-            watch.unobserve(s.target);
-            void draw(s.target as HTMLElement);
+            const holder = s.target as HTMLElement;
+            if (s.isIntersecting) near.add(holder);
+            else near.delete(holder);
+            void settle(holder);
           }
         },
         { root: host.current, rootMargin: '100% 0px' },
       );
+      const release = (holder: HTMLElement) => {
+        const canvas = holder.querySelector('canvas')!;
+        canvas.width = canvas.height = 0;
+        delete holder.dataset.drawn;
+      };
+      // One page at a time is drawn or released: PDF.js refuses a second render() on a canvas
+      // that is still being drawn, as happens when a page leaves and comes back.
+      const settle = async (holder: HTMLElement) => {
+        if (busy.has(holder)) return;
+        busy.add(holder);
+        try {
+          const drawn = holder.dataset.drawn === 'yes';
+          if (near.has(holder) && !drawn) await draw(holder);
+          else if (!near.has(holder) && drawn) release(holder);
+        } finally {
+          busy.delete(holder);
+        }
+        if (!stop && near.has(holder) !== (holder.dataset.drawn === 'yes')) void settle(holder);
+      };
       const draw = async (holder: HTMLElement) => {
         const page = await doc.getPage(Number(holder.dataset.page));
         if (stop) return;
@@ -64,7 +88,13 @@ export default function PdfView(props: {
         canvas.width = viewport.width;
         canvas.height = viewport.height;
         await page.render({ canvas, viewport }).promise.catch(() => {});
-        // The page's words, invisible, each where the picture shows it.
+        page.cleanup();
+        // The page's words, invisible, each where the picture shows it. They stay when the
+        // picture is released, so that what was read can still be selected and read aloud.
+        if (holder.querySelector('.textLayer')) {
+          holder.dataset.drawn = 'yes';
+          return;
+        }
         const size = holder.clientWidth / page.getViewport({ scale: 1 }).width;
         const words = document.createElement('div');
         words.className = 'textLayer';
