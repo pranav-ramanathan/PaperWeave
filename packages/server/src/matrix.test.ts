@@ -24,7 +24,16 @@ function fixture(name: string) {
   return entries;
 }
 const PAPERS = [
-  ...['article-basic', 'ieee-multifile', 'ams-multifile'].map((name) => ({
+  ...[
+    'article-basic',
+    'ieee-multifile',
+    'ams-multifile',
+    'real-natbib',
+    'real-biblatex-subfiles',
+    'real-tikz',
+    'real-acm',
+    'real-xelatex',
+  ].map((name) => ({
     name: `Fixture \`fixtures/${name}\``,
     entries: fixture(name),
   })),
@@ -109,6 +118,28 @@ function matrix() {
     '- Files that are not UTF-8, or that mix line endings: kept byte for byte and built, but not',
     '  editable here.',
     '- Comments, history and sharing settings from another service: a ZIP does not hold them.',
+    '- Fonts the image does not have: `libertine`, `newtxtext`, `newtxmath`, `inconsolata`. A class that',
+    '  asks for them (`acmart`) warns and builds with Computer Modern.',
+    '',
+    '## Shown as LaTeX, edited in the source view',
+    '',
+    'These are kept byte for byte, build, and are shown in place as the LaTeX they are, with a way',
+    'to their source. Measured on the `real-*` fixtures and on small samples:',
+    '',
+    '- `\\footnote{}`, `{\\bf ...}`, `\\textsc{}`, `\\SI{}{}`, `\\qty{}{}`, `\\num{}`, `\\url{}`,',
+    '  `\\href{}{}` and `\\foreignlanguage{}{}` inside a paragraph: one raw atom each. The words',
+    '  around them are editable; the words inside them are not.',
+    '- `description`, a list with `\\item[label]`, and a list with another list inside it: the whole',
+    '  environment is one raw block.',
+    '- `tikzpicture`, `pgfplots` axes, `lstlisting`, `algorithm`, `figure` and `table` (the caption of',
+    '  a figure or table is edited through its own control, the first of several in `subfigure`s),',
+    '  `CCSXML`, `\\ccsdesc`, `\\keywords`, `teaserfigure` and the title block of `acmart`.',
+    "- `\\subfile`, `\\import`, `\\include` and `\\input` lines, and a subfile's own preamble.",
+    '- A citation or a reference is shown in place with its source as its title; it is changed in',
+    '  the source view (the visual view inserts new ones, and opens a formula with a double click).',
+    '- A `.tex` file that is a root of its own (`standalone`, a subfile) is listed as another file that',
+    '  could be the root. The root chosen is the shallowest, then one named `main`, then the one that',
+    '  brings in the most files.',
     '',
   ].join('\n');
 }

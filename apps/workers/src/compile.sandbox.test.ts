@@ -15,7 +15,8 @@ import { dirname, join } from 'node:path';
 import { encodeFile, findRoot, includeGraph, parseSyncTeX, toPdf } from '@paperweave/latex';
 import { expect, test } from 'vitest';
 import { fixtures, replica, visualOp } from '../../../packages/bridge/src/harness.ts';
-import { FIXTURES, rng } from '../../../packages/latex/src/testutil.ts';
+import { describeImport } from '@paperweave/server';
+import { FIXTURES, fixtureFiles, rng } from '../../../packages/latex/src/testutil.ts';
 import { compile, sandbox } from './compile.ts';
 
 const tmp = () => mkdtempSync(join(tmpdir(), 'paperweave-test-'));
@@ -48,6 +49,27 @@ test.each(['article-basic', 'ieee-multifile', 'ams-multifile'])(
   },
 );
 
+// Papers written the way real ones are: the packages they load, the root and compiler found
+// from the files alone, and a build with no errors and no citation or reference left undefined.
+test.each(['real-natbib', 'real-biblatex-subfiles', 'real-tikz', 'real-acm', 'real-xelatex'])(
+  '%s builds with the root and compiler an import finds',
+  async (name) => {
+    const entries = Object.entries(fixtureFiles(join(FIXTURES, name))).map(([path, bytes]) => ({
+      path: path.slice(name.length + 1),
+      bytes,
+    }));
+    const { report } = describeImport(entries);
+    const out = tmp();
+    const r = await compile(join(FIXTURES, name), report.root!, out, 120, report.compiler);
+    expect(r.diagnostics.filter((d) => d.severity === 'error')).toEqual([]);
+    expect(r.ok).toBe(true);
+    expect(readFileSync(join(out, r.pdf!)).subarray(0, 5).toString()).toBe('%PDF-');
+    expect(
+      r.diagnostics.filter((d) => /(?:Citation|Reference) .* undefined/.test(d.message)),
+    ).toEqual([]);
+  },
+);
+
 // Fonts and languages papers commonly load without extra packages.
 const buildSource = async (tex: string) => {
   const project = tmp();
@@ -60,6 +82,17 @@ const buildSource = async (tex: string) => {
 test('T1 without lmodern uses outline fonts, not generated bitmaps', async () => {
   const { r } = await buildSource(
     '\\documentclass{article}\n\\usepackage[T1]{fontenc}\n\\begin{document}\nCaf\\\'e na\\"ive \\textbf{bold} \\textit{italic}\n\\end{document}\n',
+  );
+  expect(r.diagnostics.filter((d) => d.severity === 'error')).toEqual([]);
+  expect(r.ok).toBe(true);
+  expect(r.log).not.toMatch(/mktexpk|\.\d+pk\b/);
+});
+
+test('T1 text symbols with font expansion use outline fonts too', async () => {
+  // \textbullet and \texteuro are TS1 text-companion symbols; their fonts exist as outlines only
+  // in the full cm-super. microtype expands fonts, which a generated bitmap cannot do.
+  const { r } = await buildSource(
+    '\\documentclass{article}\n\\usepackage[T1]{fontenc}\n\\usepackage{textcomp}\n\\usepackage{microtype}\n\\begin{document}\n\\small \\textbullet{} \\texteuro{} \\textregistered\n\\end{document}\n',
   );
   expect(r.diagnostics.filter((d) => d.severity === 'error')).toEqual([]);
   expect(r.ok).toBe(true);

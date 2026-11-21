@@ -1,0 +1,20 @@
+\section{Method}\label{sec:method}
+We take the level $h(t)$ and write
+\begin{equation}\label{eq:level}
+  h(t) = a_0 + \sum_{k=1}^{4} a_k \cos(\omega_k t + \phi_k).
+\end{equation}
+
+Three steps follow:
+\begin{enumerate}
+  \item Remove spikes, in two parts:
+    \begin{itemize}
+      \item values beyond \SI{3}{\metre};
+      \item steps larger than \SI{0.5}{\metre} in one reading.
+    \end{itemize}
+  \item Fit \cref{eq:level} by least squares.
+  \item Smooth the residual with a window of \num{5} readings.
+\end{enumerate}
+
+The fit follows \citep{harbour94}; an alternative is described by
+\citealp{inlet07}. Pressure sensors drift, so the south gauge is checked
+against the tables each month.

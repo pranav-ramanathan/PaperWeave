@@ -1,0 +1,30 @@
+% !TEX program = xelatex
+% Synthetic fixture: a paper set with system fonts and a second language.
+\documentclass[11pt]{article}
+\usepackage{fontspec}
+\usepackage{unicode-math}
+\usepackage{polyglossia}
+\setmainlanguage{english}
+\setotherlanguage{german}
+\setmainfont{Latin Modern Roman}
+\setmathfont{Latin Modern Math}
+\usepackage{hyperref}
+
+\title{Zeitreihen mit Lücken}
+\author{J. Brenner}
+\date{}
+
+\begin{document}
+\maketitle
+
+\begin{abstract}
+We fill gaps in a daily series and keep the original values untouched.
+\end{abstract}
+
+\input{chapters/gaps}
+
+\section{Example}
+In German: \foreignlanguage{german}{Die Lücke wird linear gefüllt, wenn sie kürzer als drei Tage ist.}
+The fill rule is $f(x) = α x + β$, with $α, β ∈ ℝ$.
+
+\end{document}

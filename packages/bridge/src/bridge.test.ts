@@ -49,6 +49,22 @@ test('typing becomes the smallest splice', () => {
   expect(typed('one\ntwo\n', 4, ' ')).toBe('one \ntwo\n');
 });
 
+test('a % inside code or an address is not a comment, so typing after it adds no line break', () => {
+  // Typed just after the atom; the text that follows must stay on the same line.
+  expect(typed('Call \\lstinline|push(q, x % 8)| keeps on.\n', 6, ' z')).toBe(
+    'Call \\lstinline|push(q, x % 8)| z keeps on.\n',
+  );
+  expect(typed('Call \\verb|50%| keeps on.\n', 6, ' z')).toBe('Call \\verb|50%| z keeps on.\n');
+  expect(typed('See \\url{https://ex.org/a%20b} for data.\n', 5, ' z')).toBe(
+    'See \\url{https://ex.org/a%20b} z for data.\n',
+  );
+  expect(typed('See \\href{https://ex.org/a%20b}{the page} for data.\n', 5, ' z')).toBe(
+    'See \\href{https://ex.org/a%20b}{the page} z for data.\n',
+  );
+  // A real comment earlier on the line still keeps the typed text off it.
+  expect(typed('Done \\lstinline|a| % note\n', 6, 'x')).toBe('Done \\lstinline|a|x % note\n');
+});
+
 test('macro definitions are shown whole and cannot be deleted or wrapped from the visual editor', () => {
   const src =
     'Text \\newcommand{\\todo}[1]{\\textbf{#1}} and \\def\\eg#1{e.g.} and \\let\\a=\\b end.\n';

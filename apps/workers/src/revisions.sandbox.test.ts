@@ -97,6 +97,41 @@ test.each(['article-basic', 'ieee-multifile', 'ams-multifile'])(
   },
 );
 
+test('a revision saved with the text of one already built rebuilds to the same PDF outside the app', async () => {
+  const p = await paper('article-basic');
+  await requestBuild(t.pool, owner.id, p.id);
+  expect(await buildNext(t.pool, store, image)).toBe(true);
+  // Another second, so that the second revision is stamped with another time than the first.
+  await new Promise((done) => setTimeout(done, 1500));
+  const second = await saveRevision(t.pool, store, owner.id, p.id, 'Same text');
+  expect(second.number).toBe(2);
+  await requestBuild(t.pool, owner.id, p.id, { revisionId: second.id });
+  expect(await buildNext(t.pool, store, image)).toBe(true);
+  // Its build was not made again: the PDF is the first revision's.
+  const built = await t.pool.query(
+    'select cached_from from builds where revision_id = $1 order by created_at desc limit 1',
+    [second.id],
+  );
+  expect(built.rows[0].cached_from).not.toBeNull();
+  const pdf = await revisionPdf(t.pool, store, owner.id, p.id, second.id);
+
+  const dir = mkdtempSync(join(tmpdir(), 'paperweave-same-'));
+  const { zip } = await exportRevision(t.pool, store, owner.id, p.id, second.id, true);
+  writeFileSync(join(dir, 'same.zip'), zip);
+  execFileSync('unzip', ['-q', join(dir, 'same.zip'), '-d', join(dir, 'src')]);
+  const manifest = JSON.parse(readFileSync(join(dir, 'src/paperweave-toolchain.json'), 'utf8'));
+  const rebuilt = await compile(
+    join(dir, 'src'),
+    manifest.root,
+    join(dir, 'out'),
+    60,
+    manifest.compiler as Compiler,
+    manifest.sourceDateEpoch,
+  );
+  expect(rebuilt.ok).toBe(true);
+  expect(sha256(readFileSync(join(dir, 'out', rebuilt.pdf!)))).toBe(sha256(pdf));
+});
+
 test('building the live paper cuts a revision, and the build says when it is behind', async () => {
   const p = await paper('article-basic');
   await requestBuild(t.pool, owner.id, p.id);
