@@ -6,7 +6,7 @@ import * as Y from 'yjs';
 import { authorize, can } from './authz.ts';
 import type { BlobStore } from './blobs.ts';
 import { type ClaimChange, claimChanges, describeClaimChange, sentenceAround } from './claims.ts';
-import { placeLost, runCommand } from './commands.ts';
+import { type DeleteSet, placeLost, runCommand } from './commands.ts';
 import type { Db } from './db.ts';
 import { AppError } from './errors.ts';
 import { id } from './projects.ts';
@@ -396,7 +396,7 @@ export async function listProposals(
   // For the whole paper, every log is read in one statement; for one file, only its own.
   const logs = rows.length && fileId === undefined ? await docsOf(pool, projectId) : undefined;
   const texts = new Map<string, Awaited<ReturnType<typeof textOf>>>();
-  const deletes = new Map<string, Y.DeleteSet>();
+  const deletes = new Map<string, DeleteSet>();
   const out: Proposal[] = [];
   for (const r of rows) {
     if (!texts.has(r.file_id)) texts.set(r.file_id, await textOf(pool, store, r.file_id, logs));

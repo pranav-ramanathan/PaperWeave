@@ -57,6 +57,8 @@ function check(input: unknown): Command & { at: [Y.RelativePosition, Y.RelativeP
   }
 }
 
+export type DeleteSet = ReturnType<typeof Y.createDeleteSetFromStructStore>;
+
 /**
  * Whether the place between two anchors has been lost: either character the anchors hold on to
  * has been deleted. An empty stretch has no words to compare, so this is the only way to tell
@@ -64,7 +66,7 @@ function check(input: unknown): Command & { at: [Y.RelativePosition, Y.RelativeP
  * anchor at the start or end of the file holds on to no character and is never lost.
  * `deleted` is `Y.createDeleteSetFromStructStore(doc.store)`, made once for many checks.
  */
-export function placeLost(deleted: Y.DeleteSet, ...anchors: Uint8Array[]): boolean {
+export function placeLost(deleted: DeleteSet, ...anchors: Uint8Array[]): boolean {
   return anchors.some((encoded) => {
     try {
       const { item } = Y.decodeRelativePosition(encoded);
