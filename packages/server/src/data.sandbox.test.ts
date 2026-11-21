@@ -1,11 +1,14 @@
 // Needs the services in infra/compose.yaml. Run: pnpm test:sandbox
 import { afterAll, beforeAll, expect, test } from 'vitest';
+import * as Y from 'yjs';
 import { readZip, writeZip } from './archive.ts';
 import { blobStore } from './blobs.ts';
 import { approveDataset, datasetProposal, datasetTable, listDatasets } from './data.ts';
-import { exportZip, importZip, listFiles } from './import.ts';
+import { exportZip, importReport, importZip, listFiles } from './import.ts';
 import { acceptInvitation, invite } from './projects.ts';
-import { editFile } from './sync.ts';
+import { renameFile } from './revisions.ts';
+import { editFile, loadUpdates, TEXT } from './sync.ts';
+import { startThread } from './threads.ts';
 import { TEST_ENV, testDb } from './testing.ts';
 
 const store = blobStore(TEST_ENV);
@@ -170,4 +173,53 @@ test('data goes into a download only when its author has said so', async () => {
   expect(
     Buffer.from(back.entries.find((e) => e.path === 'data/latency.csv')!.bytes).toString(),
   ).toBe(CSV);
+});
+
+test('comments and proposals on held data stay out of the review ZIP, by file, not by name', async () => {
+  const p = await paper();
+  const row = 'Lab, north';
+  const doc = new Y.Doc();
+  for (const u of await loadUpdates(t.pool, store, p.csv)) Y.applyUpdate(doc, u);
+  const text = doc.getText(TEXT);
+  const at = text.toString().indexOf(row);
+  const pos = (i: number, side: number) =>
+    Y.encodeRelativePosition(Y.createRelativePositionFromTypeIndex(text, i, side));
+  await startThread(t.pool, store, users.owner.id, p.id, p.csv, {
+    from: pos(at, 0),
+    to: pos(at + row.length, -1),
+    body: 'Is this row right?',
+  });
+  const seen = await datasetProposal(t.pool, store, users.owner.id, p.id, p.csv);
+  const approve = (exported: boolean) =>
+    approveDataset(t.pool, store, users.owner.id, p.id, p.csv, {
+      version: seen.version,
+      columns: COLUMNS,
+      missing: ['', 'NA', 'n/a'],
+      exported,
+    });
+  const review = async () => {
+    const zip = await exportZip(t.pool, store, users.owner.id, p.id, { review: true });
+    const { entries, review } = await readZip(zip);
+    return {
+      zip,
+      joined: [...entries, ...review]
+        .map((e) => Buffer.from(e.bytes).toString('latin1'))
+        .join('\n'),
+    };
+  };
+  await approve(false);
+  const held = await review();
+  expect(held.joined).not.toContain(row);
+  // Imported, the archive says what was left out, in counts.
+  const [arrived] = await importZip(t.pool, store, users.outsider.id, held.zip, 'Arrived');
+  const report = (await importReport(t.pool, users.outsider.id, arrived.id))!;
+  expect(report.review!.missing).toEqual([
+    '1 thread on data/latency.csv was left out where this came from: the file is kept back from downloads.',
+  ]);
+  // A new name does not let it out.
+  await renameFile(t.pool, users.owner.id, p.id, p.csv, 'data/renamed.csv');
+  expect((await review()).joined).not.toContain(row);
+  // Released, it goes with the file.
+  await approve(true);
+  expect((await review()).joined).toContain('Is this row right?');
 });
