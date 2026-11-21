@@ -18,7 +18,7 @@ import {
   setRootFile,
 } from './files.ts';
 import { exportZip, importZip, listFiles } from './import.ts';
-import { acceptInvitation, createProject, getProject, invite } from './projects.ts';
+import { acceptInvitation, createProject, getProject, invite, setRole } from './projects.ts';
 import { listRevisions, renameFile, restoreRevision, saveRevision } from './revisions.ts';
 import { editFile, openFile } from './sync.ts';
 import { TEST_ENV, testDb } from './testing.ts';
@@ -191,6 +191,96 @@ test('a deleted file is saved first, and restoring brings back the same file', a
   expect((await content(p.id))['intro.tex']).toBe('Edited. Intro text.\n');
   await editFile(t.pool, store, p.intro, owner.id, (text) => text.insert(0, 'Again. '));
   expect((await content(p.id))['intro.tex']).toBe('Again. Edited. Intro text.\n');
+});
+
+/**
+ * The pool, running `act` once, just before the first statement of a transaction that comes after
+ * its `for update` on the files, and waiting for it. The delete holds every file row there.
+ */
+function holdingFiles(act: () => Promise<void>) {
+  let locked = false;
+  let acted = false;
+  const pool = t.pool;
+  return new Proxy(pool, {
+    get(target, prop) {
+      const v = Reflect.get(target, prop);
+      if (prop !== 'connect') return typeof v === 'function' ? v.bind(target) : v;
+      return async () => {
+        const client = await target.connect();
+        return new Proxy(client, {
+          get(c, p) {
+            const w = Reflect.get(c, p);
+            if (p !== 'query') return typeof w === 'function' ? w.bind(c) : w;
+            return async (sql: string, params?: unknown[]) => {
+              if (locked && !acted) {
+                acted = true;
+                await act();
+              }
+              if (/for update/.test(sql)) locked = true;
+              return c.query(sql, params);
+            };
+          },
+        });
+      };
+    },
+  });
+}
+/** Wait until some other connection is waiting on a lock held by this database's others. */
+async function untilSomeoneWaits() {
+  for (let i = 0; i < 400; i++) {
+    const { rowCount } = await t.pool.query(
+      `select 1 from pg_stat_activity where datname = current_database()
+       and wait_event_type = 'Lock' and pid <> pg_backend_pid()`,
+    );
+    if (rowCount) return;
+    await new Promise((r) => setTimeout(r, 25));
+  }
+  throw new Error('nobody started waiting for the files');
+}
+
+test('typing that queues behind a delete is refused, and the revision holds all that was acknowledged', async () => {
+  const p = await paper();
+  await editFile(t.pool, store, p.intro, owner.id, (text) => text.insert(0, 'Edited. '));
+  let late!: Promise<string>;
+  const deleting = deleteFile(
+    holdingFiles(async () => {
+      late = code(editFile(t.pool, store, p.intro, owner.id, (text) => text.insert(0, 'LATE ')));
+      await untilSomeoneWaits();
+    }),
+    store,
+    owner.id,
+    p.id,
+    p.intro,
+  );
+  const { revision } = await deleting;
+  // The edit was never acknowledged, so nothing is promised that the revision lacks.
+  expect(await late).toBe('not_found');
+  const seqs = await t.pool.query(
+    `select f.head_seq, rf.seq from all_files f join revision_files rf on rf.file_id = f.id
+     join revisions r on r.id = rf.revision_id where f.id = $1 and r.project_id = $2 and r.number = $3`,
+    [p.intro, p.id, revision],
+  );
+  expect(seqs.rows).toHaveLength(1);
+  expect(String(seqs.rows[0].head_seq)).toBe(String(seqs.rows[0].seq));
+  const [saved] = await listRevisions(t.pool, owner.id, p.id);
+  await restoreRevision(t.pool, store, owner.id, p.id, saved.id);
+  expect((await content(p.id))['intro.tex']).toBe('Edited. Intro text.\n');
+});
+
+test('a person whose role is lowered while their delete waits is refused, and the file stays', async () => {
+  const p = await paper();
+  const second = await t.signIn('second-editor@example.org');
+  const { token } = await invite(t.pool, owner.id, p.id, second.email, 'editor');
+  await acceptInvitation(t.pool, second.id, token);
+  const deleting = deleteFile(
+    holdingFiles(() => setRole(t.pool, owner.id, p.id, second.id, 'viewer')),
+    store,
+    second.id,
+    p.id,
+    p.intro,
+  );
+  expect(await code(deleting)).toBe('permission_denied');
+  expect(await paths(p.id)).toEqual(['intro.tex', 'main.tex']);
 });
 
 test('restoring a revision can swap two files back to their old names', async () => {

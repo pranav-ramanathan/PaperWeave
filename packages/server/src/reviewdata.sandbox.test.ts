@@ -5,7 +5,15 @@ import { readZip, writeZip } from './archive.ts';
 import { blobStore } from './blobs.ts';
 import { exportZip, importReport, importZip, listFiles } from './import.ts';
 import { acceptInvitation, invite } from './projects.ts';
-import { acceptProposal, closeProposal, listProposals, propose, undoAccept } from './proposals.ts';
+import {
+  acceptProposal,
+  closeProposal,
+  listProposals,
+  propose,
+  reattachProposal,
+  reviseProposal,
+  undoAccept,
+} from './proposals.ts';
 import { exportReview, locateQuote, REVIEW_FILE } from './reviewdata.ts';
 import { editFile, loadUpdates, TEXT } from './sync.ts';
 import { TEST_ENV, testDb } from './testing.ts';
@@ -300,8 +308,8 @@ async function trip(projectId: string) {
     report: (await importReport(t.pool, users.importer.id, arrived.id))!,
   };
 }
-const replaceIn = (file: string, from: string, to: string) =>
-  editFile(t.pool, store, file, users.owner.id, (text) => {
+const replaceIn = (file: string, from: string, to: string, by = users.owner.id) =>
+  editFile(t.pool, store, file, by, (text) => {
     const at = text.toString().indexOf(from);
     text.delete(at, from.length);
     text.insert(at, to);
@@ -555,4 +563,111 @@ test('a deleted comment, and a thread with none left, do not leave with the revi
   const out = await exportReview(t.pool, store, users.owner.id, p.id);
   expect(out.threads).toHaveLength(1);
   expect(out.threads[0].comments.map((c) => c.body)).toEqual(['Median or tail?']);
+});
+
+/** A place between two characters, as an editor with the caret there would send it. */
+async function caretAfter(file: string, words: string) {
+  const { to } = await ends(file, words);
+  return { from: to, to };
+}
+const saved = async (file: string) => {
+  const doc = new Y.Doc();
+  for (const u of await loadUpdates(t.pool, store, file)) Y.applyUpdate(doc, u);
+  return doc.getText(TEXT).toString();
+};
+const LINE = 'Latency stays below 40 ms for most edits.';
+/** An insertion proposal whose place is then deleted, and the paper's trip. */
+async function lostPlace() {
+  const p = await paper();
+  await propose(t.pool, store, users.reviewer.id, p.id, p.file, {
+    ...(await caretAfter(p.file, 'below 40 ms')),
+    replacement: ' (95th percentile)',
+  });
+  await replaceIn(p.file, LINE, 'We found no effect.');
+  return p;
+}
+/** "slow" is proposed to become "sluggish", then changed to "quick" in the source. */
+async function wordChanged(typedElsewhere: boolean) {
+  const p = await paper();
+  await propose(t.pool, store, users.reviewer.id, p.id, p.file, {
+    ...(await ends(p.file, 'slow')),
+    replacement: 'sluggish',
+  });
+  await replaceIn(p.file, 'slow', 'quick');
+  if (typedElsewhere)
+    await replaceIn(p.file, 'Nothing else is claimed.', 'Nothing else is slow, it is claimed.');
+  return p;
+}
+
+test('an insertion whose place was deleted does not arrive fresh', async () => {
+  const p = await lostPlace();
+  expect((await listProposals(t.pool, store, users.owner.id, p.id))[0]).toMatchObject({
+    stale: true,
+    placeLost: true,
+  });
+  const { id, report } = await trip(p.id);
+  const arrived = await listProposals(t.pool, store, users.importer.id, id);
+  expect(arrived.filter((x) => x.status === 'open' && !x.stale)).toEqual([]);
+  expect(report.review).toMatchObject({ proposals: 0 });
+  expect(report.review?.missing).toEqual([
+    'A proposal to add “ (95th percentile)” in main.tex: the place it was to be added at was no longer in the file.',
+  ]);
+  const [file] = await listFiles(t.pool, users.importer.id, id);
+  expect(await saved(file.id)).toBe(MAIN.replace(LINE, 'We found no effect.'));
+});
+
+test('a stale proposal on words typed elsewhere stays stale and cannot be accepted', async () => {
+  const p = await wordChanged(true);
+  expect((await listProposals(t.pool, store, users.owner.id, p.id))[0].stale).toBe(true);
+  const { id } = await trip(p.id);
+  const [now] = await listProposals(t.pool, store, users.importer.id, id);
+  expect(now).toMatchObject({ status: 'open', stale: true, now: '' });
+  const [file] = await listFiles(t.pool, users.importer.id, id);
+  const before = await saved(file.id);
+  expect(await code(acceptProposal(t.pool, store, users.importer.id, id, now.id))).toBe('conflict');
+  expect(await saved(file.id)).toBe(before);
+});
+
+test('a stale proposal whose words are gone still arrives, and can find them again', async () => {
+  const p = await wordChanged(false);
+  const { id, report } = await trip(p.id);
+  expect(report.review).toMatchObject({ proposals: 1 });
+  const [now] = await listProposals(t.pool, store, users.importer.id, id);
+  expect(now).toMatchObject({ status: 'open', stale: true });
+  const [file] = await listFiles(t.pool, users.importer.id, id);
+  // The closed-up stretch is not revised into a proposal about wherever it sits.
+  expect(
+    await code(reviseProposal(t.pool, store, users.importer.id, id, now.id, { replacement: 'x' })),
+  ).toBe('conflict');
+  await replaceIn(file.id, 'quick', 'slow', users.importer.id);
+  await reattachProposal(t.pool, store, users.importer.id, id, now.id);
+  expect((await listProposals(t.pool, store, users.importer.id, id))[0]).toMatchObject({
+    status: 'open',
+    stale: false,
+    now: 'slow',
+  });
+});
+
+test('the review data says which proposals were stale and which lost their place', async () => {
+  const a = await lostPlace();
+  const outA = await exportReview(t.pool, store, users.owner.id, a.id);
+  expect(outA.proposals[0]).toMatchObject({ status: 'open', stale: true, placeLost: true });
+  const c = await wordChanged(false);
+  const outC = await exportReview(t.pool, store, users.owner.id, c.id);
+  expect(outC.proposals[0]).toMatchObject({ status: 'open', stale: true });
+  expect(outC.proposals[0]).not.toHaveProperty('placeLost');
+});
+
+test('an insertion whose place is intact still arrives fresh and can be accepted', async () => {
+  const p = await paper();
+  await propose(t.pool, store, users.reviewer.id, p.id, p.file, {
+    ...(await caretAfter(p.file, 'below 40 ms')),
+    replacement: ' (95th percentile)',
+  });
+  const { id } = await trip(p.id);
+  const [now] = await listProposals(t.pool, store, users.importer.id, id);
+  expect(now).toMatchObject({ status: 'open', stale: false });
+  await acceptProposal(t.pool, store, users.importer.id, id, now.id);
+  const [file] = await listFiles(t.pool, users.importer.id, id);
+  expect(await saved(file.id)).toContain('below 40 ms (95th percentile) for most edits.');
 });

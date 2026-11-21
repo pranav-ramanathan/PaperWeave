@@ -123,7 +123,7 @@ export async function appendUpdate(
        select f.id from files f join project_members m on m.project_id = f.project_id
        where f.id = $1 and m.user_id = $2 and m.role = any($4) and f.eol is not null
      ), head as (
-       update files set head_seq = head_seq + 1 where id in (select id from allowed) returning head_seq
+       update files set head_seq = head_seq + 1 where id in (select id from allowed) and deleted_at is null returning head_seq
      )
      insert into file_updates (file_id, seq, update, user_id) select $1, head_seq, $3, $2 from head returning seq`,
     [fileId, userId, Buffer.from(update), WRITERS],
@@ -150,7 +150,7 @@ export async function appendUpdates(
        select 1 from project_members m where m.project_id = $1 and m.user_id = $2 and m.role = any($5)
      ), head as (
        update files set head_seq = head_seq + 1
-       where id = any($3::uuid[]) and project_id = $1 and eol is not null
+       where id = any($3::uuid[]) and project_id = $1 and eol is not null and deleted_at is null
          and exists (select 1 from allowed)
        returning id, head_seq
      )

@@ -3544,6 +3544,51 @@ sigconf PDF embeds a Libertine font (`pdffonts`). The 11 of them failed on the o
   captured from a real xindy build), `revisions.sandbox.test.ts` in both packages.
 - `docs/import-matrix.md` does not mention glossaries, so it is unchanged.
 
+## A proposal to add text is stale when the text around its place is deleted
+
+- A proposal to insert text (`expected === ''`) holds two Yjs anchors: the character after the
+  caret and the one before it. When an editor deleted or retyped the text around the caret, both
+  anchors closed up to one index, `now` was `''` as expected, and the place read as unchanged: it
+  was listed fresh and Accept wrote the text at wherever the place had closed up to. The same held
+  for undoing an accepted deletion (`replacement === ''`).
+- Rule: if either neighbour is deleted, the place is lost and the proposal is stale. An anchor at
+  the start or end of the file holds no character and never counts as lost, so an insertion at
+  either end, or into an empty file, stays fresh.
+- `listProposals` marks it `stale` and `placeLost`; `acceptProposal` and `undoAccept` answer
+  `conflict` (`runCommand` with `exactPlace`, checked under the file lock); `reviseProposal` refuses
+  with "The place this was to be added at is no longer in the file. Make a new proposal." The
+  proposals pane shows that sentence and hides "Change the proposal". Editor commands from the
+  sync server do not pass `exactPlace` and behave as before. No migration.
+- A restore that brings the sentence back leaves the proposal stale: the restored characters are
+  new ones, and a place cannot be re-attached (there are no words to find it by).
+- **Review data.** `exportReview` now writes `stale: true` for every open or accepted proposal that
+  is stale (before: accepted only) and `placeLost: true` for one whose place was lost; both are
+  optional, the format is still `paperweave-review-1`. Import used to place every open proposal by
+  its words, which undid staleness: an insertion arrived fresh and Accept wrote in the wrong place,
+  and a word changed in the source and typed once elsewhere arrived fresh on the other copy. Now an
+  open stale proposal with words is anchored at the start of the file (it reads as stale, Accept
+  answers `conflict`, "Find these words again" stays the person's choice, and `reviseProposal`
+  refuses the closed-up stretch). An open stale insertion (or one with `placeLost`) is left out and
+  reported in `missing`: "A proposal to add “…” in main.tex: the place it was to be added at was
+  no longer in the file." Accepted proposals are unchanged. Files exported before this change carry
+  no flag and import as they did: placed by their words, so they can still arrive fresh. No
+  migration.
+
+## Typing that landed between a delete's revision and its removal
+
+Deleting a file cut a revision in one transaction and hid the file in another. Edits that waited
+for the files while the revision was cut landed after it and before the removal: they were saved,
+acknowledged, and in no revision, while the page said "revision N still has it". Restoring N
+brought the file back without them. Now `cutRevision` takes an optional `within`, run after the cut
+in the same transaction (also when the cut finds nothing changed), and `deleteFile` removes the file
+there, after checking again that the file is live and not the root and that the person may still
+write. Files are locked before the project, as in a restore. The `acl` notification goes out when
+the transaction commits. `appendUpdate` and `appendUpdates` now refuse a file that has been
+deleted, so a queued edit is refused instead of acknowledged. Tests: `files.sandbox.test.ts` (an
+edit queued behind a delete is refused, the file's `head_seq` equals the revision's `seq`, restore
+gives back the text as it was; a role lowered mid-delete refuses the delete) and
+`sync.sandbox.test.ts` (no log entry above the revision's `seq`, editor closed with `no-access`).
+
 ## Decisions waiting on the owner
 
 See "What I need from you" in `docs/plan.md`. None blocks C1.

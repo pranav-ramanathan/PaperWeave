@@ -56,8 +56,10 @@ const Proposal = z.object({
   origin: z.enum(['person', 'critique']),
   madeBy: text(200).nullable(),
   evidence: z.array(z.string().transform((s) => s.slice(0, 500))).transform((e) => e.slice(0, 10)),
-  /** Accepted, and its words had been changed since: it stays stale. */
+  /** Open or accepted, and its words had been changed since: it stays stale. Absent in older files. */
   stale: z.boolean().optional(),
+  /** An insertion (or undone deletion) whose place was deleted: there are no words to find it by. */
+  placeLost: z.boolean().optional(),
 });
 // Items are read one by one, so that one bad item does not cost the rest.
 const ReviewData = z.object({
@@ -181,7 +183,8 @@ export async function exportReview(
       origin: p.origin,
       madeBy: p.madeBy,
       evidence: p.evidence,
-      ...(p.status === 'accepted' && p.stale ? { stale: true } : {}),
+      ...((p.status === 'open' || p.status === 'accepted') && p.stale ? { stale: true } : {}),
+      ...(p.placeLost ? { placeLost: true } : {}),
     });
   }
   return {
@@ -219,7 +222,8 @@ export function locateQuote(all: string, quote: string, before: string, after: s
 /**
  * Bring review data into a paper. Each thread and proposal is placed by its words; a thread
  * whose words are not there is kept detached, and a proposal that cannot be placed is reported
- * and left out. The people named in the data are kept as names.
+ * and left out. One that was stale where it came from stays stale, and an insertion whose place
+ * was lost is reported and left out. The people named in the data are kept as names.
  */
 export async function importReview(
   pool: pg.Pool,
@@ -307,11 +311,21 @@ export async function importReview(
     }
     const p = item.data;
     const f = await file(p.file);
+    // A stale open proposal is not placed by its words: they may since have been typed somewhere
+    // else, and it would read as fresh there.
+    const openStale = p.status === 'open' && p.stale === true;
+    if (f && openStale && (p.expected === '' || p.placeLost)) {
+      // An insertion has no words to find its place by.
+      done.missing.push(
+        `A proposal to add “${short(p.replacement)}” in ${p.file}: the place it was to be added at was no longer in the file.`,
+      );
+      continue;
+    }
     // An accepted proposal's stretch is what it put there; any other's is what it would replace.
     const stands = p.status === 'accepted' ? p.replacement : p.expected;
-    const stale = p.status === 'accepted' && p.stale === true;
-    // One that had gone stale is not placed by its words: it is anchored where it does not read
-    // as its replacement, so that it is stale here too.
+    const stale = openStale || (p.status === 'accepted' && p.stale === true);
+    // One that had gone stale is anchored where it does not read as its words, so that it is
+    // stale here too.
     const at = !f ? -1 : stale ? 0 : locateQuote(f.text.toString(), stands, p.before, p.after);
     if (!f || at < 0) {
       done.missing.push(
@@ -320,8 +334,12 @@ export async function importReview(
       continue;
     }
     // A stale one covers nothing, or one character if its replacement is empty (which an empty
-    // stretch would match).
-    const length = stale ? (p.replacement === '' ? Math.min(1, f.text.length) : 0) : stands.length;
+    // stretch would match). An open one that is stale has words, and an empty stretch is not them.
+    const length = stale
+      ? p.status === 'accepted' && p.replacement === ''
+        ? Math.min(1, f.text.length)
+        : 0
+      : stands.length;
     await pool.query(
       `insert into proposals (project_id, file_id, anchor_from, anchor_to, expected, replacement,
          reason, status, created_at, decided_at, origin, made_by, evidence, imported_author, imported_decider)

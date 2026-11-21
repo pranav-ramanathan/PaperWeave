@@ -208,3 +208,32 @@ test('compacting leaves one log entry, the same text, and old copies still merge
   expect(await runCommand(t.pool, store, owner.id, p.main, c)).toMatchObject({ result: 'applied' });
   expect(await stored(p.id)).toBe(before.replace('gamma', 'GAMMA'));
 });
+
+test('with exactPlace, an insertion whose anchors were deleted is refused; without it, it applies', async () => {
+  const p = await paper();
+  const text = await open(p.main);
+  const at = text.toString().indexOf(' beta');
+  const insertion = (): Command => ({
+    key: randomUUID(),
+    from: Y.encodeRelativePosition(Y.createRelativePositionFromTypeIndex(text, at, 0)),
+    to: Y.encodeRelativePosition(Y.createRelativePositionFromTypeIndex(text, at, -1)),
+    expected: '',
+    replacement: ' not',
+  });
+  const [a, b] = [insertion(), insertion()];
+  // Both neighbours go: the two anchors close up to one place, which reads as "" as it did.
+  await editFile(t.pool, store, p.main, owner.id, (x) => {
+    const i = x.toString().indexOf('Alpha beta');
+    x.delete(i, 'Alpha beta'.length);
+    x.insert(i, 'Omega');
+  });
+  const before = await stored(p.id);
+  expect(await runCommand(t.pool, store, owner.id, p.main, a, { exactPlace: true })).toMatchObject({
+    result: 'conflict',
+  });
+  expect(await stored(p.id)).toBe(before);
+  expect(await rows(p.main)).toBeGreaterThan(0);
+  // The same command without the option applies, as it always has.
+  expect(await runCommand(t.pool, store, owner.id, p.main, b)).toMatchObject({ result: 'applied' });
+  expect(await stored(p.id)).not.toBe(before);
+});

@@ -218,7 +218,13 @@ export default function Proposals(props: {
           {p.status === 'rejected' && (p.decidedBy ? `Rejected by ${p.decidedBy}.` : 'Rejected.')}
           {p.status === 'dismissed' && 'Withdrawn by its author.'}
         </p>
-        {p.status === 'open' && p.stale && (
+        {p.status === 'open' && p.placeLost && (
+          <p className="note">
+            <strong>Out of date.</strong> The place this was to be added at is no longer in the
+            file. Make a new proposal.
+          </p>
+        )}
+        {p.status === 'open' && p.stale && !p.placeLost && (
           <p className="note">
             <strong>Out of date.</strong> The text has changed since this was proposed. It now
             reads: <q>{p.now || '(nothing)'}</q>. It cannot be accepted as it is.
@@ -286,7 +292,7 @@ export default function Proposals(props: {
                   Find these words again
                 </button>
               )}
-            {p.status === 'open' && !gone(p) && (p.mine || canDecide) && (
+            {p.status === 'open' && !gone(p) && !p.placeLost && (p.mine || canDecide) && (
               <button type="button" data-revise={p.id} onClick={() => setRevising(p.id)}>
                 Change the proposal
               </button>

@@ -142,15 +142,35 @@ export async function deleteFile(
   const file = (
     await pool.query(
       `select f.id, f.path, p.root_file_id = f.id as root from files f join projects p on p.id = f.project_id
-       where f.id = $1 and f.project_id = $2`,
+       where f.id = $1 and f.project_id = $2 and f.deleted_at is null`,
       [id(fileId), projectId],
     )
   ).rows[0];
   if (!file) throw new AppError('not_found', 'No such file.');
   if (file.root)
     throw new AppError('invalid_input', 'This is the root file. Make another file the root first.');
-  const saved = await cutRevision(pool, store, userId, projectId);
-  await removeFile(pool, projectId, fileId);
+  // The revision and the removal are one transaction. Edits that waited for the files while the
+  // revision was cut would otherwise land before the removal, be acknowledged, and be in no
+  // revision. Everything is checked again here, with the files held: the paper may have changed.
+  const saved = await cutRevision(pool, store, userId, projectId, {
+    within: async (db) => {
+      await authorize(db, userId, id(projectId), 'file.write');
+      const now = (
+        await db.query(
+          `select p.root_file_id = f.id as root from files f join projects p on p.id = f.project_id
+           where f.id = $1 and f.project_id = $2 and f.deleted_at is null`,
+          [id(fileId), projectId],
+        )
+      ).rows[0];
+      if (!now) throw new AppError('not_found', 'No such file.');
+      if (now.root)
+        throw new AppError(
+          'invalid_input',
+          'This is the root file. Make another file the root first.',
+        );
+      await removeFile(db, projectId, fileId);
+    },
+  });
   return { path: file.path as string, revision: saved.number };
 }
 
