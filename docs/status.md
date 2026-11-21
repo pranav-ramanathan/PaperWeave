@@ -3767,6 +3767,13 @@ Coming back online, the editor said "This paper was restored to an earlier revis
 
 - Tests: `tests/e2e/recover.spec.ts` (file deleted; person removed; and the other file's tab still saves, with the owner seeing its edit).
 
+## Fault suite: a restore pressed twice
+
+`SEED=302909809 FAULTS=120` failed with "the revision kept before a restore lacks text that was stored". It was the test model, not the product. Two restores to the same revision in a row, with nothing typed between, make one revision: the second is the first again (the button pressed twice, already covered in `revisions.sandbox.test.ts`). The model still looked for the revision numbered one below the restore, which was the paper from before the first restore. The product lost nothing: the stored text was the restore revision's text.
+
+- The model now checks whether the restore added a revision. If it did not, the paper as it stood is that restore revision itself, and every mark stored before must be in it. The invariant (acknowledged text is never lost) is unchanged.
+- Also fails on main and on 1c68346, so it was long-standing and found by a new random seed.
+
 ## Decisions waiting on the owner
 
 See "What I need from you" in `docs/plan.md`. None blocks C1.
