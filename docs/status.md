@@ -2981,6 +2981,32 @@ Changed on the way, and worth keeping:
 - The sign-in step of the browser tests now fails with the server's own answer, status and
   words, if a link is not sent. The page says only that it could not be sent.
 
+### A browser test that depended on a triple click
+
+- **What happened.** On 21 November, in a whole run, `insert.spec` "after an equation is put on a
+  line of its own, typing carries on after it" found the table inserted in the middle of the
+  last paragraph (the line before it read `NEXTSecond`), not after the paragraph. The same test
+  passed 9 of 9 on its own.
+- **Why.** The table goes in where the caret is, as an equation does. The test clicks after
+  "Second" and expected the table after the paragraph. The test's third click in a few seconds
+  lands within 10 pixels of the second, because each insertion leaves the line in nearly the
+  same place. ProseMirror counts clicks that are under 500 ms apart and near each other as a
+  double and then a triple click, and a triple click selects the paragraph; the table then goes
+  after the selection. When the clicks are further apart in time, the click is a caret
+  mid-paragraph and the table goes there. Logged at the moment of the insert: caret 39 to 39
+  (mid-paragraph) in every failure, selection 29 to 50 (the paragraph) in every pass, with 560
+  and 360 ms between the clicks in a failing run.
+- **Measured** (`--repeat-each 30`, one worker): 0 of 30 failed unthrottled;
+  with `E2E_CPU_THROTTLE=4`, 24 of 30 failed on `origin/main` and 22 of 30 on the commit before
+  PR 133. With the CPU busy on all cores (8 loops on 4) none failed. The caret drawing added in
+  PR 133 is not involved: its redraws are not selection changes, and the selection at the insert
+  was the click's.
+- **Now** the test presses End after the click, so that the caret is at the end of the paragraph
+  however fast the clicks are. With `E2E_CPU_THROTTLE=4`, 40 of 40 pass. `E2E_CPU_THROTTLE=<n>`
+  slows every page the tests open by that factor (`person` in `tests/e2e/helpers.ts`).
+- Not changed: the editor, which does what its tests say (an insert goes at the caret, or after
+  the selection).
+
 ### What the browser says when the server does not answer
 
 - Sync ticket: the request is given up after 10 seconds and asked again. The editor says
