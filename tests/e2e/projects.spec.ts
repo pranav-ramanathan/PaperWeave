@@ -171,6 +171,53 @@ test('a button pressed twice does its work once', async ({ browser }) => {
   await audit(page, 'the list of papers');
 });
 
+test("a button pressed twice before the page's script has started does its work once", async ({
+  browser,
+}) => {
+  const owner = await person(browser, 'twice-early');
+  const { page } = owner;
+  await page.goto('/sign-in');
+  await signIn(page, owner.email);
+  await expect(page.getByRole('heading', { name: 'Your papers' })).toBeVisible();
+  const release = await scriptsHeld(page);
+  await page.goto('/projects', { waitUntil: 'domcontentloaded' });
+  const name = `Twice early ${run}`;
+  await page.getByLabel('Name of a new paper').fill(name);
+  let posts = 0;
+  page.on('request', (r) => {
+    if (r.method() === 'POST' && new URL(r.url()).pathname === '/projects') posts++;
+  });
+  // The answer comes 300 ms late, so that the first post is still on its way at the second press
+  // however fast the server is.
+  await page.route(
+    (u) => u.pathname === '/projects',
+    async (route) => {
+      if (route.request().method() === 'POST') await new Promise((r) => setTimeout(r, 300));
+      await route.continue();
+    },
+  );
+  // Two presses 50 ms apart: in one task the browser itself drops the first post.
+  await page
+    .getByRole('button', { name: 'Create paper' })
+    .evaluate(
+      (b: HTMLButtonElement) =>
+        new Promise<void>((r) => {
+          b.click();
+          setTimeout(() => {
+            b.click();
+            r();
+          }, 50);
+        }),
+    )
+    .catch(() => {}); // the page may have left before the second press
+  // Not 'load': the new page's scripts are held too.
+  await page.waitForURL(/\/projects\/[0-9a-f-]{36}$/, { waitUntil: 'domcontentloaded' });
+  release();
+  expect(posts).toBe(1);
+  await page.goto('/projects');
+  await expect(page.getByRole('link', { name, exact: true })).toHaveCount(1);
+});
+
 test("the sign-in form works for someone quicker than the page's script", async ({ browser }) => {
   const visitor = await person(browser, 'quick');
   const { page } = visitor;

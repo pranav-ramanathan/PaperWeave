@@ -1308,6 +1308,8 @@ caret had been put where no text can go.
 
 ## A button pressed twice
 
+(Before the page's script has started: see "Before the page's script has started".)
+
 Tried on the paper's page: "Delete", "Save revision" and "Send invitation", each pressed
 twice quickly.
 
@@ -1480,36 +1482,53 @@ second one.
   `waitUntil: 'domcontentloaded'`), and then each thing below done as a person would, with
   the scripts let through afterwards where that mattered. A production build, one machine.
 
-| Before                                                                               | Now                                                                        |
-| ------------------------------------------------------------------------------------ | -------------------------------------------------------------------------- |
-| A file dropped on a page opened in its place (the handler was put on in `useEffect`) | refused from the first byte: an inline script with the request's nonce     |
-| Sign-in: Enter or the button sent a plain GET to `/sign-in?email=...`; no link sent  | the button is disabled until the script has started, so Enter does nothing |
-| Sign-in: the field was controlled, so text typed or filled early might not be sent   | the form reads the field itself (`FormData`) and sends that                |
+| Before                                                                                   | Now                                                                                                            |
+| ---------------------------------------------------------------------------------------- | -------------------------------------------------------------------------------------------------------------- |
+| A file dropped on a page opened in its place (the handler was put on in `useEffect`)     | refused from the first byte: an inline script with the request's nonce                                         |
+| Sign-in: Enter or the button sent a plain GET to `/sign-in?email=...`; no link sent      | the button is disabled until the script has started, so Enter does nothing                                     |
+| Sign-in: the field was controlled, so text typed or filled early might not be sent       | the form reads the field itself (`FormData`) and sends that                                                    |
+| Two presses 50 ms apart of Create paper made two papers (`Once` attaches in `useEffect`) | a form the browser posts itself is posted once: `SENT`, an inline script beside `DROPPED`, for every POST form |
 
 - **Probe**, scripts held, one run each:
 
-| Tried                                | What happened                                                                                    |
-| ------------------------------------ | ------------------------------------------------------------------------------------------------ |
-| Create paper, pressed once           | Works: posted natively, the paper's page comes back. One paper.                                  |
-| Create paper, two clicks in one task | One paper (the browser drops the first post).                                                    |
-| Create paper, two clicks 50 ms apart | **Two papers** with the same name (counted in the database). `Once.tsx` attaches in `useEffect`. |
-| Add file, a small file               | Works: "Added early.tex."                                                                        |
-| Add file, 4.6 MB `.tex`              | Posted whole and accepted. Locally nothing refuses it; a function on Vercel would at 4.5 MB.     |
-| Sign out                             | Does nothing until the script has started; works after.                                          |
-| A link to a file                     | Works (a plain link).                                                                            |
-| Typing where the editor will be      | Nothing takes the keys (no editor yet, nothing in the page); they are not in the editor after.   |
-| Rename a file (open the row, Rename) | Works: the confirming page comes.                                                                |
-| Join a paper from an invitation      | Works.                                                                                           |
+| Tried                                | What happened                                                                                  |
+| ------------------------------------ | ---------------------------------------------------------------------------------------------- |
+| Create paper, pressed once           | Works: posted natively, the paper's page comes back. One paper.                                |
+| Create paper, two clicks in one task | One paper (the browser drops the first post).                                                  |
+| Create paper, two clicks 50 ms apart | One paper now (two, with the same name, before `SENT`).                                        |
+| Add file, a small file               | Works: "Added early.tex."                                                                      |
+| Add file, 4.6 MB `.tex`              | Posted whole and accepted. Locally nothing refuses it; a function on Vercel would at 4.5 MB.   |
+| Sign out                             | Does nothing until the script has started; works after.                                        |
+| A link to a file                     | Works (a plain link).                                                                          |
+| Typing where the editor will be      | Nothing takes the keys (no editor yet, nothing in the page); they are not in the editor after. |
+| Rename a file (open the row, Rename) | Works: the confirming page comes.                                                              |
+| Join a paper from an invitation      | Works.                                                                                         |
 
-- **Found, not changed:** two papers from two presses 50 ms apart before the script has
-  started. Nobody's work is lost and nothing leaves the app, so it is left for a decision.
-  Typed keys before the editor exists are lost, but there was nothing yet to type into.
+- **Found, not changed:** typed keys before the editor exists are lost, but there was nothing
+  yet to type into.
 - **Held by** browser tests: `projects.spec` "the sign-in form works for someone quicker than
   the page's script" and `files.spec` "a file dropped before the page's script has started is
   not opened in its place". Each failed on the old code. `files.spec` slowed four times: 50 of
   50 pass (10 of each test), with the plain `expect` back in "a paper is started from nothing".
+  `projects.spec` "a button pressed twice before the page's script has started does its work
+  once" (Create paper, 50 ms apart, the answer held 300 ms): failed on the old code, 10 of 10,
+  with two posts; passes 10 of 10 now.
+- **How `SENT` works.** Before hydration a server-action form is a plain POST form; after it,
+  React always calls `preventDefault` on its submit. A submit that reaches `window` unprevented
+  is the browser posting the form itself, and the form is remembered; its next submit is
+  prevented and stopped in the capture phase, before React or `Once` hear it. Only a
+  back/forward-cache restore (`pageshow` with `persisted`) forgets them. `Once` is unchanged.
+  Every form that can be posted this way (`DirectUpload`'s small-file path, Add file, Import
+  ZIP, the server-action forms before hydration) is answered by a redirect or a page, so the
+  page is replaced; the downloads (`/export`, the build PDF and log) are links, not forms,
+  and none posts to a new tab.
 - **Not changed:** only the pages made by `person` are slowed (`E2E_CPU_THROTTLE`); a second
   page a test opens itself runs at full speed.
+- **Not changed:** a press that is stopped (the browser's Stop, or a post that never answers)
+  leaves that form unusable until the page is reloaded, as `Once` already does for Import ZIP
+  and Add file. With no script at all there is no guard. Two requests sent without the page
+  still make two. A first press before the script starts and a second after is covered by the
+  capture listener and has no test of its own.
 
 ## The view a file opens in
 
