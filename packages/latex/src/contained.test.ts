@@ -23,13 +23,15 @@ const REPLACEMENTS = [
   '\n\nnew',
   '\\section{',
   ' ',
+  'a\\begin{document}b',
 ];
 
 function document(r: Rng, plain: boolean) {
   const out: string[] = [];
   for (let i = 0, n = 3 + r.int(12); i < n; i++)
     out.push(!plain && r.int(3) === 0 ? soup(r, 1 + r.int(12)) : r.pick(PARAS));
-  return out.join(r.pick(['\n\n', '\n\n', '\n \n', '\n']));
+  const head = r.int(2) ? '\\documentclass{article}\n\\begin{document}\n\n' : '';
+  return head + out.join(r.pick(['\n\n', '\n\n', '\n \n', '\n']));
 }
 
 /** Where each inline atom that is not a definition sits in the source. */
@@ -93,4 +95,25 @@ test('containedNear catches a spill into the next paragraph, far from either end
 test('containedNear refuses, and does not parse, a paragraph past the cap', () => {
   const src = `a \\sys{} ${'word '.repeat(WINDOW_CAP / 4)}`;
   expect(containedNear(src, 2, 6, '\\sys{}')).toBe(false);
+});
+
+test('containedNear starts no window at a stray \\end{document} or inside the preamble', () => {
+  const lone =
+    'Throughout, $x$ and ]\\\\end{document} is the length.\n\nSecond \\sys{} paragraph.\n\nThird.';
+  const src = `${lone}\n\n${lone}\n\n${lone}`;
+  const from = src.lastIndexOf('\\sys{}');
+  expect(containedNear(src, from, 6, '\\cite{k}')).toBe(true);
+  const pre = `\\documentclass{article}\n\\newcommand{\\sys}{S}\n\\begin{document}\n\nUse \\sys{} now.\n\nMore.\n`;
+  expect(containedNear(pre, pre.indexOf('\\sys{} now'), 6, '\\cite{k}')).toBe(true);
+  expect(containedNear(pre, pre.indexOf('\\sys{}}'), 6, '\\cite{k}')).toBe(false);
+  // A second \\begin{document} is only text, as in the whole file.
+  expect(containedNear(pre, pre.indexOf('\\sys{} now'), 6, 'a\\begin{document}b')).toBe(
+    contained(
+      parse(pre),
+      parse(pre.replace('\\sys{} now', 'a\\begin{document}b now')),
+      pre.indexOf('\\sys{} now'),
+      6,
+      19,
+    ),
+  );
 });

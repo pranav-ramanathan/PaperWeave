@@ -74,6 +74,7 @@ export function contained(
 export const WINDOW_CAP = 256 * 1024;
 /** Same margin as `reparse`: a boundary the edit itself touches does not count as one. */
 const MARGIN = 24;
+const DOC = '\\begin{document}';
 
 /**
  * `contained` for the text `now` and a replacement of its bytes [from, from + was), parsing only a
@@ -91,7 +92,7 @@ const MARGIN = 24;
  *
  * If the window would pass WINDOW_CAP (one giant paragraph, say) the answer is false, which the
  * callers report as a conflict. It never falls back to a full parse: refusing is safe, a crash is
- * not. A window that would take in `\begin{document}` starts at 0 instead, for the preamble.
+ * not. The preamble is kept apart, as the whole-file parse reads it: see the comment below.
  */
 export function containedNear(
   now: string,
@@ -101,6 +102,8 @@ export function containedNear(
   transparent: ReadonlySet<string> = DEFAULT_TRANSPARENT,
 ): boolean {
   const to = from + was;
+  const d = now.indexOf(DOC);
+  if (d >= 0 ? from < d + DOC.length : replacement.includes(DOC)) return false;
   const n = now.length;
   const floor = Math.max(0, from - WINDOW_CAP);
   /** Start of the paragraph before `at`, or -1 if it lies past the floor. */
@@ -121,7 +124,9 @@ export function containedNear(
     let at2 = Math.max(bb, 0);
     HARD.lastIndex = at2;
     for (let h = HARD.exec(now); h && h.index + h[0].length <= cut; h = HARD.exec(now))
-      at2 = h.index;
+      // Only a heading that begins its line is certainly where a block begins; `\\end{document}`,
+      // or a heading inside a line, can sit in the middle of a paragraph.
+      if (h[0][1] !== 'e' && now[h.index - 1] === '\n') at2 = h.index;
     return at2;
   };
   const s1 = startBefore(from);
@@ -136,17 +141,22 @@ export function containedNear(
     if (e - s > WINDOW_CAP) return false;
   }
   if (e - s > WINDOW_CAP) return false;
+  // The text up to the first `\begin{document}` is one block of preamble, and nothing in it is an
+  // atom. A later `\begin{document}` is only text. A window that starts after the preamble is
+  // given a one-line preamble of its own, so what it reads of those matches the whole file.
   let start = s;
-  if (start > 0 && now.slice(start, e).includes('\\begin{document}')) {
-    start = 0;
-    if (e > WINDOW_CAP) return false;
+  let head = '';
+  if (d >= 0) {
+    start = Math.max(s, d + DOC.length);
+    head = DOC;
   }
-  const before = now.slice(start, e);
-  const after = now.slice(start, from) + replacement + now.slice(to, e);
+  if (e - start > WINDOW_CAP) return false;
+  const before = head + now.slice(start, e);
+  const after = head + now.slice(start, from) + replacement + now.slice(to, e);
   return contained(
     parse(before, transparent),
     parse(after, transparent),
-    from - start,
+    from - start + head.length,
     was,
     replacement.length,
   );
