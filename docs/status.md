@@ -3740,6 +3740,12 @@ warns about `key@cref`; that is now counted as the same label, so it is listed o
   heading, empty atom part, anchor association) and two in `apps/sync/src/sync.sandbox.test.ts`
   (refused; and the ends of the file and unrelated typing still apply).
 
+## A replacement that spills into its neighbours
+
+An inline atom's replacement was checked for spilling (`contained`) only against the client's text. It now travels as `contained: true` on the command, and `runCommand` and `Bridge.applyCommand` check it against the text as it stands when the command lands, answering `conflict` if another editor's edit made it spill (for instance deleting the space after `\sys{}` before `\sys` is written there). The check parses the file twice inside the file's row lock: about 0.5 s of parsing plus 0.5 s of checking at 1 MB, about 4 s at 5 MB, and it ran out of an 8 GB heap at the 50 MB limit.
+
+`openMath` skips `rewriteCommand`, so formulas have no containment check on either side.
+
 ## Decisions waiting on the owner
 
 See "What I need from you" in `docs/plan.md`. None blocks C1.
