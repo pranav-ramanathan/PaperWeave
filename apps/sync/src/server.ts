@@ -121,6 +121,23 @@ export async function startSync(opts: {
     // by a connection that is on its way out (see beforeSync). So the first time someone is
     // let in to a freshly read copy, the log is read once more from where the reading began.
     async connected({ documentName, connection, context }) {
+      // A connection is not known to `recheck` or `signedOut` until the file has been read, which
+      // can take a while. Whatever changed meanwhile is looked for here, before it is told or
+      // given anything.
+      try {
+        if (await look(connection, documentName)) return;
+        if (context.sessionId !== null) {
+          const { rowCount } = await pool.query('select 1 from session where id::text = $1', [
+            context.sessionId,
+          ]);
+          if (!rowCount) return connection.close({ code: 4401, reason: 'signed-out' });
+        }
+      } catch (err) {
+        // The database did not answer. Not final, as a refusal is, and not left open unchecked:
+        // the editor is told to try again.
+        console.error(`could not look up who may use ${documentName}:`, (err as Error).message);
+        return connection.close({ code: 1013, reason: TRY_AGAIN });
+      }
       // The page was made for the role its person had when it loaded. That may be a while ago.
       tellRole(connection, context.role);
       if (server.hocuspocus.documents.get(documentName) !== connection.document) {
@@ -225,23 +242,32 @@ export async function startSync(opts: {
     },
   });
 
+  /**
+   * Look again at what one connection may do: set whether it may write, tell its editor if its
+   * role changed, and close it for good if its person is off the paper. True if it was closed.
+   */
+  const look = async (connection: Connection<Context>, name: string) => {
+    try {
+      const file = await openFile(pool, connection.context.userId, name);
+      connection.readOnly = !file.canWrite;
+      if (connection.context.role !== file.role) {
+        connection.context.role = file.role;
+        tellRole(connection, file.role);
+      }
+      return false;
+    } catch (err) {
+      if (!(err instanceof AppError)) throw err;
+      // The reason tells the editor this is final, not a dropped connection.
+      connection.close({ code: 4403, reason: 'no-access' });
+      return true;
+    }
+  };
   /** Look again at what each connection to a paper's files may do, or to every paper's. */
   const recheck = async (projectId?: string) => {
     for (const [name, document] of server.hocuspocus.documents) {
       for (const connection of document.getConnections() as Connection<Context>[]) {
         if (projectId && connection.context.projectId !== projectId) continue;
-        try {
-          const file = await openFile(pool, connection.context.userId, name);
-          connection.readOnly = !file.canWrite;
-          if (connection.context.role !== file.role) {
-            connection.context.role = file.role;
-            tellRole(connection, file.role);
-          }
-        } catch (err) {
-          if (!(err instanceof AppError)) throw err;
-          // The reason tells the editor this is final, not a dropped connection.
-          connection.close({ code: 4403, reason: 'no-access' });
-        }
+        await look(connection, name);
       }
     }
   };
