@@ -216,10 +216,14 @@ test('after an equation is put on a line of its own, typing carries on after it'
   // At the end of a paragraph: the next place is the start of the paragraph that follows.
   await equation('here.', 'b = 2');
   await page.keyboard.type('NEXT');
-  // A table goes in by the same road. It is put after the paragraph it was asked for in,
-  // which here is the last thing in the paper: nothing after it can take text, so the caret
-  // goes back to the nearest place before, the end of that paragraph.
+  // A table goes in by the same road: where the caret is. The caret is put at the end of the
+  // paragraph, which here is the last thing in the paper: nothing after the table can take
+  // text, so the caret goes back to the nearest place before, the end of that paragraph. (The
+  // click alone is not enough: three clicks within half a second of each other, near each
+  // other, are a triple click to the editor, which selects the paragraph. Slower than that it
+  // is a caret in the middle of the paragraph, and the table goes in there.)
   await clickAfter(page, VISUAL, 'Second');
+  await page.keyboard.press('End');
   await page.getByRole('group', { name: 'Edit' }).getByRole('button', { name: 'Table' }).click();
   const table = page.getByRole('dialog', { name: 'Insert a table' });
   await table.getByLabel('Caption').fill('Sizes');
