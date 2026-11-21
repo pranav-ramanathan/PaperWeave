@@ -58,6 +58,24 @@ function check(input: unknown): Command & { at: [Y.RelativePosition, Y.RelativeP
 }
 
 /**
+ * Whether the place between two anchors has been lost: either character the anchors hold on to
+ * has been deleted. An empty stretch has no words to compare, so this is the only way to tell
+ * that the text around it was deleted and its two anchors have collapsed to one index. An
+ * anchor at the start or end of the file holds on to no character and is never lost.
+ * `deleted` is `Y.createDeleteSetFromStructStore(doc.store)`, made once for many checks.
+ */
+export function placeLost(deleted: Y.DeleteSet, ...anchors: Uint8Array[]): boolean {
+  return anchors.some((encoded) => {
+    try {
+      const { item } = Y.decodeRelativePosition(encoded);
+      return item !== null && Y.isDeleted(deleted, item);
+    } catch {
+      return false;
+    }
+  });
+}
+
+/**
  * Apply a command to a file as the user. The check and the edit happen while the file's log is
  * held, so the text checked is the text edited: typing by others waits a moment, and of two
  * commands on the same stretch the second sees what the first did.
@@ -79,6 +97,12 @@ export async function runCommand(
     within?: (db: Db, placed: { from: Uint8Array; to: Uint8Array }) => Promise<void>;
     /** The longest the file's text may become. The default is what could be imported. */
     maxFileText?: number;
+    /**
+     * For a command that adds text (its stretch is empty): it lands only if the characters on
+     * both sides of its place are still in the file, so that text deleted around the caret
+     * does not leave the command applying at wherever the place closed up to.
+     */
+    exactPlace?: boolean;
   } = {},
 ): Promise<CommandResult> {
   const c = check(command);
@@ -107,6 +131,12 @@ export async function runCommand(
     });
     const now = text.toString();
     if (from < 0 || to < from || now.slice(from, to) !== c.expected)
+      return { result: 'conflict', text: now };
+    if (
+      opts.exactPlace &&
+      c.expected === '' &&
+      placeLost(Y.createDeleteSetFromStructStore(doc.store), c.from, c.to)
+    )
       return { result: 'conflict', text: now };
     if (now.length - (to - from) + c.replacement.length > (opts.maxFileText ?? MAX_FILE_TEXT))
       throw new AppError(

@@ -6,7 +6,7 @@ import * as Y from 'yjs';
 import { authorize, can } from './authz.ts';
 import type { BlobStore } from './blobs.ts';
 import { type ClaimChange, claimChanges, describeClaimChange, sentenceAround } from './claims.ts';
-import { runCommand } from './commands.ts';
+import { placeLost, runCommand } from './commands.ts';
 import type { Db } from './db.ts';
 import { AppError } from './errors.ts';
 import { id } from './projects.ts';
@@ -29,6 +29,11 @@ export type Proposal = {
    * is. Accepted: the replacement has been changed since, so the accept cannot be undone.
    */
   stale: boolean;
+  /**
+   * An insertion (open) or a deletion (accepted) whose place was lost: the text on one side of
+   * it was deleted. It cannot be accepted or put back, and a place cannot be found again.
+   */
+  placeLost: boolean;
   /** The stretch as it reads now. */
   now: string;
   /**
@@ -178,6 +183,14 @@ export async function reviseProposal(
       'conflict',
       'The words this was about are no longer in the file. Find them again, or make a new proposal.',
     );
+  if (
+    p.expected === '' &&
+    placeLost(Y.createDeleteSetFromStructStore(doc.store), p.anchor_from, p.anchor_to)
+  )
+    throw new AppError(
+      'conflict',
+      'The place this was to be added at is no longer in the file. Make a new proposal.',
+    );
   const expected = text.toString().slice(from, to);
   if (expected === replacement) throw bad('That would change nothing.');
   const done = await pool.query(
@@ -262,6 +275,7 @@ export async function acceptProposal(
       replacement: p.replacement,
     },
     {
+      exactPlace: true,
       // In the same transaction as the edit: both happen, or neither. From here on the
       // proposal's stretch is the replacement where it stands, which is what an undo needs.
       within: async (db, placed) => {
@@ -310,6 +324,7 @@ export async function undoAccept(
       replacement: p.expected,
     },
     {
+      exactPlace: true,
       within: async (db, placed) => {
         const marked = await db.query(
           `update proposals set status = 'open', decided_by = null, decided_at = null,
@@ -381,10 +396,14 @@ export async function listProposals(
   // For the whole paper, every log is read in one statement; for one file, only its own.
   const logs = rows.length && fileId === undefined ? await docsOf(pool, projectId) : undefined;
   const texts = new Map<string, Awaited<ReturnType<typeof textOf>>>();
+  const deletes = new Map<string, Y.DeleteSet>();
   const out: Proposal[] = [];
   for (const r of rows) {
     if (!texts.has(r.file_id)) texts.set(r.file_id, await textOf(pool, store, r.file_id, logs));
     const { doc, text } = texts.get(r.file_id)!;
+    // Built once for the file, not once for each of its proposals.
+    if (!deletes.has(r.file_id))
+      deletes.set(r.file_id, Y.createDeleteSetFromStructStore(doc.store));
     const [from, to] = [locate(doc, text, r.anchor_from), locate(doc, text, r.anchor_to)];
     const known = from >= 0 && to >= from;
     const whole = text.toString();
@@ -401,6 +420,9 @@ export async function listProposals(
         );
       } else flags = claimChanges(r.expected, r.replacement);
     }
+    const lost =
+      (r.status === 'open' ? r.expected === '' : r.status === 'accepted' && r.replacement === '') &&
+      placeLost(deletes.get(r.file_id)!, r.anchor_from, r.anchor_to);
     out.push({
       id: r.id,
       fileId: r.file_id,
@@ -412,9 +434,11 @@ export async function listProposals(
       reason: r.reason,
       status: r.status,
       stale:
-        r.status === 'open'
+        lost ||
+        (r.status === 'open'
           ? !known || now !== r.expected
-          : r.status === 'accepted' && (!known || now !== r.replacement),
+          : r.status === 'accepted' && (!known || now !== r.replacement)),
+      placeLost: lost,
       now,
       flags: flags.map(describeClaimChange),
       origin: r.origin,
