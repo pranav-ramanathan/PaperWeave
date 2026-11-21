@@ -3128,6 +3128,14 @@ the last two items.
 - **Editor teardown.** `live.current` is cleared before the views are destroyed, so the awareness
   listener has nothing to redraw. No new test.
 - **Run.** Unit 155, sandbox 248 (1 skipped, not new), browser 106 of 106.
+- **Measured, not changed: a wait for a free connection.** The review asked whether the 10-second
+  limit on waiting for one of the pool's 10 connections turns a burst into errors. Bursts of
+  transactions each holding a connection (local Postgres, one process): 50 × 0.1 s, 100 × 0.3 s
+  and 200 × 0.5 s all succeeded, the last in 10.07 s; 250 × 0.5 s, 50 failed with "timeout
+  exceeded when trying to connect". So a process fails requests only once more than about ten
+  seconds of database work is queued in it. A sync save holds a connection for milliseconds, and
+  on Vercel each instance serves few requests at once; before the limit, such a request waited
+  until the platform cut it off.
 
 ## Decisions waiting on the owner
 
