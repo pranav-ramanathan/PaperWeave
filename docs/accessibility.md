@@ -81,6 +81,12 @@ Where this stands, what holds it there, and what nobody has checked yet.
   button that was left, and still does when the Edit group goes (the source view has 3
   buttons). Measured on the small paper: from the toolbar to the text 11 Tab presses, now 1;
   from the top of the file's page to the text, without the skip link, 15, now 5.
+- **Ctrl+Home and Ctrl+End in the visual editor** (`keys.spec`) put the caret at the start of
+  the first text and the end of the last text, and with Shift select out to them. They did
+  nothing before: the paper starts and ends with drawn blocks (the preamble and
+  `\end{document}`), and the browser's own move to the start or end of the document found no
+  place for a caret. Checked with Ctrl in Chromium only; Cmd+Home on a Mac uses the same
+  binding, and Cmd+Up and Cmd+Down have not been tried.
 - **The other pages' refusal lines have the keyboard** (`keys.spec`): the checks before
   submitting, a data file, a chart, the two renames and an invitation (both of its lines). This
   was tried by loading the address a refusal returns to, with `?error=` on it, not by provoking

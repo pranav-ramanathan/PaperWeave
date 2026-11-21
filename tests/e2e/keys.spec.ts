@@ -91,6 +91,41 @@ async function selectLine(page: Page, line: number, words: string) {
   await expect.poll(selected).toBe(words);
 }
 
+/**
+ * Where the caret is in the editor: at the start of the first text a caret can be in, at the end
+ * of the last one, or neither. The preamble and \\end{document} around the text are drawn blocks.
+ */
+const caretAt = (page: Page) =>
+  page.locator('.editor .visual .ProseMirror').evaluate((el) => {
+    const sel = document.getSelection();
+    const walker = document.createTreeWalker(el, NodeFilter.SHOW_TEXT, {
+      acceptNode: (n) =>
+        n.parentElement?.closest('[contenteditable=false]')
+          ? NodeFilter.FILTER_REJECT
+          : NodeFilter.FILTER_ACCEPT,
+    });
+    let first: Node | null = null;
+    let last: Node | null = null;
+    for (let n = walker.nextNode(); n; n = walker.nextNode()) {
+      first ??= n;
+      last = n;
+    }
+    if (!sel || !sel.isCollapsed) return sel ? 'selection' : 'none';
+    if (sel.anchorNode === first && sel.anchorOffset === 0) return 'start';
+    if (sel.anchorNode === last && sel.anchorOffset === (last?.textContent?.length ?? -1))
+      return 'end';
+    return 'elsewhere';
+  });
+
+/** The caret to the start of the text with ArrowUp and Home, as selectLine does. */
+async function caretToStart(page: Page) {
+  for (let i = 0; i < 10 && (await caretAt(page)) !== 'start'; i++) {
+    await page.keyboard.press('ArrowUp');
+    await page.keyboard.press('Home');
+  }
+  await expect.poll(() => caretAt(page)).toBe('start');
+}
+
 test('a comment and a proposed change are started, sent and decided without losing the keyboard', async ({
   browser,
 }) => {
@@ -170,7 +205,7 @@ test('the window for an equation takes what is typed straight after it opens', a
   await expect(page.locator('.editor .visual .ProseMirror')).toContainText('Latency');
 
   await tabTo(page, 'main.tex, visual editor');
-  await page.keyboard.press('ControlOrMeta+Home');
+  await caretToStart(page);
   await page.keyboard.press('ArrowDown');
   await page.keyboard.press('Alt+=');
   const box = page.getByRole('dialog', { name: 'Insert an equation' });
@@ -469,7 +504,7 @@ test('a formula is opened for editing with the keyboard', async ({ browser }) =>
     ].join('\n'),
   );
   await tabTo(page, 'main.tex, visual editor');
-  await page.keyboard.press('ControlOrMeta+Home');
+  await caretToStart(page);
   // From the top, Right goes over the preamble and then the words; it stops on the formula.
   const inline = page.locator('.editor .visual .ProseMirror-selectednode.pw-math:not(.pw-block)');
   let rights = 0;
@@ -510,4 +545,35 @@ test('a formula is opened for editing with the keyboard', async ({ browser }) =>
 
   await showSource(page);
   expect(await sourceText(page)).toContain('Let $T_1$ be');
+});
+
+test('Ctrl+Home and Ctrl+End go to the start and the end of the text, with Shift they select', async ({
+  browser,
+}) => {
+  test.setTimeout(180_000);
+  const page = await paper(browser, 'keys-edges', true);
+  const editor = page.locator('.editor .visual .ProseMirror');
+  const selected = () => page.evaluate(() => document.getSelection()?.toString() ?? '');
+  const middle = async () => {
+    await page.keyboard.press('ArrowDown');
+    await page.keyboard.press('ArrowRight');
+    await expect.poll(() => caretAt(page)).toBe('elsewhere');
+  };
+  await tabTo(page, 'main.tex, visual editor');
+  await expect(editor).toBeFocused();
+  await middle();
+  await page.keyboard.press('ControlOrMeta+Home');
+  expect(await caretAt(page)).toBe('start');
+  await page.keyboard.press('ControlOrMeta+End');
+  expect(await caretAt(page)).toBe('end');
+
+  // Shift extends from the caret to the edge, either way.
+  await page.keyboard.press('ControlOrMeta+Home');
+  await middle();
+  await page.keyboard.press('Shift+ControlOrMeta+Home');
+  expect(await selected()).toMatch(/^Results/);
+  await page.keyboard.press('ControlOrMeta+Home');
+  await middle();
+  await page.keyboard.press('Shift+ControlOrMeta+End');
+  expect((await selected()).trimEnd()).toMatch(/proposal is here\.$/);
 });
