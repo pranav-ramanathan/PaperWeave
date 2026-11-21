@@ -450,16 +450,19 @@ async function cutForExport(
   opts: { review?: boolean },
 ) {
   await authorize(pool, userId, id(projectId), 'project.export');
-  const revision = await cutRevision(pool, store, userId, projectId);
-  const extra = opts.review
-    ? [
-        {
-          path: REVIEW_FILE,
-          bytes: Buffer.from(
-            JSON.stringify(await exportReview(pool, store, userId, projectId), null, 2) + '\n',
-          ),
-        },
-      ]
-    : [];
+  // The review is read in the cut's own transaction, with every file held, so it describes the
+  // text the revision (and so the ZIP's files) has: typing between the two would otherwise move
+  // the words a thread or proposal is placed by. Only the database is read while they are held.
+  let review: Buffer | undefined;
+  const revision = await cutRevision(pool, store, userId, projectId, {
+    within: opts.review
+      ? async (db) => {
+          review = Buffer.from(
+            JSON.stringify(await exportReview(db, store, userId, projectId), null, 2) + '\n',
+          );
+        }
+      : undefined,
+  });
+  const extra = review ? [{ path: REVIEW_FILE, bytes: review }] : [];
   return { revisionId: revision.id as string, extra };
 }

@@ -3664,6 +3664,19 @@ shared, so `citeIndex` reads every group too, and `\\cite<pre>{k}` now yields it
 index and the visual editor's atoms agree with the grammar view. Tests: five in `prose.test.ts`
 and `labels.test.ts` (fail on the old code), one in `grammar.sandbox.test.ts`.
 
+## A download with its review, while someone types
+
+The ZIP "with review data" cut a revision, then read the live text to place each thread and
+proposal by its words and what stands around them. Typing between the two meant the review
+described text that differed from the ZIP's files, so on import a quote with the same words
+elsewhere could not be told apart: a proposal was reported missing and a thread came in detached.
+
+The review is now read inside the cut's own transaction (`within`), with every file held, so it
+and the files are one moment. Only the database is read while they are held; the store is sent to
+before. `exportReview`, `listThreads`, `listProposals` and `loadUpdates` take a transaction client
+as well as the pool. Test: `reviewdata.sandbox.test.ts` types between the cut and the review read
+(fails on the old code).
+
 ## Decisions waiting on the owner
 
 See "What I need from you" in `docs/plan.md`. None blocks C1.

@@ -185,13 +185,15 @@ export async function notifyEdits(db: Db, edits: Map<string, number>): Promise<v
  * first edit, written once so that every later reader builds on the same history.
  */
 export async function loadUpdates(
-  pool: pg.Pool,
+  pool: Db,
   store: BlobStore,
   fileId: string,
 ): Promise<Uint8Array[]> {
   const existing = await readLog(pool, fileId);
   if (existing.length) return existing;
-  return transaction(pool, (db) => lockedUpdates(db, store, fileId));
+  // Already inside a transaction (a connection, not a pool): there is nothing to open.
+  if ('release' in pool) return lockedUpdates(pool, store, fileId);
+  return transaction(pool as pg.Pool, (db) => lockedUpdates(db, store, fileId));
 }
 const readLog = async (db: Db, fileId: string) =>
   (

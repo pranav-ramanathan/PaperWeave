@@ -59,7 +59,7 @@ const MAX = 20_000;
 const bad = (why: string) => new AppError('invalid_input', why);
 
 async function textOf(
-  pool: pg.Pool,
+  pool: Db,
   store: BlobStore,
   fileId: string,
   logs?: Map<string, Uint8Array[]>,
@@ -374,7 +374,7 @@ export async function closeProposal(
 
 /** The proposals of a paper, or of one of its files, oldest first, with where each stands. */
 export async function listProposals(
-  pool: pg.Pool,
+  pool: Db,
   store: BlobStore,
   userId: string,
   projectId: string,
