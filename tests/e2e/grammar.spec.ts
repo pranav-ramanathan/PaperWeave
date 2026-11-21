@@ -7,7 +7,7 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { writeZip } from '../../packages/server/src/archive';
 import { pdfText } from '../../packages/server/src/pdftext';
-import { emailedLink, person, run, showSource, signIn } from './helpers';
+import { emailedLink, person, run, showSource, showVisual, signIn } from './helpers';
 
 const MAIN = [
   '\\documentclass{article}',
@@ -157,4 +157,42 @@ test('a suggestion is taken as LaTeX source, so the build keeps the rest of the 
   // Read here, not with a tool the machine running the tests may not have.
   const text = pdfText(await (await owner.page.request.get(href!)).body());
   expect(text).toContain('We fund R&D every year and nothing else.');
+});
+
+test('a check that gets no answer says so and keeps the findings and their marks', async ({
+  browser,
+}) => {
+  test.setTimeout(120_000);
+  const owner = await person(browser, 'grammar-offline');
+  const zip = join(mkdtempSync(join(tmpdir(), 'paperweave-e2e-')), `Offline ${run}.zip`);
+  writeFileSync(zip, await writeZip([{ path: 'main.tex', bytes: Buffer.from(MAIN) }]));
+  await owner.page.goto('/sign-in');
+  await signIn(owner.page, owner.email);
+  await owner.page.getByLabel('Or import a ZIP of a LaTeX project').setInputFiles(zip);
+  await owner.page.getByRole('button', { name: 'Import ZIP' }).click();
+  await expect(owner.page.getByRole('heading', { name: 'Language' })).toBeVisible();
+  await owner.page.getByRole('link', { name: 'main.tex' }).first().click();
+  await expect(finding(owner.page, 'Spelling: “sentense”')).toBeVisible({ timeout: 30_000 });
+  await expect(owner.page.locator(`${VISUAL} .finding-mark`)).toHaveCount(3);
+
+  // The next check does not get through. A word typed makes one.
+  let refused = 0;
+  await owner.page.route(/\/projects\/[^/]+\/grammar\?file=/, (r) => {
+    refused++;
+    return r.abort();
+  });
+  await showSource(owner.page);
+  await owner.page.locator('.editor .cm-content').click();
+  await owner.page.keyboard.press('ControlOrMeta+End');
+  await owner.page.keyboard.type('% a note');
+  await expect(panel(owner.page)).toContainText(
+    'The spelling and grammar checker did not answer.',
+    {
+      timeout: 15_000,
+    },
+  );
+  expect(refused).toBeGreaterThan(0);
+  await expect(finding(owner.page, 'Spelling: “sentense”')).toBeVisible();
+  await showVisual(owner.page);
+  await expect(owner.page.locator(`${VISUAL} .finding-mark`)).toHaveCount(3);
 });

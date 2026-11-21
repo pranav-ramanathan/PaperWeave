@@ -40,6 +40,8 @@ const UPLOAD_KEY = /^tmp\/[0-9a-f-]{36}\/[0-9a-f-]{36}$/;
 
 const ANSWER_MS = 10_000;
 const BYTES_PER_MS = 100;
+/** The longest a body of unknown length (chunked) may take. */
+const UNKNOWN_LENGTH_MS = 10 * 60_000;
 
 export const sha256 = (bytes: Uint8Array) => createHash('sha256').update(bytes).digest('hex');
 
@@ -68,10 +70,13 @@ export function blobStore(env: Record<string, string | undefined> = process.env)
     return `${bucket}/${key}`;
   };
   let ready: Promise<unknown> | undefined;
+  /** The timers that watch a response's body, to be cleared when it has been read. */
+  const watching = new WeakMap<Response, ReturnType<typeof setTimeout>>();
   /**
    * A request to the store that gives up when the line has gone quiet: the store has 10 seconds
-   * to answer, and then the body, in or out, is allowed to move at 100 kB/s at least. A flat limit
-   * would cut a large download or leave a dead line hanging for minutes.
+   * to answer, and then the body, in or out, is allowed to move at 100 kB/s at least (a body of
+   * unknown length, ten minutes). A flat limit would cut a large download or leave a dead line
+   * hanging for minutes. A caller that has the response calls `settle` when it is done with it.
    */
   const ask = async (address: string, init: RequestInit = {}, sending = 0) => {
     const stop = new AbortController();
@@ -87,13 +92,21 @@ export function blobStore(env: Record<string, string | undefined> = process.env)
     const res = await s3
       .fetch(address, { ...init, signal: stop.signal })
       .finally(() => clearTimeout(first));
-    allow(ANSWER_MS + Number(res.headers.get('content-length') ?? 0) / BYTES_PER_MS);
+    // A HEAD has no body to wait for.
+    if (init.method !== 'HEAD') {
+      const length = res.headers.get('content-length');
+      watching.set(
+        res,
+        allow(length === null ? UNKNOWN_LENGTH_MS : ANSWER_MS + Number(length) / BYTES_PER_MS),
+      );
+    }
     return res;
   };
+  const settle = (res: Response) => clearTimeout(watching.get(res));
   // Creating a bucket that exists is an error we can ignore; a real failure shows on the PUT.
   // A failure is not kept: the next call asks again.
   const bucketReady = () =>
-    (ready ??= ask(bucket, { method: 'PUT' }).catch((err) => {
+    (ready ??= ask(bucket, { method: 'PUT' }).then(settle, (err) => {
       ready = undefined;
       throw err;
     }));
@@ -118,6 +131,7 @@ export function blobStore(env: Record<string, string | undefined> = process.env)
   };
   const head = async (address: string) => {
     const res = await ask(address, { method: 'HEAD' });
+    settle(res);
     if (res.status === 404) return null;
     if (!res.ok) throw new Error(`blob store refused a read: ${res.status}`);
     return Number(res.headers.get('content-length'));
@@ -127,14 +141,16 @@ export function blobStore(env: Record<string, string | undefined> = process.env)
       await bucketReady();
       const digest = sha256(bytes);
       const res = await ask(url(digest), { method: 'PUT', body: bytes as BodyInit }, bytes.length);
+      settle(res);
       if (!res.ok) throw new Error(`blob store refused a write: ${res.status}`);
       return digest;
     },
     async get(digest) {
       const res = await ask(url(digest));
+      if (res.status === 404 || !res.ok) settle(res);
       if (res.status === 404) return null;
       if (!res.ok) throw new Error(`blob store refused a read: ${res.status}`);
-      const bytes = new Uint8Array(await res.arrayBuffer());
+      const bytes = new Uint8Array(await res.arrayBuffer().finally(() => settle(res)));
       // Never hand back bytes that are not what was asked for.
       if (sha256(bytes) !== digest) throw new Error(`blob ${digest} is corrupt`);
       return bytes;
@@ -157,11 +173,13 @@ export function blobStore(env: Record<string, string | undefined> = process.env)
     uploadSize: (key) => head(uploadKey(key)),
     async uploadRead(key) {
       const res = await ask(uploadKey(key));
+      if (!res.ok) settle(res);
       if (!res.ok) throw new Error(`blob store refused a read: ${res.status}`);
-      return new Uint8Array(await res.arrayBuffer());
+      return new Uint8Array(await res.arrayBuffer().finally(() => settle(res)));
     },
     async uploadDrop(key) {
       const res = await ask(uploadKey(key), { method: 'DELETE' });
+      settle(res);
       if (!res.ok && res.status !== 404)
         throw new Error(`blob store refused a delete: ${res.status}`);
     },
@@ -177,8 +195,9 @@ export function blobStore(env: Record<string, string | undefined> = process.env)
           ...(token ? { 'continuation-token': token } : {}),
         }).toString();
         const res = await ask(list.href);
+        if (!res.ok) settle(res);
         if (!res.ok) throw new Error(`blob store refused a listing: ${res.status}`);
-        const xml = await res.text();
+        const xml = await res.text().finally(() => settle(res));
         for (const m of xml.matchAll(/<Contents>([\s\S]*?)<\/Contents>/g)) {
           const key = /<Key>([^<]*)<\/Key>/.exec(m[1])?.[1];
           const when = Date.parse(/<LastModified>([^<]*)<\/LastModified>/.exec(m[1])?.[1] ?? '');

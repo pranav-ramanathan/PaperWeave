@@ -92,3 +92,32 @@ test('an upload that stops is given up', async ({ browser }) => {
     timeout: 45_000,
   });
 });
+
+test('a page restored after a large upload was posted is a form that can be used again', async ({
+  browser,
+}) => {
+  test.setTimeout(120_000);
+  const page = await signedIn(browser, 'uploadback');
+  // The post goes nowhere, so the page stays as it is when the person goes back to it.
+  await page.evaluate(() => {
+    HTMLFormElement.prototype.submit = () => {};
+  });
+  await importZip(page, await bigZip(`Back ${run}`));
+  await expect(
+    page.getByText(`Back ${run}.zip is uploaded. Waiting for the server to take it.`),
+  ).toBeVisible({ timeout: 60_000 });
+  const form = page.locator('form', { has: page.getByLabel('Or import a ZIP of a LaTeX project') });
+  await expect(form.locator('input[type=hidden][name=key]')).toHaveCount(1);
+
+  // What a browser does when it brings the page back from its cache.
+  await page.evaluate(() =>
+    window.dispatchEvent(new PageTransitionEvent('pageshow', { persisted: true })),
+  );
+  await expect(page.getByText('is uploaded. Waiting for the server')).toHaveCount(0);
+  await expect(page.getByRole('progressbar', { name: 'Uploaded so far' })).toHaveCount(0);
+  await expect(page.locator('#waiting')).toHaveText('');
+  await expect(page.getByLabel('Or import a ZIP of a LaTeX project')).toBeEnabled();
+  await expect(
+    form.locator('input[type=hidden][name=key], input[type=hidden][name=name]'),
+  ).toHaveCount(0);
+});

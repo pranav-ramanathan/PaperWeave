@@ -241,11 +241,14 @@ export async function editComment(
   if (author !== userId)
     throw new AppError('permission_denied', 'Only the person who wrote a comment can change it.');
   const said = body(input.body);
-  // Saving the same words again is not a change.
-  await db.query(
-    'update thread_comments set body = $2, edited_at = now() where id = $1 and body <> $2',
+  // Saving the same words again is not a change. A comment deleted since the check above is not
+  // written to: the update skips it, and the check is made again to tell the two apart.
+  const changed = await db.query(
+    `update thread_comments set body = $2, edited_at = now()
+     where id = $1 and body <> $2 and deleted_at is null returning id`,
     [id(commentId), said],
   );
+  if (changed.rowCount === 0) await authorOf(db, projectId, threadId, commentId);
 }
 
 /**
