@@ -1,5 +1,13 @@
 // Adding and removing a paper's files, and choosing its root.
-import { decodeFile, graphicsPaths, includes, norm, resolveVia, rootDir } from '@paperweave/latex';
+import {
+  decodeFile,
+  graphicsPaths,
+  includes,
+  type Include,
+  norm,
+  resolveVia,
+  rootDir,
+} from '@paperweave/latex';
 import type pg from 'pg';
 import { checkPath, type Limits, LIMITS } from './archive.ts';
 import { authorize } from './authz.ts';
@@ -179,6 +187,24 @@ function relativeTo(dir: string, path: string) {
   return [...from.slice(same).map(() => '..'), ...to.slice(same)].join('/');
 }
 
+/**
+ * What to replace in the line of an include so that it names `path` (as written from the root's
+ * folder). A path written in two groups, `\\import{dir}{file}`, is replaced group by group: the
+ * folder keeps its trailing slash, or lack of one, and a group that says the same is left alone.
+ */
+export function nameSplices(inc: Include, path: string): Splice[] {
+  if (!inc.import) return [{ at: inc.targetAt, length: inc.target.length, insert: path }];
+  const { dir, dirAt, file } = inc.import;
+  const cut = path.lastIndexOf('/') + 1;
+  let newDir = path.slice(0, cut);
+  if (dir && !dir.endsWith('/')) newDir = newDir.replace(/\/$/, '');
+  const out: Splice[] = [];
+  if (newDir !== dir) out.push({ at: dirAt, length: dir.length, insert: newDir });
+  if (path.slice(cut) !== file)
+    out.push({ at: inc.targetAt, length: file.length, insert: path.slice(cut) });
+  return out;
+}
+
 /** The lines that name a file (`\input`, `\bibliography`, `\includegraphics`...) and what they would say after it is renamed. */
 async function renamePlan(
   db: Db,
@@ -218,7 +244,7 @@ async function renamePlan(
         found.via && newPath.startsWith(norm(folder) + '/')
           ? newPath.slice(norm(folder).length + 1)
           : relativeTo(dir, newPath);
-      hits.push({ at: inc.targetAt, length: inc.target.length, insert });
+      hits.push(...nameSplices(inc, insert));
     }
     if (hits.length) splices.set(file.id, hits);
   }

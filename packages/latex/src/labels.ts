@@ -6,18 +6,32 @@ export type LabelDef = { key: string; at: number; end: number; keyAt: number };
 /** One key inside a `\ref{...}` or one of its relatives. */
 export type RefUse = { key: string; command: string; at: number; end: number; keyAt: number };
 
-const REFS = new Set([
+/** The commands that name a label, for parse and labelIndex alike. */
+export const REFS = new Set([
   ...['ref', 'eqref', 'pageref', 'autoref', 'nameref', 'vref', 'Vref', 'vpageref', 'subref'],
   ...['cref', 'Cref', 'cpageref', 'Cpageref', 'namecref', 'crefrange', 'Crefrange', 'labelcref'],
   ...['fref', 'Fref', 'zcref', 'zcpageref', 'hyperref'],
 ]);
-const CITES = new Set([
+/** The commands that name a bibliography key, for parse and citeIndex alike. */
+export const CITES = new Set([
   ...['cite', 'citep', 'citet', 'citealt', 'citealp', 'citeauthor', 'citeyear', 'citeyearpar'],
   ...['citenum', 'citetitle', 'nocite', 'parencite', 'textcite', 'autocite', 'footcite'],
   ...['smartcite', 'supercite', 'fullcite', 'footfullcite', 'Cite', 'Citep', 'Citet'],
   ...['Parencite', 'Textcite', 'Autocite', 'Citeauthor'],
 ]);
 const VERBATIM = /^\\begin\{(verbatim\*?|lstlisting|minted|Verbatim|comment)\}/;
+
+/** Commands whose first brace group is an address, written as it is. */
+const VERBATIM_ARG = new Set(['url', 'nolinkurl', 'path', 'href']);
+/** Index after the `{...}` group at `at`, braces balanced and nothing else special; 0 if unclosed. */
+function verbatimGroup(src: string, at: number): number {
+  let depth = 0;
+  for (let i = at; i < src.length; i++) {
+    if (src[i] === '{') depth++;
+    else if (src[i] === '}' && --depth === 0) return i + 1;
+  }
+  return 0;
+}
 
 /** One key in the braces of a command: `\\ref{key}`, or one of several in `\\cite{a, b}`. */
 type Use = { key: string; command: string; at: number; end: number; keyAt: number };
@@ -53,6 +67,30 @@ function keyUses(src: string, wanted: (command: string) => boolean): Use[] {
       const close = src.indexOf(src[p], p + 1);
       i = close < 0 ? src.length : close;
       continue;
+    }
+    if (name[1] === 'lstinline' || name[1] === 'mintinline') {
+      // \lstinline[opts]|code|, \lstinline{code}, \mintinline{lang}|code|: no comments, no keys.
+      if (src[p] === '[') p = src.indexOf(']', p) + 1 || src.length;
+      if (name[1] === 'mintinline' && src[p] === '{') p = src.indexOf('}', p) + 1 || src.length;
+      const open = src[p];
+      if (open === '{') {
+        i = (verbatimGroup(src, p) || src.length) - 1;
+        continue;
+      }
+      if (open !== undefined && !/[\s\w]/.test(open)) {
+        const close = src.indexOf(open, p + 1);
+        const nl = src.indexOf('\n', p);
+        i = close >= 0 && (nl < 0 || close < nl) ? close : (nl < 0 ? src.length : nl) - 1;
+        continue;
+      }
+    }
+    if (VERBATIM_ARG.has(name[1]) && src[p] === '{') {
+      // The address of \url{..} or \href{..}{..} is taken as it is: a % in it is no comment.
+      const end = verbatimGroup(src, p);
+      if (end) {
+        i = end - 1;
+        continue;
+      }
     }
     if (!wanted(name[1])) {
       i = p - 1;

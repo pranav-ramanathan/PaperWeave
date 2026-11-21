@@ -68,3 +68,14 @@ test('\\hyperref, \\fref, \\Fref and \\zcref name labels', () => {
   ]);
   for (const r of refs) expect(src.slice(r.keyAt, r.keyAt + r.key.length)).toBe(r.key);
 });
+
+test('a % in an address or in inline code is not a comment hiding what follows', () => {
+  const src = [
+    'See \\url{https://ex.org/a%20b} and \\ref{sec:a}.',
+    'And \\href{https://ex.org/a%20b}{here} \\ref{sec:b}, \\lstinline|x % y| \\ref{sec:c}',
+    'Also \\mintinline{c}{a % b} \\ref{sec:d} \\lstinline[language=C]!%! \\ref{sec:e} % \\ref{no}',
+  ].join('\n');
+  expect(labelIndex(src).refs.map((r) => r.key)).toEqual([
+    ...['sec:a', 'sec:b', 'sec:c', 'sec:d', 'sec:e'],
+  ]);
+});

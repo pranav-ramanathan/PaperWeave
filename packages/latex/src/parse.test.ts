@@ -7,8 +7,12 @@ import {
   decodeFile,
   encodeFile,
   findRoot,
+  CITES,
+  citeIndex,
   includeGraph,
+  labelIndex,
   parse,
+  REFS,
   reparse,
 } from './index.ts';
 import { assertLossless, FIXTURES, fixtureFiles, fragment, rng, soup } from './testutil.ts';
@@ -173,4 +177,107 @@ test('coverage report', () => {
     expect(c.frozen).toBe(0);
     expect(c.editable / (c.editable + c.raw)).toBeGreaterThan(0.7);
   }
+});
+
+/** The atoms of the one paragraph `src` parses to, as `type:source`, and the other block kinds. */
+const atomsOf = (src: string) => {
+  const blocks = parse(src).blocks.filter((b) => b.body.kind !== 'ws');
+  const atoms = blocks.flatMap((b) =>
+    b.body.kind === 'para'
+      ? b.body.pieces
+          .filter((p) => p.k === 'atom')
+          .map((p) => `${p.type}:${b.body.text.slice(p.s, p.e)}`)
+      : [],
+  );
+  return { atoms, kinds: blocks.map((b) => b.body.kind) };
+};
+
+test('a % in the address of a link is part of the address, not a comment', () => {
+  for (const cmd of ['\\url{https://ex.org/a%20b}', '\\nolinkurl{a%20b}', '\\path{a%20b/c}']) {
+    const { atoms, kinds } = atomsOf(
+      `See ${cmd} for data.\n\nNext paragraph.\n\n\\section{Two}\n\nMore.\n`,
+    );
+    expect(atoms, cmd).toEqual([`raw:${cmd}`]);
+    expect(kinds, cmd).toEqual(['para', 'para', 'heading', 'para']);
+  }
+  // Only the first group of \href is the address; the second is text and may hold a comment.
+  const href = '\\href{https://ex.org/a%20b}{the \\emph{data}}';
+  expect(atomsOf(`See ${href} for data.\n\nNext.\n`)).toEqual({
+    atoms: [`raw:${href}`],
+    kinds: ['para', 'para'],
+  });
+  // Braces inside the address balance as usual.
+  expect(atomsOf('A \\url{a{b}%c} d.\n').atoms).toEqual(['raw:\\url{a{b}%c}']);
+  // On a line of its own it is a block, not an error; inside another command it is kept whole.
+  expect(atomsOf('\\url{a%20b}\n\nNext.\n').kinds).toEqual(['raw', 'para']);
+  expect(atomsOf('A\\footnote{see \\url{a%20b}} b.\n\nNext.\n')).toEqual({
+    atoms: ['raw:\\footnote{see \\url{a%20b}}'],
+    kinds: ['para', 'para'],
+  });
+});
+
+test('a $ inside a brace group of inline math does not end the formula', () => {
+  const f = '$x \\text{ if $y$ holds}$';
+  expect(atomsOf(`Let ${f} be so.`).atoms).toEqual([`math:${f}`]);
+  const g = '\\(x \\text{ if $y$ holds}\\)';
+  expect(atomsOf(`Let ${g} be so.`).atoms).toEqual([`math:${g}`]);
+  // Braces that never close are plain characters: the formula ends at the next $, as before.
+  expect(atomsOf('Let $a{b$ be $c$.').atoms).toEqual(['math:$a{b$', 'math:$c$']);
+  // And a formula cannot reach across a blank line to find its brace.
+  expect(atomsOf('Let $a{b$ be.\n\nThen } here $c$.\n').atoms.slice(0, 1)).toEqual(['math:$a{b$']);
+});
+
+test('\\lstinline and \\mintinline take their argument as it is, like \\verb', () => {
+  for (const code of [
+    '\\lstinline|x % y|',
+    '\\lstinline[language=C]!a % {b!',
+    '\\lstinline{x % y}',
+    '\\mintinline{python}|x % y|',
+    '\\mintinline[fontsize=\\small]{c}{a % {b} c}',
+  ]) {
+    const src = `Use ${code} here.\n\nNext.\n`;
+    expect(atomsOf(src), code).toEqual({ atoms: [`raw:${code}`], kinds: ['para', 'para'] });
+    const p = parse(src).blocks[0].body;
+    if (p.kind !== 'para') throw new Error('not a paragraph');
+    const last = p.pieces.filter((x) => x.k === 'text').at(-1)!;
+    expect(p.text.slice(last.s, last.e), code).toBe('here.');
+  }
+  // Without a closing delimiter it stops at the end of the line, as \verb does.
+  expect(atomsOf('Use \\lstinline|x y\nnext line\n').atoms).toEqual(['raw:\\lstinline|x y']);
+  // A command named in prose, with no delimiter after it, takes nothing with it.
+  expect(atomsOf('The \\lstinline command.\n').atoms).toEqual(['raw:\\lstinline']);
+});
+
+/** A use of the command `name` of the form its package writes, naming the keys `a` (and `b`). */
+const use = (name: string) => {
+  if (name === 'hyperref') return '\\hyperref[a]{text}';
+  const groups = name.endsWith('range') ? '{a}{b}' : '{a,b}';
+  return `\\${name}${CITES.has(name) ? '[see][p.~3]' : ''}${groups}`;
+};
+
+test('every reference and citation the label index finds is a ref or cite atom', () => {
+  for (const name of [...REFS, ...CITES]) {
+    const src = `See ${use(name)} for more.\n\nNext.\n`;
+    const found = [...labelIndex(src).refs, ...citeIndex(src)].map((u) => u.command);
+    expect(found, name).toContain(name);
+    const { atoms } = atomsOf(src);
+    // \hyperref[key]{text} has prose in its braces, so it stays a raw command.
+    const type = name === 'hyperref' ? 'raw' : REFS.has(name) ? 'ref' : 'cite';
+    expect(atoms, name).toEqual([`${type}:${use(name)}`]);
+  }
+});
+
+test('\\crefrange is one atom with both of its groups', () => {
+  expect(atomsOf('From \\crefrange{a}{b} on, \\Cref{c}.').atoms).toEqual([
+    'ref:\\crefrange{a}{b}',
+    'ref:\\Cref{c}',
+  ]);
+});
+
+test('\\nameref, \\vref, \\citealp, \\citeyearpar and capitalised forms are references and citations', () => {
+  const src =
+    'A \\nameref{a} \\vref{b} \\Cref{c} \\citealp{d} \\citealt[p.~2]{e} \\citeyearpar{f} \\Textcite{g}.';
+  expect(atomsOf(src).atoms.map((a) => a.split(':')[0])).toEqual([
+    ...['ref', 'ref', 'ref', 'cite', 'cite', 'cite', 'cite'],
+  ]);
 });

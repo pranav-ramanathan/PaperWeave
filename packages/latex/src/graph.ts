@@ -14,10 +14,18 @@ export type Include = {
   targetAt: number;
   /** For `support`: the extension TeX adds to a name written without one (`.sty`). */
   ext?: string;
+  /**
+   * For `\import{dir}{file}` and its relatives, where the path is written in two groups: `target`
+   * is the two joined, `targetAt` is where the file group's text starts, and this is the rest.
+   */
+  import?: { dir: string; dirAt: number; file: string };
 };
 
 const CMD =
   /\\(input|include|subfile|bibliography|addbibresource|includegraphics)\*?(?:\[[^\]]*\])?\s*\{([^{}]*)\}/g;
+// The `import` package: `\import{dir}{file}`, `\subimport{dir}{file}`, `\includefrom{dir}{file}`.
+const IMPORT =
+  /\\(import|subimport|inputfrom|subinputfrom|includefrom|subincludefrom)\*?\s*\{([^{}]*)\}\s*\{([^{}]*)\}/g;
 // `\input name`: TeX reads the name up to the next space.
 const BARE = /\\input\s+([^\s{}%\\#]+)/g;
 // Files of the paper that packages and classes read. Each has the extension TeX adds.
@@ -102,6 +110,23 @@ export function includes(src: string): Include[] {
   for (const m of live.matchAll(SUPPORT_CMD)) braced(m, m[1]);
   for (const m of live.matchAll(MINTED)) braced(m, 'verbatiminput');
   for (const m of live.matchAll(PLOT)) braced(m, 'verbatiminput');
+  for (const m of live.matchAll(IMPORT)) {
+    // Both are read from the folder TeX started in, as every other include here is. (\subimport
+    // reads from the folder of the file that holds it; that is not followed.)
+    const [dir, file] = [m[2].trim(), m[3].trim()];
+    if (!file) continue;
+    const target = dir && !dir.endsWith('/') ? `${dir}/${file}` : dir + file;
+    const dirAt = m.index + m[0].indexOf('{') + 1 + m[2].indexOf(dir);
+    const targetAt = m.index + m[0].lastIndexOf('{') + 1 + m[3].indexOf(file);
+    out.push({
+      kind: 'input',
+      target,
+      dynamic: /[\\#]/.test(target),
+      at: m.index,
+      targetAt,
+      import: { dir, dirAt, file },
+    });
+  }
   for (const m of live.matchAll(BARE))
     add('input', m.index, m[1], m.index + m[0].length - m[1].length, false);
   // The graph walks \input in the order they are written.

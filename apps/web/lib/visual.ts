@@ -274,16 +274,22 @@ export function createVisual(opts: {
   const ref = (node: PMNode) => {
     const src: string = node.attrs.src;
     const dom = el('span', 'pw-atom pw-ref');
-    const m = /^\\(\w+)\*?(?:\[[^\]]*\])?\{([^}]*)\}/.exec(src);
-    const keys = (m?.[2] ?? '').split(',').map((k) => k.trim());
+    const m = /^\\(\w+)\*?(?:\[[^\]]*\])*\{([^}]*)\}(?:\{([^}]*)\})?/.exec(src);
+    // \crefrange{first}{last} names two labels; the others name one or a list.
+    const range = !!m && m[1].endsWith('range') && m[3] !== undefined;
+    const keys = [m?.[2] ?? '', ...(range ? [m?.[3] ?? ''] : [])]
+      .flatMap((g) => g.split(','))
+      .map((k) => k.trim());
     const draw = () => {
       const n = numbers();
-      if (!n.known || !m) dom.textContent = `→${keys.join(', ')}`;
+      // \nameref prints the title of what the label is on, which is not known here.
+      if (!n.known || !m || m[1] === 'nameref') dom.textContent = `→${keys.join(', ')}`;
       else {
         // LaTeX prints ?? for a label it does not know. So do we.
         const page = m[1].toLowerCase().includes('pageref');
         const each = keys.map((k) => (page ? n.labels[k]?.page : n.labels[k]?.number) || '??');
-        dom.textContent = m[1] === 'eqref' ? `(${each.join(', ')})` : each.join(', ');
+        dom.textContent =
+          m[1] === 'eqref' ? `(${each.join(', ')})` : each.join(range ? ' to ' : ', ');
         dom.classList.toggle('pw-unknown', each.includes('??'));
       }
       dom.setAttribute('aria-label', `reference to ${keys.join(', ')}: ${dom.textContent}`);

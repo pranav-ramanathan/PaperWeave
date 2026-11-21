@@ -194,26 +194,42 @@ export async function typingSaved(page: Page) {
 export async function selectWord(page: Page, within: string, word: string) {
   // The file's text arrives a moment after its page does.
   await expect(page.locator(within)).toContainText(word);
-  const at = await page.evaluate(
-    ([sel, w]) => {
-      const walker = document.createTreeWalker(document.querySelector(sel)!, NodeFilter.SHOW_TEXT);
-      for (let n = walker.nextNode(); n; n = walker.nextNode()) {
-        const i = n.textContent!.indexOf(w);
-        if (i < 0) continue;
-        n.parentElement!.scrollIntoView({ block: 'center' });
-        const range = document.createRange();
-        range.setStart(n, i);
-        range.setEnd(n, i + w.length);
-        const r = range.getBoundingClientRect();
-        return { x: r.x + r.width / 2, y: r.y + r.height / 2 };
-      }
-      return null;
-    },
-    [within, word] as const,
-  );
-  if (!at) throw new Error(`"${word}" is not shown in ${within}`);
-  await page.mouse.dblclick(at.x, at.y);
-  await expect.poll(() => page.evaluate(() => getSelection()!.toString())).toBe(word);
+  const selected = () => page.evaluate(() => getSelection()!.toString());
+  // Measured, then pressed. Something drawn above the text a moment later (a panel that has just
+  // changed, a note) can move it between the two, and the press lands beside the word: then it is
+  // measured and pressed again.
+  for (let attempt = 1; ; attempt++) {
+    const at = await page.evaluate(
+      ([sel, w]) => {
+        const walker = document.createTreeWalker(
+          document.querySelector(sel)!,
+          NodeFilter.SHOW_TEXT,
+        );
+        for (let n = walker.nextNode(); n; n = walker.nextNode()) {
+          const i = n.textContent!.indexOf(w);
+          if (i < 0) continue;
+          n.parentElement!.scrollIntoView({ block: 'center' });
+          const range = document.createRange();
+          range.setStart(n, i);
+          range.setEnd(n, i + w.length);
+          const r = range.getBoundingClientRect();
+          return { x: r.x + r.width / 2, y: r.y + r.height / 2 };
+        }
+        return null;
+      },
+      [within, word] as const,
+    );
+    if (!at) throw new Error(`"${word}" is not shown in ${within}`);
+    await page.mouse.dblclick(at.x, at.y);
+    if (attempt === 3) break;
+    try {
+      await expect.poll(selected, { timeout: 1500 }).toBe(word);
+      return;
+    } catch {
+      // Moved under the pointer: measure again.
+    }
+  }
+  await expect.poll(selected).toBe(word);
 }
 
 /** Put the caret just after a word in an editor, with one click at the word's end. */
