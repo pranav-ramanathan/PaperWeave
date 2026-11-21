@@ -1,4 +1,5 @@
 import { AppError, can, chartDraws, listDatasets } from '@paperweave/server';
+import Result from '../../../../Result';
 import Link from '../../../../Go';
 import Once from '../../../../Once';
 import { notFound } from 'next/navigation';
@@ -74,7 +75,7 @@ export default async function ChartPage({
         <h1>{chart ? `Chart ${chart.name}` : 'New chart'}</h1>
         {back}
       </header>
-      {error && <p role="alert">{error}</p>}
+      {error && <Result alert>{error}</Result>}
       {chart?.status === 'queued' &&
         (stuck ? (
           <p role="alert">

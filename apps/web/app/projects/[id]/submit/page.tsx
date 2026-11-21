@@ -7,6 +7,7 @@ import {
   heldLine,
   submissionChecks,
 } from '@paperweave/server';
+import Result from '../../../Result';
 import Link from '../../../Go';
 import Once from '../../../Once';
 import { notFound } from 'next/navigation';
@@ -82,7 +83,7 @@ async function Submit({
           Back to the paper
         </Link>
       </header>
-      {error && <p role="alert">{error}</p>}
+      {error && <Result alert>{error}</Result>}
       {checks.ready ? (
         <>
           <p role="status">
