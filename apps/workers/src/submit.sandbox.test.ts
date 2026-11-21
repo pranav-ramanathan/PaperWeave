@@ -527,3 +527,63 @@ test('a manifest marks the chart data held from the archive, and lists what is h
     (await heldInRevisions(t.pool, users.owner.id, project.id, [revision.id])).get(revision.id),
   ).toEqual(['data.csv']);
 });
+
+// A label written twice in the source counts only when TeX itself says it is multiply defined:
+// text that TeX skips (\iffalse, the other arm of a switch) defines nothing.
+const SKIPPED =
+  '\\section{A}\\label{sec:a}\n\\iffalse\n\\section{Old}\\label{sec:a}\n\\fi\nSee \\ref{sec:a}.';
+const SWITCH =
+  '\\newif\\ifwide\\widetrue\n\\ifwide\\section{A}\\label{sec:a}\\else\\section{B}\\label{sec:a}\\fi\nSee \\ref{sec:a}.';
+const labelsOf = (found: { findings: { level: string; kind: string }[] }, level: string) =>
+  found.findings.filter((f) => f.kind === 'label' && f.level === level);
+
+test('a label repeated only in text TeX skips does not stop a paper', async () => {
+  const skipped = await verdict('Iffalse label', { 'main.tex': doc('', SKIPPED) });
+  expect(skipped.text).toEqual([]);
+  expect(skipped.ready).toBe(true);
+  expect(labelsOf(skipped, 'warning')).toHaveLength(1);
+  expect(labelsOf(skipped, 'problem')).toHaveLength(0);
+
+  const wide = await verdict('Switch label', { 'main.tex': doc('', SWITCH) });
+  expect(wide.text).toEqual([]);
+  expect(wide.ready).toBe(true);
+}, 240_000);
+
+test('a label TeX really defines twice stops a paper, once', async () => {
+  const twice = await verdict('Real duplicate', {
+    'main.tex': doc(
+      '',
+      '\\section{A}\\label{sec:a}\n\\section{B}\\label{sec:a}\nSee \\ref{sec:a}.',
+    ),
+  });
+  expect(twice.ready).toBe(false);
+  expect(labelsOf(twice, 'problem')).toHaveLength(1);
+  expect(twice.problems[0].message).toContain('sec:a');
+}, 240_000);
+
+test('the same skipped duplicate is a problem again once the paper has changed', async () => {
+  const zip = await writeZip([{ path: 'main.tex', bytes: Buffer.from(doc('', SKIPPED)) }]);
+  const [project] = await importZip(t.pool, store, users.owner.id, zip, 'Stale iffalse');
+  await requestBuild(t.pool, users.owner.id, project.id);
+  expect(await buildNext(t.pool, store, image, 90)).toBe(true);
+  const checks = () => submissionChecks(t.pool, store, users.owner.id, project.id);
+  expect(await checks()).toMatchObject({ ready: true });
+  const main = (await listFiles(t.pool, users.owner.id, project.id)).find(
+    (f) => f.path === 'main.tex',
+  )!.id;
+  await editFile(t.pool, store, main, users.owner.id, (text) => text.insert(text.length, '%\n'));
+  const stale = await checks();
+  expect(stale.ready).toBe(false);
+  expect(labelsOf(stale, 'problem')).toHaveLength(1);
+}, 240_000);
+
+test('with cleveref, a label TeX defines twice is one problem, not two', async () => {
+  const found = await verdict('Cleveref duplicate', {
+    'main.tex': doc(
+      '\\usepackage{cleveref}',
+      '\\section{A}\\label{sec:a}\n\\section{B}\\label{sec:a}\nSee \\cref{sec:a}.',
+    ),
+  });
+  expect(found.ready).toBe(false);
+  expect(labelsOf(found, 'problem')).toHaveLength(1);
+}, 240_000);
