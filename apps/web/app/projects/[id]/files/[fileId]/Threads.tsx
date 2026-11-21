@@ -16,12 +16,14 @@ function Say(props: {
   label: string;
   button: string;
   members: Member[];
+  /** Words to start from, when a comment is being changed. */
+  initial?: string;
   send(body: string, mentions: string[]): Promise<string | null>;
   onCancel?(): void;
   /** Told whether something is written here and not yet sent. */
   onDraft?(written: boolean): void;
 }) {
-  const [body, setBody] = useState('');
+  const [body, setBody] = useState(props.initial ?? '');
   const [to, setTo] = useState<string[]>([]);
   const [problem, setProblem] = useState('');
   const [busy, setBusy] = useState(false);
@@ -44,7 +46,7 @@ function Say(props: {
         setBusy(false);
         setProblem(wrong ?? '');
         if (wrong) return;
-        setBody('');
+        setBody(props.initial ?? '');
         setTo([]);
         setBegun(false);
         props.onDraft?.(false);
@@ -61,6 +63,7 @@ function Say(props: {
           rows={2}
           maxLength={5000}
           required
+          autoFocus={props.initial !== undefined}
         />
       </label>
       {begun && props.members.length > 0 && (
@@ -119,6 +122,9 @@ export default function Threads(props: {
   /** The thread the address names (?thread=), as an email's link does. */
   const [named, setNamed] = useState<string | null>(null);
   const [resolvedOpen, setResolvedOpen] = useState(false);
+  /** The comment this person is changing, and the one they were asked whether to delete. */
+  const [editing, setEditing] = useState<{ thread: string; comment: string } | null>(null);
+  const [removing, setRemoving] = useState<string | null>(null);
   const found = useRef(false);
   useEffect(() => {
     setNamed(new URLSearchParams(location.search).get('thread'));
@@ -174,10 +180,20 @@ export default function Threads(props: {
     }
   }, [named, threads, resolvedOpen]);
 
+  // A comment deleted while this person was changing it: the form goes, and they are told.
+  useEffect(() => {
+    if (!editing || !threads) return;
+    if (!threads.some((t) => t.comments.some((c) => c.id === editing.comment))) {
+      setEditing(null);
+      setNote('The comment you were changing has been deleted.');
+    }
+  }, [editing, threads]);
+
   // A thread someone else resolves while this person is part-way through a reply to it stays
   // where it is until the reply is sent or rubbed out. Moved among the resolved ones, its
   // form would go, and what was written in it would go too, without a word.
-  const held = (t: Thread) => t.status === 'resolved' && drafts.includes(t.id);
+  const held = (t: Thread) =>
+    t.status === 'resolved' && (drafts.includes(t.id) || editing?.thread === t.id);
   const one = (t: Thread) => (
     <li key={t.id}>
       <article
@@ -203,8 +219,52 @@ export default function Threads(props: {
             <li key={c.id}>
               <strong>{c.author ?? 'Someone who has left'}</strong>{' '}
               <time dateTime={c.createdAt}>{day(c.createdAt)}</time>
+              {c.editedAt && <span className="note"> (changed)</span>}
               {c.mentions.length > 0 && <span className="note"> to {c.mentions.join(', ')}</span>}
-              <p>{c.body}</p>
+              {editing?.comment === c.id ? (
+                <Say
+                  label="Your comment"
+                  button="Save"
+                  initial={c.body}
+                  members={[]}
+                  onCancel={() => setEditing(null)}
+                  send={async (body) => {
+                    const wrong = await post(`${url}/${t.id}`, { comment: c.id, body });
+                    if (!wrong) setEditing(null);
+                    return wrong;
+                  }}
+                />
+              ) : (
+                <p>{c.body}</p>
+              )}
+              {canComment && c.yours && editing?.comment !== c.id && (
+                <button type="button" onClick={() => setEditing({ thread: t.id, comment: c.id })}>
+                  Change
+                </button>
+              )}
+              {c.removable && removing !== c.id && (
+                <button type="button" onClick={() => setRemoving(c.id)}>
+                  Delete
+                </button>
+              )}
+              {c.removable && removing === c.id && (
+                <span role="group" aria-label="Delete this comment?">
+                  Delete this comment for everyone?{' '}
+                  <button
+                    type="button"
+                    onClick={async () => {
+                      const wrong = await post(`${url}/${t.id}`, { comment: c.id, delete: true });
+                      setRemoving(null);
+                      if (wrong) setNote(wrong);
+                    }}
+                  >
+                    Delete it
+                  </button>
+                  <button type="button" onClick={() => setRemoving(null)}>
+                    Keep it
+                  </button>
+                </span>
+              )}
             </li>
           ))}
         </ol>
@@ -246,8 +306,17 @@ export default function Threads(props: {
         </p>
         {held(t) && (
           <p className="note" role="status">
-            <strong>This thread was resolved while you were writing.</strong> Your reply can still
-            be sent.
+            {drafts.includes(t.id) ? (
+              <>
+                <strong>This thread was resolved while you were writing.</strong> Your reply can
+                still be sent.
+              </>
+            ) : (
+              <>
+                <strong>This thread was resolved while you were changing a comment.</strong> What
+                you wrote can still be saved.
+              </>
+            )}
           </p>
         )}
         {canComment && (t.status === 'open' || held(t)) && (

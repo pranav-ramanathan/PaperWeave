@@ -367,7 +367,8 @@ Read this first. Update it in every pull request.
     holds none of the comment or the text.
   - "Show in the text" selects a thread's stretch in whichever view is open. The panel reads
     the threads again every five seconds. The paper's page lists its open threads.
-  - Not yet: editing or deleting a comment.
+  - A comment can be changed by its author and deleted by its author or the paper's owner; see
+    "A comment changed or taken back".
 - **E2: proposed changes.** A "Proposed changes" panel under the editor. Anyone who may comment
   (owner, editor, reviewer) selects text, or puts the caret where text should go, and proposes
   what should stand there, with a reason. Nothing is written to the paper until an owner or
@@ -2752,6 +2753,39 @@ Built after the security review, which had it as its first open item.
 - **Not done.** A caret in the preamble or inside a formula's source is not drawn. A caret is
   kept at its last place after focus leaves, as in the source view. Names and colours are
   unverified.
+
+## A comment changed or taken back
+
+- **What was wrong.** A typo, a comment on the wrong thread or something pasted by mistake stayed
+  for ever, showed to every member and went out in the review-data export.
+- **Now.** A comment's author (owner, editor or reviewer) can change its words ("Change", then
+  "Save"); the comment then shows "(changed)". Its author or the paper's owner can delete it,
+  after a question ("Delete this comment for everyone?"). The owner's right covers imported
+  comments and those of people who have left. Migration 0026 adds `edited_at` and `deleted_at`
+  to `thread_comments`. A deleted comment keeps its row and `mentions` with `body = ''`, and
+  `listThreads` leaves it out, so the paper's page, the marks in the text and the export do not
+  carry it. A thread with no comment left is not listed and is not counted by the checks before
+  submitting. The review mark in `builds.ts` also holds the latest change or deletion time, so
+  other people's panels read again.
+  - `editComment` and `deleteComment` in `threads.ts` check that the person is on the paper
+    (else `not_found`), may comment, and that the comment is in that thread of that paper and
+    not deleted (else `not_found`). Changing is for the author alone, even for the owner.
+    `yours` and `removable` on a listed comment only decide which buttons show.
+  - An edit form open when its thread is resolved stays, with its words, and says so. The
+    note for a reply being written is unchanged. If the comment is deleted meanwhile, the form
+    goes and the person is told.
+- **Held by** `threads.sandbox.test.ts` (author, owner, other reviewer, viewer, outsider, another
+  paper, wrong thread, deleted comment, last comment, mention limit not reset by deleting),
+  `poll.sandbox.test.ts` (the review mark), `reviewdata.sandbox.test.ts` (the export) and
+  `threads.spec.ts` ("a comment is changed by its author and deleted by its author or the
+  owner…": two people, the keyboard alone, axe with the edit form and the question open). On the
+  old files each fails: the functions do not exist, and the browser test finds no "Change"
+  button. With only `submit.ts` or only `builds.ts` as before, the test of the checks or of the
+  mark still fails.
+- **Not done.** An edit keeps the comment's mentions and sends no email. The export does not
+  carry `editedAt`. No history of an edit is kept. Words in an edit form are lost if the owner
+  deletes that comment meanwhile. The emptied row is kept so the mention-email limit cannot be
+  reset by deleting.
 
 ## Browser tests that failed once in a while
 

@@ -333,3 +333,135 @@ test('the link in a mention email opens the comment it is about, signed out or i
   );
   await expect(owner.page.locator('article[aria-current=true]')).toHaveCount(0);
 });
+
+test('a comment is changed by its author and deleted by its author or the owner, on both pages', async ({
+  browser,
+}) => {
+  test.setTimeout(180_000);
+  const owner = await person(browser, 'change-owner');
+  const reviewer = await person(browser, 'change-reviewer');
+  const zip = join(mkdtempSync(join(tmpdir(), 'paperweave-e2e-')), `Changes ${run}.zip`);
+  writeFileSync(zip, await writeZip([{ path: 'main.tex', bytes: Buffer.from(MAIN) }]));
+  await owner.page.goto('/sign-in');
+  await signIn(owner.page, owner.email);
+  await owner.page.getByLabel('Or import a ZIP of a LaTeX project').setInputFiles(zip);
+  await owner.page.getByRole('button', { name: 'Import ZIP' }).click();
+  await owner.page.getByLabel('Their email address').fill(reviewer.email);
+  await owner.page.getByLabel('Their role').selectOption('reviewer');
+  await owner.page.getByRole('button', { name: 'Send invitation' }).click();
+  await expect(owner.page.getByRole('status')).toContainText(reviewer.email);
+  await reviewer.page.goto(await emailedLink(reviewer.email, '/invitations/'));
+  await signIn(reviewer.page, reviewer.email);
+  await reviewer.page.getByRole('button', { name: 'Join this paper' }).click();
+  await expect(reviewer.page.getByText('You are a reviewer')).toBeVisible();
+
+  // The reviewer comments on a word; the owner answers.
+  await reviewer.page.getByRole('link', { name: 'main.tex' }).first().click();
+  const theirs = reviewer.page.getByRole('region', { name: 'Comments' });
+  await selectWord(reviewer.page, VISUAL, 'forty');
+  await theirs.getByRole('button', { name: 'Comment on the selected text' }).click();
+  await theirs.getByLabel('Comment', { exact: true }).fill('Is that the mean?');
+  await theirs.getByRole('button', { name: 'Start thread' }).click();
+  const thread = (page: typeof owner.page) =>
+    page.getByRole('article', { name: 'Thread on “forty”' });
+  const comment = (page: typeof owner.page, words: string) =>
+    thread(page).locator('ol > li').filter({ hasText: words });
+  await expect(reviewer.page.locator(`${VISUAL} .thread-mark`)).toHaveText('forty');
+  await owner.page.getByRole('link', { name: 'main.tex' }).first().click();
+  await expect(comment(owner.page, 'Is that the mean?')).toBeVisible({ timeout: 15_000 });
+  await thread(owner.page).getByLabel('Reply about “forty”').fill('The tail.');
+  await thread(owner.page).getByRole('button', { name: 'Reply' }).click();
+  await expect(comment(reviewer.page, 'The tail.')).toBeVisible({ timeout: 15_000 });
+
+  // Who is offered what: each person may change their own words; the owner may delete both.
+  await expect(
+    comment(reviewer.page, 'Is that the mean?').getByRole('button', { name: 'Change' }),
+  ).toBeVisible();
+  await expect(comment(reviewer.page, 'The tail.').getByRole('button')).toHaveCount(0);
+  await expect(
+    comment(owner.page, 'Is that the mean?').getByRole('button', { name: 'Change' }),
+  ).toHaveCount(0);
+  await expect(
+    comment(owner.page, 'Is that the mean?').getByRole('button', { name: 'Delete' }),
+  ).toBeVisible();
+  await expect(
+    comment(owner.page, 'The tail.').getByRole('button', { name: 'Change' }),
+  ).toBeVisible();
+
+  // The reviewer changes their comment with the keyboard alone; the owner sees it, marked.
+  await comment(reviewer.page, 'Is that the mean?').getByRole('button', { name: 'Change' }).focus();
+  await reviewer.page.keyboard.press('Enter');
+  await expect(theirs.getByLabel('Your comment')).toBeFocused();
+  await expect(theirs.getByLabel('Your comment')).toHaveValue('Is that the mean?');
+  await reviewer.page.keyboard.press('ControlOrMeta+A');
+  await reviewer.page.keyboard.type('Is that the median?');
+  await audit(reviewer.page, 'a comment being changed');
+  await reviewer.page.keyboard.press('Tab');
+  await expect(theirs.getByRole('button', { name: 'Save' })).toBeFocused();
+  await reviewer.page.keyboard.press('Enter');
+  await expect(comment(reviewer.page, 'Is that the median?')).toContainText('(changed)');
+  await expect(comment(owner.page, 'Is that the median?')).toContainText('(changed)', {
+    timeout: 15_000,
+  });
+  await expect(comment(owner.page, 'The tail.')).not.toContainText('(changed)');
+
+  // The owner resolves the thread while the reviewer has the form open: the form stays, with
+  // the words in it, and they can still be saved.
+  await comment(reviewer.page, 'Is that the median?')
+    .getByRole('button', { name: 'Change' })
+    .click();
+  await theirs.getByLabel('Your comment').fill('Is that the median, then?');
+  await thread(owner.page).getByRole('button', { name: 'Resolve' }).click();
+  await expect(thread(reviewer.page)).toContainText(
+    'This thread was resolved while you were changing a comment. What you wrote can still be saved.',
+    { timeout: 15_000 },
+  );
+  await expect(theirs.getByLabel('Your comment')).toHaveValue('Is that the median, then?');
+  await theirs.getByRole('button', { name: 'Save' }).click();
+  await theirs.getByText('Resolved (1)').click();
+  await expect(comment(reviewer.page, 'Is that the median, then?')).toBeVisible();
+  await owner.page.getByRole('region', { name: 'Comments' }).getByText('Resolved (1)').click();
+  await thread(owner.page).getByRole('button', { name: 'Open again' }).click();
+  await expect(thread(reviewer.page).getByRole('button', { name: 'Resolve' })).toBeVisible({
+    timeout: 15_000,
+  });
+
+  // The reviewer adds a reply and takes it back: asked once, kept if declined, gone on both pages.
+  await thread(reviewer.page).getByLabel('Reply about “forty”').fill('Sorry, wrong thread.');
+  await thread(reviewer.page).getByRole('button', { name: 'Reply' }).click();
+  await expect(comment(owner.page, 'Sorry, wrong thread.')).toBeVisible({ timeout: 15_000 });
+  const wrong = comment(reviewer.page, 'Sorry, wrong thread.');
+  await wrong.getByRole('button', { name: 'Delete' }).click();
+  await expect(wrong).toContainText('Delete this comment for everyone?');
+  await audit(reviewer.page, 'a comment about to be deleted');
+  await wrong.getByRole('button', { name: 'Keep it' }).click();
+  await expect(wrong.getByRole('button', { name: 'Delete', exact: true })).toBeVisible();
+  await wrong.getByRole('button', { name: 'Delete', exact: true }).click();
+  await wrong.getByRole('button', { name: 'Delete it' }).click();
+  await expect(comment(reviewer.page, 'Sorry, wrong thread.')).toHaveCount(0);
+  await expect(comment(owner.page, 'Sorry, wrong thread.')).toHaveCount(0, { timeout: 15_000 });
+
+  // A comment deleted while its author is changing it: the form goes, and they are told.
+  await comment(reviewer.page, 'Is that the median, then?')
+    .getByRole('button', { name: 'Change' })
+    .click();
+  await comment(owner.page, 'Is that the median, then?')
+    .getByRole('button', { name: 'Delete' })
+    .click();
+  await comment(owner.page, 'Is that the median, then?')
+    .getByRole('button', { name: 'Delete it' })
+    .click();
+  await expect(theirs).toContainText('The comment you were changing has been deleted.', {
+    timeout: 15_000,
+  });
+  await expect(theirs.getByLabel('Your comment')).toHaveCount(0);
+
+  // The last comment goes: so does the thread, and its mark in the text, on both pages.
+  await comment(owner.page, 'The tail.').getByRole('button', { name: 'Delete' }).click();
+  await comment(owner.page, 'The tail.').getByRole('button', { name: 'Delete it' }).click();
+  await expect(thread(owner.page)).toHaveCount(0);
+  await expect(owner.page.locator(`${VISUAL} .thread-mark`)).toHaveCount(0);
+  await expect(thread(reviewer.page)).toHaveCount(0, { timeout: 15_000 });
+  await expect(reviewer.page.locator(`${VISUAL} .thread-mark`)).toHaveCount(0);
+  await expect(theirs.getByText('No open threads on this file.')).toBeVisible();
+});
