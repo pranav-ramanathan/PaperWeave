@@ -3,6 +3,7 @@ import { afterAll, beforeAll, expect, test } from 'vitest';
 import * as Y from 'yjs';
 import { writeZip } from './archive.ts';
 import { blobStore } from './blobs.ts';
+import type { Db } from './db.ts';
 import { importZip, listFiles } from './import.ts';
 import { acceptInvitation, invite } from './projects.ts';
 import { editFile, loadUpdates, TEXT } from './sync.ts';
@@ -422,6 +423,34 @@ test('a comment is changed by its author and deleted by its author or the owner'
   expect((await listThreads(t.pool, store, users.owner.id, p.id, p.file)).map((x) => x.id)).toEqual(
     [second.id],
   );
+});
+
+test('a comment deleted between the check and the save is not written to', async () => {
+  const p = await paper();
+  const made = await startThread(t.pool, store, users.reviewer.id, p.id, p.file, {
+    ...(await ends(p.file, 'below 40 ms')),
+    body: 'Median or tail?',
+  });
+  const [{ comments }] = await threads(p);
+  const [mine] = comments;
+  // A person who deletes it just after the author's check, before the update.
+  const racing = {
+    query: async (sql: string, params?: unknown[]) => {
+      if (/^\s*update thread_comments set body = \$2/.test(sql))
+        await deleteComment(t.pool, users.reviewer.id, p.id, made.id, mine.id);
+      return t.pool.query(sql, params as never);
+    },
+  } as unknown as Db;
+  expect(
+    await code(
+      editComment(racing, users.reviewer.id, p.id, made.id, mine.id, { body: 'Changed.' }),
+    ),
+  ).toBe('not_found');
+  const row = (
+    await t.pool.query('select body, deleted_at from thread_comments where id = $1', [mine.id])
+  ).rows[0];
+  expect(row.body).toBe('');
+  expect(row.deleted_at).toBeInstanceOf(Date);
 });
 
 test('a paper whose only thread has no comment left has no unfinished review', async () => {
