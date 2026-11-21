@@ -222,6 +222,8 @@ export type Graph = {
   missing: { from: string; target: string; at: number }[];
   dynamic: { from: string; target: string }[];
   cycles: string[][];
+  /** The import folder in force in each visited file, with its trailing slash: `''` at the root. */
+  base: Record<string, string>;
 };
 
 /** `files` maps every project path to its text; `paths` lists all paths, binary ones included. */
@@ -233,7 +235,7 @@ export function includeGraph(
   const all = new Set(paths);
   const dir = rootDir(root);
   const via = graphicsPaths(files[root] ?? '');
-  const g: Graph = { order: [], preamble: [], edges: [], missing: [], dynamic: [], cycles: [] };
+  const g: Graph = { order: [], preamble: [], edges: [], missing: [], dynamic: [], cycles: [], base: {} };
   const body = uncomment(files[root] ?? '').indexOf('\\begin{document}');
   const stack: string[] = [];
   const visit = (from: string, preamble = false, base = '') => {
@@ -243,6 +245,7 @@ export function includeGraph(
     }
     if (g.order.includes(from)) return;
     g.order.push(from);
+    g.base[from] = base;
     if (preamble) g.preamble.push(from);
     stack.push(from);
     for (const inc of includes(files[from] ?? '')) {

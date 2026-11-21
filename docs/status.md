@@ -3421,8 +3421,12 @@ nested sub-import are now in `graph.order`, so labels, citations and import see 
   `\input` and a picture inside it: it builds, the nested text is in the PDF, a `detail.tex` in
   both folders gives the import folder's, and a file only at the root is still found.
 - **Tests:** `graph.test.ts` (7 new, all fail on the old code); one sandbox test.
-- **Not changed:** `renamePlan` in `packages/server/src/files.ts` still resolves from the root, so
-  renaming a file does not rewrite a `\subimport` line inside an imported file. `\subfile` was
+- **Renames follow the import folder.** `Graph.base` gives each visited file's import folder, and
+  `renamePlan` resolves every include the way `includeGraph` does. A name found in the import
+  folder is written from there: a `\subimport` folder group is relative to it (and may use `..`),
+  and a plain `\input` or picture stays relative to it. A plain include whose file moves out of
+  the import folder is written from the root, which TeX falls back to. Limit: a file of the same
+  name inside the import folder would shadow it, and that is not checked. `\subfile` was
   not checked. Starred forms (`\import*`) are treated as unstarred.
 
 ## Decisions waiting on the owner

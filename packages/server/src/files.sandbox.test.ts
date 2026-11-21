@@ -546,3 +546,45 @@ test('renaming a style, a listing and a data file follows the lines that name th
   ]);
   expect(await buildsFine(project.id)).toBe('ok');
 });
+
+test('a file reached through \\import is renamed in the lines of the imported files', async () => {
+  const zip = await writeZip(
+    Object.entries({
+      'main.tex': [
+        '\\documentclass{article}',
+        '\\begin{document}',
+        '\\import{sections/}{intro}',
+        '\\input{top}',
+        '\\end{document}',
+        '',
+      ].join('\n'),
+      'sections/intro.tex': '\\subimport{figs/}{plot}\n\\input{detail}\n',
+      'sections/figs/plot.tex': 'Plot.\n',
+      'sections/detail.tex': 'Detail.\n',
+      'top.tex': 'Top.\n',
+    }).map(([path, text]) => ({ path, bytes: Buffer.from(text) })),
+  );
+  const [project] = await importZip(t.pool, store, owner.id, zip, 'Imported');
+  const ids = Object.fromEntries(
+    (await listFiles(t.pool, owner.id, project.id)).map((f) => [f.path, f.id]),
+  );
+  const propose = async (from: string, to: string) =>
+    (await proposeFileRename(t.pool, store, owner.id, project.id, ids[from], to)).changes.map(
+      (c) => `${c.path}:${c.line} ${c.after}`,
+    );
+  expect(await propose('sections/figs/plot.tex', 'sections/figs/plot2.tex')).toEqual([
+    'sections/intro.tex:1 \\subimport{figs/}{plot2}',
+  ]);
+  expect(await propose('sections/figs/plot.tex', 'sections/other/plot.tex')).toEqual([
+    'sections/intro.tex:1 \\subimport{other/}{plot}',
+  ]);
+  expect(await propose('sections/detail.tex', 'sections/detail2.tex')).toEqual([
+    'sections/intro.tex:2 \\input{detail2}',
+  ]);
+  // Out of the import folder: named from the root, which TeX falls back to.
+  expect(await propose('sections/detail.tex', 'parts/detail.tex')).toEqual([
+    'sections/intro.tex:2 \\input{parts/detail}',
+  ]);
+  // A root-level include is as before.
+  expect(await propose('top.tex', 'sections/top.tex')).toEqual(['main.tex:4 \\input{sections/top}']);
+});

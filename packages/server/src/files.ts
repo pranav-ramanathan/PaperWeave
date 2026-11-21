@@ -2,6 +2,7 @@
 import {
   decodeFile,
   graphicsPaths,
+  includeGraph,
   includes,
   type Include,
   norm,
@@ -226,10 +227,19 @@ async function renamePlan(
   const via = graphicsPaths(rootFile?.text ?? '');
   const ext = (path: string) => /\.[^./]+$/.exec(path)?.[0] ?? '';
   const splices = new Map<string, Splice[]>();
+  const { base } = includeGraph(
+    Object.fromEntries(files.map((f) => [f.path, f.text])),
+    rootFile?.path ?? '',
+    [...paths],
+  );
   for (const file of files) {
     const hits: Splice[] = [];
+    const inBase = base[file.path] ?? '';
     for (const inc of includes(file.text)) {
-      const found = resolveVia(inc, dir, paths, via);
+      // As includeGraph looks: the import folder first, then the root's folder.
+      const underBase =
+        inc.kind !== 'bib' && inBase ? resolveVia(inc, dir + inBase, paths) : undefined;
+      const found = underBase ?? resolveVia(inc, dir, paths, via);
       if (found?.path !== from) continue;
       // Written without its extension before, and the extension has not changed: leave it off.
       // TeX adds .sty, .cls and .bst itself, so a new name for one is written without it.
@@ -240,8 +250,15 @@ async function renamePlan(
       // Found through a \\graphicspath folder: say it as relative to that folder, if it is
       // still inside it. Otherwise relative to the root's folder, which always works.
       const folder = dir + found.via;
-      const insert =
-        found.via && newPath.startsWith(norm(folder) + '/')
+      // Found in the import folder: say it from there, as TeX looks there first. A sub-import's
+      // folder group is relative to it, and may climb out with `..`. Any other include that
+      // would leave the folder is written from the root, which TeX falls back to; a same-named
+      // file inside the import folder would shadow it, and that is not checked.
+      const insert = underBase
+        ? inc.import?.sub || newPath.startsWith(dir + inBase)
+          ? relativeTo(dir + inBase, newPath)
+          : relativeTo(dir, newPath)
+        : found.via && newPath.startsWith(norm(folder) + '/')
           ? newPath.slice(norm(folder).length + 1)
           : relativeTo(dir, newPath);
       hits.push(...nameSplices(inc, insert));
