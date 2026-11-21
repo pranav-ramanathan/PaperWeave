@@ -12,12 +12,16 @@ import {
 import { blobs, currentUser, db, readJson, sameOrigin } from '../../../../../lib/server';
 import { failed, MENTION_LIMIT_NOTE, tellMentioned } from '../mentions';
 
-/** The two places an attach may carry, as bytes; none when it carries none. */
+/**
+ * The two places an attach may carry, as bytes; none when it carries none. The editor writes
+ * them in the URL-safe alphabet (- and _, no padding), and Buffer reads that as well as the
+ * standard one. A check for the standard one alone refused any place whose bytes held a - or _.
+ */
 function placesOf(input: object) {
   const { from, to } = input as { from?: unknown; to?: unknown };
   if (from === undefined && to === undefined) return undefined;
   const bytes = (v: unknown) => {
-    if (typeof v !== 'string' || !v || v.length > 200 || !/^[A-Za-z0-9+/]+={0,2}$/.test(v))
+    if (typeof v !== 'string' || !v || v.length > 200 || !/^[A-Za-z0-9+/_-]+={0,2}$/.test(v))
       throw new AppError('invalid_input', 'That place in the text is not valid.');
     return new Uint8Array(Buffer.from(v, 'base64'));
   };

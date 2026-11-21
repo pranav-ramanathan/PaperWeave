@@ -3787,6 +3787,18 @@ Coming back online, the editor said "This paper was restored to an earlier revis
   the words there match the thread's fingerprint. Anything else is refused and the thread
   stays detached; the tab tries again at its next reading. Viewers and outsiders are refused as
   before. Deleting again (redo) detaches the thread, correctly.
+- **What triggers the attach.** The reading of the threads: when the comments panel is first
+  shown, and whenever the build pane's poll (every few seconds) says the paper's text or its
+  comments have changed. After an undo is saved the text mark moves, so the undoing tab reads
+  about one poll later and sends the places. Everyone else's panel and a reload pick the change
+  up the same way: the re-attached anchors move the comments mark, so their next poll reads
+  the thread attached. That depends on the poll, not on a push: expect a few seconds.
+- **A fault found by a flaky test.** About one attach in six was refused with "That place in the
+  text is not valid", whatever the timing: the editor writes places in the URL-safe alphabet
+  (`-`, `_`, no padding) and the route accepted only the standard one, so a place whose bytes
+  encoded to a `-` or `_` was refused, silently, and nothing read the threads again. The route
+  now accepts both. A refusal because the undo is not yet saved (`conflict`) was never seen: the
+  poll waits for the save to show. If it did happen, the retry would come at the next change.
 - **Not done.** Proposed changes have the same fault: after an undo they go stale. Left as a
   follow-up.
 
