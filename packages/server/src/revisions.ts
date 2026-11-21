@@ -850,11 +850,14 @@ export async function restoreRevision(
      where id = $1`,
       [projectId, revision.compiler, revision.root],
     );
-    return cut(db, store, userId, projectId, {
+    const made = await cut(db, store, userId, projectId, {
       kind: 'restore',
       restoredFrom: revisionId,
       ready,
     });
+    // Told once the restore commits, after the edits it made: connected editors learn it was one.
+    await db.query("select pg_notify('restored', $1)", [`${projectId}:${made.number}`]);
+    return made;
   });
 }
 

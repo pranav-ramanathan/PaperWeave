@@ -305,10 +305,13 @@ export default function FileEditor(props: {
           // Thrown, not sent: the connection attempt ends here, without bothering the server.
           throw new Error('held until the person decides');
         }
-        restoreSeen = restored;
+        // Only offered: it counts as seen once this connection has synced. If the attempt dies
+        // first, edits typed meanwhile are still held back from the restored text.
+        restoreOffered = restored;
         return ticket ?? '';
       },
       onSynced: () => {
+        restoreSeen = Math.max(restoreSeen ?? 0, restoreOffered ?? 0);
         update({ loaded: true });
         // Arrived from a place in the PDF: go to the line it named, once, now that there is text.
         const line = Number(new URLSearchParams(location.search).get('line'));
@@ -332,8 +335,14 @@ export default function FileEditor(props: {
         }, 1000);
       },
       onStateless: ({ payload }) => {
-        const reply: (Reply & { key: string }) | Saved | Role = JSON.parse(payload);
+        const reply: (Reply & { key: string }) | Saved | Role | { restored: number } =
+          JSON.parse(payload);
         if ('role' in reply) return roleIs(reply);
+        // A restore made while this tab is connected arrives as ordinary edits; this says it was one.
+        if ('restored' in reply) {
+          restoreSeen = Math.max(restoreSeen ?? 0, reply.restored);
+          return;
+        }
         if ('saved' in reply) return saving.answered(reply);
         waiting.get(reply.key)?.(reply);
       },
@@ -382,6 +391,8 @@ export default function FileEditor(props: {
     });
     /** The paper's newest restore when this tab last connected, and one found since, if held. */
     let restoreSeen: number | null = null;
+    /** The newest restore the last ticket named: seen only once the connection has synced. */
+    let restoreOffered: number | null = null;
     let restoreHeld: number | null = null;
     /** Whether this tab should be connected: false only while the browser says it is offline. */
     let wantOpen = true;
