@@ -50,6 +50,8 @@ const CITE = new Set([
 ]);
 /** Commands whose first brace group is verbatim: a % in it is part of the address. */
 const VERB_ARG = new Set(['url', 'nolinkurl', 'path', 'href']);
+/** Commands whose argument is written between delimiters, as \verb|x| or \lstinline{x}. */
+const CODE_INLINE = new Set(['verb', 'lstinline', 'mintinline']);
 /** Commands that define something: their arguments include bare names and mid-way brackets. */
 const DEFS = new Set([
   ...['newcommand', 'renewcommand', 'providecommand', 'DeclareRobustCommand', 'newenvironment'],
@@ -239,12 +241,42 @@ function parseInto(
     }
     return -1;
   };
+  /**
+   * Index after the argument of \verb, \lstinline or \mintinline whose name ends at j: written
+   * between two equal characters (to the end of the line if the second never comes), or for the
+   * last two in braces. -1 if there is none here.
+   */
+  const codeEnd = (name: string, j: number, lim = n) => {
+    let k = j;
+    if (name === 'verb') {
+      if (src[k] === '*') k++;
+    } else {
+      if (src[k] === '[') {
+        const b = bracket(k);
+        if (b < 0) return -1;
+        k = b;
+      }
+      if (name === 'mintinline') {
+        const g = src[k] === '{' ? rawGroup(k, lim) : -1;
+        if (g < 0) return -1;
+        k = g;
+      }
+      if (k >= n || isW(src[k]) || isL(src[k])) return -1;
+      if (src[k] === '{') return rawGroup(k, lim);
+    }
+    const nl = eol(k);
+    const close = k < n ? src.indexOf(src[k], k + 1) : -1;
+    return close >= 0 && close < nl ? close + 1 : nl;
+  };
   /** End of the control sequence at i, with the verbatim argument of one that has such. */
   const cmdEnd = (i: number, lim = n) => {
     const j = word(i);
     if (!isL(src[i + 1])) return j;
     const name = src.slice(i + 1, j);
-    if (VERB_ARG.has(name) && src[j] === '{') {
+    if (CODE_INLINE.has(name)) {
+      const e = codeEnd(name, j, lim);
+      if (e >= 0) return e;
+    } else if (VERB_ARG.has(name) && src[j] === '{') {
       const g = rawGroup(j, lim);
       if (g >= 0) return g;
     }
@@ -332,6 +364,10 @@ function parseInto(
     const sym = !isL(src[i + 1]);
     if (sym && src[i + 1] !== '\\') return j;
     const name = src.slice(i + 1, word(i));
+    if (CODE_INLINE.has(name)) {
+      const e = codeEnd(name, j);
+      if (e >= 0) return e;
+    }
     if (src[j] === '*') j++;
     if (DEFS.has(name)) {
       // \newcommand{\x}[1]{...}, \def\x#1{...}, \let\a=\b: take the whole definition.
@@ -496,11 +532,6 @@ function parseInto(
           push('esc', i, j + 2, { ch: TEXT_ESC[name] });
           i = j + 2;
           continue;
-        } else if (name === 'verb') {
-          const k = src[j] === '*' ? j + 1 : j;
-          const nl = src.indexOf('\n', k);
-          const close = k < n ? src.indexOf(src[k], k + 1) : -1;
-          e = close >= 0 && (nl < 0 || close < nl) ? close + 1 : nl < 0 ? n : nl;
         }
         if (e < 0) {
           e = unit(i);
@@ -657,7 +688,7 @@ function parseInto(
         throw new Unbalanced('para', `\\end{${end.name}} without \\begin`);
       }
       const inlineCmd = STYLE.has(name) || REF.has(name) || CITE.has(name) || name in TEXT_ESC;
-      if (isL(name[0]) && !inlineCmd && name !== 'verb') {
+      if (isL(name[0]) && !inlineCmd && !CODE_INLINE.has(name)) {
         // A command alone on its line (\maketitle, \input{x}, \label{y}) is its own block.
         const e = unit(i);
         let k = e;

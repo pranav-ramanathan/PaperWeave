@@ -66,6 +66,22 @@ function keyUses(src: string, wanted: (command: string) => boolean): Use[] {
       i = close < 0 ? src.length : close;
       continue;
     }
+    if (name[1] === 'lstinline' || name[1] === 'mintinline') {
+      // \lstinline[opts]|code|, \lstinline{code}, \mintinline{lang}|code|: no comments, no keys.
+      if (src[p] === '[') p = src.indexOf(']', p) + 1 || src.length;
+      if (name[1] === 'mintinline' && src[p] === '{') p = src.indexOf('}', p) + 1 || src.length;
+      const open = src[p];
+      if (open === '{') {
+        i = (verbatimGroup(src, p) || src.length) - 1;
+        continue;
+      }
+      if (open !== undefined && !/[\s\w]/.test(open)) {
+        const close = src.indexOf(open, p + 1);
+        const nl = src.indexOf('\n', p);
+        i = close >= 0 && (nl < 0 || close < nl) ? close : (nl < 0 ? src.length : nl) - 1;
+        continue;
+      }
+    }
     if (VERBATIM_ARG.has(name[1]) && src[p] === '{') {
       // The address of \url{..} or \href{..}{..} is taken as it is: a % in it is no comment.
       const end = verbatimGroup(src, p);
