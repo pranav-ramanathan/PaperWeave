@@ -3556,7 +3556,8 @@ sigconf PDF embeds a Libertine font (`pdffonts`). The 11 of them failed on the o
   `conflict` (`runCommand` with `exactPlace`, checked under the file lock); `reviseProposal` refuses
   with "The place this was to be added at is no longer in the file. Make a new proposal." The
   proposals pane shows that sentence and hides "Change the proposal". Editor commands from the
-  sync server do not pass `exactPlace` and behave as before. No migration.
+  sync server pass `exactPlace` too (see "An insertion from the visual view whose place was
+  deleted"). No migration.
 - A restore that brings the sentence back leaves the proposal stale: the restored characters are
   new ones, and a place cannot be re-attached (there are no words to find it by).
 - **Review data.** `exportReview` now writes `stale: true` for every open or accepted proposal that
@@ -3712,6 +3713,32 @@ warns about `key@cref`; that is now counted as the same label, so it is listed o
 | Label really defined twice, built                             | one problem          | one problem                   |
 | `\iffalse` paper edited and not rebuilt                       | problem              | problem (and the stale build) |
 | cleveref, label really defined twice                          | two problems         | one problem                   |
+
+## An insertion from the visual view whose place was deleted
+
+- **The fault.** A citation, reference, equation, figure or table window sets the place when it
+  opens, and the command runs when the person confirms, perhaps minutes later. `insertCommand`
+  named the place by one anchor, the character after the caret, for both ends. If a co-author
+  deleted the paragraph meanwhile, the anchor closed up to the next surviving character, the
+  expected text `''` still matched, and the server answered `applied`: the insertion landed at the
+  seam, next to a heading or inside its `\section{`. `atomCommand` with an empty part (an empty
+  table cell, an absent caption) had the same shape.
+- **Now.** `insertCommand`, and `atomCommand` when its part is empty, put `from` on the character
+  before the place (association -1) and `to` on the character after. The sync server's command
+  path passes `exactPlace: true` to `runCommand`, so an insertion is refused (`conflict`) if either
+  character was deleted. `placeLost` already handles the association, and an anchor with no
+  character (the start or end of the file) is never lost. `runCommand` is unchanged. The editor
+  shows its usual "That text changed before the edit arrived. Try again."
+- `Bridge.applyCommand`, the in-memory stand-in for tests, does the same check. It holds a small
+  copy of `placeLost`, because `packages/bridge` cannot import `packages/server` (that would be
+  a circular dependency); keep the two in step.
+- `visual.ts` puts the caret after an insertion from `c.to`, which is unchanged (the character
+  after the caret), so the caret still follows the insertion.
+- **Stricter than before, and safe.** If another person types exactly at the caret, the stretch
+  between the anchors is no longer empty and the command conflicts; the person tries again.
+- Tests: four in `packages/bridge/src/bridge.test.ts` (paragraph deleted, delete running into a
+  heading, empty atom part, anchor association) and two in `apps/sync/src/sync.sandbox.test.ts`
+  (refused; and the ends of the file and unrelated typing still apply).
 
 ## Decisions waiting on the owner
 

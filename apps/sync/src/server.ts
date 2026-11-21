@@ -192,7 +192,7 @@ export async function startSync(opts: {
           (connection.context as Context).userId,
           documentName,
           { ...c, from: bytes(c?.from), to: bytes(c?.to) },
-          { notify: false, maxFileText: opts.maxFileText },
+          { notify: false, maxFileText: opts.maxFileText, exactPlace: true },
         );
         // The editor waits eight seconds for an answer. One that took long was waiting for
         // something, and which file and how long is worth knowing. Never the text.

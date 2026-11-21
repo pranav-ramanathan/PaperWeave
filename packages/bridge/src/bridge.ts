@@ -204,11 +204,17 @@ export class Bridge {
     const spot = locate(this.model, state.doc, state.selection.to);
     // A paragraph just opened with Enter is not in the source yet: there is no place to name.
     if (!spot || spot.block < 0) return null;
-    const at = Y.createRelativePositionFromTypeIndex(
-      this.ytext,
-      toSrc(this.model, state.doc, state.selection.to, -1),
-    );
-    return { key: crypto.randomUUID(), from: at, to: at, expected: '', replacement };
+    const i = toSrc(this.model, state.doc, state.selection.to, -1);
+    // One anchor on each side of the caret, so that if the text around it is deleted the
+    // command can tell (see placeLost in packages/server). `to` is also where the caret goes
+    // afterwards: it stands on the character after, which ends up after the insertion.
+    return {
+      key: crypto.randomUUID(),
+      from: Y.createRelativePositionFromTypeIndex(this.ytext, i, -1),
+      to: Y.createRelativePositionFromTypeIndex(this.ytext, i),
+      expected: '',
+      replacement,
+    };
   }
 
   /**
@@ -239,12 +245,14 @@ export class Bridge {
     }
     // The model must agree with the text about where the atom is, or nothing is built.
     if (this.ytext.toString().slice(from, from + src.length) !== src) return null;
-    const rel = (i: number) => Y.createRelativePositionFromTypeIndex(this.ytext, i);
     const [start, end] = part ? [part.at, part.end] : [0, src.length];
     if (start < 0 || end < start || end > src.length) return null;
+    // An empty part is an insertion: its `from` holds the character before, as insertCommand's does.
+    const rel = (i: number, assoc = 0) =>
+      Y.createRelativePositionFromTypeIndex(this.ytext, i, assoc);
     return {
       key: crypto.randomUUID(),
-      from: rel(from + start),
+      from: rel(from + start, start === end ? -1 : 0),
       to: rel(from + end),
       expected: src.slice(start, end),
       replacement,
@@ -294,6 +302,16 @@ export class Bridge {
     const to = Y.createAbsolutePositionFromRelativePosition(c.to, doc)?.index;
     if (from == null || to == null || this.ytext.toString().slice(from, to) !== c.expected)
       return 'conflict';
+    // shortcut: a local copy of placeLost (packages/server/src/commands.ts), which this package
+    // cannot import without a circular dependency. Same rule: an insertion is refused if the
+    // character either anchor holds on to is deleted. No anchor item (file start or end) is never lost.
+    if (c.expected === '') {
+      const deleted = Y.createDeleteSetFromStructStore(doc.store);
+      for (const a of [c.from, c.to]) {
+        const item = a.item;
+        if (item !== null && Y.isDeleted(deleted, item)) return 'conflict';
+      }
+    }
     this.seen.add(c.key);
     this.splice([{ from, to, insert: c.replacement }]);
     return 'applied';

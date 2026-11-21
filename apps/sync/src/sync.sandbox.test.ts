@@ -657,8 +657,41 @@ test('an insertion whose neighbours were deleted is refused, and the text is lef
     result: 'conflict',
   });
   await new Promise((r) => setTimeout(r, 200));
-  expect(await stored(project)).toBe(after);
+  expect(await stored(project)).toBe(MAIN.replace('Hello.\r\n', ''));
   expect(owner.text.toString()).toBe(after);
+});
+
+test('an insertion at the ends of the file, or after typing elsewhere, still applies', async () => {
+  const { project, file } = await paper();
+  const editor = client(users.editor, file);
+  const owner = client(users.owner, file);
+  await saved(editor, owner);
+  const insert = async (i: number, replacement: string) => {
+    const rel = (assoc: number) =>
+      Buffer.from(
+        Y.encodeRelativePosition(Y.createRelativePositionFromTypeIndex(editor.text, i, assoc)),
+      ).toString('base64url');
+    const key = crypto.randomUUID();
+    editor.provider.sendStateless(
+      JSON.stringify({ key, from: rel(-1), to: rel(0), expected: '', replacement }),
+    );
+    await until('an answer', () => editor.state.replies.some((r) => r.key === key));
+    return editor.state.replies.find((r) => r.key === key)!;
+  };
+  const was = editor.text.toString();
+  expect((await insert(0, '% top\n')).result).toBe('applied');
+  expect((await insert(was.length + '% top\n'.length, '% end\n')).result).toBe('applied');
+  // The place is named, then someone types elsewhere, then the insertion is asked for.
+  const mid = editor.text.toString().indexOf('Hello.') + 'Hel'.length;
+  owner.text.insert(0, '% typed\n');
+  await saved(owner, editor);
+  await until('the typing', () => editor.text.toString().startsWith('% typed\n'));
+  expect((await insert(mid + '% typed\n'.length, '~')).result).toBe('applied');
+  await until('everyone to see it', () => owner.text.toString().includes('Hel~lo.'));
+  const want = '% typed\n% top\n' + was.replace('Hello.', 'Hel~lo.') + '% end\n';
+  expect(owner.text.toString()).toBe(want);
+  await saved(owner, editor);
+  expect((await stored(project)).replace(/\r\n/g, '\n')).toBe(want);
 });
 
 test('a command reaches people who have the file open, and a stale one tells its author', async () => {
