@@ -287,8 +287,7 @@ test('text added at the caret is out of date once the owner retypes the sentence
 
   // The reviewer puts the caret before a word and proposes adding text there.
   await reviewer.page.getByRole('link', { name: 'main.tex' }).first().click();
-  await selectWord(reviewer.page, VISUAL, 'milliseconds');
-  await reviewer.page.keyboard.press('ArrowLeft');
+  await clickAfter(reviewer.page, VISUAL, 'forty');
   await panel(reviewer.page).getByRole('button', { name: 'Propose a change here' }).click();
   await panel(reviewer.page).getByLabel('Text to add at the caret').fill('whole ');
   await panel(reviewer.page).getByRole('button', { name: 'Propose', exact: true }).click();
