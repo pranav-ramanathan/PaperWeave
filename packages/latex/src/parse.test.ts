@@ -15,7 +15,15 @@ import {
   REFS,
   reparse,
 } from './index.ts';
-import { assertLossless, FIXTURES, fixtureFiles, fragment, rng, soup } from './testutil.ts';
+import {
+  assertLossless,
+  assertNoSplitPair,
+  FIXTURES,
+  fixtureFiles,
+  fragment,
+  rng,
+  soup,
+} from './testutil.ts';
 
 const files = fixtureFiles();
 const texts = Object.fromEntries(
@@ -280,4 +288,42 @@ test('\\nameref, \\vref, \\citealp, \\citeyearpar and capitalised forms are refe
   expect(atomsOf(src).atoms.map((a) => a.split(':')[0])).toEqual([
     ...['ref', 'ref', 'ref', 'cite', 'cite', 'cite', 'cite'],
   ]);
+});
+
+test('an edit that balances an earlier $ reaches back to the blank line before it', () => {
+  // The brace in \text{b never closes, so $a\text{b$ is first read as ending at the second $. An
+  // edit two blocks later that supplies the } changes that, and so the paragraph before it.
+  const old = 'Let $a\\text{b$ so\n\\begin{align}\nx\n\\end{align}\nthen c d\n';
+  const src = old.replace('c d', 'c} d');
+  expect(parse(src).blocks.map((b) => b.body.kind)).toEqual(['error', 'ws']);
+  expect(JSON.stringify(reparse(parse(old), src).blocks)).toBe(JSON.stringify(parse(src).blocks));
+});
+
+test('rewriting $\\delta$ to $\\d}\\(lta$ after such a formula parses as a full parse does', () => {
+  const old = 'Let $a\\text{b$ so\n\\begin{align}\nx\n\\end{align}\nthen $\\delta$ d\n\nNext.\n';
+  const src = old.replace('$\\delta$', '$\\d}\\(lta$');
+  const full = parse(src);
+  assertLossless(full);
+  expect(full.blocks.map((b) => b.body.kind)).toEqual(['para', 'ws', 'para', 'ws']);
+  expect(JSON.stringify(reparse(parse(old), src).blocks)).toBe(JSON.stringify(full.blocks));
+});
+
+test('a backslash before an emoji takes the whole character', () => {
+  const src = 'a \\😀 x \\verb😀y😀 z \\\u{1F600}\n\n\\😀\n';
+  const p = parse(src);
+  assertLossless(p);
+  assertNoSplitPair(p);
+  expect(p.blocks.map((b) => b.body.text).join('')).toBe(src);
+  const para = p.blocks[0].body;
+  if (para.kind !== 'para') throw new Error('not a paragraph');
+  const atoms = para.pieces.filter((x) => x.k === 'atom').map((x) => para.text.slice(x.s, x.e));
+  expect(atoms).toEqual(['\\😀', '\\verb😀y😀', '\\😀']);
+  for (const s of ['\\😀 x', 'x\\😀', '\\😀', '$\\😀$', '\\verb😀', '\\(😀\\)']) {
+    assertLossless(parse(s));
+    expect(
+      parse(s)
+        .blocks.map((b) => b.body.text)
+        .join(''),
+    ).toBe(s);
+  }
 });

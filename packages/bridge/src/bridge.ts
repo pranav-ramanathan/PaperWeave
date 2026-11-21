@@ -21,6 +21,12 @@ export type CommandResult = 'applied' | 'duplicate' | 'conflict';
 
 /** Half of a surrogate pair: one UTF-16 unit of a character that was cut in two. */
 const HALF = /[\ud800-\udbff](?![\udc00-\udfff])|(?<![\ud800-\udbff])[\udc00-\udfff]/;
+/** Whether source offset `at` falls between the two halves of a surrogate pair. */
+const inPair = (src: string, at: number) => {
+  const a = src.charCodeAt(at - 1);
+  const b = src.charCodeAt(at);
+  return a >= 0xd800 && a < 0xdc00 && b >= 0xdc00 && b < 0xe000;
+};
 
 export class Bridge {
   model: Model;
@@ -74,6 +80,13 @@ export class Bridge {
       // Backspace or Delete at an edge that cannot be joined, with nothing selected: nothing to say.
       const quiet = step instanceof ReplaceStep && step.slice.size === 0 && state.selection.empty;
       if (!quiet) this.onReject();
+      return false;
+    }
+    // An edit that starts or ends between the halves of an emoji, or writes half of one, would
+    // make the shared text turn the half into U+FFFD. The caret is never put there, so refuse.
+    const src = this.model.parsed.src;
+    if (t.edits.some((e) => inPair(src, e.from) || inPair(src, e.to) || HALF.test(e.insert))) {
+      this.onReject();
       return false;
     }
     this.pending.set(tr, t);

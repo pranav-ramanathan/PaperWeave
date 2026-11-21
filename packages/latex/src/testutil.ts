@@ -40,13 +40,30 @@ const FRAGMENTS = [
   ...['\\begin{equation}', '\\end{equation}', '\\begin{abstract}', '\\end{abstract}', '~', '\\%'],
   ...['\\foo', '\\begin{verbatim}', '\\end{verbatim}', '&', '_', '^', '#', '\\', '*', '\t'],
   ...['\\url{', '%20', '\\href{', '\\text{', '\\lstinline|', '\\crefrange{'],
+  ...['$\\d', '$\\d}', '\\(lta$', '$\\delta$', '\\😀', '\\😀 x'],
   ...['word', 'a', 'é', '😀', 'two words', '\\label{x}', '\\textbackslash{}', '\\begin{', '\\end{'],
 ];
 export const fragment = (r: Rng) => r.pick(FRAGMENTS);
 export const soup = (r: Rng, n: number) => Array.from({ length: n }, () => fragment(r)).join('');
 
+/** Throws if any block or piece boundary of p falls between the two halves of a surrogate pair. */
+export function assertNoSplitPair(p: Parsed) {
+  const split = (at: number) => {
+    const a = p.src.charCodeAt(at - 1);
+    const b = p.src.charCodeAt(at);
+    return a >= 0xd800 && a < 0xdc00 && b >= 0xdc00 && b < 0xe000;
+  };
+  for (const b of p.blocks) {
+    if (split(b.start)) throw new Error(`block starts inside a surrogate pair at ${b.start}`);
+    for (const piece of textblocks(b.body).flat())
+      for (const at of [piece.s, piece.e])
+        if (split(b.start + at)) throw new Error(`piece boundary inside a pair at ${b.start + at}`);
+  }
+}
+
 /** Throws unless every source character belongs to exactly one piece of exactly one block. */
 export function assertLossless(p: Parsed) {
+  assertNoSplitPair(p);
   let at = 0;
   for (const b of p.blocks) {
     if (b.start !== at) throw new Error(`block gap at ${at}`);

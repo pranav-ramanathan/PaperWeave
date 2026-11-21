@@ -3379,6 +3379,32 @@ open with "edit it in the source".
 - **Run:** unit 169 (29 files), sandbox 261 passed and 1 skipped (33 files), lint and typecheck
   clean, browser suite 120 of 120 (16 minutes), including `atoms.spec`.
 
+## Two parser faults found by the atom-rewrite fuzz
+
+- **Reparse after an edit that balances an earlier `$`.** Inline math with a `{` that never closes
+  is first read with braces counted, scanning ahead to the next blank line or heading, which can
+  be past the end of its own paragraph, and then again without them. An edit later in that region
+  that supplied the `}` changed the paragraph before it, but `reparse` backed up only three
+  blocks and kept the old one, so it differed from `parse` (`Let $a\text{b$ so`, a display
+  environment, then `c d` becoming `c} d`; and `$\delta$` rewritten to `$\d}\(lta$` after such a
+  paragraph). `reparse` now also restarts at the last blank line or heading before the edit
+  (with 24 characters of margin, so a boundary the edit touches does not count).
+- **A backslash before a character outside the BMP.** `\` + one UTF-16 unit made the atom end
+  between the halves of a surrogate pair, and a `\verb` delimiter that was an emoji was matched by
+  its first half. Both now take the whole character; `assertLossless` also checks that no block
+  or piece boundary falls inside a pair.
+- **Bridge.** A visual transaction whose source edit starts or ends between the halves of an
+  emoji, or inserts half of one, was accepted and the shared text wrote U+FFFD (inserting at, or
+  deleting up to, the middle of a pair). `Bridge.filter` now refuses it. The `HALF` guard in
+  `rewriteCommand` is no longer reached by `\` + emoji but is kept.
+- **Fuzz.** The fragments `$\d`, `$\d}`, `\(lta$`, `$\delta$`, `\` + emoji and `\` + emoji + ` x`
+  were added. With the old `reparse`, `FUZZ=300000` of the incremental test failed at seed 2079.
+  `FUZZ=500000` of the latex tests passes (5000 seeds of 100 edits each); `FUZZ=100000` of the
+  bridge tests passes. The reparse fault is not reached by the atom-rewrite fuzz as it stands (it
+  compares a full parse too); seed 25218 at `FUZZ=210000` passes.
+- **Run:** unit 174 (29 files), sandbox 261 passed and 1 skipped, lint and typecheck clean,
+  browser `visual`, `maths`, `insert`, `atoms`, `keys` 21 of 21.
+
 ## Decisions waiting on the owner
 
 See "What I need from you" in `docs/plan.md`. None blocks C1.

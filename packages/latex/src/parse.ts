@@ -106,6 +106,12 @@ const ABORT = Symbol('abort');
 const isL = (c: string | undefined) => !!c && ((c >= 'a' && c <= 'z') || (c >= 'A' && c <= 'Z'));
 const isW = (c: string | undefined) => c === ' ' || c === '\t' || c === '\n';
 const isS = (c: string | undefined) => c === ' ' || c === '\t';
+/** Length in UTF-16 units of the character at i: 2 for a surrogate pair, so no boundary splits one. */
+const cpLen = (s: string, i: number) => {
+  const c = s.charCodeAt(i);
+  const d = s.charCodeAt(i + 1);
+  return c >= 0xd800 && c < 0xdc00 && d >= 0xdc00 && d < 0xe000 ? 2 : 1;
+};
 
 export function parse(src: string, transparent: ReadonlySet<string> = DEFAULT_TRANSPARENT): Parsed {
   const blocks: Block[] = [];
@@ -148,6 +154,23 @@ export function reparse(prev: Parsed, src: string): Parsed {
   if (k < 0) k = ob.length;
   // A block's end can depend on the first token of what follows it, so back up past that reach.
   k = Math.max(0, k - 3);
+  // Inline math that is unclosed or has braces that never balance is decided by scanning ahead
+  // as far as the next blank line or heading, which can be past the end of its own block. So an
+  // edit can change any block back to there: restart at the last such boundary before the edit.
+  // The margin keeps a boundary that the edit itself touches from counting.
+  const cut = Math.max(0, p - 24);
+  let bb = -1;
+  for (let j = old.lastIndexOf('\n', cut); j > 0 && bb < 0; j = old.lastIndexOf('\n', j - 1)) {
+    let q = j - 1;
+    while (old[q] === ' ' || old[q] === '\t') q--;
+    if (old[q] === '\n') bb = q;
+  }
+  let reach = Math.max(bb, 0);
+  HARD.lastIndex = reach;
+  for (let h = HARD.exec(old); h && h.index + h[0].length <= cut; h = HARD.exec(old))
+    reach = h.index;
+  const kb = ob.findIndex((b) => b.start + b.body.text.length > reach);
+  if (kb >= 0) k = Math.min(k, kb);
   // A frozen block was decided by scanning to the end of the file, so any edit can change it.
   const err = ob.findIndex((b) => b.body.kind === 'error');
   if (err >= 0) k = Math.min(k, err);
@@ -184,7 +207,7 @@ function parseInto(
   const word = (i: number) => {
     let j = i + 1;
     if (j >= n) return j;
-    if (!isL(src[j])) return j + 1;
+    if (!isL(src[j])) return j + cpLen(src, j);
     while (isL(src[j])) j++;
     return j;
   };
@@ -266,8 +289,9 @@ function parseInto(
       if (src[k] === '{') return rawGroup(k, lim);
     }
     const nl = eol(k);
-    const close = k < n ? src.indexOf(src[k], k + 1) : -1;
-    return close >= 0 && close < nl ? close + 1 : nl;
+    const w = cpLen(src, k);
+    const close = k < n ? src.indexOf(src.slice(k, k + w), k + w) : -1;
+    return close >= 0 && close < nl ? close + w : nl;
   };
   /** End of the control sequence at i, with the verbatim argument of one that has such. */
   const cmdEnd = (i: number, lim = n) => {
