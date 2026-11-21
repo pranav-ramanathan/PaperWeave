@@ -646,9 +646,10 @@ test('an insertion whose neighbours were deleted is refused, and the text is lef
     replacement: '~\\cite{knuth}',
   };
   // Someone deletes the paragraph, and the server has it before the insertion is asked for.
-  owner.text.delete(owner.text.toString().indexOf('Hello.'), 'Hello.\r\n'.length);
+  // (The file is held with \n line ends.)
+  const after = owner.text.toString().replace('Hello.\n', '');
+  owner.text.delete(owner.text.toString().indexOf('Hello.'), 'Hello.\n'.length);
   await saved(owner, editor);
-  const after = MAIN.replace('Hello.\r\n', '');
   await until('the delete', () => editor.text.toString() === after);
   editor.provider.sendStateless(JSON.stringify(command));
   await until('an answer', () => editor.state.replies.some((r) => r.key === command.key));
