@@ -37,13 +37,11 @@ export default function Language(props: {
     const res = await fetch(`${url}?file=${fileId}`, { signal: AbortSignal.timeout(25_000) }).catch(
       () => null,
     );
-    if (!res || res.status === 503) {
+    // No answer at all (offline for a moment, or too slow): say so, and keep what was found.
+    if (!res) return setOff('The spelling and grammar checker did not answer.');
+    if (res.status === 503) {
       // No checker: say so once, and show nothing as if it were clean.
-      setOff(
-        res
-          ? (((await res.json().catch(() => null)) as { error?: string } | null)?.error ?? '')
-          : 'The spelling and grammar checker did not answer.',
-      );
+      setOff(((await res.json().catch(() => null)) as { error?: string } | null)?.error ?? '');
       setFindings(null);
       return told.current([]);
     }
