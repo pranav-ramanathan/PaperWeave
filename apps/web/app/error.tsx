@@ -6,6 +6,8 @@
 export default function Failed() {
   return (
     <main>
+      {/* React puts a title in the head. A client component has no `metadata`. */}
+      <title>This page could not be shown — PaperWeave</title>
       <h1>This page could not be shown</h1>
       <p>
         Something went wrong on the service&apos;s side, not yours. What was already saved is still

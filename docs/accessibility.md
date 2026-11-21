@@ -2,6 +2,15 @@
 
 Where this stands, what holds it there, and what nobody has checked yet.
 
+- Every page's `<title>` was "PaperWeave" (WCAG 2.4.2), so a page that opened said nothing to tell
+  it from another. Each now says where it is: "Papers", the paper's name, "main.tex · <paper>",
+  "Check before submitting · <paper>", "Describe a data file · <paper>", "New chart · <paper>"
+  (or "Chart <name>"), "Rename a file", "Rename a label", "Revision 1 to revision 2",
+  "Invitation to <paper>", "Sign in", "Nothing here" and "This page could not be shown", each
+  followed by "— PaperWeave". A paper's name is in a title only from the same check and the same
+  read the page makes, so someone who is not on the paper gets "Nothing here". `titles.spec.ts`
+  holds this; the error page's title is not tried (nothing in the tests makes a page fail).
+
 ## Held by tests
 
 `tests/e2e/a11y.spec.ts` runs in CI with the other browser tests.
@@ -152,9 +161,6 @@ client would. The paper was `fixtures/ieee-multifile`, a second person was invit
   - The other pages' error lines (data, chart, submit, rename, invitations) are not yet
     focused the same way.
   - The toolbar has 11 buttons before the text, each a Tab stop.
-  - Every page's `<title>` is "PaperWeave" (only `layout.tsx` sets metadata), so a new page
-    announces nothing that tells it from another on load, most of all after a single-ZIP import,
-    which opens the paper's page with no result line.
 
 ## Status without colour
 

@@ -3,6 +3,9 @@
 // that the pages' content policy refuses.)
 import Link from './Go';
 
+// Whatever was asked for, the title says no more than the page: not which paper it was.
+export const metadata = { title: { absolute: 'Nothing here — PaperWeave' } };
+
 export default function NotFound() {
   return (
     <main>

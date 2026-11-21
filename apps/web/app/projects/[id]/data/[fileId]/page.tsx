@@ -1,13 +1,19 @@
 import { Wide } from '../../../../Wide';
-import { AppError, can, COLUMN_TYPES, datasetProposal, getProject } from '@paperweave/server';
+import { AppError, can, COLUMN_TYPES, datasetProposal } from '@paperweave/server';
 import Link from '../../../../Go';
 import Once from '../../../../Once';
 import { notFound } from 'next/navigation';
-import { blobs, db, requireUser } from '../../../../../lib/server';
+import { blobs, db, forTitle, paperOf, requireUser } from '../../../../../lib/server';
 import { approveDatasetAction } from '../../../actions';
 
 export const dynamic = 'force-dynamic';
 const HOLDS = { number: 'numbers', date: 'dates', text: 'text' } as const;
+
+export async function generateMetadata({ params }: { params: Promise<{ id: string }> }) {
+  const { id } = await params;
+  const project = await forTitle((userId) => paperOf(userId, id));
+  return { title: `Describe a data file${project ? ` · ${project.name}` : ''}` };
+}
 
 /** A CSV file as the service reads it, for its author to check and describe. */
 export default async function Describe({
@@ -21,7 +27,7 @@ export default async function Describe({
   const { error } = await searchParams;
   const user = await requireUser(`/projects/${id}/data/${fileId}`);
   const loaded = await Promise.all([
-    getProject(db(), user.id, id),
+    paperOf(user.id, id),
     datasetProposal(db(), blobs(), user.id, id, fileId),
   ]).catch((err) => {
     if (!(err instanceof AppError)) throw err;

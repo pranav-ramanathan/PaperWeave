@@ -2,9 +2,7 @@ import {
   AppError,
   withScope,
   can,
-  getProject,
   importReport,
-  listFiles,
   listMembers,
   modelProcessing,
   openFile,
@@ -12,7 +10,7 @@ import {
 } from '@paperweave/server';
 import Link from '../../../../Go';
 import { notFound } from 'next/navigation';
-import { blobs, db, requireUser } from '../../../../../lib/server';
+import { blobs, db, filesOf, forTitle, paperOf, requireUser } from '../../../../../lib/server';
 import BuildPane from './BuildPane';
 import FileEditor from './FileEditor';
 
@@ -33,8 +31,8 @@ async function FilePage({
     `/projects/${id}/files/${fileId}${named ? `?thread=${named}` : ''}`,
   );
   const loaded = await Promise.all([
-    getProject(db(), user.id, id),
-    listFiles(db(), user.id, id),
+    paperOf(user.id, id),
+    filesOf(user.id, id),
     openFile(db(), user.id, fileId),
     importReport(db(), user.id, id),
     paperMacros(db(), blobs(), user.id, id),
@@ -103,6 +101,22 @@ async function FilePage({
 }
 
 // What this page reads about the paper, it reads once.
+/** The file's path and the paper's name; a file that is not in this paper is not found. */
+export async function generateMetadata({
+  params,
+}: {
+  params: Promise<{ id: string; fileId: string }>;
+}) {
+  const { id, fileId } = await params;
+  const found = await forTitle(async (userId) => {
+    const [project, files] = await Promise.all([paperOf(userId, id), filesOf(userId, id)]);
+    return { project, file: files.find((f) => f.id === fileId) };
+  });
+  if (!found) return { title: 'File' };
+  if (!found.file) notFound();
+  return { title: `${found.file.path} · ${found.project.name}` };
+}
+
 export default function Scoped(props: Parameters<typeof FilePage>[0]) {
   return withScope(() => FilePage(props));
 }

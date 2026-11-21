@@ -6,6 +6,7 @@ import { blobs, db, requireUser } from '../../../../../../lib/server';
 import { renameFileAction } from '../../../../actions';
 
 export const dynamic = 'force-dynamic';
+export const metadata = { title: 'Rename a file' };
 
 /** The lines that name a file, and what they would say once it is renamed. Nothing is changed. */
 export default async function RenameFile({

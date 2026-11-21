@@ -1,11 +1,22 @@
-import { findInvitation } from '@paperweave/server';
 import Link from '../../Go';
 import Once from '../../Once';
-import { db, requireUser } from '../../../lib/server';
+import { currentUser, invitationOf, requireUser } from '../../../lib/server';
 import SignOut from '../../SignOut';
 import { joinAction } from '../../projects/actions';
 
 export const dynamic = 'force-dynamic';
+
+/** Says what the page's heading says: the paper's name only where the page shows it. */
+export async function generateMetadata({ params }: { params: Promise<{ token: string }> }) {
+  const { token } = await params;
+  const user = await currentUser();
+  const invitation = user && (await invitationOf(token, user.id).catch(() => null));
+  if (!user || !invitation) return { title: 'Invitation not valid' };
+  if (invitation.memberRole) return { title: `Already on ${invitation.project}` };
+  if (invitation.email !== user.email.toLowerCase())
+    return { title: 'Invitation for someone else' };
+  return { title: `Invitation to ${invitation.project}` };
+}
 
 export default async function Invitation({
   params,
@@ -16,7 +27,7 @@ export default async function Invitation({
 }) {
   const { token } = await params;
   const user = await requireUser(`/invitations/${token}`);
-  const invitation = await findInvitation(db(), token, user.id);
+  const invitation = await invitationOf(token, user.id);
   const { error } = await searchParams;
   if (!invitation)
     return (

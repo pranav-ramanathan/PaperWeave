@@ -28,7 +28,9 @@ const SENT = `(function(){var s=new WeakSet;addEventListener('submit',function(e
 // started since do not send it either. Only a page brought back by Back or Forward frees them:
 // the first pageshow comes when the scripts arrive, which may be mid-post. A GET form is not ours.
 
-export const metadata = { title: 'PaperWeave' };
+// Every page names itself, and the name is followed by the service's: "Papers — PaperWeave". The
+// title is the first thing a screen reader says of a page that has just opened.
+export const metadata = { title: { default: 'PaperWeave', template: '%s — PaperWeave' } };
 
 export default async function Layout({ children }: { children: ReactNode }) {
   // Every page is made for its request: its scripts carry that request's number (see proxy.ts),

@@ -3,6 +3,7 @@ import { currentUser, safePath } from '../../lib/server';
 import SignInForm from './SignInForm';
 
 export const dynamic = 'force-dynamic';
+export const metadata = { title: 'Sign in' };
 
 export default async function SignIn({
   searchParams,

@@ -510,6 +510,8 @@ Read this first. Update it in every pull request.
   - `tests/e2e/a11y.spec.ts`: an automated audit (axe, WCAG 2.1 A and AA) of seven pages
     including the editor in both views with everything showing, and one flow done with the
     keyboard alone.
+  - Fixed: every page had the title "PaperWeave"; each now names where it is, and never a paper
+    the person may not see (`tests/e2e/titles.spec.ts`).
   - Fixed: the PDF pane could not be reached from the keyboard; the PDF's pages had no text (they
     now carry their words, which also makes them selectable); tabbing into the visual editor
     gave no caret; a keyboard selection could be cut short when the keyboard moved on.
@@ -3091,6 +3093,27 @@ Changed on the way, and worth keeping:
   drives an unslowed page. Unset, nothing changes.
 - **Result with every page slowed (4 times).** 104 ran, 104 passed, in 20 minutes; nothing new
   failed. At full speed, 104 of 104 pass (14 minutes).
+
+### A keyboard test that never went to the start of the text
+
+- **What happened.** On PR 145, `keys.spec` "a comment is changed, replied to and deleted, and a
+  proposal changed…" failed with "Tab never reached Start thread"; with `E2E_CPU_THROTTLE=4`
+  and `--repeat-each 10 --workers 1`, 6 of 10 failed (focus was on "Text to add at the caret",
+  the proposal made from an empty selection). 8 of 8 passed at full speed.
+- **Why.** The test's `select()` went to the start of the text with Ctrl+Home. In the headless
+  Chromium the tests run in, Ctrl+Home does nothing in the editor (Home alone, and ArrowUp, do).
+  The first `select(1)` worked only because the caret was already at the start; `select(3)`
+  began where the last selection ended (the end of "Latency"), and three ArrowDowns from there
+  reached the closing `\end{document}` block or the end, where seven Shift+ArrowRight keys select
+  nothing or something else depending on how far the page had got. Logged per key: after Ctrl+Home
+  the selection was unchanged, at either speed. Line 3 was also not the line wanted: with the
+  start reached, the sentence for the proposal is line 2.
+- **Not the product.** Home, ArrowUp and ArrowDown moved the caret, and the editor's selection
+  followed, as expected; nothing a person at a keyboard does was lost.
+- **Now** `selectLine` in `tests/e2e/keys.spec.ts` (used by both tests that select) goes up a line
+  and to the start of the line until the caret is at the start of the text, selects line 1 or 2,
+  and waits for the selected words to be "Latency" or "The sen". With `E2E_CPU_THROTTLE=4`,
+  `--repeat-each 10 --workers 1`: 10 of 10 pass (4 of 10 before). Full speed: 8 of 8.
 
 ### What the browser says when the server does not answer
 

@@ -7,6 +7,18 @@ export const dynamic = 'force-dynamic';
 const WHAT = { added: 'Added', removed: 'Removed', changed: 'Changed', renamed: 'Renamed' };
 const MARK = { '+': 'added', '-': 'removed', ' ': 'kept' } as const;
 
+// Only the two numbers in the address, which say nothing the address does not: the paper's name
+// would cost a read of its own.
+export async function generateMetadata({
+  params,
+}: {
+  params: Promise<{ rev: string; other: string }>;
+}) {
+  const { rev, other } = await params;
+  const n = (s: string) => (/^\d{1,9}$/.test(s) ? s : '?');
+  return { title: `Revision ${n(other)} to revision ${n(rev)}` };
+}
+
 export default async function Diff({
   params,
 }: {

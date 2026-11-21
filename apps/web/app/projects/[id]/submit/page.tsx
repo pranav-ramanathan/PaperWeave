@@ -3,7 +3,6 @@ import {
   withScope,
   can,
   type Finding,
-  getProject,
   heldInRevisions,
   heldLine,
   submissionChecks,
@@ -11,7 +10,7 @@ import {
 import Link from '../../../Go';
 import Once from '../../../Once';
 import { notFound } from 'next/navigation';
-import { blobs, db, requireUser } from '../../../../lib/server';
+import { blobs, db, forTitle, paperOf, requireUser } from '../../../../lib/server';
 import { buildNowAction } from '../../actions';
 
 export const dynamic = 'force-dynamic';
@@ -28,7 +27,7 @@ async function Submit({
   const { error } = await searchParams;
   const user = await requireUser(`/projects/${id}/submit`);
   const [project, checks] = await Promise.all([
-    getProject(db(), user.id, id),
+    paperOf(user.id, id),
     submissionChecks(db(), blobs(), user.id, id),
   ]).catch((err) => {
     if (err instanceof AppError && err.code === 'not_found') notFound();
@@ -126,6 +125,12 @@ async function Submit({
       )}
     </main>
   );
+}
+
+export async function generateMetadata({ params }: { params: Promise<{ id: string }> }) {
+  const { id } = await params;
+  const project = await forTitle((userId) => paperOf(userId, id));
+  return { title: `Check before submitting${project ? ` · ${project.name}` : ''}` };
 }
 
 // What this page reads about the paper, it reads once.

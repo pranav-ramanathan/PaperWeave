@@ -41,6 +41,46 @@ async function tabTo(page: Page, name: string | RegExp) {
   throw new Error(`Tab never reached ${name}`);
 }
 
+/**
+ * Into the text, and the first seven characters of a line selected, with keys alone. Ctrl+Home
+ * does nothing in the headless Chromium the tests run in (Home alone does), so the caret goes up
+ * a line at a time and to the start of the line, until it is at the start of the text.
+ */
+async function selectLine(page: Page, line: number, words: string) {
+  await tabTo(page, 'main.tex, visual editor');
+  const editor = page.locator('.editor .visual .ProseMirror');
+  /** The selected text, or null while the page's selection is not in the editor. */
+  const selected = () =>
+    editor.evaluate((el) => {
+      const sel = document.getSelection();
+      const inside = (n: Node | null) => !!n && el.contains(n);
+      return sel && inside(sel.anchorNode) && inside(sel.focusNode) ? sel.toString() : null;
+    });
+  const atStart = () =>
+    editor.evaluate((el) => {
+      const sel = document.getSelection();
+      // The first text a caret can be in: the preamble before it is a drawn block.
+      const first = document
+        .createTreeWalker(el, NodeFilter.SHOW_TEXT, {
+          acceptNode: (n) =>
+            n.parentElement?.closest('[contenteditable=false]')
+              ? NodeFilter.FILTER_REJECT
+              : NodeFilter.FILTER_ACCEPT,
+        })
+        .nextNode();
+      return !!sel && sel.isCollapsed && sel.anchorNode === first && sel.anchorOffset === 0;
+    });
+  await expect.poll(selected).not.toBeNull();
+  for (let i = 0; i < 10 && !(await atStart()); i++) {
+    await page.keyboard.press('ArrowUp');
+    await page.keyboard.press('Home');
+  }
+  await expect.poll(atStart).toBe(true);
+  for (let i = 0; i < line; i++) await page.keyboard.press('ArrowDown');
+  for (let i = 0; i < 7; i++) await page.keyboard.press('Shift+ArrowRight');
+  await expect.poll(selected).toBe(words);
+}
+
 test('a comment and a proposed change are started, sent and decided without losing the keyboard', async ({
   browser,
 }) => {
@@ -55,17 +95,11 @@ test('a comment and a proposed change are started, sent and decided without losi
   await page.getByRole('link', { name: 'main.tex' }).first().click();
   await expect(page.locator('.editor .visual .ProseMirror')).toContainText('Latency');
 
-  /** Into the text, and a few characters of a line selected, with keys alone. */
-  const select = async (line: number) => {
-    await tabTo(page, 'main.tex, visual editor');
-    await page.keyboard.press('ControlOrMeta+Home');
-    for (let i = 0; i < line; i++) await page.keyboard.press('ArrowDown');
-    for (let i = 0; i < 7; i++) await page.keyboard.press('Shift+ArrowRight');
-  };
+  const select = (line: number, words: string) => selectLine(page, line, words);
 
   // A comment: the form takes the keyboard when it opens, and the button has it again when
   // the thread has been started.
-  await select(1);
+  await select(1, 'Latency');
   await tabTo(page, 'Comment on the selected text');
   await page.keyboard.press('Enter');
   expect(await focused(page)).toMatchObject({ name: 'Comment', region: 'Comments' });
@@ -87,7 +121,7 @@ test('a comment and a proposed change are started, sent and decided without losi
   expect((await focused(page)).region).toBe('Comments');
 
   // A proposed change, the same way.
-  await select(3);
+  await select(2, 'The sen');
   await tabTo(page, 'Propose a change here');
   await page.keyboard.press('Enter');
   expect(await focused(page)).toMatchObject({
@@ -231,13 +265,8 @@ test('a comment is changed, replied to and deleted, and a proposal changed, with
   test.setTimeout(240_000);
   const page = await paper(browser, 'keys-edit', true);
   const comments = page.getByRole('region', { name: 'Comments' });
-  const select = async (line: number) => {
-    await tabTo(page, 'main.tex, visual editor');
-    await page.keyboard.press('ControlOrMeta+Home');
-    for (let i = 0; i < line; i++) await page.keyboard.press('ArrowDown');
-    for (let i = 0; i < 7; i++) await page.keyboard.press('Shift+ArrowRight');
-  };
-  await select(1);
+  const select = (line: number, words: string) => selectLine(page, line, words);
+  await select(1, 'Latency');
   await tabTo(page, 'Comment on the selected text');
   await page.keyboard.press('Enter');
   await page.keyboard.type('Said with keys.');
@@ -283,7 +312,7 @@ test('a comment is changed, replied to and deleted, and a proposal changed, with
   await audit(page, 'the file page');
 
   // A proposal is changed.
-  await select(3);
+  await select(2, 'The sen');
   await tabTo(page, 'Propose a change here');
   await page.keyboard.press('Enter');
   await page.keyboard.type('Changed by keys');

@@ -8,7 +8,6 @@ import {
   citationChecks,
   citationReport,
   firstSteps,
-  getProject,
   importReport,
   labelReport,
   languageSettings,
@@ -32,7 +31,7 @@ import {
 import Link from '../../Go';
 import Result from '../../Result';
 import { notFound } from 'next/navigation';
-import { blobs, db, requireUser } from '../../../lib/server';
+import { blobs, db, forTitle, paperOf, requireUser } from '../../../lib/server';
 import {
   buildRevisionAction,
   cancelInvitationAction,
@@ -90,7 +89,7 @@ async function Project({
   const asked = Number((await searchParams).before);
   const olderThan = Number.isInteger(asked) && asked > 0 ? asked : undefined;
   const loaded = await Promise.all([
-    getProject(db(), user.id, id),
+    paperOf(user.id, id),
     listMembers(db(), user.id, id),
     listFiles(db(), user.id, id),
     importReport(db(), user.id, id),
@@ -1126,6 +1125,13 @@ async function Project({
 }
 
 // What this page reads about the paper, it reads once.
+/** The paper's name, from the read the page makes of it. */
+export async function generateMetadata({ params }: { params: Promise<{ id: string }> }) {
+  const { id } = await params;
+  const project = await forTitle((userId) => paperOf(userId, id));
+  return { title: project?.name ?? 'Paper' };
+}
+
 export default function Scoped(props: Parameters<typeof Project>[0]) {
   return withScope(() => Project(props));
 }

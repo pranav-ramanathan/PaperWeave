@@ -8,6 +8,7 @@ import SignOut from '../SignOut';
 import { createAction } from './actions';
 
 export const dynamic = 'force-dynamic';
+export const metadata = { title: 'Papers' };
 
 export default async function Projects({
   searchParams,
