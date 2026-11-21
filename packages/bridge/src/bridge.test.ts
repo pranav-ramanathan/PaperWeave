@@ -4,6 +4,7 @@ import { NodeSelection, TextSelection } from '@tiptap/pm/state';
 import { expect, test } from 'vitest';
 import * as Y from 'yjs';
 import { fixtures, replica, shown, textblocks, visualOp } from './harness.ts';
+import { contained, parse } from '@paperweave/latex';
 import type { Command } from './bridge.ts';
 import { fromSrc, toSrc } from './project.ts';
 
@@ -834,6 +835,7 @@ test(`${N} rewrites of an inline atom change its bytes and nothing else, or are 
           no++;
           continue;
         }
+        expect(out.contained, where).toBe(true);
         // Sometimes another replica deletes a little text next to the atom first. Then the
         // command conflicts, or changes only the atom's bytes.
         if (r.int(3) === 0) {
@@ -853,6 +855,10 @@ test(`${N} rewrites of an inline atom change its bytes and nothing else, or are 
           }
           expect(res).toBe('applied');
           const at2 = Y.createAbsolutePositionFromRelativePosition(c.from, rep.ydoc)!.index;
+          // Whatever the other replica did, what applied is contained in the text it applied to.
+          expect(contained(parse(mid), parse(rep.src), at2, a.src.length, now.length), where).toBe(
+            true,
+          );
           expect(rep.src.slice(0, at2), where).toBe(mid.slice(0, at2));
           expect(rep.src.slice(at2 + now.length), where).toBe(mid.slice(at2 + a.src.length));
           rep.check();
