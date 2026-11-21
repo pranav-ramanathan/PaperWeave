@@ -3841,8 +3841,10 @@ Coming back online, the editor said "This paper was restored to an earlier revis
 - **Tests.** `keys.spec.ts` (Compile now has the keyboard while compiling and after; a second
   Enter and Space send no second build) and `proposals.spec.ts` (the review button, the answer
   held back, keeps the keyboard and sends one request). Both fail on the old code.
-- **Found by reading, not fixed.** In `Threads.tsx`, after "Attach to the same words again"
-  succeeds the button unmounts, focus goes to `<body>` and nothing is announced.
+- **Follow-up, done.** In `Threads.tsx`, "Attach to the same words again" unmounted on success,
+  focus went to `<body>` and nothing was announced. It now says "The words were found again."
+  in the comments' note and moves focus to the Comments heading, as "Find these words again"
+  does in `Proposals.tsx`. Test: `keys.spec.ts` (fails on the old code).
 
 ## Decisions waiting on the owner
 

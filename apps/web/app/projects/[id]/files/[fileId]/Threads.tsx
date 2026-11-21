@@ -360,7 +360,10 @@ export default function Threads(props: {
               type="button"
               onClick={async () => {
                 const wrong = await post(`${url}/${t.id}`, { attach: true });
-                if (wrong) setNote(wrong);
+                if (wrong) return setNote(wrong);
+                // The button is gone once the words are found: say so, and keep the keyboard in the comments.
+                setNote('The words were found again.');
+                setMoved((n) => n + 1);
               }}
             >
               Attach to the same words again
