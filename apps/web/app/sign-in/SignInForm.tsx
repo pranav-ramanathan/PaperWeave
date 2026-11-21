@@ -1,10 +1,14 @@
 'use client';
 
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
 
 export default function SignInForm({ next }: { next: string }) {
   const [state, setState] = useState<'idle' | 'sending' | 'sent' | 'refused' | 'unsent'>('idle');
   const [email, setEmail] = useState('');
+  // Before the page's script has started the form would be sent as a plain GET, and nothing
+  // would read the field: the button waits for the script.
+  const [ready, setReady] = useState(false);
+  useEffect(() => setReady(true), []);
 
   if (state === 'sent')
     return (
@@ -16,13 +20,16 @@ export default function SignInForm({ next }: { next: string }) {
     <form
       onSubmit={async (e) => {
         e.preventDefault();
+        // The field itself, not state: text typed or filled before the script started is in it.
+        const address = String(new FormData(e.currentTarget).get('email') ?? '');
+        setEmail(address);
         setState('sending');
         const res = await fetch('/api/auth/sign-in/magic-link', {
           method: 'POST',
           headers: { 'content-type': 'application/json' },
           // A link that is used again, or has expired, comes back to this page with a message.
           body: JSON.stringify({
-            email,
+            email: address,
             callbackURL: next,
             errorCallbackURL: `/sign-in?next=${encodeURIComponent(next)}`,
           }),
@@ -36,16 +43,9 @@ export default function SignInForm({ next }: { next: string }) {
     >
       <label>
         Email address
-        <input
-          type="email"
-          name="email"
-          required
-          autoComplete="email"
-          value={email}
-          onChange={(e) => setEmail(e.target.value)}
-        />
+        <input type="email" name="email" required autoComplete="email" />
       </label>
-      <button type="submit" disabled={state === 'sending'}>
+      <button type="submit" disabled={!ready || state === 'sending'}>
         {state === 'sending' ? 'Sending…' : 'Email me a sign-in link'}
       </button>
       {state === 'unsent' && (

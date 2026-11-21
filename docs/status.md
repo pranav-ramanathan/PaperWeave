@@ -722,6 +722,12 @@ ordinary use. Ten ways of looking found them, and each is cheap to do again:
     a minute; a paper's page reading each file four times; saves and downloads one file at a
     time.
 
+30. **Use a page before its script has started.** Hold back `/_next/static/*.js` (`scriptsHeld`
+    in `tests/e2e/helpers.ts`), as a slow line does. Found: a file dropped on the page opened in
+    its place; a sign-in form posted as a plain GET with the address in the URL; a double press
+    on "Create paper" 50 ms apart making two papers (see "Before the page's script has
+    started").
+
 Tried the same way and nothing found: thirty connections typing into one file at once (kept
 as a test in `sync.sandbox.test`); 400 threads and 400 proposals on one file, on the server
 (both lists took about 20 ms; not kept); and each tool of the visual view worked slowly
@@ -1446,8 +1452,8 @@ second one.
 - **What was wrong.** No page said what to do with a dropped file, so the browser did its
   own thing: open the file in the tab, the paper's page or the editor gone. Text dropped on
   the visual view took the editor's own way in, which could not write paragraphs or a list.
-- **Now** a file dropped anywhere but on a field for choosing one is refused (`Dropped` in
-  `apps/web/app/Dropped.tsx`, in the root layout); the visual and source views say where
+- **Now** a file dropped anywhere but on a field for choosing one is refused (`DROPPED`, a
+  script run as the page is read, first in the body of `apps/web/app/layout.tsx`); the visual and source views say where
   files are added. Text dropped on the visual view goes in where it was dropped, by the same
   rule as a paste (`take` and `handleDrop` in `apps/web/lib/visual.ts`). Text dropped on the
   source view goes in as before.
@@ -1466,6 +1472,44 @@ second one.
   new feature. A word dragged within the visual view was tried with the mouse and nothing
   changed, but whether the browser began a drag at all was not seen.
 - **How it was made.** Planned by one agent, probed and written by others, checked here.
+
+## Before the page's script has started
+
+- **What was tried.** The page's scripts held back (`scriptsHeld` in `tests/e2e/helpers.ts`
+  holds every `/_next/static/*.js` request until told to go; the page is gone to with
+  `waitUntil: 'domcontentloaded'`), and then each thing below done as a person would, with
+  the scripts let through afterwards where that mattered. A production build, one machine.
+
+| Before                                                                               | Now                                                                        |
+| ------------------------------------------------------------------------------------ | -------------------------------------------------------------------------- |
+| A file dropped on a page opened in its place (the handler was put on in `useEffect`) | refused from the first byte: an inline script with the request's nonce     |
+| Sign-in: Enter or the button sent a plain GET to `/sign-in?email=...`; no link sent  | the button is disabled until the script has started, so Enter does nothing |
+| Sign-in: the field was controlled, so text typed or filled early might not be sent   | the form reads the field itself (`FormData`) and sends that                |
+
+- **Probe**, scripts held, one run each:
+
+| Tried                                | What happened                                                                                    |
+| ------------------------------------ | ------------------------------------------------------------------------------------------------ |
+| Create paper, pressed once           | Works: posted natively, the paper's page comes back. One paper.                                  |
+| Create paper, two clicks in one task | One paper (the browser drops the first post).                                                    |
+| Create paper, two clicks 50 ms apart | **Two papers** with the same name (counted in the database). `Once.tsx` attaches in `useEffect`. |
+| Add file, a small file               | Works: "Added early.tex."                                                                        |
+| Add file, 4.6 MB `.tex`              | Posted whole and accepted. Locally nothing refuses it; a function on Vercel would at 4.5 MB.     |
+| Sign out                             | Does nothing until the script has started; works after.                                          |
+| A link to a file                     | Works (a plain link).                                                                            |
+| Typing where the editor will be      | Nothing takes the keys (no editor yet, nothing in the page); they are not in the editor after.   |
+| Rename a file (open the row, Rename) | Works: the confirming page comes.                                                                |
+| Join a paper from an invitation      | Works.                                                                                           |
+
+- **Found, not changed:** two papers from two presses 50 ms apart before the script has
+  started. Nobody's work is lost and nothing leaves the app, so it is left for a decision.
+  Typed keys before the editor exists are lost, but there was nothing yet to type into.
+- **Held by** browser tests: `projects.spec` "the sign-in form works for someone quicker than
+  the page's script" and `files.spec` "a file dropped before the page's script has started is
+  not opened in its place". Each failed on the old code. `files.spec` slowed four times: 50 of
+  50 pass (10 of each test), with the plain `expect` back in "a paper is started from nothing".
+- **Not changed:** only the pages made by `person` are slowed (`E2E_CPU_THROTTLE`); a second
+  page a test opens itself runs at full speed.
 
 ## The view a file opens in
 
@@ -3013,13 +3057,13 @@ Changed on the way, and worth keeping:
 - **Found.** `files.spec` "a paper is started from nothing…" failed 7 of 10 slowed, 0 of 10 at
   full speed. Just after adding a file, the page comes back from the form's post with its words
   already drawn, and the test dropped a file on it at once. The handler that stops a dropped
-  file from being opened in place of the app (`Dropped.tsx`) is put on once the page's script
+  file from being opened in place of the app (then `Dropped.tsx`) was put on once the page's script
   has started, so the drop came before it: neither `dragover` nor `drop` was taken. Waiting
   five seconds first, it passed 10 of 10.
-- **Now** the test asks again until the drop is taken, and only then checks that the file field
-  is left alone. Slowed, 10 of 10 pass (7 of 10 failed before). A person can drop a file on a
-  page before its script has started, on a slow line; the browser then opens the file in
-  place of the page. Not changed.
+- **Now** the drop is taken from the first byte of the page, not once its script has started
+  (see "Before the page's script has started"), and the test drops at once, with a plain
+  `expect`. Slowed, 10 of 10 pass (7 of 10 failed before). (First fixed by asking again until
+  the drop was taken.)
 - Not changed: the editor, which does what its tests say (an insert goes at the caret, or after
   the selection).
 
