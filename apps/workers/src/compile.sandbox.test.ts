@@ -1,6 +1,7 @@
 // Needs Docker and the TeX image (docker build -t paperweave-tex infra/tex). Run: pnpm test:sandbox
 import { execFileSync } from 'node:child_process';
 import {
+  copyFileSync,
   cpSync,
   existsSync,
   mkdirSync,
@@ -301,3 +302,49 @@ test.each(['article-basic', 'ieee-multifile', 'ams-multifile'])(
     if (havePdfinfo) expect(pages(join(out, result.pdf!))).toBeGreaterThan(0);
   },
 );
+
+// The `import` package: a file read through \import reads its own \subimport, \input and
+// pictures from the import folder first, as TeX does.
+test('\\import then \\subimport, \\input and a picture resolve from the import folder', async () => {
+  const files: Record<string, string> = {
+    'main.tex':
+      '\\documentclass{article}\n\\usepackage{import}\n\\usepackage{graphicx}\n\\begin{document}\n\\import{sections/}{intro}\n\\end{document}\n',
+    'sections/intro.tex':
+      'Intro words. \\subimport{figs/}{plot}\n\\input{detail}\n\\input{rootonly}\n\\includegraphics[width=1cm]{pic}\n',
+    'sections/figs/plot.tex': 'Nestedplottext.\n',
+    'sections/detail.tex': 'Detailtext.\n',
+    // The import folder is tried first; the folder TeX started in is the fallback.
+    'detail.tex': 'Rootdetailtext.\n',
+    'rootonly.tex': 'Rootonlytext.\n',
+  };
+  const project = tmp();
+  for (const [path, text] of Object.entries(files)) {
+    mkdirSync(dirname(join(project, path)), { recursive: true });
+    writeFileSync(join(project, path), text);
+  }
+  // A one-page PDF to use as the picture, made by TeX itself.
+  const pic = tmp();
+  writeFileSync(
+    join(pic, 'main.tex'),
+    '\\documentclass{article}\\begin{document}x\\end{document}\n',
+  );
+  const made = await compile(pic, 'main.tex', pic);
+  expect(made.ok).toBe(true);
+  copyFileSync(join(pic, made.pdf!), join(project, 'sections/pic.pdf'));
+
+  const out = tmp();
+  const r = await compile(project, 'main.tex', out);
+  expect(r.diagnostics.filter((d) => d.severity === 'error')).toEqual([]);
+  expect(r.ok).toBe(true);
+  if (havePdfinfo) {
+    const text = execFileSync('pdftotext', [join(out, r.pdf!), '-'], { encoding: 'utf8' });
+    expect(text).toContain('Nestedplottext');
+    expect(text).toContain('Detailtext');
+    expect(text).not.toContain('Rootdetailtext');
+    expect(text).toContain('Rootonlytext');
+  }
+
+  const g = includeGraph(files, 'main.tex', [...Object.keys(files), 'sections/pic.pdf']);
+  expect(g.missing).toEqual([]);
+  expect(g.order).toContain('sections/figs/plot.tex');
+});

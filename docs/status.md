@@ -3246,8 +3246,8 @@ changed a fixture, `docs/import-matrix.md` or the build image.
 - **`\import`, `\subimport`, `\includefrom`** (and `\inputfrom`, `\subinputfrom`,
   `\subincludefrom`) were not in the include graph, so the files they name had no report and were
   not part of the paper. They are now, as `input` edges. A file rename rewrites such a line group
-  by group (`nameSplices` in `files.ts`). Not followed: `\subimport` is resolved from the root's
-  folder like every other include, not from the folder of the file that holds it.
+  by group (`nameSplices` in `files.ts`). (Sub-imports were first resolved from the root's
+  folder; see "Import folders" below.)
 - **One list of reference commands.** `REFS` and `CITES` are exported from `labels.ts` and used
   by `parse.ts`. `\crefrange`, `\nameref`, `\vref`, `\citealp`, `\citealt`, `\citeyearpar`
   and the capitalised forms are now `ref` and `cite` atoms. `\crefrange` takes two groups.
@@ -3345,8 +3345,7 @@ selected splits the paragraph there, as it does for any selected thing. Prose ed
 - **Run:** unit 166 (29 files), sandbox 261 passed and 1 skipped (33 files), lint and typecheck
   clean, browser suite 119 of 119 (16 minutes), including the new import test.
 - **Not changed.** `acmart` with the fonts it asks for (`libertine`, `newtxmath`, `inconsolata`):
-  adding `texlive-fonts-extra` is 1.4 GB installed. `\subimport` is still resolved from the
-  root's folder.
+  adding `texlive-fonts-extra` is 1.4 GB installed.
 
 ## Inline atoms opened from the visual view
 
@@ -3404,6 +3403,31 @@ open with "edit it in the source".
   compares a full parse too); seed 25218 at `FUZZ=210000` passes.
 - **Run:** unit 174 (29 files), sandbox 261 passed and 1 skipped, lint and typecheck clean,
   browser `visual`, `maths`, `insert`, `atoms`, `keys` 21 of 21.
+
+## Import folders
+
+`includeGraph` now follows the `import` package's folder. `\import`, `\inputfrom` and
+`\includefrom` set it to their folder argument (a trailing slash is not needed); `\subimport`,
+`\subinputfrom` and `\subincludefrom` add their folder to the one in force; plain `\input` and
+`\include` keep it. Every include except a bibliography is looked for there first, then from the
+root's folder as before; a picture tries the import folder before `\graphicspath`. `\bibliography`
+and `\addbibresource` stay root-relative. `..` folds, and a root in a folder gives folders
+relative to it. The first visit of a file still wins, and cycles are still reported. Files in a
+nested sub-import are now in `graph.order`, so labels, citations and import see them.
+
+- **TeX checked.** `import.sty` (v6.2) puts the import folder first on `\input@path` and
+  `\Ginput@path`, with the folder TeX started in as the fallback, and a sub-import appends to the
+  folder in force. The sandbox test builds `\import{sections/}{intro}` with a `\subimport`, an
+  `\input` and a picture inside it: it builds, the nested text is in the PDF, a `detail.tex` in
+  both folders gives the import folder's, and a file only at the root is still found.
+- **Tests:** `graph.test.ts` (7 new, all fail on the old code); one sandbox test.
+- **Renames follow the import folder.** `Graph.base` gives each visited file's import folder, and
+  `renamePlan` resolves every include the way `includeGraph` does. A name found in the import
+  folder is written from there: a `\subimport` folder group is relative to it (and may use `..`),
+  and a plain `\input` or picture stays relative to it. A plain include whose file moves out of
+  the import folder is written from the root, which TeX falls back to. Limit: a file of the same
+  name inside the import folder would shadow it, and that is not checked. `\subfile` was
+  not checked. Starred forms (`\import*`) are treated as unstarred.
 
 ## Decisions waiting on the owner
 

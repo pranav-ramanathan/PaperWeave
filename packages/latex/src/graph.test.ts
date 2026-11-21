@@ -1,5 +1,6 @@
 import { expect, test } from 'vitest';
 import { graphicsPaths, includeGraph, includes } from './graph.ts';
+import { labelIndex } from './labels.ts';
 
 test('\\graphicspath folders are read, and a comment hides them', () => {
   expect(graphicsPaths('\\graphicspath{{a/}{b/c/}}')).toEqual(['a/', 'b/c/']);
@@ -116,4 +117,127 @@ test('\\import, \\subimport and \\includefrom name a folder and a file in two gr
   expect(
     inc.map((i) => root.slice(i.import!.dirAt, i.import!.dirAt + i.import!.dir.length)),
   ).toEqual(['sections/', 'sections', '', 'sections/']);
+});
+
+const DOC = (body: string) => `\\documentclass{article}\\begin{document}\n${body}\n\\end{document}`;
+
+test('\\subimport inside an imported file is read from the import folder', () => {
+  const files = {
+    'main.tex': DOC('\\import{sections/}{intro}'),
+    'sections/intro.tex': 'A \\subimport{figs/}{plot}',
+    'sections/figs/plot.tex': 'P',
+  };
+  const g = includeGraph(files, 'main.tex');
+  expect(g.order).toEqual(['main.tex', 'sections/intro.tex', 'sections/figs/plot.tex']);
+  expect(g.missing).toEqual([]);
+});
+
+test('\\input and \\includegraphics in an imported file try the import folder, then the root', () => {
+  const files = {
+    'main.tex': DOC('\\import{sections}{intro}'),
+    'sections/intro.tex':
+      '\\input{detail}\\input{rootonly}\\includegraphics{pic}\\includegraphics{rootpic}',
+    'sections/detail.tex': 'D',
+    'detail.tex': 'not this one',
+    'rootonly.tex': 'R',
+  };
+  const paths = [...Object.keys(files), 'sections/pic.pdf', 'rootpic.png'];
+  const g = includeGraph(files, 'main.tex', paths);
+  expect(g.missing).toEqual([]);
+  expect(g.edges).toEqual([
+    { from: 'main.tex', to: 'sections/intro.tex', kind: 'input' },
+    { from: 'sections/intro.tex', to: 'sections/detail.tex', kind: 'input' },
+    { from: 'sections/intro.tex', to: 'rootonly.tex', kind: 'input' },
+    { from: 'sections/intro.tex', to: 'sections/pic.pdf', kind: 'graphics' },
+    { from: 'sections/intro.tex', to: 'rootpic.png', kind: 'graphics' },
+  ]);
+});
+
+test('in an imported file the import folder comes before \\graphicspath', () => {
+  const files = {
+    'main.tex': '\\graphicspath{{figs/}}' + DOC('\\import{sections/}{intro}'),
+    'sections/intro.tex': '\\includegraphics{pic}\\includegraphics{other}',
+  };
+  const paths = [...Object.keys(files), 'sections/pic.png', 'figs/pic.png', 'figs/other.png'];
+  const g = includeGraph(files, 'main.tex', paths);
+  expect(g.edges.map((e) => e.to)).toEqual([
+    'sections/intro.tex',
+    'sections/pic.png',
+    'figs/other.png',
+  ]);
+});
+
+test('a bibliography in an imported file stays relative to the root', () => {
+  const files = {
+    'main.tex': DOC('\\import{sections/}{intro}'),
+    'sections/intro.tex': '\\bibliography{refs}',
+    'sections/refs.bib': '',
+    'refs.bib': '',
+  };
+  const g = includeGraph(files, 'main.tex');
+  expect(g.edges.map((e) => e.to)).toEqual(['sections/intro.tex', 'refs.bib']);
+});
+
+test('two levels of \\subimport add up, and .. folds', () => {
+  const files = {
+    'main.tex': DOC('\\import{a}{one}'),
+    'a/one.tex': '\\subimport{b/}{two}',
+    'a/b/two.tex': '\\subimport{c/}{three}\\subimport{../shared/}{x}\\input{local}',
+    'a/b/c/three.tex': 'T',
+    'a/shared/x.tex': 'X',
+    'a/b/local.tex': 'L',
+  };
+  const g = includeGraph(files, 'main.tex');
+  expect(g.missing).toEqual([]);
+  expect(g.order).toEqual([
+    'main.tex',
+    'a/one.tex',
+    'a/b/two.tex',
+    'a/b/c/three.tex',
+    'a/shared/x.tex',
+    'a/b/local.tex',
+  ]);
+});
+
+test('with the root in a folder, the import folder is relative to that folder', () => {
+  const files = {
+    'root/main.tex': DOC('\\import{sections/}{intro}'),
+    'root/sections/intro.tex': '\\subimport{figs/}{plot}\\input{detail}',
+    'root/sections/figs/plot.tex': 'P',
+    'root/sections/detail.tex': 'D',
+  };
+  const g = includeGraph(files, 'root/main.tex');
+  expect(g.missing).toEqual([]);
+  expect(g.order).toEqual([
+    'root/main.tex',
+    'root/sections/intro.tex',
+    'root/sections/figs/plot.tex',
+    'root/sections/detail.tex',
+  ]);
+});
+
+test('a label in a nested subimport is read through the graph order', () => {
+  const files: Record<string, string> = {
+    'main.tex': DOC('\\import{sections/}{intro}'),
+    'sections/intro.tex': '\\subimport{figs/}{plot}',
+    'sections/figs/plot.tex': '\\section{S}\\label{sec:nested}',
+  };
+  const g = includeGraph(files, 'main.tex');
+  const keys = g.order.flatMap((p) => labelIndex(files[p]).labels.map((l) => l.key));
+  expect(keys).toEqual(['sec:nested']);
+});
+
+test('\\import inside an imported file names its folder from the root', () => {
+  const files = {
+    'main.tex': DOC('\\import{a/}{one}'),
+    'a/one.tex': '\\import{b/}{two}',
+    'b/two.tex': 'T',
+  };
+  expect(includeGraph(files, 'main.tex').missing).toEqual([]);
+});
+
+test('the sub* forms are flagged', () => {
+  const src =
+    '\\import{a}{b}\\subimport{a}{b}\\inputfrom{a}{b}\\subinputfrom{a}{b}\\includefrom{a}{b}\\subincludefrom{a}{b}';
+  expect(includes(src).map((i) => i.import!.sub)).toEqual([false, true, false, true, false, true]);
 });

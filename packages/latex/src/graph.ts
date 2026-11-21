@@ -17,8 +17,9 @@ export type Include = {
   /**
    * For `\import{dir}{file}` and its relatives, where the path is written in two groups: `target`
    * is the two joined, `targetAt` is where the file group's text starts, and this is the rest.
+   * `sub` is true for the `sub*` forms, whose folder is added to the one in force.
    */
-  import?: { dir: string; dirAt: number; file: string };
+  import?: { dir: string; dirAt: number; file: string; sub: boolean };
 };
 
 const CMD =
@@ -111,8 +112,8 @@ export function includes(src: string): Include[] {
   for (const m of live.matchAll(MINTED)) braced(m, 'verbatiminput');
   for (const m of live.matchAll(PLOT)) braced(m, 'verbatiminput');
   for (const m of live.matchAll(IMPORT)) {
-    // Both are read from the folder TeX started in, as every other include here is. (\subimport
-    // reads from the folder of the file that holds it; that is not followed.)
+    // `target` is the two groups joined, as written. `includeGraph` reads the folder in force
+    // from `import.dir`; `nameSplices` reads `target`.
     const [dir, file] = [m[2].trim(), m[3].trim()];
     if (!file) continue;
     const target = dir && !dir.endsWith('/') ? `${dir}/${file}` : dir + file;
@@ -124,7 +125,7 @@ export function includes(src: string): Include[] {
       dynamic: /[\\#]/.test(target),
       at: m.index,
       targetAt,
-      import: { dir, dirAt, file },
+      import: { dir, dirAt, file, sub: m[1].startsWith('sub') },
     });
   }
   for (const m of live.matchAll(BARE))
@@ -193,6 +194,14 @@ export function resolveVia(
   return undefined;
 }
 
+/** The import folder an `\\import`-family include sets for the file it reads; `base` is the one in force. */
+export const importBase = (inc: Include, base: string) => {
+  if (inc.kind !== 'input') return base;
+  if (!inc.import) return base;
+  const folder = norm((inc.import.sub ? base : '') + '/' + inc.import.dir);
+  return folder ? folder + '/' : '';
+};
+
 export const resolveInclude = (
   inc: Include,
   dir: string,
@@ -213,6 +222,8 @@ export type Graph = {
   missing: { from: string; target: string; at: number }[];
   dynamic: { from: string; target: string }[];
   cycles: string[][];
+  /** The import folder in force in each visited file, with its trailing slash: `''` at the root. */
+  base: Record<string, string>;
 };
 
 /** `files` maps every project path to its text; `paths` lists all paths, binary ones included. */
@@ -224,16 +235,25 @@ export function includeGraph(
   const all = new Set(paths);
   const dir = rootDir(root);
   const via = graphicsPaths(files[root] ?? '');
-  const g: Graph = { order: [], preamble: [], edges: [], missing: [], dynamic: [], cycles: [] };
+  const g: Graph = {
+    order: [],
+    preamble: [],
+    edges: [],
+    missing: [],
+    dynamic: [],
+    cycles: [],
+    base: {},
+  };
   const body = uncomment(files[root] ?? '').indexOf('\\begin{document}');
   const stack: string[] = [];
-  const visit = (from: string, preamble = false) => {
+  const visit = (from: string, preamble = false, base = '') => {
     if (stack.includes(from)) {
       g.cycles.push([...stack.slice(stack.indexOf(from)), from]);
       return;
     }
     if (g.order.includes(from)) return;
     g.order.push(from);
+    g.base[from] = base;
     if (preamble) g.preamble.push(from);
     stack.push(from);
     for (const inc of includes(files[from] ?? '')) {
@@ -242,8 +262,12 @@ export function includeGraph(
         g.dynamic.push({ from, target: inc.target });
         continue;
       }
-      // TeX resolves every path against the directory it was started in: the root's.
-      const to = resolveInclude(inc, dir, all, via);
+      // TeX looks in the import folder in force first, then in the directory it was started in:
+      // the root's. A picture tries the import folder before \graphicspath; a bibliography is
+      // read by BibTeX or biber from the root's folder alone.
+      const to =
+        (inc.kind !== 'bib' && base ? resolveInclude(inc, dir + base, all) : undefined) ??
+        resolveInclude(inc, dir, all, via);
       if (!to) {
         // A package or class may be the system's: only a file of the paper is followed.
         if (inc.kind === 'support') continue;
@@ -251,7 +275,8 @@ export function includeGraph(
         continue;
       }
       g.edges.push({ from, to, kind: inc.kind });
-      if (inc.kind === 'input') visit(to, preamble || (from === root && inc.at < body));
+      if (inc.kind === 'input')
+        visit(to, preamble || (from === root && inc.at < body), importBase(inc, base));
     }
     stack.pop();
   };
