@@ -824,7 +824,7 @@ test('a restore is not taken as seen because a ticket was fetched: edits typed b
   const ticketServed = new Promise<void>((r) => (served = r));
   let typed!: () => void;
   const hasTyped = new Promise<void>((r) => (typed = r));
-  let live: { close: () => unknown } | null = null;
+  let live = null as { close: () => unknown } | null;
   let mocked = false;
   await editor.page.routeWebSocket(/:4100/, (ws) => {
     if (!online) return ws.close();
