@@ -766,7 +766,7 @@ export default function FileEditor(props: {
   }, [projectId, fileId, canWrite, user, syncUrl, props.path, props.visual, sourceOnly]);
 
   const status = sync.refused
-    ? `You no longer have access to this file, or it has been deleted.${sync.unsaved ? ' What you typed while offline was not saved. Copy what you need from it.' : ''}`
+    ? `You no longer have access to this file, or it has been deleted.${sync.unsaved ? ' What you typed here was not saved. Copy what you need from it.' : ''}`
     : sync.tooLarge
       ? 'An edit of yours is too large to save, so your unsaved edits cannot be kept. Copy what you need from them, then discard them. To add a large file to the paper, upload it.'
       : sync.held
