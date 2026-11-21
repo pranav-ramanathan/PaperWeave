@@ -1,11 +1,11 @@
 // Keeps one visual document in step with one shared LaTeX text.
-import { DEFAULT_TRANSPARENT, parse, reparse, sourceOnly } from '@paperweave/latex';
+import { contained, DEFAULT_TRANSPARENT, parse, reparse, sourceOnly } from '@paperweave/latex';
 import type { Node as PMNode, Schema } from '@tiptap/pm/model';
 import { ReplaceStep } from '@tiptap/pm/transform';
 import { type EditorState, Selection, TextSelection, type Transaction } from '@tiptap/pm/state';
 import * as Y from 'yjs';
 import { locate, model, type Model, projector, toSrc } from './project.ts';
-import { contained, diff, type Edit, emphEdit, translate, type Translation } from './translate.ts';
+import { diff, type Edit, emphEdit, translate, type Translation } from './translate.ts';
 
 export type Host = { getState(): EditorState; dispatch(tr: Transaction): void };
 
@@ -16,6 +16,8 @@ export type Command = {
   to: Y.RelativePosition;
   expected: string;
   replacement: string;
+  /** The replacement of one inline atom: refused if it would spill into the text around it. */
+  contained?: boolean;
 };
 export type CommandResult = 'applied' | 'duplicate' | 'conflict';
 
@@ -286,7 +288,7 @@ export class Bridge {
     // agree that nothing around the atom moved.
     return contained(old, reparse(old, text), from, to - from, replacement.length) &&
       contained(old, parse(text, old.transparent), from, to - from, replacement.length)
-      ? { ...c, key: crypto.randomUUID(), replacement }
+      ? { ...c, key: crypto.randomUUID(), replacement, contained: true }
       : 'spills';
   }
 
@@ -311,6 +313,21 @@ export class Bridge {
         const item = a.item;
         if (item !== null && Y.isDeleted(deleted, item)) return 'conflict';
       }
+    }
+    // shortcut: same check as runCommand's, with the default transparent set.
+    if (c.contained) {
+      const now = this.ytext.toString();
+      const after = now.slice(0, from) + c.replacement + now.slice(to);
+      if (
+        !contained(
+          parse(now, DEFAULT_TRANSPARENT),
+          parse(after, DEFAULT_TRANSPARENT),
+          from,
+          to - from,
+          c.replacement.length,
+        )
+      )
+        return 'conflict';
     }
     this.seen.add(c.key);
     this.splice([{ from, to, insert: c.replacement }]);

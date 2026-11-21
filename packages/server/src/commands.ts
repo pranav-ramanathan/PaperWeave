@@ -1,5 +1,6 @@
 // Structural edits: replace one stretch of a file's text, but only if it still reads as the
 // author saw it. Typing merges; a command either lands exactly as meant or not at all.
+import { contained, DEFAULT_TRANSPARENT, parse } from '@paperweave/latex';
 import type pg from 'pg';
 import * as Y from 'yjs';
 import type { BlobStore } from './blobs.ts';
@@ -19,6 +20,12 @@ export type Command = {
   /** What the stretch said when the command was made. */
   expected: string;
   replacement: string;
+  /**
+   * For the replacement of one inline atom: it lands only if the text around the atom is still
+   * read as it was once the replacement is in. What others typed next to the atom can make a
+   * replacement that was safe for its author run into the text beside it.
+   */
+  contained?: boolean;
 };
 export type CommandResult =
   /** `update` is the edit as a Yjs update, so its author can apply it as their own (and undo it). */
@@ -35,6 +42,7 @@ function check(input: unknown): Command & { at: [Y.RelativePosition, Y.RelativeP
   if (typeof c.key !== 'string' || !UUID.test(c.key)) throw bad('its key is not valid');
   if (typeof c.expected !== 'string' || typeof c.replacement !== 'string')
     throw bad('its text is missing');
+  if (c.contained !== undefined && typeof c.contained !== 'boolean') throw bad('its flag is invalid');
   if (c.expected.length > MAX_TEXT || c.replacement.length > MAX_TEXT) throw bad('it is too large');
   // Stored text has LF line ends only; the file's own style is put back on export.
   if (c.replacement.includes('\r')) throw bad('it has a carriage return');
@@ -134,6 +142,19 @@ export async function runCommand(
     const now = text.toString();
     if (from < 0 || to < from || now.slice(from, to) !== c.expected)
       return { result: 'conflict', text: now };
+    if (c.contained) {
+      const after = now.slice(0, from) + c.replacement + now.slice(to);
+      if (
+        !contained(
+          parse(now, DEFAULT_TRANSPARENT),
+          parse(after, DEFAULT_TRANSPARENT),
+          from,
+          to - from,
+          c.replacement.length,
+        )
+      )
+        return { result: 'conflict', text: now };
+    }
     if (
       opts.exactPlace &&
       c.expected === '' &&
