@@ -237,3 +237,30 @@ test('with exactPlace, an insertion whose anchors were deleted is refused; witho
   expect(await runCommand(t.pool, store, owner.id, p.main, b)).toMatchObject({ result: 'applied' });
   expect(await stored(p.id)).not.toBe(before);
 });
+
+test('a contained command is refused when another editor deleted the space after its atom', async () => {
+  const zip = await writeZip([
+    { path: 'main.tex', bytes: Buffer.from('\\newcommand{\\sys}{S}\n\nUse \\sys{} now and later.\n') },
+  ]);
+  const [project] = await importZip(t.pool, store, owner.id, zip, 'Contained');
+  const file = (await listFiles(t.pool, owner.id, project.id))[0].id;
+  const flagged = { ...replace(await open(file), '\\sys{}', '\\sys'), contained: true };
+  const bare = { ...replace(await open(file), '\\sys{}', '\\sys'), key: randomUUID() };
+  await editFile(t.pool, store, file, owner.id, (text) =>
+    text.delete(text.toString().indexOf('{} now') + 2, 1),
+  );
+  const before = await rows(file);
+  const refused = await runCommand(t.pool, store, owner.id, file, flagged);
+  expect(refused).toEqual({
+    result: 'conflict',
+    text: '\\newcommand{\\sys}{S}\n\nUse \\sys{}now and later.\n',
+  });
+  expect(await rows(file)).toBe(before);
+  // Not flagged, the same command applies and breaks the text: the flag is what protects.
+  expect((await runCommand(t.pool, store, owner.id, file, bare)).result).toBe('applied');
+  expect((await open(file)).toString()).toContain('Use \\sysnow and');
+  // A flag that is not a boolean is refused.
+  expect(
+    await code(runCommand(t.pool, store, owner.id, file, { ...bare, key: randomUUID(), contained: 'yes' })),
+  ).toBe('invalid_input');
+});

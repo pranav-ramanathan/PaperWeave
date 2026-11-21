@@ -4,6 +4,7 @@ import { NodeSelection, TextSelection } from '@tiptap/pm/state';
 import { expect, test } from 'vitest';
 import * as Y from 'yjs';
 import { fixtures, replica, shown, textblocks, visualOp } from './harness.ts';
+import type { Command } from './bridge.ts';
 import { fromSrc, toSrc } from './project.ts';
 
 const N = Number(process.env.FUZZ ?? 10000);
@@ -694,6 +695,46 @@ function rewrite(r: ReturnType<typeof replica>, old: string, now: string) {
   return { c, out };
 }
 
+const SYS = '\\newcommand{\\sys}{S}\n\nUse \\sys{} now and later.\n';
+
+test('a rewrite that was safe for its author is refused once another replica deleted the space after the atom', () => {
+  const r = replica(SYS);
+  const { c, out } = rewrite(r, '\\sys{}', '\\sys');
+  expect(typeof out).toBe('object');
+  const cmd = out as Command;
+  expect(cmd.contained).toBe(true);
+  const { b, merge } = peer(r);
+  const at = b.src.indexOf('\\sys{} now') + '\\sys{}'.length;
+  b.ytext.delete(at, 1);
+  merge();
+  expect(r.src).toContain('Use \\sys{}now and');
+  const was = r.src;
+  expect(r.bridge.applyCommand(cmd)).toBe('conflict');
+  expect(r.src).toBe(was);
+  r.check();
+  // Without the flag the same command lands and breaks the build: the flag is what protects.
+  const bare = { ...cmd, key: 'bare' };
+  delete bare.contained;
+  expect(c.key).not.toBe(cmd.key);
+  expect(r.bridge.applyCommand(bare)).toBe('applied');
+  expect(r.src).toContain('Use \\sysnow and');
+});
+
+test('a rewrite is refused once another replica deleted the text before the atom that made it safe', () => {
+  const r = replica('\\newcommand{\\sys}{S}\n\nUse \\sys{} \\textsc{now} and later.\n');
+  const { out } = rewrite(r, '\\textsc{now}', 'now');
+  expect(typeof out).toBe('object');
+  const { b, merge } = peer(r);
+  const at = b.src.indexOf('{} \\textsc');
+  b.ytext.delete(at, 3);
+  merge();
+  expect(r.src).toContain('Use \\sys\\textsc{now}');
+  const was = r.src;
+  expect(r.bridge.applyCommand(out as Command)).toBe('conflict');
+  expect(r.src).toBe(was);
+  r.check();
+});
+
 test('an inline atom is rewritten to exactly the new bytes, or the rewrite is refused', () => {
   const doc =
     'See \\citep{a} here.\\footnote{Old note.} Use {\\bf x} and \\sys{}x now.\n\\newcommand{\\sys}{S}\n';
@@ -791,6 +832,31 @@ test(`${N} rewrites of an inline atom change its bytes and nothing else, or are 
         if (out === 'spills' || out === 'conflict') {
           expect(rep.src, where).toBe(was);
           no++;
+          continue;
+        }
+        // Sometimes another replica deletes a little text next to the atom first. Then the
+        // command conflicts, or changes only the atom's bytes.
+        if (r.int(3) === 0) {
+          const other = replica('', rep.ydoc);
+          const i = Y.createAbsolutePositionFromRelativePosition(c.from, rep.ydoc)!.index;
+          const side = r.int(2) ? i + a.src.length : Math.max(0, i - 1 - r.int(3));
+          other.ytext.delete(Math.min(side, other.src.length - 1), 1 + r.int(2));
+          Y.applyUpdate(rep.ydoc, Y.encodeStateAsUpdate(other.ydoc));
+          other.bridge.destroy();
+          const mid = rep.src;
+          const res = rep.bridge.applyCommand(out);
+          if (res === 'conflict') {
+            expect(rep.src, where).toBe(mid);
+            rep.check();
+            atoms.splice(0, atoms.length, ...inlineAtoms(rep));
+            continue;
+          }
+          expect(res).toBe('applied');
+          const at2 = Y.createAbsolutePositionFromRelativePosition(c.from, rep.ydoc)!.index;
+          expect(rep.src.slice(0, at2), where).toBe(mid.slice(0, at2));
+          expect(rep.src.slice(at2 + now.length), where).toBe(mid.slice(at2 + a.src.length));
+          rep.check();
+          atoms.splice(0, atoms.length, ...inlineAtoms(rep));
           continue;
         }
         expect(rep.bridge.applyCommand(out)).toBe('applied');
