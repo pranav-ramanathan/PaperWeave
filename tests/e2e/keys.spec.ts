@@ -554,9 +554,14 @@ test('Ctrl+Home and Ctrl+End go to the start and the end of the text, with Shift
   const page = await paper(browser, 'keys-edges', true);
   const editor = page.locator('.editor .visual .ProseMirror');
   const selected = () => page.evaluate(() => document.getSelection()?.toString() ?? '');
+  // Into the text, away from both edges. Just after the editor takes the keyboard it puts its
+  // own caret back for a moment (ProseMirror, within 20 ms), so the move is made again until it
+  // has stuck; no person types that fast.
   const middle = async () => {
-    await page.keyboard.press('ArrowDown');
-    await page.keyboard.press('ArrowRight');
+    for (let i = 0; i < 5 && (await caretAt(page)) !== 'elsewhere'; i++) {
+      await page.keyboard.press('ArrowDown');
+      await page.keyboard.press('ArrowRight');
+    }
     await expect.poll(() => caretAt(page)).toBe('elsewhere');
   };
   await tabTo(page, 'main.tex, visual editor');
