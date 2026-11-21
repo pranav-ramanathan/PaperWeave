@@ -50,6 +50,12 @@ Where this stands, what holds it there, and what nobody has checked yet.
   - Groups are also told apart without colour: by the shape of a point, the dashes of a line,
     the place of a bar.
 
+- **The keyboard after a comment or a proposed change** (`keys.spec`). Opening the form for a
+  comment or a proposed change puts the keyboard in its text field; sending it, or putting it
+  away, puts the keyboard back on the button that opened it; resolving a thread and accepting a
+  proposal leave the keyboard in that part of the page and say what happened in words. The
+  window for an equation takes what is typed straight after it opens.
+
 Other browser tests hold narrower things: composing text with an input method while someone
 else edits the same paragraph (`spike.spec`), switching views with the selection kept
 (`visual.spec`), and the equation, reference, citation, figure and table windows opened from
@@ -74,6 +80,59 @@ the keyboard (`insert.spec`).
   large to save ("copy what you need"). It now takes the keyboard, and a test moves through a
   long file in it, and selects from it, with keys alone. Found by running the audit in those states, which the
   first audit did not visit.
+
+- On pressing Enter on "Comment on the selected text" or "Propose a change here", the button
+  went and the form that replaced it was not given the keyboard: nothing had it, and what was
+  typed went nowhere. Sending the form, resolving a thread and accepting, rejecting or
+  withdrawing a proposal did the same (the thing the keyboard was on is gone, and the proposal
+  or thread moves into a list that is closed), and the result was not said anywhere.
+- The window for an equation opened with the keyboard on "In the line", so the formula typed
+  after Alt+= went nowhere (a space would have changed the choice). It now opens on the LaTeX field.
+
+## Walked with the keyboard alone, from sign-in to the revision's downloads
+
+One run of the beta path in Chromium with Playwright, pressing keys only (Tab, Shift+Tab, Enter,
+Space, arrows, Escape, Alt+R/C/=/T, Ctrl+I, Shift+F10); the mail links were opened as an email
+client would. The paper was `fixtures/ieee-multifile`, a second person was invited as an editor.
+
+- **Works.** Asking for a sign-in link (the email field is the third Tab stop); importing a ZIP
+  (Space on the file field opens the browser's chooser; "Import ZIP" is the next Tab);
+  inviting (the role is changed with the arrow keys); joining from the invitation; opening a
+  file from the list; typing in both views; emphasis by Ctrl+I and by the "Emphasise" button
+  (the button keeps the keyboard and the selection); a reference, a citation, an equation and a
+  table from Alt+R, Alt+C, Alt+= and Alt+T, each closed with Enter on Insert or with Escape,
+  and the keyboard back in the text afterwards; the menu "At this place" from Shift+F10, opened
+  at the caret with its first item focused, closed with Escape; switching views (the keyboard
+  moves into the editor that is shown); "Compile now" (the status says "The PDF is up to date.");
+  saving a named revision; "Build the PDF for revision N"; the revision's "ZIP" and "PDF" links
+  (both download: `attachment`, named `<paper> rN.zip` and `.pdf`).
+- **Dialogs** are native and modal: Tab goes round the window and through the browser's own
+  controls (nothing has the page's focus for one press) and back. The table window's caption
+  is required: Enter on Insert with it empty puts the keyboard in the caption and the browser
+  says "Please fill out this field."
+- **Fixed above:** the keyboard in the comment, proposal and equation forms; the keyboard after
+  they are sent or put away; resolving a thread and deciding a proposal.
+- **Not changed, for a decision.**
+  - After any form that posts (Import ZIP, Send invitation, Save revision, Build the PDF for a
+    revision, Restore) the page is drawn again with nothing focused, and the result ("Invitation
+    sent to…", "Saved as revision N.") is a `role="status"` line that was in the page as it
+    loaded. Whether a screen reader says it has not been listened to. A keyboard user begins
+    again from the top of the page.
+  - There is no way past the lists at the top of a page. The paper's page is 47 Tab stops from
+    the top to "Their email address" and 47 more from the revision's name field to its "ZIP"
+    link; the file's page is 43 stops from the top to the visual editor (the list of files
+    first), 20 on the smaller paper in `keys.spec`. No skip link; the headings and regions are
+    there for a screen reader's own jumps.
+  - The visual view has no way to make or change a heading, by any means (the toolbar has
+    Emphasise, Undo, Redo and the insert buttons). A heading is typed in the source view.
+  - The same loss of the keyboard on closing is in the code, and was not walked or changed, for
+    "Change the proposal" (Save the proposal), changing a comment (Save), deleting a comment (the
+    question and its answer) and "Reply".
+  - Editing an existing formula from the keyboard (Enter on a selected formula) was not
+    confirmed: the arrow keys selected a display formula and raw blocks in one run, and an inline
+    formula could not be reached the same way in the run that tried it.
+  - Pressing Alt+T within about a tenth of a second of closing the table window with Escape did
+    not open it once; slower, it did. Not reproduced since.
 
 ## Status without colour
 

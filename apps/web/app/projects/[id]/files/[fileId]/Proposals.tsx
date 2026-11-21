@@ -45,6 +45,7 @@ function Change(props: {
           onChange={(e) => setReplacement(e.target.value)}
           rows={3}
           maxLength={20000}
+          autoFocus
         />
       </label>
       <label>
@@ -144,8 +145,33 @@ export default function Proposals(props: {
     await read();
     return wrong;
   };
-  const act = async (p: Proposal, action: string) =>
-    setNote((await post(`${url}/${p.id}`, { action })) ?? '');
+  const heading = useRef<HTMLHeadingElement>(null);
+  const opener = useRef<HTMLButtonElement>(null);
+  const wasStarting = useRef(false);
+  const [moved, setMoved] = useState(0);
+  // A proposal that was decided has moved to the other list, and the button the keyboard was on with it.
+  useEffect(() => {
+    if (moved && document.activeElement === document.body) heading.current?.focus();
+  }, [moved]);
+  // The form for a new proposal takes the button's place, and the button comes back when it closes.
+  useEffect(() => {
+    if (wasStarting.current && !starting) opener.current?.focus();
+    wasStarting.current = !!starting;
+  }, [starting]);
+  const act = async (p: Proposal, action: string) => {
+    const wrong = await post(`${url}/${p.id}`, { action });
+    if (wrong) return setNote(wrong);
+    setNote(
+      {
+        accept: 'Proposal accepted. It is now among the decided ones.',
+        reject: 'Proposal rejected. It is now among the decided ones.',
+        withdraw: 'Proposal withdrawn. It is now among the decided ones.',
+        undo: 'Acceptance undone. The proposal is open again.',
+        attach: 'The words were found again.',
+      }[action] ?? '',
+    );
+    setMoved((n) => n + 1);
+  };
 
   // A proposal someone else decides while this person is part-way through changing it stays
   // where it is, with what they have written, until they put the form away. Moved among the
@@ -270,10 +296,13 @@ export default function Proposals(props: {
   const decided = proposals?.filter((p) => p.status !== 'open' && !held(p)) ?? [];
   return (
     <section className="threads" id="proposals" aria-label="Proposed changes">
-      <h2>Proposed changes</h2>
+      <h2 ref={heading} tabIndex={-1}>
+        Proposed changes
+      </h2>
       {canPropose && !starting && (
         <button
           type="button"
+          ref={opener}
           onClick={() => {
             const picked = props.selection();
             setStarting(picked);
