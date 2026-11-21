@@ -9,6 +9,7 @@ import { authorize } from './authz.ts';
 import { type BlobStore, sha256 } from './blobs.ts';
 import { id } from './projects.ts';
 import { listProposals } from './proposals.ts';
+import { heldFileIds } from './revisions.ts';
 import { loadUpdates, TEXT } from './sync.ts';
 import { listThreads } from './threads.ts';
 
@@ -70,6 +71,17 @@ const ReviewData = z.object({
   root: z.string().max(255).optional(),
   threads: z.array(z.unknown()),
   proposals: z.array(z.unknown()),
+  /** Files kept back from downloads whose threads and proposals were left out: counts only. */
+  held: z
+    .array(
+      z.object({
+        file: text(500),
+        threads: z.number().int().min(0),
+        proposals: z.number().int().min(0),
+      }),
+    )
+    .max(1000)
+    .optional(),
 });
 export type ReviewData = Omit<z.infer<typeof ReviewData>, 'threads' | 'proposals'> & {
   threads: z.input<typeof Thread>[];
@@ -124,8 +136,20 @@ export async function exportReview(
     )
   ).rows[0];
   const file = await texts(pool, store, projectId);
+  // Data kept back from downloads keeps its comments and proposals back too, by file, not path.
+  const held = await heldFileIds(pool, projectId);
+  const left = new Map<string, { file: string; threads: number; proposals: number }>();
+  const leave = (fileId: string, path: string, kind: 'threads' | 'proposals') => {
+    const n = left.get(fileId) ?? { file: path, threads: 0, proposals: 0 };
+    n[kind]++;
+    left.set(fileId, n);
+  };
   const threads = [];
   for (const t of await listThreads(pool, store, userId, projectId)) {
+    if (held.has(t.fileId)) {
+      leave(t.fileId, t.path, 'threads');
+      continue;
+    }
     // A thread goes by how it reads now. One whose words are gone keeps the words it started on.
     const base = {
       file: t.path,
@@ -160,6 +184,10 @@ export async function exportReview(
   }
   const proposals = [];
   for (const p of await listProposals(pool, store, userId, projectId)) {
+    if (held.has(p.fileId)) {
+      leave(p.fileId, p.path, 'proposals');
+      continue;
+    }
     // What stands around the stretch now, to find it by later.
     const f = (await file(p.path))!;
     const at = Y.createAbsolutePositionFromRelativePosition(
@@ -194,6 +222,7 @@ export async function exportReview(
     ...(paper.root ? { root: paper.root } : {}),
     threads,
     proposals,
+    ...(left.size ? { held: [...left.values()].sort((a, b) => a.file.localeCompare(b.file)) } : {}),
   };
 }
 
@@ -236,6 +265,16 @@ export async function importReview(
   if (!read.success) {
     done.missing.push('The review data in the archive could not be read, so none was brought in.');
     return done;
+  }
+  for (const h of read.data.held ?? []) {
+    const n = (k: number, one: string) => `${k} ${one}${k === 1 ? '' : 's'}`;
+    const what = [h.threads && n(h.threads, 'thread'), h.proposals && n(h.proposals, 'proposal')]
+      .filter(Boolean)
+      .join(' and ');
+    if (what)
+      done.missing.push(
+        `${what} on ${h.file} ${h.threads + h.proposals === 1 ? 'was' : 'were'} left out where this came from: the file is kept back from downloads.`,
+      );
   }
   const file = await texts(pool, store, projectId);
   const short = (s: string) => (s.length > 40 ? `${s.slice(0, 40)}…` : s);

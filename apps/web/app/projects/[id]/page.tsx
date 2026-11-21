@@ -315,6 +315,8 @@ async function Project({
                 <small>
                   Comments and proposed changes come too; saved revisions, citation checks, data
                   descriptions, chart settings and language settings do not.
+                  {heldAway.length > 0 &&
+                    ' Comments and proposed changes on the files kept back are left out too.'}
                 </small>
               </>
             )}{' '}

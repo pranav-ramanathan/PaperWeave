@@ -3631,6 +3631,22 @@ it is told, and commits the ticket's number only in `onSynced`. Tests: one in `s
 leaves the open file alone, and a connection that dies after its ticket). The last holds the order
 with routes, not sleeps.
 
+## Held data no longer leaves through the review file
+
+"Data kept back never leaves, in any download" was false for the ZIP with review data:
+`exportReview` wrote every thread and proposal, so a held CSV's quoted rows (`quote`, `expected`)
+and the text around them (`before`, `after`) went out in `paperweave-review.json`. It now reads the
+held file ids once (`heldFileIds`, the same set the ZIP uses) and skips every thread and proposal
+on those files, by file id so a rename cannot dodge it: detached and resolved threads and decided
+proposals too. The file gains an optional `held: [{ file, threads, proposals }]`, counts only, and
+importing it adds one line per entry to the report's `missing` list. Files without the field read
+as before. The project page says beside the ZIP link that comments and proposals on held files are
+left out. Tests: one in `reviewdata.sandbox.test.ts`, one in `data.sandbox.test.ts` (export,
+import report, rename, release).
+
+Not covered: a comment body or an evidence string on another file that quotes the held data in a
+person's own words. That is free text, and nothing can tell it from any other sentence.
+
 ## Decisions waiting on the owner
 
 See "What I need from you" in `docs/plan.md`. None blocks C1.
