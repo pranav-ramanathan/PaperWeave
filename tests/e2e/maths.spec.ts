@@ -95,6 +95,25 @@ test('a formula is edited in place, with a preview, and without overwriting anyo
   await page.getByRole('button', { name: 'Undo' }).click();
   await expect(source(other)).toContainText('&\\le |e| + c .');
 
+  // A formula that would change how the text around it is read is refused here: the box stays
+  // open, with the reason, and the other person's source is unchanged.
+  const before = await sourceText(other);
+  await inline.dblclick();
+  await box.getByLabel('LaTeX').fill('$T');
+  await box.getByRole('button', { name: 'Apply' }).click();
+  await expect(box.getByRole('alert')).toContainText('make the change in the source');
+  await expect(box).toBeVisible();
+  await box.getByRole('button', { name: 'Cancel' }).click();
+  await expect(box).toBeHidden();
+  await display.dblclick();
+  await box.getByLabel('LaTeX').fill(align.replace('\\end{align}', ''));
+  await box.getByRole('button', { name: 'Apply' }).click();
+  await expect(box.getByRole('alert')).toContainText('make the change in the source');
+  await expect(box).toBeVisible();
+  await box.getByRole('button', { name: 'Cancel' }).click();
+  await expect(box).toBeHidden();
+  expect(await sourceText(other)).toBe(before);
+
   // Someone else changes the formula while it is open here: applying does not overwrite them.
   await display.dblclick();
   await box.getByLabel('LaTeX').fill(align.replace('+ c .', '+ 2c .'));

@@ -12,6 +12,8 @@ const PARAS = [
   'Math $a + b$ and \\textbf{bold \\sys{}} then more.',
   'Unclosed $ math here and \\cite{d} too',
   '\\begin{equation}\nx = 1\n\\end{equation}',
+  '\\begin{align}\na &= b\n\\end{align}',
+  '$$ y = 2 $$',
 ];
 const REPLACEMENTS = [
   '\\sys',
@@ -19,6 +21,10 @@ const REPLACEMENTS = [
   'x y',
   '$',
   '\\\\\n\n',
+  '\\begin{equation}\ny\n\\end{equation}',
+  '\\begin{equation}\ny',
+  '$$ z $$',
+  '$$ z',
   '{',
   '\n\nnew',
   '\\section{',
@@ -34,13 +40,15 @@ function document(r: Rng, plain: boolean) {
   return head + out.join(r.pick(['\n\n', '\n\n', '\n \n', '\n']));
 }
 
-/** Where each inline atom that is not a definition sits in the source. */
+/** Where each inline atom that is not a definition, and each display formula, sits in the source. */
 function atoms(src: string) {
   const out: [number, number][] = [];
-  for (const b of parse(src).blocks)
+  for (const b of parse(src).blocks) {
+    if (b.body.kind === 'math') out.push([b.start, b.start + b.body.text.length]);
     for (const tb of textblocks(b.body))
       for (const q of tb)
         if (q.k === 'atom' && q.type !== 'def') out.push([b.start + q.s, b.start + q.e]);
+  }
   return out;
 }
 
@@ -116,4 +124,25 @@ test('containedNear starts no window at a stray \\end{document} or inside the pr
       19,
     ),
   );
+});
+
+test('a display formula rewritten to another display formula is contained; one missing its end is not', () => {
+  const src = 'Before.\n\n\\begin{equation}\nx = 1\n\\end{equation}\n\nAfter \\cite{a}.\n';
+  const from = src.indexOf('\\begin{equation}');
+  const was = '\\begin{equation}\nx = 1\n\\end{equation}'.length;
+  const check = (rep: string) => {
+    const after = src.slice(0, from) + rep + src.slice(from + was);
+    const full = contained(parse(src), parse(after), from, was, rep.length);
+    // The window must not accept what the full check refuses.
+    if (containedNear(src, from, was, rep)) expect(full).toBe(true);
+    return full;
+  };
+  expect(check('\\begin{equation}\ny = 2\n\\end{equation}')).toBe(true);
+  expect(check('\\[ y \\]')).toBe(true);
+  expect(check('\\begin{equation}\ny = 2')).toBe(false);
+  expect(check('$ y $')).toBe(false);
+  expect(
+    check('\\begin{equation}\ny\n\\end{equation}\n\n\\begin{equation}\nz\n\\end{equation}'),
+  ).toBe(false);
+  expect(containedNear(src, from, was, '\\begin{equation}\ny = 2\n\\end{equation}')).toBe(true);
 });

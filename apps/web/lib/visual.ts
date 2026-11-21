@@ -122,7 +122,7 @@ export function createVisual(opts: {
    * server, but only if it still says `src`: what someone else changed meanwhile is not
    * overwritten.
    */
-  editMath?(src: string, apply: (replacement: string) => Promise<CommandResult>): void;
+  editMath?(src: string, apply: (replacement: string) => Promise<CommandResult | 'spills'>): void;
   /**
    * The person asked to edit an inline atom: a citation, a reference, a footnote, other raw
    * LaTeX. `apply` replaces its source, but answers 'spills' (and changes nothing) if that
@@ -203,9 +203,10 @@ export function createVisual(opts: {
     const c = bridge.atomCommand(editor.state, pos, src);
     if (!c) return say('That formula cannot be edited here. Edit it in the source.');
     resume = { from: editor.state.selection.from, to: editor.state.selection.to, acted };
-    opts.editMath!(src, async (replacement) =>
-      opts.run({ ...c, key: crypto.randomUUID(), replacement }),
-    );
+    opts.editMath!(src, async (replacement) => {
+      const next = bridge.rewriteCommand(c, replacement);
+      return typeof next === 'string' ? next : opts.run(next);
+    });
   };
   /** What an inline atom is called, in the window that edits it. */
   const atomName = (node: PMNode) =>
