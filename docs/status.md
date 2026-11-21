@@ -510,6 +510,8 @@ Read this first. Update it in every pull request.
   - `tests/e2e/a11y.spec.ts`: an automated audit (axe, WCAG 2.1 A and AA) of seven pages
     including the editor in both views with everything showing, and one flow done with the
     keyboard alone.
+  - Fixed: every page had the title "PaperWeave"; each now names where it is, and never a paper
+    the person may not see (`tests/e2e/titles.spec.ts`).
   - Fixed: the PDF pane could not be reached from the keyboard; the PDF's pages had no text (they
     now carry their words, which also makes them selectable); tabbing into the visual editor
     gave no caret; a keyboard selection could be cut short when the keyboard moved on.

@@ -7,8 +7,14 @@ import {
   connect,
   cookiesToSet,
   createAuth,
+  findInvitation,
+  getProject,
+  listCharts,
+  listFiles,
+  withScope,
   type Auth,
 } from '@paperweave/server';
+import { cache } from 'react';
 import { cookies, headers } from 'next/headers';
 import { createHash } from 'node:crypto';
 import { notFound, redirect } from 'next/navigation';
@@ -182,8 +188,40 @@ export async function currentSession({ fresh = false } = {}) {
   return found.response;
 }
 
-export async function currentUser() {
-  return (await currentSession())?.user ?? null;
+// Within one page's render the page and its title ask who is signed in once between them
+// (outside a render, `cache` does nothing).
+export const currentUser = cache(async () => (await currentSession())?.user ?? null);
+
+/**
+ * What a page and its `<title>` both read about a paper, asked once between them in one render:
+ * the same answer, from the same check that the person may see the paper, so a title is never
+ * made from what the page would not show.
+ */
+export const paperOf = cache((userId: string, id: string) => getProject(db(), userId, id));
+export const filesOf = cache((userId: string, id: string) => listFiles(db(), userId, id));
+export const chartsOf = cache((userId: string, id: string) =>
+  listCharts(db(), blobs(), userId, id),
+);
+export const invitationOf = cache((token: string, userId: string) =>
+  findInvitation(db(), token, userId),
+);
+
+/**
+ * For a title: what `load` reads for the signed-in person. A paper that is not theirs to see is
+ * the page's not-found, as for the page itself, and nothing of it goes into a title. Null if no
+ * one is signed in (the page sends them to sign in) or the read failed some other way (the
+ * page shows that).
+ */
+export async function forTitle<T>(load: (userId: string) => Promise<T>): Promise<T | null> {
+  const user = await currentUser();
+  if (!user) return null;
+  try {
+    // In a scope, so what a title asks of one paper asks the paper's membership once.
+    return await withScope(() => load(user.id));
+  } catch (err) {
+    if (err instanceof AppError && err.code === 'not_found') notFound();
+    return null;
+  }
 }
 
 /** The signed-in user, or a trip to the sign-in page and back to `returnTo`. */

@@ -1,18 +1,29 @@
-import {
-  AppError,
-  can,
-  chartDraws,
-  getProject,
-  listCharts,
-  listDatasets,
-} from '@paperweave/server';
+import { AppError, can, chartDraws, listDatasets } from '@paperweave/server';
 import Link from '../../../../Go';
 import Once from '../../../../Once';
 import { notFound } from 'next/navigation';
-import { blobs, db, requireUser } from '../../../../../lib/server';
+import { blobs, chartsOf, db, forTitle, paperOf, requireUser } from '../../../../../lib/server';
 import { removeChartAction, saveChartAction } from '../../../actions';
 
 export const dynamic = 'force-dynamic';
+
+/** The chart's name (or "New chart") and the paper's; a chart that is not in this paper is not found. */
+export async function generateMetadata({
+  params,
+}: {
+  params: Promise<{ id: string; chartId: string }>;
+}) {
+  const { id, chartId } = await params;
+  const found = await forTitle(async (userId) => {
+    const [project, charts] = await Promise.all([paperOf(userId, id), chartsOf(userId, id)]);
+    return { project, chart: charts.find((c) => c.id === chartId) };
+  });
+  if (!found) return { title: 'Chart' };
+  if (chartId !== 'new' && !found.chart) notFound();
+  return {
+    title: `${found.chart ? `Chart ${found.chart.name}` : 'New chart'} · ${found.project.name}`,
+  };
+}
 
 /** A chart: what it draws, how it stands, and the form that makes or changes it. */
 export default async function ChartPage({
@@ -26,9 +37,9 @@ export default async function ChartPage({
   const { error, data } = await searchParams;
   const user = await requireUser(`/projects/${id}/charts/${chartId}`);
   const [project, datasets, charts] = await Promise.all([
-    getProject(db(), user.id, id),
+    paperOf(user.id, id),
     listDatasets(db(), blobs(), user.id, id),
-    listCharts(db(), blobs(), user.id, id),
+    chartsOf(user.id, id),
   ]).catch((err) => {
     if (err instanceof AppError && err.code === 'not_found') notFound();
     throw err;

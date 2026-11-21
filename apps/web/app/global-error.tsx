@@ -5,6 +5,9 @@
 export default function FailedEverywhere() {
   return (
     <html lang="en">
+      <head>
+        <title>This page could not be shown — PaperWeave</title>
+      </head>
       <body>
         <main>
           <h1>This page could not be shown</h1>

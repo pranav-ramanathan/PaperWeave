@@ -6,6 +6,7 @@ import { blobs, db, requireUser } from '../../../../../lib/server';
 import { renameLabelAction } from '../../../actions';
 
 export const dynamic = 'force-dynamic';
+export const metadata = { title: 'Rename a label' };
 
 /** What renaming a label would change, shown before anything is changed. */
 export default async function RenameLabel({
