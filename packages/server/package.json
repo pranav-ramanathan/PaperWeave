@@ -2,7 +2,10 @@
   "name": "@paperweave/server",
   "private": true,
   "type": "module",
-  "exports": "./src/index.ts",
+  "exports": {
+    ".": "./src/index.ts",
+    "./textdiff": "./src/textdiff.ts"
+  },
   "scripts": {
     "migrate": "node --env-file-if-exists=../../apps/web/.env.local src/migrate-cli.ts",
     "check-blobs": "node --env-file-if-exists=../../apps/web/.env.local src/check-blobs-cli.ts"

@@ -231,3 +231,32 @@ test('a reviewer proposes a change; the owner accepts it, undoes that, and rejec
   await ask(owner.page).click();
   await expect(panel(owner.page)).toContainText('Reviews by a model are not set up.');
 });
+
+test('a proposal marks only the words it changes', async ({ browser }) => {
+  test.setTimeout(90_000);
+  const owner = await person(browser, 'worddiff-owner');
+  const zip = join(mkdtempSync(join(tmpdir(), 'paperweave-e2e-')), `Word diff ${run}.zip`);
+  writeFileSync(zip, await writeZip([{ path: 'main.tex', bytes: Buffer.from(MAIN) }]));
+  await owner.page.goto('/sign-in');
+  await signIn(owner.page, owner.email);
+  await owner.page.getByLabel('Or import a ZIP of a LaTeX project').setInputFiles(zip);
+  await owner.page.getByRole('button', { name: 'Import ZIP' }).click();
+  await owner.page.getByRole('link', { name: 'main.tex' }).first().click();
+  await showSource(owner.page);
+  await selectWord(owner.page, SOURCE, 'Nothing');
+  await owner.page.keyboard.press('Shift+End');
+  await panel(owner.page).getByRole('button', { name: 'Propose a change here' }).click();
+  await expect(panel(owner.page).getByLabel('Replace it with')).toHaveValue(
+    'Nothing else is claimed here.',
+  );
+  await panel(owner.page).getByLabel('Replace it with').fill('Nothing more is claimed here.');
+  await panel(owner.page).getByRole('button', { name: 'Propose', exact: true }).click();
+  const one = panel(owner.page).getByRole('article', {
+    name: 'Proposal to change “Nothing else is claimed here.”',
+  });
+  await expect(one).toContainText('Now: Nothing else is claimed here.');
+  await expect(one).toContainText('Proposed: Nothing more is claimed here.');
+  await expect(one.locator('del')).toHaveText('else');
+  await expect(one.locator('ins')).toHaveText('more');
+  await audit(owner.page, 'a proposal with only its changed words marked');
+});

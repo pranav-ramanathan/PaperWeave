@@ -1,7 +1,8 @@
 'use client';
 
 import type { Proposal } from '@paperweave/server';
-import { useCallback, useEffect, useRef, useState } from 'react';
+import { diffWords } from '@paperweave/server/textdiff';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { whenMarked } from '../../../../../lib/builds';
 import type { Stretch } from './Threads';
 
@@ -58,6 +59,33 @@ function Change(props: {
         Cancel
       </button>
     </form>
+  );
+}
+
+/** The old and the new text of a proposal, with only the words that change struck and added. */
+function Words(props: { was: string; now: string }) {
+  const diff = useMemo(
+    () => (props.was && props.now ? diffWords(props.was, props.now) : null),
+    [props.was, props.now],
+  );
+  const show = (pieces: { changed: boolean; text: string }[], Mark: 'del' | 'ins') =>
+    pieces.map((x, i) =>
+      x.changed ? <Mark key={i}>{x.text}</Mark> : <span key={i}>{x.text}</span>,
+    );
+  const marked = diff ? [...diff.was, ...diff.now].filter((x) => x.changed) : [];
+  const spacing = marked.length > 0 && marked.every((x) => !x.text.trim());
+  return (
+    <>
+      <p className="change">
+        <span>Now: </span>
+        {diff ? show(diff.was, 'del') : <del>{props.was || '(nothing: text is added here)'}</del>}
+      </p>
+      <p className="change">
+        <span>Proposed: </span>
+        {diff ? show(diff.now, 'ins') : <ins>{props.now || '(nothing: the text is removed)'}</ins>}
+      </p>
+      {spacing && <p className="note">Only the spacing or the line breaks differ.</p>}
+    </>
   );
 }
 
@@ -129,14 +157,7 @@ export default function Proposals(props: {
   const one = (p: Proposal) => (
     <li key={p.id}>
       <article aria-label={`Proposal to change ${named(p.expected)}`}>
-        <p className="change">
-          <span>Now: </span>
-          <del>{p.expected || '(nothing: text is added here)'}</del>
-        </p>
-        <p className="change">
-          <span>Proposed: </span>
-          <ins>{p.replacement || '(nothing: the text is removed)'}</ins>
-        </p>
+        <Words was={p.expected} now={p.replacement} />
         {p.reason && <p>Why: {p.reason}</p>}
         {p.origin === 'critique' && (
           <p className="note">
