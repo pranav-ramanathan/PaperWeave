@@ -808,3 +808,46 @@ test('a source file can be added as text, and renaming a listing to .py keeps th
   expect(proposal.changes.map((c) => c.after)).toEqual(['\\lstinputlisting{code/a.py}']);
   expect(await buildsFine(project.id)).toBe('ok');
 });
+
+test('a file cannot share a name with a folder, nor have a part of its path over 255 bytes', async () => {
+  const p = await paper();
+  // A file used as a folder, and a folder used as a file: neither can be written to disk.
+  expect(await code(createFile(t.pool, store, owner.id, p.id, 'main.tex/notes.tex'))).toBe(
+    'invalid_input',
+  );
+  const made = await createFile(t.pool, store, owner.id, p.id, 'assets.tex/a.png');
+  expect(made).toBeTruthy();
+  const x = await createFile(t.pool, store, owner.id, p.id, 'x.tex');
+  expect(await code(renameFile(t.pool, owner.id, p.id, x, 'assets.tex'))).toBe('invalid_input');
+  expect(await code(createFile(t.pool, store, owner.id, p.id, 'assets.tex'))).toBe(
+    'invalid_input',
+  );
+  await expect(createFile(t.pool, store, owner.id, p.id, 'main.tex/notes.tex')).rejects.toThrow(
+    'cannot share the name "main.tex"',
+  );
+  // A path that is only a file's name with something after it in the same folder is fine.
+  await createFile(t.pool, store, owner.id, p.id, 'main.tex.bak.tex');
+  // The limit is 255 bytes a part, not characters.
+  expect(await code(createFile(t.pool, store, owner.id, p.id, `${'漢'.repeat(200)}.tex`))).toBe(
+    'invalid_input',
+  );
+  expect(await code(renameFile(t.pool, owner.id, p.id, x, `sub/${'漢'.repeat(200)}.tex`))).toBe(
+    'invalid_input',
+  );
+  expect(await code(createFile(t.pool, store, owner.id, p.id, `${'漢'.repeat(80)}.tex`))).toBe(
+    'ok',
+  );
+  expect(await paths(p.id)).toContain(`${'漢'.repeat(80)}.tex`);
+});
+
+test('an archive that has a file and a folder of one name imports the file and reports the rest', async () => {
+  const zip = await writeZip([
+    { path: 'main.tex', bytes: Buffer.from(MAIN) },
+    { path: 'a.tex', bytes: Buffer.from('A\n') },
+    { path: 'a.tex/b.tex', bytes: Buffer.from('B\n') },
+  ]);
+  const [project] = await importZip(t.pool, store, owner.id, zip, 'Collide');
+  const listed = await paths(project.id);
+  // Never both: the paper must be writable to disk.
+  expect(listed.includes('a.tex') && listed.includes('a.tex/b.tex')).toBe(false);
+});
