@@ -812,50 +812,65 @@ test('a restore that leaves the open file alone is still known to its editor', a
 test('a restore is not taken as seen because a ticket was fetched: edits typed before the connection syncs are held', async ({
   browser,
 }) => {
-  const { editor, restore } = await sharedPaper(browser, 'rec-died', [
+  const { editor, paper, restore } = await sharedPaper(browser, 'rec-died', [
     { path: 'main.tex', text: MAIN },
   ]);
-  await editor.page.getByRole('link', { name: 'main.tex' }).click();
-  await showSource(editor.page);
-  await typeAtStart(editor.page, '% regretted\n');
-  await expect(status(editor.page)).toHaveText('All edits saved.');
-
-  // Offline with nothing unsent, the paper is restored.
-  await editor.page.context().setOffline(true);
-  await expect(status(editor.page)).toContainText('Offline.');
-  await restore();
-
-  // Back online: the first attempt gets its ticket, which names the restore, and then its
-  // socket dies. The second attempt waits for the person to have typed before it asks for a ticket.
-  let online = false;
+  // Every socket this page opens from now on passes through here, so that one can be cut and
+  // another answered by nothing.
+  let online = true;
   let tickets = 0;
   let aborted = false;
   let served!: () => void;
   const ticketServed = new Promise<void>((r) => (served = r));
   let typed!: () => void;
   const hasTyped = new Promise<void>((r) => (typed = r));
-  await editor.page.route('**/api/sync-ticket**', async (route) => {
-    if (!online) return route.abort();
-    if (++tickets === 1) {
-      await route.continue();
-      served();
+  let live: { close: () => unknown } | null = null;
+  let mocked = false;
+  await editor.page.routeWebSocket(/:4100/, (ws) => {
+    if (!online) return ws.close();
+    // The first socket opened after coming back is answered by nothing, and closed once its
+    // ticket is out.
+    if (tickets === 0 && started && !mocked) {
+      mocked = true;
+      void ticketServed.then(() => {
+        aborted = true;
+        return ws.close();
+      });
       return;
     }
-    await hasTyped;
-    await route.continue();
-  });
-  await editor.page.routeWebSocket(/.*/, async (ws) => {
-    if (!online) return ws.close();
-    if (!aborted) {
-      await ticketServed;
-      aborted = true;
-      return ws.close();
-    }
+    live = ws;
     ws.connectToServer();
   });
-  online = true;
+  await editor.page.route('**/api/sync-ticket**', async (route) => {
+    if (!online) return route.abort();
+    // Counted only when the server answered: a request made while still offline is not a ticket.
+    const answer = await route.fetch().catch(() => null);
+    if (!answer) return route.abort();
+    if (started && ++tickets > 1) await hasTyped;
+    await route.fulfill({ response: answer });
+    if (started && tickets === 1) served();
+  });
+  let started = false;
+  // Loaded again, so that the page's sockets are the ones routed above.
+  await editor.page.goto(paper);
+  await editor.page.getByRole('link', { name: 'main.tex' }).click();
+  await showSource(editor.page);
+  await typeAtStart(editor.page, '% regretted\n');
+  await expect(status(editor.page)).toHaveText('All edits saved.');
+
+  // Offline with nothing unsent, the paper is restored.
+  online = false;
+  await editor.page.context().setOffline(true);
+  await live?.close();
+  await expect(status(editor.page)).toContainText('Offline.');
+  await restore();
+
+  // Back online: the first attempt gets its ticket, which names the restore, and then its
+  // socket dies. The second attempt waits for the person to have typed before it asks for a ticket.
+  started = true;
   await editor.page.context().setOffline(false);
-  await expect.poll(() => aborted).toBe(true);
+  online = true;
+  await expect.poll(() => aborted, { timeout: 30_000 }).toBe(true);
   await typeAtStart(editor.page, '% typed between\n');
   typed();
 
