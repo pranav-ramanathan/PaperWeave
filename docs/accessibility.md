@@ -9,6 +9,7 @@ Where this stands, what holds it there, and what nobody has checked yet.
 - **An automated audit** (axe, WCAG 2.1 A and AA rules) of the sign-in page, the list of papers, a
   paper's page, a data file's page, the new-chart page, the checks before submitting, and the
   editor in both views with a spelling finding, a thread, a proposed change and the PDF showing,
+  a comment being changed and the question before one is deleted (`threads.spec`),
   and the page for an address that leads nowhere. No failures.
 - **The same audit on pages the first one did not visit**, run from the tests that already go
   there: the differences between two revisions, the lines a file rename or a label rename

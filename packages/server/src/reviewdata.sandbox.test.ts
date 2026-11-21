@@ -9,7 +9,7 @@ import { acceptProposal, closeProposal, listProposals, propose, undoAccept } fro
 import { exportReview, locateQuote, REVIEW_FILE } from './reviewdata.ts';
 import { editFile, loadUpdates, TEXT } from './sync.ts';
 import { TEST_ENV, testDb } from './testing.ts';
-import { listThreads, reply, setThreadStatus, startThread } from './threads.ts';
+import { deleteComment, listThreads, reply, setThreadStatus, startThread } from './threads.ts';
 
 const store = blobStore(TEST_ENV);
 let t: Awaited<ReturnType<typeof testDb>>;
@@ -536,4 +536,23 @@ test('an accepted proposal that had gone stale arrives stale', async () => {
   expect(now).toMatchObject({ status: 'accepted', stale: true, replacement: 'No more' });
   // Undoing the accept is refused here as it is where this came from.
   expect(await code(undoAccept(t.pool, store, users.importer.id, id, now.id))).toBe('conflict');
+});
+
+test('a deleted comment, and a thread with none left, do not leave with the review', async () => {
+  const p = await paper();
+  const kept = await startThread(t.pool, store, users.reviewer.id, p.id, p.file, {
+    ...(await ends(p.file, 'below 40 ms')),
+    body: 'Median or tail?',
+  });
+  await reply(t.pool, users.reviewer.id, p.id, kept.id, { body: 'Pasted by mistake.' });
+  const gone = await startThread(t.pool, store, users.reviewer.id, p.id, p.file, {
+    ...(await ends(p.file, 'will be cut')),
+    body: 'Wrong paper.',
+  });
+  const all = await listThreads(t.pool, store, users.owner.id, p.id);
+  await deleteComment(t.pool, users.owner.id, p.id, kept.id, all[0].comments[1].id);
+  await deleteComment(t.pool, users.owner.id, p.id, gone.id, all[1].comments[0].id);
+  const out = await exportReview(t.pool, store, users.owner.id, p.id);
+  expect(out.threads).toHaveLength(1);
+  expect(out.threads[0].comments.map((c) => c.body)).toEqual(['Median or tail?']);
 });
