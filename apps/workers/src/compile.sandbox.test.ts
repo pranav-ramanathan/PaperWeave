@@ -114,6 +114,30 @@ test.each([
   expect(r.log).not.toMatch(/mktexpk/);
 });
 
+// Packages that live in texlive-plain-generic, which texlive-latex-extra only recommends.
+test.each([
+  ['ulem', '\\usepackage[normalem]{ulem}', '\\sout{x}'],
+  ['soul', '\\usepackage{soul}', '\\hl{x}'],
+  ['changes', '\\usepackage{changes}', '\\added{x}'],
+  ['datetime2', '\\usepackage{datetime2}', '\\today'],
+])('%s builds', async (_name, pre, body) => {
+  const { r, out } = await buildSource(
+    `\\documentclass{article}\n${pre}\n\\begin{document}\n${body}\n\\end{document}\n`,
+  );
+  expect(r.diagnostics.filter((d) => d.severity === 'error')).toEqual([]);
+  expect(r.ok).toBe(true);
+  expect(readFileSync(join(out, r.pdf!)).subarray(0, 5).toString()).toBe('%PDF-');
+});
+
+test('aastex631 builds', async () => {
+  const { r, out } = await buildSource(
+    '\\documentclass{aastex631}\n\\begin{document}\n\\title{T}\n\\author{A}\n\\maketitle\nx\n\\end{document}\n',
+  );
+  expect(r.diagnostics.filter((d) => d.severity === 'error')).toEqual([]);
+  expect(r.ok).toBe(true);
+  expect(readFileSync(join(out, r.pdf!)).subarray(0, 5).toString()).toBe('%PDF-');
+});
+
 test('shell escape is off', async () => {
   const project = tmp();
   cpSync(join(FIXTURES, 'probes/shell-escape.tex'), join(project, 'main.tex'));
