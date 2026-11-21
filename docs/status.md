@@ -3753,6 +3753,14 @@ An inline atom's replacement was checked for spilling (`contained`) only against
 - **Refused now.** Changing an inline formula to a display one in the box, or splitting one equation into two, changes the block structure and is refused with "make the change in the source".
 - Tests: `contained.test.ts` (display to display, missing `\end{equation}`; the window property test now includes math blocks), `bridge.test.ts`, `commands.sandbox.test.ts` and `maths.spec` (`$T` and `align` without its end, alert shown, box open, source unchanged).
 
+## File names: folders and byte limits
+
+`checkPath` now refuses a path with a part over 255 bytes in UTF-8 (a 200-character CJK name is 600 bytes), and `createFile` and `renameFile` (also the rename proposal) refuse a path that uses an existing file as a folder, or is a folder of an existing file: "A file and a folder cannot share the name "main.tex"." Before, both passed, `mkdirSync`/`writeFileSync` in the builder threw, and every build of that paper failed. Reproduced with `createFile('main.tex/notes.tex')`, a rename to `assets.tex` beside `assets.tex/a.png`, and a 200-character CJK name.
+
+- **Import.** A ZIP holding `a.tex` and `a.tex/b.tex` was imported whole. Now the file that is also a folder is skipped, with the reason in the import report, and the folder's files are kept. An entry with a part over 255 bytes is skipped, with a reason.
+- **Restore.** `restoreRevision` does not re-validate paths. It replaces the paper with the revision's file set and removes later files, so a later file cannot collide with it. A revision cut before this fix may still hold a colliding pair, and restoring it brings that back. Not fixed here.
+- Tests: `files.sandbox.test.ts` (names, folders, import), `builds.sandbox.test.ts` (a 240-byte name builds).
+
 ## Decisions waiting on the owner
 
 See "What I need from you" in `docs/plan.md`. None blocks C1.

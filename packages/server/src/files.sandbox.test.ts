@@ -819,9 +819,7 @@ test('a file cannot share a name with a folder, nor have a part of its path over
   expect(made).toBeTruthy();
   const x = await createFile(t.pool, store, owner.id, p.id, 'x.tex');
   expect(await code(renameFile(t.pool, owner.id, p.id, x, 'assets.tex'))).toBe('invalid_input');
-  expect(await code(createFile(t.pool, store, owner.id, p.id, 'assets.tex'))).toBe(
-    'invalid_input',
-  );
+  expect(await code(createFile(t.pool, store, owner.id, p.id, 'assets.tex'))).toBe('invalid_input');
   await expect(createFile(t.pool, store, owner.id, p.id, 'main.tex/notes.tex')).rejects.toThrow(
     'cannot share the name "main.tex"',
   );
@@ -849,5 +847,6 @@ test('an archive that has a file and a folder of one name imports the file and r
   const [project] = await importZip(t.pool, store, owner.id, zip, 'Collide');
   const listed = await paths(project.id);
   // Never both: the paper must be writable to disk.
-  expect(listed.includes('a.tex') && listed.includes('a.tex/b.tex')).toBe(false);
+  expect(listed).toContain('a.tex/b.tex');
+  expect(listed).not.toContain('a.tex');
 });
