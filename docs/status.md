@@ -3556,7 +3556,8 @@ sigconf PDF embeds a Libertine font (`pdffonts`). The 11 of them failed on the o
   `conflict` (`runCommand` with `exactPlace`, checked under the file lock); `reviseProposal` refuses
   with "The place this was to be added at is no longer in the file. Make a new proposal." The
   proposals pane shows that sentence and hides "Change the proposal". Editor commands from the
-  sync server do not pass `exactPlace` and behave as before. No migration.
+  sync server pass `exactPlace` too (see "An insertion from the visual view whose place was
+  deleted"). No migration.
 - A restore that brings the sentence back leaves the proposal stale: the restored characters are
   new ones, and a place cannot be re-attached (there are no words to find it by).
 - **Review data.** `exportReview` now writes `stale: true` for every open or accepted proposal that
@@ -3712,6 +3713,38 @@ warns about `key@cref`; that is now counted as the same label, so it is listed o
 | Label really defined twice, built                             | one problem          | one problem                   |
 | `\iffalse` paper edited and not rebuilt                       | problem              | problem (and the stale build) |
 | cleveref, label really defined twice                          | two problems         | one problem                   |
+
+## An insertion from the visual view whose place was deleted
+
+- **The fault.** A citation, reference, equation, figure or table window sets the place when it
+  opens, and the command runs when the person confirms, perhaps minutes later. `insertCommand`
+  named the place by one anchor, the character after the caret, for both ends. If a co-author
+  deleted the paragraph meanwhile, the anchor closed up to the next surviving character, the
+  expected text `''` still matched, and the server answered `applied`: the insertion landed at the
+  seam, next to a heading or inside its `\section{`. `atomCommand` with an empty part (an empty
+  table cell, an absent caption) had the same shape.
+- **Now.** `insertCommand`, and `atomCommand` when its part is empty, put `from` on the character
+  before the place (association -1) and `to` on the character after. The sync server's command
+  path passes `exactPlace: true` to `runCommand`, so an insertion is refused (`conflict`) if either
+  character was deleted. `placeLost` already handles the association, and an anchor with no
+  character (the start or end of the file) is never lost. `runCommand` is unchanged. The editor
+  shows its usual "That text changed before the edit arrived. Try again."
+- `Bridge.applyCommand`, the in-memory stand-in for tests, does the same check. It holds a small
+  copy of `placeLost`, because `packages/bridge` cannot import `packages/server` (that would be
+  a circular dependency); keep the two in step.
+- `visual.ts` puts the caret after an insertion from `c.to`, which is unchanged (the character
+  after the caret), so the caret still follows the insertion.
+- **Stricter than before, and safe.** If another person types exactly at the caret, the stretch
+  between the anchors is no longer empty and the command conflicts; the person tries again.
+- Tests: four in `packages/bridge/src/bridge.test.ts` (paragraph deleted, delete running into a
+  heading, empty atom part, anchor association) and two in `apps/sync/src/sync.sandbox.test.ts`
+  (refused; and the ends of the file and unrelated typing still apply).
+
+## A replacement that spills into its neighbours
+
+An inline atom's replacement was checked for spilling (`contained`) only against the client's text. It now travels as `contained: true` on the command, and `runCommand` and `Bridge.applyCommand` check it against the text as it stands when the command lands, answering `conflict` if another editor's edit made it spill (for instance deleting the space after `\sys{}` before `\sys` is written there). The check parses a window, not the file (`containedNear` in `packages/latex/src/contained.ts`): from two paragraphs before the edit to two paragraphs after it, where a paragraph boundary is a blank line (a heading that begins a line also starts one), found by the rule `reparse` restarts on, with its 24-character margin. The window is parsed before the edit and after it, and `contained` runs on the two with offsets relative to the window, so the cost follows the paragraph and not the file: about 5 ms at 1 MB and 5 MB and about 30 ms at 50 MB (`MAX_FILE_TEXT`), with the edit in an ordinary paragraph (the 5 MB server test finishes in about 1.5 s including import), where the full-file check took 0.75 s, 4.3 s and ran out of an 8 GB heap. The preamble is kept apart: an edit before `\begin{document}` is refused (nothing there is an atom), and a window after it gets a one-line preamble so a second `\begin{document}` is text, as in the whole file. A window over 256 KB (`WINDOW_CAP`, one paragraph with no blank line in it, say) is refused with `conflict`; it never falls back to the full parse, because refusing is safe and running out of memory inside the row lock is not. Against the full-file check, a seeded property test (`packages/latex/src/contained.test.ts`) finds the window never accepts what the full check refuses, and agrees exactly on ordinary documents. On random fragment soup it can refuse what the full check accepts, when the window starts inside a span left open across a blank line (an unclosed `verbatim`, `$$` or environment), since it then reads that text as prose; about 0.1% of such cases.
+
+`openMath` skips `rewriteCommand`, so formulas have no containment check on either side.
 
 ## Decisions waiting on the owner
 

@@ -237,3 +237,68 @@ test('with exactPlace, an insertion whose anchors were deleted is refused; witho
   expect(await runCommand(t.pool, store, owner.id, p.main, b)).toMatchObject({ result: 'applied' });
   expect(await stored(p.id)).not.toBe(before);
 });
+
+test('a contained command is refused when another editor deleted the space after its atom', async () => {
+  const zip = await writeZip([
+    {
+      path: 'main.tex',
+      bytes: Buffer.from(
+        '\\documentclass{article}\n\\begin{document}\n\\newcommand{\\sys}{S}\n\nUse \\sys{} now and later.\n',
+      ),
+    },
+  ]);
+  const [project] = await importZip(t.pool, store, owner.id, zip, 'Contained');
+  const file = (await listFiles(t.pool, owner.id, project.id))[0].id;
+  const flagged = { ...replace(await open(file), '\\sys{}', '\\sys'), contained: true };
+  const bare = { ...replace(await open(file), '\\sys{}', '\\sys'), key: randomUUID() };
+  await editFile(t.pool, store, file, owner.id, (text) =>
+    text.delete(text.toString().indexOf('{} now') + 2, 1),
+  );
+  const before = await rows(file);
+  const refused = await runCommand(t.pool, store, owner.id, file, flagged);
+  expect(refused).toEqual({
+    result: 'conflict',
+    text: '\\documentclass{article}\n\\begin{document}\n\\newcommand{\\sys}{S}\n\nUse \\sys{}now and later.\n',
+  });
+  expect(await rows(file)).toBe(before);
+  // Not flagged, the same command applies and breaks the text: the flag is what protects.
+  expect((await runCommand(t.pool, store, owner.id, file, bare)).result).toBe('applied');
+  expect((await open(file)).toString()).toContain('Use \\sysnow and');
+  // A flag that is not a boolean is refused.
+  expect(
+    await code(
+      runCommand(t.pool, store, owner.id, file, { ...bare, key: randomUUID(), contained: 'yes' }),
+    ),
+  ).toBe('invalid_input');
+});
+
+test('a contained command in a large file is checked on a window and still applies', async () => {
+  const para =
+    'A paragraph of ordinary words with \\cite{a} and some $x + y$ in it, to fill space.';
+  const head = '\\documentclass{article}\n\\begin{document}\n\\newcommand{\\sys}{S}\n\n';
+  // About 5 MB; a full parse of it twice would take seconds inside the row lock.
+  const half = `${Array(30_000).fill(para).join('\n\n')}\n\n`;
+  const zip = await writeZip([
+    {
+      path: 'main.tex',
+      bytes: Buffer.from(`${head}${half}Use \\sys{} now and later.\n\n${half}\\end{document}\n`),
+    },
+  ]);
+  const [project] = await importZip(t.pool, store, owner.id, zip, 'Large');
+  const file = (await listFiles(t.pool, owner.id, project.id))[0].id;
+  const text = await open(file);
+  expect(text.length).toBeGreaterThan(4_000_000);
+  const flagged = { ...replace(text, '\\sys{}', '\\cite{k}'), contained: true };
+  const started = performance.now();
+  expect(await runCommand(t.pool, store, owner.id, file, flagged)).toMatchObject({
+    result: 'applied',
+  });
+  expect(performance.now() - started).toBeLessThan(1000);
+  expect((await open(file)).toString()).toContain('Use \\cite{k} now and later.');
+  // One that spills into its neighbour is still caught.
+  const spill = { ...replace(await open(file), '\\cite{k}', '\\sys'), contained: true };
+  await editFile(t.pool, store, file, owner.id, (y) =>
+    y.delete(y.toString().indexOf('\\cite{k} now') + 8, 1),
+  );
+  expect((await runCommand(t.pool, store, owner.id, file, spill)).result).toBe('conflict');
+});

@@ -628,6 +628,72 @@ const logRows = async (file: string) =>
   (await t.pool.query('select count(*)::int as n from file_updates where file_id = $1', [file]))
     .rows[0].n;
 
+test('an insertion whose neighbours were deleted is refused, and the text is left as it was', async () => {
+  const { project, file } = await paper();
+  const editor = client(users.editor, file);
+  const owner = client(users.owner, file);
+  await saved(editor, owner);
+  const place = editor.text.toString().indexOf('Hello.') + 'Hel'.length;
+  const rel = (i: number, assoc = 0) =>
+    Buffer.from(
+      Y.encodeRelativePosition(Y.createRelativePositionFromTypeIndex(editor.text, i, assoc)),
+    ).toString('base64url');
+  const command = {
+    key: crypto.randomUUID(),
+    from: rel(place, -1),
+    to: rel(place),
+    expected: '',
+    replacement: '~\\cite{knuth}',
+  };
+  // Someone deletes the paragraph, and the server has it before the insertion is asked for.
+  // (The file is held with \n line ends.)
+  const after = owner.text.toString().replace('Hello.\n', '');
+  owner.text.delete(owner.text.toString().indexOf('Hello.'), 'Hello.\n'.length);
+  await saved(owner, editor);
+  await until('the delete', () => editor.text.toString() === after);
+  editor.provider.sendStateless(JSON.stringify(command));
+  await until('an answer', () => editor.state.replies.some((r) => r.key === command.key));
+  expect(editor.state.replies.find((r) => r.key === command.key)).toMatchObject({
+    result: 'conflict',
+  });
+  await new Promise((r) => setTimeout(r, 200));
+  expect(await stored(project)).toBe(MAIN.replace('Hello.\r\n', ''));
+  expect(owner.text.toString()).toBe(after);
+});
+
+test('an insertion at the ends of the file, or after typing elsewhere, still applies', async () => {
+  const { project, file } = await paper();
+  const editor = client(users.editor, file);
+  const owner = client(users.owner, file);
+  await saved(editor, owner);
+  const insert = async (i: number, replacement: string) => {
+    const rel = (assoc: number) =>
+      Buffer.from(
+        Y.encodeRelativePosition(Y.createRelativePositionFromTypeIndex(editor.text, i, assoc)),
+      ).toString('base64url');
+    const key = crypto.randomUUID();
+    editor.provider.sendStateless(
+      JSON.stringify({ key, from: rel(-1), to: rel(0), expected: '', replacement }),
+    );
+    await until('an answer', () => editor.state.replies.some((r) => r.key === key));
+    return editor.state.replies.find((r) => r.key === key)!;
+  };
+  const was = editor.text.toString();
+  expect((await insert(0, '% top\n')).result).toBe('applied');
+  expect((await insert(was.length + '% top\n'.length, '% end\n')).result).toBe('applied');
+  // The place is named, then someone types elsewhere, then the insertion is asked for.
+  const mid = editor.text.toString().indexOf('Hello.') + 'Hel'.length;
+  owner.text.insert(0, '% typed\n');
+  await saved(owner, editor);
+  await until('the typing', () => editor.text.toString().startsWith('% typed\n'));
+  expect((await insert(mid + '% typed\n'.length, '~')).result).toBe('applied');
+  await until('everyone to see it', () => owner.text.toString().includes('Hel~lo.'));
+  const want = '% typed\n% top\n' + was.replace('Hello.', 'Hel~lo.') + '% end\n';
+  expect(owner.text.toString()).toBe(want);
+  await saved(owner, editor);
+  expect((await stored(project)).replace(/\r\n/g, '\n')).toBe(want);
+});
+
 test('a command reaches people who have the file open, and a stale one tells its author', async () => {
   const { project, file } = await paper();
   const owner = client(users.owner, file);

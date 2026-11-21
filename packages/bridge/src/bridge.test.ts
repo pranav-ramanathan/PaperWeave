@@ -4,6 +4,8 @@ import { NodeSelection, TextSelection } from '@tiptap/pm/state';
 import { expect, test } from 'vitest';
 import * as Y from 'yjs';
 import { fixtures, replica, shown, textblocks, visualOp } from './harness.ts';
+import { contained, parse } from '@paperweave/latex';
+import type { Command } from './bridge.ts';
 import { fromSrc, toSrc } from './project.ts';
 
 const N = Number(process.env.FUZZ ?? 10000);
@@ -438,6 +440,95 @@ test('LaTeX is inserted at the caret, wherever the text has moved to meanwhile',
   expect(r.bridge.insertCommand(r.state.apply(tr), 'x')).toBeNull();
 });
 
+/** A second replica of r's text, and a way to bring what it did back into r. */
+function peer(r: ReturnType<typeof replica>) {
+  const b = replica('', r.ydoc);
+  return {
+    b,
+    merge: () => Y.applyUpdate(r.ydoc, Y.encodeStateAsUpdate(b.ydoc)),
+  };
+}
+const FLOW = 'One.\n\nTwo here.\n\nThree.\n';
+
+test('an insertion whose caret paragraph is deleted by someone else is refused, not moved', () => {
+  const r = replica(FLOW);
+  r.select(textblocks(r).filter((t) => t.para)[1].start + 3);
+  const c = r.bridge.insertCommand(r.state, '~\\cite{knuth}')!;
+  const { b, merge } = peer(r);
+  const at = b.src.indexOf('Two here.');
+  b.ytext.delete(at, 'Two here.\n\n'.length);
+  merge();
+  expect(r.src).toBe('One.\n\nThree.\n');
+  expect(r.bridge.applyCommand(c)).toBe('conflict');
+  expect(r.src).toBe('One.\n\nThree.\n');
+  r.check();
+});
+
+test('an insertion whose deleted text ran into a heading is refused', () => {
+  const src = 'Intro text here.\n\n\\section{Methods}\nBody.\n';
+  const r = replica(src);
+  r.select(textblocks(r).filter((t) => t.para)[0].start + 10);
+  const c = r.bridge.insertCommand(r.state, '~\\cite{knuth}')!;
+  const { b, merge } = peer(r);
+  b.ytext.delete(9, b.src.indexOf('Methods') - 9);
+  merge();
+  expect(r.src).toBe('Intro tex' + 'Methods}\nBody.\n');
+  expect(r.bridge.applyCommand(c)).toBe('conflict');
+  expect(r.src).toBe('Intro texMethods}\nBody.\n');
+});
+
+test('an empty part of an atom is refused if the atom is deleted by someone else', () => {
+  const r = replica(fixtures['ieee-multifile/tables/ablation.tex']);
+  let at = -1;
+  let src = '';
+  r.state.doc.forEach((node, pos) => {
+    if (node.type.name === 'raw_block' && floatParts(node.attrs.src))
+      [at, src] = [pos, node.attrs.src];
+  });
+  const cap = floatParts(src)!.caption!;
+  const c = r.bridge.atomCommand(r.state, at, '\\label{x}', { at: cap.at, end: cap.at })!;
+  expect(c.expected).toBe('');
+  const { b, merge } = peer(r);
+  b.ytext.delete(b.src.indexOf(src), src.length);
+  merge();
+  const was = r.src;
+  expect(r.bridge.applyCommand(c)).toBe('conflict');
+  expect(r.src).toBe(was);
+});
+
+test('an insertion names the character before the caret and the one after', () => {
+  const r = replica(FLOW);
+  r.select(textblocks(r).filter((t) => t.para)[1].start + 3);
+  const c = r.bridge.insertCommand(r.state, 'x')!;
+  const from = Y.decodeRelativePosition(Y.encodeRelativePosition(c.from));
+  const to = Y.decodeRelativePosition(Y.encodeRelativePosition(c.to));
+  expect(from.assoc).toBeLessThan(0);
+  expect(to.assoc).toBe(0);
+  // Stands on 'o' before the caret in "Two", and ' ' after it.
+  const idx = (p: Y.RelativePosition) =>
+    Y.createAbsolutePositionFromRelativePosition(p, r.ydoc)!.index;
+  expect(idx(c.from)).toBe(idx(c.to));
+});
+
+test('an insertion at either end of the file, or after typing elsewhere, still applies', () => {
+  for (const end of [0, 1]) {
+    const r = replica('Only text.\n');
+    const tb = textblocks(r).filter((t) => t.para)[0];
+    r.select(end ? tb.start + 'Only text.'.length : tb.start);
+    const c = r.bridge.insertCommand(r.state, '!')!;
+    expect(r.bridge.applyCommand(c)).toBe('applied');
+    expect(r.src).toBe(end ? 'Only text.!\n' : '!Only text.\n');
+  }
+  const r = replica(FLOW);
+  r.select(textblocks(r).filter((t) => t.para)[1].start + 3);
+  const c = r.bridge.insertCommand(r.state, '!')!;
+  const { b, merge } = peer(r);
+  b.ytext.insert(0, '% note\n');
+  merge();
+  expect(r.bridge.applyCommand(c)).toBe('applied');
+  expect(r.src).toBe('% note\nOne.\n\nTwo! here.\n\nThree.\n');
+});
+
 test('editing one cell of a table changes only that cell, and two people can edit two cells', () => {
   const r = replica(fixtures['ieee-multifile/tables/ablation.tex']);
   const table = () => {
@@ -605,6 +696,46 @@ function rewrite(r: ReturnType<typeof replica>, old: string, now: string) {
   return { c, out };
 }
 
+const SYS = '\\newcommand{\\sys}{S}\n\nUse \\sys{} now and later.\n';
+
+test('a rewrite that was safe for its author is refused once another replica deleted the space after the atom', () => {
+  const r = replica(SYS);
+  const { c, out } = rewrite(r, '\\sys{}', '\\sys');
+  expect(typeof out).toBe('object');
+  const cmd = out as Command;
+  expect(cmd.contained).toBe(true);
+  const { b, merge } = peer(r);
+  const at = b.src.indexOf('\\sys{} now') + '\\sys{}'.length;
+  b.ytext.delete(at, 1);
+  merge();
+  expect(r.src).toContain('Use \\sys{}now and');
+  const was = r.src;
+  expect(r.bridge.applyCommand(cmd)).toBe('conflict');
+  expect(r.src).toBe(was);
+  r.check();
+  // Without the flag the same command lands and breaks the build: the flag is what protects.
+  const bare = { ...cmd, key: 'bare' };
+  delete bare.contained;
+  expect(c.key).not.toBe(cmd.key);
+  expect(r.bridge.applyCommand(bare)).toBe('applied');
+  expect(r.src).toContain('Use \\sysnow and');
+});
+
+test('a rewrite is refused once another replica deleted the text before the atom that made it safe', () => {
+  const r = replica('\\newcommand{\\sys}{S}\n\nUse \\sys{} \\textsc{now} and later.\n');
+  const { out } = rewrite(r, '\\textsc{now}', 'now');
+  expect(typeof out).toBe('object');
+  const { b, merge } = peer(r);
+  const at = b.src.indexOf('{} \\textsc');
+  b.ytext.delete(at, 3);
+  merge();
+  expect(r.src).toContain('Use \\sys\\textsc{now}');
+  const was = r.src;
+  expect(r.bridge.applyCommand(out as Command)).toBe('conflict');
+  expect(r.src).toBe(was);
+  r.check();
+});
+
 test('an inline atom is rewritten to exactly the new bytes, or the rewrite is refused', () => {
   const doc =
     'See \\citep{a} here.\\footnote{Old note.} Use {\\bf x} and \\sys{}x now.\n\\newcommand{\\sys}{S}\n';
@@ -702,6 +833,36 @@ test(`${N} rewrites of an inline atom change its bytes and nothing else, or are 
         if (out === 'spills' || out === 'conflict') {
           expect(rep.src, where).toBe(was);
           no++;
+          continue;
+        }
+        expect(out.contained, where).toBe(true);
+        // Sometimes another replica deletes a little text next to the atom first. Then the
+        // command conflicts, or changes only the atom's bytes.
+        if (r.int(3) === 0) {
+          const other = replica('', rep.ydoc);
+          const i = Y.createAbsolutePositionFromRelativePosition(c.from, rep.ydoc)!.index;
+          const side = r.int(2) ? i + a.src.length : Math.max(0, i - 1 - r.int(3));
+          other.ytext.delete(Math.min(side, other.src.length - 1), 1 + r.int(2));
+          Y.applyUpdate(rep.ydoc, Y.encodeStateAsUpdate(other.ydoc));
+          other.bridge.destroy();
+          const mid = rep.src;
+          const res = rep.bridge.applyCommand(out);
+          if (res === 'conflict') {
+            expect(rep.src, where).toBe(mid);
+            rep.check();
+            atoms.splice(0, atoms.length, ...inlineAtoms(rep));
+            continue;
+          }
+          expect(res).toBe('applied');
+          const at2 = Y.createAbsolutePositionFromRelativePosition(c.from, rep.ydoc)!.index;
+          // Whatever the other replica did, what applied is contained in the text it applied to.
+          expect(contained(parse(mid), parse(rep.src), at2, a.src.length, now.length), where).toBe(
+            true,
+          );
+          expect(rep.src.slice(0, at2), where).toBe(mid.slice(0, at2));
+          expect(rep.src.slice(at2 + now.length), where).toBe(mid.slice(at2 + a.src.length));
+          rep.check();
+          atoms.splice(0, atoms.length, ...inlineAtoms(rep));
           continue;
         }
         expect(rep.bridge.applyCommand(out)).toBe('applied');

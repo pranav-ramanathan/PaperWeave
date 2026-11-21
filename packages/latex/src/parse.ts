@@ -84,9 +84,9 @@ export function theoremEnvs(src: string): string[] {
   return [...src.matchAll(/\\newtheorem\*?\{([^{}]+)\}/g)].map((m) => m[1]);
 }
 
-const HARD =
+export const HARD =
   /\\(?:part|chapter|(?:sub){0,2}section|(?:sub)?paragraph)(?![a-zA-Z])|\\end\{document\}/g;
-const BRK = /\n[ \t]*\n/g;
+export const BRK = /\n[ \t]*\n/g;
 const ENV = /\{([^{}\\%\n]+)\}/y;
 const DOC = '\\begin{document}';
 /** How a tie (~) is shown: a non-breaking space. */
