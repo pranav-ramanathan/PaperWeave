@@ -298,7 +298,14 @@ export default function FileEditor(props: {
         const { ticket, restored } = answer;
         // Coming back online to a paper that was restored meanwhile: this person's unsent edits
         // were made to text that is no longer there. They are held until the person decides.
-        if (restoreSeen !== null && restored !== restoreSeen && saving.unsaved) {
+        // `null` is not a restore: the file is gone or this person has lost access. The ticket is
+        // returned, and the sync server refuses it, which locks the editor (see refuse).
+        if (
+          restored != null &&
+          restoreSeen !== null &&
+          restored !== restoreSeen &&
+          saving.unsaved
+        ) {
           restoreHeld = restored;
           update({ held: true });
           setLocked(true);
@@ -307,7 +314,7 @@ export default function FileEditor(props: {
         }
         // Only offered: it counts as seen once this connection has synced. If the attempt dies
         // first, edits typed meanwhile are still held back from the restored text.
-        restoreOffered = restored;
+        if (restored != null) restoreOffered = restored;
         return ticket ?? '';
       },
       onSynced: () => {
@@ -759,7 +766,7 @@ export default function FileEditor(props: {
   }, [projectId, fileId, canWrite, user, syncUrl, props.path, props.visual, sourceOnly]);
 
   const status = sync.refused
-    ? 'You no longer have access to this file, or it has been deleted.'
+    ? `You no longer have access to this file, or it has been deleted.${sync.unsaved ? ' What you typed here was not saved. Copy what you need from it.' : ''}`
     : sync.tooLarge
       ? 'An edit of yours is too large to save, so your unsaved edits cannot be kept. Copy what you need from them, then discard them. To add a large file to the paper, upload it.'
       : sync.held

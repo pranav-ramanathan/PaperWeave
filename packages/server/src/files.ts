@@ -10,7 +10,7 @@ import {
   rootDir,
 } from '@paperweave/latex';
 import type pg from 'pg';
-import { checkPath, type Limits, LIMITS, SOURCE } from './archive.ts';
+import { checkPath, clashMessage, type Limits, LIMITS, pathClash, SOURCE } from './archive.ts';
 import { authorize } from './authz.ts';
 import type { BlobStore } from './blobs.ts';
 import { type Db, transaction } from './db.ts';
@@ -59,6 +59,13 @@ export async function createFile(
   if (problem) throw new AppError('invalid_input', `That name cannot be used: ${problem}.`);
   if (bytes.length > limits.fileBytes)
     throw new AppError('invalid_input', 'That file is too large.');
+  const clash = pathClash(
+    path as string,
+    (await db.query('select path from files where project_id = $1', [projectId])).rows.map(
+      (r) => r.path,
+    ),
+  );
+  if (clash) throw new AppError('invalid_input', clashMessage(clash));
   // The same limits as an imported paper: how many files, and what they add up to. A file's
   // size is what it was added with, or for text edited since, what it came to at the paper's
   // newest revision; text typed since then is held to its own limit.
@@ -340,6 +347,15 @@ export async function proposeFileRename(
     [projectId, to, fileId],
   );
   if (taken.rows[0]) throw new AppError('conflict', 'Another file already has that name.');
+  const others = await pool.query('select path from files where project_id = $1 and id <> $2', [
+    projectId,
+    fileId,
+  ]);
+  const clash = pathClash(
+    to as string,
+    others.rows.map((r) => r.path),
+  );
+  if (clash) throw new AppError('invalid_input', clashMessage(clash));
   return plan.proposal;
 }
 

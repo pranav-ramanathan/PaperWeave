@@ -242,6 +242,7 @@ test(`${STEPS} steps of typing through faults lose nothing (seed ${SEED})`, asyn
         const to = pick(saves);
         if (!to) return;
         const before = await settle();
+        const newest = (await listRevisions(t.pool, users.owner.id, project.id))[0].number;
         const restored = await restoreRevision(t.pool, store, users.owner.id, project.id, to.id);
         // The restore itself: the stored text is the saved text, mark for mark.
         const after = marks(await stored());
@@ -249,8 +250,12 @@ test(`${STEPS} steps of typing through faults lose nothing (seed ${SEED})`, asyn
           throw new Error('right after a restore, the stored text is not the restored revision');
         // The paper as it stood is the revision before the restore. It holds everything stored
         // until then, including an edit that arrived a moment before from someone now offline.
+        // Put back to the same revision twice with nothing typed between, the second restore is
+        // the first one again, a button pressed twice: no revision is added, and the paper as it
+        // stood is that restore itself, which is the text the paper still has.
+        const again = restored.number <= newest;
         const kept = (await listRevisions(t.pool, users.owner.id, project.id)).find(
-          (r) => r.number === restored.number - 1,
+          (r) => r.number === (again ? restored.number : restored.number - 1),
         )!;
         const { zip } = await exportRevision(t.pool, store, users.owner.id, project.id, kept.id);
         const was = marks(Buffer.from((await readZip(zip)).entries[0].bytes).toString());

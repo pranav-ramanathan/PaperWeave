@@ -3753,6 +3753,27 @@ An inline atom's replacement was checked for spilling (`contained`) only against
 - **Refused now.** Changing an inline formula to a display one in the box, or splitting one equation into two, changes the block structure and is refused with "make the change in the source".
 - Tests: `contained.test.ts` (display to display, missing `\end{equation}`; the window property test now includes math blocks), `bridge.test.ts`, `commands.sandbox.test.ts` and `maths.spec` (`$T` and `align` without its end, alert shown, box open, source unchanged).
 
+## File names: folders and byte limits
+
+`checkPath` now refuses a path with a part over 255 bytes in UTF-8 (a 200-character CJK name is 600 bytes), and `createFile` and `renameFile` (also the rename proposal) refuse a path that uses an existing file as a folder, or is a folder of an existing file: "A file and a folder cannot share the name "main.tex"." Before, both passed, `mkdirSync`/`writeFileSync` in the builder threw, and every build of that paper failed. Reproduced with `createFile('main.tex/notes.tex')`, a rename to `assets.tex` beside `assets.tex/a.png`, and a 200-character CJK name.
+
+- **Import.** A ZIP holding `a.tex` and `a.tex/b.tex` was imported whole. Now the file that is also a folder is skipped, with the reason in the import report, and the folder's files are kept. An entry with a part over 255 bytes is skipped, with a reason.
+- **Restore.** `restoreRevision` does not re-validate paths. It replaces the paper with the revision's file set and removes later files, so a later file cannot collide with it. A revision cut before this fix may still hold a colliding pair, and restoring it brings that back. Not fixed here.
+- Tests: `files.sandbox.test.ts` (names, folders, import), `builds.sandbox.test.ts` (a 240-byte name builds).
+
+## Edits typed offline in a file that was deleted, or after losing access
+
+Coming back online, the editor said "This paper was restored to an earlier revision while you were offline" and offered "Apply my edits to the restored paper" when no restore had happened: the file had been deleted, or the person removed from the paper. `/api/sync-ticket` answers `restored: null` then (`lastRestore` threw an `AppError`), and `FileEditor` took `null !== 0` for a restore, held the edits and threw before the sync server was asked, so `refuse()` never ran. Now only a numeric `restored` holds edits (a file deleted and then brought back by a real restore still does). With `null` the ticket is used, the sync server refuses it, and the editor locks as for any other lost access, saying "What you typed here was not saved. Copy what you need from it." The locked text stays selectable. `restoreOffered` is set only from a number. With nothing unsent nothing changes. No server change.
+
+- Tests: `tests/e2e/recover.spec.ts` (file deleted; person removed; and the other file's tab still saves, with the owner seeing its edit).
+
+## Fault suite: a restore pressed twice
+
+`SEED=302909809 FAULTS=120` failed with "the revision kept before a restore lacks text that was stored". It was the test model, not the product. Two restores to the same revision in a row, with nothing typed between, make one revision: the second is the first again (the button pressed twice, already covered in `revisions.sandbox.test.ts`). The model still looked for the revision numbered one below the restore, which was the paper from before the first restore. The product lost nothing: the stored text was the restore revision's text.
+
+- The model now checks whether the restore added a revision. If it did not, the paper as it stood is that restore revision itself, and every mark stored before must be in it. The invariant (acknowledged text is never lost) is unchanged.
+- Also fails on main and on 1c68346, so it was long-standing and found by a new random seed.
+
 ## Decisions waiting on the owner
 
 See "What I need from you" in `docs/plan.md`. None blocks C1.

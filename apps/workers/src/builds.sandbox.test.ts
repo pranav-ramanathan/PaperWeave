@@ -692,3 +692,15 @@ test('a paper built with the wrong engine fails, and builds once the compiler is
   );
   expect(manifest.compiler).toBe('xelatex');
 });
+
+test('a paper with a long but valid file name still builds', async () => {
+  const { project, main } = await paper();
+  // 80 CJK characters are 240 bytes: under the 255 bytes a file name may have on disk.
+  const name = `${'漢'.repeat(80)}.tex`;
+  await createFile(t.pool, store, owner.id, project, name, Buffer.from('Extra words.\n'));
+  await edit(main, (text) =>
+    text.insert(text.toString().indexOf('\\end{document}'), `\\input{${name}}\n`),
+  );
+  const done = await build(project);
+  expect(done).toMatchObject({ status: 'succeeded', hasPdf: true });
+});

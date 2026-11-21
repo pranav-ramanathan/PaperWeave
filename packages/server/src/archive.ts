@@ -73,6 +73,28 @@ function notZip(zip: Uint8Array): string {
 const bad = (message: string) =>
   new AppError('invalid_input', `This ZIP cannot be imported: ${message}.`);
 
+/** The most bytes a file system allows in one name of a path. Counted in UTF-8, not characters. */
+const NAME_BYTES = 255;
+const tooLong = (part: string) => Buffer.byteLength(part, 'utf8') > NAME_BYTES;
+
+/**
+ * The folder or file that `path` would share a name with, or '' if there is none: an existing
+ * path that is a folder on the way to `path`, or that `path` is a folder on the way to. Neither
+ * can be written to disk. `path` itself is not compared with an equal one: that is a different
+ * problem, with its own message.
+ */
+export function pathClash(path: string, existing: Iterable<string>): string {
+  for (const other of existing) {
+    if (other.startsWith(`${path}/`)) return path;
+    if (path.startsWith(`${other}/`)) return other;
+  }
+  return '';
+}
+
+/** The refusal for `pathClash`, worded for a name that is being added. */
+export const clashMessage = (name: string) =>
+  `A file and a folder cannot share the name "${name}".`;
+
 /** Why a path cannot be a file in a paper, or '' if it can. */
 export function checkPath(path: unknown, limits: Limits = LIMITS): string {
   if (typeof path !== 'string' || !path || path.length > limits.pathLength)
@@ -84,6 +106,8 @@ export function checkPath(path: unknown, limits: Limits = LIMITS): string {
     path.split('/').some((part) => !part || part === '.' || part === '..')
   )
     return 'it must be a plain path inside the paper';
+  if (path.split('/').some(tooLong))
+    return `a name in it is over ${NAME_BYTES} bytes once written as UTF-8, which is the most a file system allows`;
   if (PICTURE.test(path)) return PICTURE_REASON;
   if (TOOLCHAIN.test(path))
     return 'paperweave-toolchain.json is written by PaperWeave on download, so it cannot be a file of the paper';
@@ -121,7 +145,19 @@ export function readZip(
         const bibs = entries.some((e) => BIB.test(e.path));
         const dropped = bibs ? entries.filter((e) => BBL.test(e.path)) : [];
         for (const e of dropped) skipped.push({ path: e.path, reason: BBL_REASON });
-        resolve({ entries: entries.filter((e) => !dropped.includes(e)), skipped, review });
+        // A file that is also a folder of other files cannot be written out: the folder wins.
+        const names = new Set(entries.map((e) => e.path));
+        const folders = new Set<string>();
+        for (const n of names)
+          for (let at = n.indexOf('/'); at >= 0; at = n.indexOf('/', at + 1))
+            if (names.has(n.slice(0, at))) folders.add(n.slice(0, at));
+        for (const f of folders)
+          skipped.push({ path: f, reason: `${clashMessage(f)} The files in the folder were kept` });
+        resolve({
+          entries: entries.filter((e) => !dropped.includes(e) && !folders.has(e.path)),
+          skipped,
+          review,
+        });
       });
       file.on('entry', (entry: yauzl.Entry) => {
         const path = entry.fileName;
@@ -141,6 +177,10 @@ export function readZip(
         if (total > limits.totalBytes) return fail('it unpacks to too much data');
 
         if (SYSTEM.test(path)) return file.readEntry();
+        if (path.split('/').some(tooLong)) {
+          skipped.push({ path, reason: `a name in it is over ${NAME_BYTES} bytes in UTF-8` });
+          return file.readEntry();
+        }
         const isReview = /(^|\/)paperweave-review\.json$/.test(path);
         const reason =
           isReview || BBL.test(path)

@@ -420,8 +420,9 @@ test('a page left open by one person does not carry on as the next person to sig
   await tab.goto('/sign-in');
   await signIn(tab, second.email);
   // The first person's page stops. What they typed is not saved under the second's name.
+  // (It also says what was typed was not saved, as for any locked editor with edits unsent.)
   await expect(status(page)).toHaveText(
-    'You no longer have access to this file, or it has been deleted.',
+    'You no longer have access to this file, or it has been deleted. What you typed here was not saved. Copy what you need from it.',
     { timeout: 20_000 },
   );
   await tab.goto(page.url());
@@ -879,4 +880,72 @@ test('a restore is not taken as seen because a ticket was fetched: edits typed b
   });
   await expect(status(editor.page)).toContainText('not saved');
   await expect(source(editor.page)).toHaveAttribute('contenteditable', 'false');
+});
+
+// Typed offline in two files; then the owner deletes one, or removes the editor, and the editor
+// comes back. No restore happened, so it must not be said to have been one.
+async function offlineThenGone(
+  browser: Parameters<typeof person>[0],
+  tag: string,
+  how: 'delete' | 'remove',
+) {
+  const { owner, editor, paper } = await sharedPaper(browser, tag, [
+    { path: 'main.tex', text: MAIN },
+    { path: 'body.tex', text: 'Body text.\n' },
+  ]);
+  const mainTab = editor.page;
+  const bodyTab = await mainTab.context().newPage();
+  await mainTab.goto(paper);
+  await mainTab.getByRole('link', { name: 'main.tex' }).first().click();
+  await showSource(mainTab);
+  await expect(status(mainTab)).toHaveText('All edits saved.');
+  await bodyTab.goto(paper);
+  await bodyTab.getByRole('link', { name: 'body.tex' }).first().click();
+  await showSource(bodyTab);
+  await expect(status(bodyTab)).toHaveText('All edits saved.');
+
+  await mainTab.context().setOffline(true);
+  await expect(status(mainTab)).toContainText('Offline.');
+  await expect(status(bodyTab)).toContainText('Offline.');
+  await typeAtStart(mainTab, '% main typed offline\n');
+  await typeAtStart(bodyTab, '% body typed offline\n');
+  await owner.page.goto(paper);
+  if (how === 'delete') {
+    await owner.page.getByRole('button', { name: 'Delete body.tex' }).click();
+    await expect(owner.page.getByRole('status')).toContainText('Deleted body.tex.');
+  } else {
+    await owner.page.getByRole('button', { name: `Remove ${editor.email}` }).click();
+    await expect(owner.page.getByRole('button', { name: `Remove ${editor.email}` })).toHaveCount(0);
+  }
+  await mainTab.context().setOffline(false);
+  return { owner, mainTab, bodyTab, paper };
+}
+
+for (const how of ['delete', 'remove'] as const) {
+  test(`edits typed offline in a file that is then ${how === 'delete' ? 'deleted' : 'taken from the editor'} are said to be unsaved, not held for a restore`, async ({
+    browser,
+  }) => {
+    const { bodyTab } = await offlineThenGone(browser, `rec-gone-${how}`, how);
+    await expect(status(bodyTab)).toContainText(
+      'You no longer have access to this file, or it has been deleted.',
+      { timeout: 30_000 },
+    );
+    await expect(bodyTab.getByRole('button', { name: /Apply my edits/ })).toHaveCount(0);
+    await expect(status(bodyTab)).toContainText('not saved');
+    await expect(status(bodyTab)).not.toContainText('restored to an earlier revision');
+    // Locked, but what was typed can still be read and selected.
+    await expect(source(bodyTab)).toHaveAttribute('contenteditable', 'false');
+    await expect(source(bodyTab)).toContainText('% body typed offline');
+  });
+}
+
+test('deleting one file does not stop another that was typed in offline from being saved', async ({
+  browser,
+}) => {
+  const { owner, mainTab, paper } = await offlineThenGone(browser, 'rec-gone-guard', 'delete');
+  await expect(status(mainTab)).toHaveText('All edits saved.', { timeout: 30_000 });
+  await owner.page.goto(paper);
+  await owner.page.getByRole('link', { name: 'main.tex' }).first().click();
+  await showSource(owner.page);
+  await expect(source(owner.page)).toContainText('% main typed offline');
 });

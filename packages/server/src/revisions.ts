@@ -2,7 +2,7 @@
 import { createHash } from 'node:crypto';
 import { LATEXMK_RULES, decodeFile } from '@paperweave/latex';
 import type pg from 'pg';
-import { checkPath, type Entry, writeZip, zipStream } from './archive.ts';
+import { checkPath, clashMessage, type Entry, pathClash, writeZip, zipStream } from './archive.ts';
 import { mapLimit, READS, readAhead } from './batch.ts';
 import { authorize } from './authz.ts';
 import type { BlobStore } from './blobs.ts';
@@ -624,6 +624,15 @@ export async function renameFile(
     [projectId, path, id(fileId)],
   );
   if (taken.rows[0]) throw new AppError('conflict', 'Another file already has that name.');
+  const others = await db.query('select path from files where project_id = $1 and id <> $2', [
+    projectId,
+    id(fileId),
+  ]);
+  const clash = pathClash(
+    path as string,
+    others.rows.map((r) => r.path),
+  );
+  if (clash) throw new AppError('invalid_input', clashMessage(clash));
   const { rowCount } = await db
     .query('update files set path = $3 where id = $1 and project_id = $2', [
       fileId,
