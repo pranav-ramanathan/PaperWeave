@@ -174,3 +174,40 @@ test('coverage report', () => {
     expect(c.editable / (c.editable + c.raw)).toBeGreaterThan(0.7);
   }
 });
+
+/** The atoms of the one paragraph `src` parses to, as `type:source`, and the other block kinds. */
+const atomsOf = (src: string) => {
+  const blocks = parse(src).blocks.filter((b) => b.body.kind !== 'ws');
+  const atoms = blocks.flatMap((b) =>
+    b.body.kind === 'para'
+      ? b.body.pieces
+          .filter((p) => p.k === 'atom')
+          .map((p) => `${p.type}:${b.body.text.slice(p.s, p.e)}`)
+      : [],
+  );
+  return { atoms, kinds: blocks.map((b) => b.body.kind) };
+};
+
+test('a % in the address of a link is part of the address, not a comment', () => {
+  for (const cmd of ['\\url{https://ex.org/a%20b}', '\\nolinkurl{a%20b}', '\\path{a%20b/c}']) {
+    const { atoms, kinds } = atomsOf(
+      `See ${cmd} for data.\n\nNext paragraph.\n\n\\section{Two}\n\nMore.\n`,
+    );
+    expect(atoms, cmd).toEqual([`raw:${cmd}`]);
+    expect(kinds, cmd).toEqual(['para', 'para', 'heading', 'para']);
+  }
+  // Only the first group of \href is the address; the second is text and may hold a comment.
+  const href = '\\href{https://ex.org/a%20b}{the \\emph{data}}';
+  expect(atomsOf(`See ${href} for data.\n\nNext.\n`)).toEqual({
+    atoms: [`raw:${href}`],
+    kinds: ['para', 'para'],
+  });
+  // Braces inside the address balance as usual.
+  expect(atomsOf('A \\url{a{b}%c} d.\n').atoms).toEqual(['raw:\\url{a{b}%c}']);
+  // On a line of its own it is a block, not an error; inside another command it is kept whole.
+  expect(atomsOf('\\url{a%20b}\n\nNext.\n').kinds).toEqual(['raw', 'para']);
+  expect(atomsOf('A\\footnote{see \\url{a%20b}} b.\n\nNext.\n')).toEqual({
+    atoms: ['raw:\\footnote{see \\url{a%20b}}'],
+    kinds: ['para', 'para'],
+  });
+});

@@ -68,3 +68,11 @@ test('\\hyperref, \\fref, \\Fref and \\zcref name labels', () => {
   ]);
   for (const r of refs) expect(src.slice(r.keyAt, r.keyAt + r.key.length)).toBe(r.key);
 });
+
+test('a % in an address is not a comment hiding what follows', () => {
+  const src = [
+    'See \\url{https://ex.org/a%20b} and \\ref{sec:a}.',
+    'And \\href{https://ex.org/a%20b}{here} \\ref{sec:b} % \\ref{no}',
+  ].join('\n');
+  expect(labelIndex(src).refs.map((r) => r.key)).toEqual([...['sec:a', 'sec:b']]);
+});

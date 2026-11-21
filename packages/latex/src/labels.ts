@@ -19,6 +19,18 @@ const CITES = new Set([
 ]);
 const VERBATIM = /^\\begin\{(verbatim\*?|lstlisting|minted|Verbatim|comment)\}/;
 
+/** Commands whose first brace group is an address, written as it is. */
+const VERBATIM_ARG = new Set(['url', 'nolinkurl', 'path', 'href']);
+/** Index after the `{...}` group at `at`, braces balanced and nothing else special; 0 if unclosed. */
+function verbatimGroup(src: string, at: number): number {
+  let depth = 0;
+  for (let i = at; i < src.length; i++) {
+    if (src[i] === '{') depth++;
+    else if (src[i] === '}' && --depth === 0) return i + 1;
+  }
+  return 0;
+}
+
 /** One key in the braces of a command: `\\ref{key}`, or one of several in `\\cite{a, b}`. */
 type Use = { key: string; command: string; at: number; end: number; keyAt: number };
 
@@ -53,6 +65,14 @@ function keyUses(src: string, wanted: (command: string) => boolean): Use[] {
       const close = src.indexOf(src[p], p + 1);
       i = close < 0 ? src.length : close;
       continue;
+    }
+    if (VERBATIM_ARG.has(name[1]) && src[p] === '{') {
+      // The address of \url{..} or \href{..}{..} is taken as it is: a % in it is no comment.
+      const end = verbatimGroup(src, p);
+      if (end) {
+        i = end - 1;
+        continue;
+      }
     }
     if (!wanted(name[1])) {
       i = p - 1;

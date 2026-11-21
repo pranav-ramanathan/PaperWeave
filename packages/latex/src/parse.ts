@@ -48,6 +48,8 @@ const CITE = new Set([
   ...['cite', 'citep', 'citet', 'citeauthor', 'citeyear', 'nocite'],
   ...['parencite', 'textcite', 'autocite', 'footcite'],
 ]);
+/** Commands whose first brace group is verbatim: a % in it is part of the address. */
+const VERB_ARG = new Set(['url', 'nolinkurl', 'path', 'href']);
 /** Commands that define something: their arguments include bare names and mid-way brackets. */
 const DEFS = new Set([
   ...['newcommand', 'renewcommand', 'providecommand', 'DeclareRobustCommand', 'newenvironment'],
@@ -224,13 +226,37 @@ function parseInto(
     }
     return end;
   };
+  /**
+   * Index after the brace group opening at i, taken as it is (no comments), or -1. It does not
+   * cross a blank line or `lim`, so what it decides never depends on text far past where it is.
+   */
+  const rawGroup = (i: number, lim = n) => {
+    let d = 0;
+    for (let j = i; j < lim; j++) {
+      if (src[j] === '{') d++;
+      else if (src[j] === '}' && --d === 0) return j + 1;
+      else if (src[j] === '\n' && blankAt(j)) return -1;
+    }
+    return -1;
+  };
+  /** End of the control sequence at i, with the verbatim argument of one that has such. */
+  const cmdEnd = (i: number, lim = n) => {
+    const j = word(i);
+    if (!isL(src[i + 1])) return j;
+    const name = src.slice(i + 1, j);
+    if (VERB_ARG.has(name) && src[j] === '{') {
+      const g = rawGroup(j, lim);
+      if (g >= 0) return g;
+    }
+    return j;
+  };
   /** Index after the brace group opening at i, or -1. */
   const group = (i: number) => {
     let d = 0;
     let j = i;
     while (j < n) {
       const c = src[j];
-      if (c === '\\') j = word(j);
+      if (c === '\\') j = cmdEnd(j);
       else if (c === '%') j = lineEnd(j);
       else {
         if (c === '{') d++;
@@ -247,7 +273,7 @@ function parseInto(
       const c = src[j];
       if (c === '\\') {
         if (hardAt(j)) return -1;
-        j = word(j);
+        j = cmdEnd(j);
       } else if (c === '%') j = eol(j);
       else if (c === '{') {
         const g = group(j);
@@ -267,7 +293,7 @@ function parseInto(
       const c = src[k];
       if (c === '\\') {
         if (hardAt(k)) return -1;
-        k = word(k);
+        k = cmdEnd(k);
       } else if (c === '%') k = eol(k);
       else if (c === '\n' && blankAt(k)) return -1;
       else k++;
@@ -296,8 +322,9 @@ function parseInto(
     let j = word(i);
     const sym = !isL(src[i + 1]);
     if (sym && src[i + 1] !== '\\') return j;
+    const name = src.slice(i + 1, word(i));
     if (src[j] === '*') j++;
-    if (DEFS.has(src.slice(i + 1, word(i)))) {
+    if (DEFS.has(name)) {
       // \newcommand{\x}[1]{...}, \def\x#1{...}, \let\a=\b: take the whole definition.
       for (let body = false; ;) {
         const c = src[j];
@@ -318,8 +345,9 @@ function parseInto(
       if (b < 0) break;
       j = b;
     }
-    while (!sym && src[j] === '{') {
-      const g = group(j);
+    // The address of \url{..} and \href{..}{..} is taken as it is: a % in it is not a comment.
+    for (let first = VERB_ARG.has(name); !sym && src[j] === '{'; first = false) {
+      const g = first ? rawGroup(j) : group(j);
       if (g < 0) throw new Unbalanced('hard', 'unclosed {');
       j = g;
     }
@@ -340,7 +368,7 @@ function parseInto(
       } else if (src.startsWith(shut, j)) {
         j += shut.length;
         if (--depth === 0) return j;
-      } else j = word(j);
+      } else j = cmdEnd(j, eol(j));
     }
     return -1;
   };
