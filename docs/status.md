@@ -36,6 +36,16 @@ Read this first. Update it in every pull request.
   - The cache key covers every file's bytes, the root, the compiler and the toolchain image ID.
     Results are reused only within the same paper.
   - The TeX image has pdfLaTeX, XeLaTeX and LuaLaTeX.
+  - Measured gaps in the image, now filled (`infra/tex/Dockerfile`): `\usepackage[T1]{fontenc}`
+    without lmodern built with generated bitmap fonts (`mktexpk`, `ecrm1000.600pk`) because
+    cm-super was missing, and `babel` had only English and Greek, so `[ngerman]`, `[french]` and
+    the rest failed with "Unknown option". Added `cm-super-minimal` (it has the T1 Type 1 fonts)
+    and `texlive-lang-` german, french, spanish, italian, portuguese, european (dutch among
+    others), polish and cyrillic. Image size 1.49 GB to 1.61 GB (content size 412 MB to 448 MB);
+    a clean build of the image took about 2m40 here. Left out: texlive-fonts-extra (newtxtext,
+    libertine, inconsolata), very large and not needed by acmart sigconf. The toolchain image ID
+    is in the cache key, so builds cached before this are not reused. Sandbox tests build a T1
+    paper (no `mktexpk` in the log) and papers in german, french, spanish and russian.
   - The editor page shows the PDF beside the source. It compiles by itself once typing has paused,
     lists errors with file and line, and keeps showing the last good PDF, marked when it is behind
     the text. The PDF is shown in the browser's own viewer; PDF.js comes with SyncTeX (D5).

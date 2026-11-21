@@ -48,6 +48,38 @@ test.each(['article-basic', 'ieee-multifile', 'ams-multifile'])(
   },
 );
 
+// Fonts and languages papers commonly load without extra packages.
+const buildSource = async (tex: string) => {
+  const project = tmp();
+  writeFileSync(join(project, 'main.tex'), tex);
+  const out = tmp();
+  const r = await compile(project, 'main.tex', out);
+  return { r, out };
+};
+
+test('T1 without lmodern uses outline fonts, not generated bitmaps', async () => {
+  const { r } = await buildSource(
+    '\\documentclass{article}\n\\usepackage[T1]{fontenc}\n\\begin{document}\nCaf\\\'e na\\"ive \\textbf{bold} \\textit{italic}\n\\end{document}\n',
+  );
+  expect(r.diagnostics.filter((d) => d.severity === 'error')).toEqual([]);
+  expect(r.ok).toBe(true);
+  expect(r.log).not.toMatch(/mktexpk|\.\d+pk\b/);
+});
+
+test.each([
+  ['ngerman', '', 'Gr\\"u\\ss{}e aus M\\"unchen'],
+  ['french', '\\usepackage[T1]{fontenc}', "Voil\\`a un \\'et\\'e fran\\c{c}ais~!"],
+  ['spanish', '\\usepackage[T1]{fontenc}', 'Ma\\~nana'],
+  ['russian', '\\usepackage[T2A]{fontenc}\n\\usepackage[utf8]{inputenc}', 'Привет, мир'],
+])('babel %s builds', async (lang, pre, body) => {
+  const { r } = await buildSource(
+    `\\documentclass{article}\n${pre}\n\\usepackage[${lang}]{babel}\n\\begin{document}\n${body}\n\\end{document}\n`,
+  );
+  expect(r.diagnostics.filter((d) => d.severity === 'error')).toEqual([]);
+  expect(r.ok).toBe(true);
+  expect(r.log).not.toMatch(/mktexpk/);
+});
+
 test('shell escape is off', async () => {
   const project = tmp();
   cpSync(join(FIXTURES, 'probes/shell-escape.tex'), join(project, 'main.tex'));
