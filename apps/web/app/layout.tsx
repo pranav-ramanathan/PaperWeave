@@ -15,6 +15,19 @@ const DROPPED = `(function(){function keep(e){var d=e.dataTransfer;if(!d||Array.
 // Comments in the script: dragged text is not ours (no 'Files'); a field for choosing a file takes
 // a dropped one itself; whoever has already taken a dragover (the visual view) keeps its own cursor.
 
+/**
+ * A form the browser posts itself is posted once. Before the page's scripts have started nothing
+ * else guards a second press (Once.tsx attaches when they have), and the first post has already
+ * reached the server. Run as the page is read, like DROPPED.
+ */
+const SENT = `(function(){var s=new WeakSet;addEventListener('submit',function(e){if(s.has(e.target)){e.preventDefault();e.stopImmediatePropagation()}},true);addEventListener('submit',function(e){var f=e.target;if(!e.defaultPrevented&&f instanceof HTMLFormElement&&(f.getAttribute('method')||'').toLowerCase()==='post')s.add(f)});addEventListener('pageshow',function(e){if(e.persisted)s=new WeakSet})})()`;
+// Comments in the script: a submit the page's scripts took (React's server actions, the editors,
+// a large upload) is prevented by the time it reaches the window, and is theirs to guard; one
+// that is not is on its way as a plain post, and its form is remembered until the page is
+// replaced. A remembered form's next submit is stopped first of all (capture), so that scripts
+// started since do not send it either. Only a page brought back by Back or Forward frees them:
+// the first pageshow comes when the scripts arrive, which may be mid-post. A GET form is not ours.
+
 export const metadata = { title: 'PaperWeave' };
 
 export default async function Layout({ children }: { children: ReactNode }) {
@@ -30,6 +43,7 @@ export default async function Layout({ children }: { children: ReactNode }) {
       </head>
       <body>
         <script nonce={nonce} dangerouslySetInnerHTML={{ __html: DROPPED }} />
+        <script nonce={nonce} dangerouslySetInnerHTML={{ __html: SENT }} />
         <Fresh />
         <Waiting />
         {children}
