@@ -3052,8 +3052,8 @@ Changed on the way, and worth keeping:
 ### The whole browser suite with the pages slowed down
 
 - **What was tried.** On 21 November, every browser test with `E2E_CPU_THROTTLE=4`: 102 ran,
-  101 passed, in 20 minutes. Only the pages made by `person` are slowed; a second page a test
-  opens itself runs at full speed.
+  101 passed, in 20 minutes. Only the first page made by `person` was slowed; a second page a
+  test opens itself ran at full speed.
 - **Found.** `files.spec` "a paper is started from nothing…" failed 7 of 10 slowed, 0 of 10 at
   full speed. Just after adding a file, the page comes back from the form's post with its words
   already drawn, and the test dropped a file on it at once. The handler that stops a dropped
@@ -3066,6 +3066,12 @@ Changed on the way, and worth keeping:
   the drop was taken.)
 - Not changed: the editor, which does what its tests say (an insert goes at the caret, or after
   the selection).
+- **Every page slowed.** Now every page of a person's context is slowed, the first and any a
+  test opens with `context.newPage()` (about 15 places in 11 specs), and a popup the app opens.
+  `newPage` returns only once the page's rate is set, while it is still blank, so the test never
+  drives an unslowed page. Unset, nothing changes.
+- **Result with every page slowed (4 times).** 104 ran, 104 passed, in 20 minutes; nothing new
+  failed. At full speed, 104 of 104 pass (14 minutes).
 
 ### What the browser says when the server does not answer
 

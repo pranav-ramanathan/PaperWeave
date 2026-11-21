@@ -100,6 +100,37 @@ export async function scriptsHeld(page: Page) {
   return go;
 }
 
+/**
+ * A slow machine, on request: E2E_CPU_THROTTLE=4 makes every page of the context four times
+ * slower, the first and any the test opens later. `newPage` is wrapped so that it returns only
+ * once the page's rate is set (the page is still blank, nothing of the app has run). A page the
+ * app opens itself (a popup) has no such call to wait on; the `page` event covers it.
+ */
+function slowDown(context: BrowserContext) {
+  const rate = Number(process.env.E2E_CPU_THROTTLE);
+  if (!(rate > 1)) return;
+  const slowed = new WeakMap<Page, Promise<unknown>>();
+  const slow = (page: Page) => {
+    if (!slowed.has(page)) {
+      slowed.set(
+        page,
+        context
+          .newCDPSession(page)
+          .then((cdp) => cdp.send('Emulation.setCPUThrottlingRate', { rate }))
+          .catch(() => {}), // the page was closed before it was set
+      );
+    }
+    return slowed.get(page)!;
+  };
+  const newPage = context.newPage.bind(context);
+  context.newPage = async () => {
+    const page = await newPage();
+    await slow(page);
+    return page;
+  };
+  context.on('page', (page) => void slow(page));
+}
+
 let people = 0;
 /** The test now running, and the browser windows it has opened through `person`. */
 let running = '';
@@ -118,13 +149,8 @@ export async function person(browser: Browser, who: string) {
   const context = await browser.newContext({ extraHTTPHeaders: { 'x-forwarded-for': ip } });
   refusals(context);
   opened.push(context);
+  slowDown(context);
   const page = await context.newPage();
-  // A slow machine, on request: E2E_CPU_THROTTLE=4 makes every page four times slower.
-  const throttle = Number(process.env.E2E_CPU_THROTTLE);
-  if (throttle > 1) {
-    const cdp = await context.newCDPSession(page);
-    await cdp.send('Emulation.setCPUThrottlingRate', { rate: throttle });
-  }
   return { page, email: address(who) };
 }
 
