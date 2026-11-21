@@ -79,8 +79,8 @@ the keyboard (`insert.spec`).
 
 - A thread's text is tinted and has a solid line under it; a proposed change has a dashed
   line; a spelling or grammar finding has a wavy line.
-- A proposal says "Now:" and "Proposed:" in words beside the struck and added text, and says
-  "Out of date" in words.
+- A proposal says "Now:" and "Proposed:" in words beside the struck and added text, which is the
+  changed words only, and says "Out of date" in words.
 - A claim flag is a bordered box that begins "This changes more than the wording".
 - Saved, offline, held and refused states of the editor are sentences in a live region.
 - The band that shows a line in the PDF has an outline, and the place is also said in words.

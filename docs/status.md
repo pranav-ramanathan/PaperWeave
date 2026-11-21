@@ -391,8 +391,8 @@ Read this first. Update it in every pull request.
   - Open proposals are marked in the text in both views with a dashed underline (threads have a
     solid one). The paper's page lists open proposals and threads under "Review", and the checks
     before submitting mention unfinished review without letting it stand in the way.
-  - Not yet: accepting several at once; a word-by-word diff inside a proposal (it shows the old
-    and the new text whole).
+  - A proposal marks only the words it changes (struck in "Now:", added in "Proposed:").
+  - Not yet: accepting several at once.
 - **E3: spelling and grammar.** A "Spelling and grammar" panel under the editor of a LaTeX
   file, and a wavy line under each finding in both views. Checked when the file opens and again
   once what was typed is saved and has been left alone for a moment.
@@ -2786,6 +2786,28 @@ Built after the security review, which had it as its first open item.
   carry `editedAt`. No history of an edit is kept. Words in an edit form are lost if the owner
   deletes that comment meanwhile. The emptied row is kept so the mention-email limit cannot be
   reset by deleting.
+
+## A proposal marks only the words it changes
+
+- **What was wrong.** A proposal showed the whole old text struck and the whole new text added.
+  Someone deciding on a passage of a few sentences with one word changed had to compare by eye.
+- **Now.** `diffWords` in `packages/server/src/textdiff.ts` compares the two texts word by word
+  (a word with its `\command`, `0.05` or `thirty-five` is one unit, a run of white space is one,
+  any other character is one), with the same algorithm as `diffLines` (both now use one private
+  `diffSeq`). White space kept between two changes is marked changed too, so a changed phrase is
+  one piece. `Proposals.tsx` strikes only the changed pieces of "Now:" and underlines only the
+  changed pieces of "Proposed:". If only spacing or line breaks differ it says so in a note. The
+  client imports the file through the new `@paperweave/server/textdiff` export, which has no
+  imports, so `pg` stays out of the browser bundle.
+- **Held by** `textdiff.test.ts` (one word changed; a phrase as one piece; `0.05`, `\cite` and
+  `thirty-five` whole; spacing only; an addition only; too large gives null; random texts join
+  back to both inputs) and `proposals.spec.ts` ("a proposal marks only the words it changes",
+  axe included). On the old files the unit tests fail (no `diffWords`) and the browser test finds
+  the whole sentence in `del`.
+- **Not changed.** The paper's page still says "proposes changing X to Y" in short. The revision
+  comparison is still line by line. "It now reads" on an out-of-date proposal is shown whole. A
+  rewrite that keeps few words is marked in many small pieces. Past about a million cells
+  (about a thousand changed words and spaces on each side) the old whole-text display is used.
 
 ## Browser tests that failed once in a while
 

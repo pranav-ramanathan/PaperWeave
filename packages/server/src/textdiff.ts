@@ -3,14 +3,13 @@
 export type DiffLine = { op: ' ' | '+' | '-'; text: string };
 
 /**
- * The lines of `a` and `b` as kept, removed and added, in order. Returns null if the files are too
- * large to compare line by line here.
+ * The items of `x` and `y` as kept, removed and added, in order. Returns null if the changed
+ * region is larger than `maxCells` table cells.
  * shortcut: a plain longest-common-subsequence table, quadratic in the changed region. Fine for
- * papers; switch to Myers' algorithm if files of tens of thousands of changed lines turn up.
+ * papers and proposals; switch to Myers' algorithm if files of tens of thousands of changed
+ * lines or words turn up.
  */
-export function diffLines(a: string, b: string, maxCells = 4_000_000): DiffLine[] | null {
-  const x = a.split('\n');
-  const y = b.split('\n');
+function diffSeq(x: string[], y: string[], maxCells: number): DiffLine[] | null {
   let start = 0;
   while (start < x.length && start < y.length && x[start] === y[start]) start++;
   let endX = x.length;
@@ -46,6 +45,49 @@ export function diffLines(a: string, b: string, maxCells = 4_000_000): DiffLine[
   }
   for (const text of x.slice(endX)) out.push({ op: ' ', text });
   return out;
+}
+
+/**
+ * The lines of `a` and `b` as kept, removed and added, in order. Returns null if the files are too
+ * large to compare line by line here.
+ */
+export function diffLines(a: string, b: string, maxCells = 4_000_000): DiffLine[] | null {
+  return diffSeq(a.split('\n'), b.split('\n'), maxCells);
+}
+
+export type WordPiece = { changed: boolean; text: string };
+
+const WORDS = /\\?[\p{L}\p{N}]+(?:[.'’-][\p{L}\p{N}]+)*|\s+|[^]/gu;
+
+/**
+ * `a` and `b` as pieces, each marked changed or not, so that the pieces of `was` join to `a` and
+ * those of `now` to `b`. A word (with its `\command`, `0.05` or `thirty-five` kept whole), a run of
+ * white space or any other character is compared as one. Kept white space between two changes is
+ * marked changed too, so one changed phrase is one piece. Returns null if the texts are too large
+ * to compare here.
+ */
+export function diffWords(
+  a: string,
+  b: string,
+  maxCells = 1_000_000,
+): { was: WordPiece[]; now: WordPiece[] } | null {
+  const ops = diffSeq(a.match(WORDS) ?? [], b.match(WORDS) ?? [], maxCells);
+  if (!ops) return null;
+  const was: WordPiece[] = [];
+  const now: WordPiece[] = [];
+  const add = (to: WordPiece[], changed: boolean, text: string) => {
+    const last = to.at(-1);
+    if (last?.changed === changed) last.text += text;
+    else to.push({ changed, text });
+  };
+  ops.forEach(({ op, text }, k) => {
+    const prev = ops[k - 1]?.op;
+    const next = ops[k + 1]?.op;
+    const changed = op === ' ' && !text.trim() && !!prev && !!next && prev !== ' ' && next !== ' ';
+    if (op !== '+') add(was, op === '-' || changed, text);
+    if (op !== '-') add(now, op === '+' || changed, text);
+  });
+  return { was, now };
 }
 
 /**
