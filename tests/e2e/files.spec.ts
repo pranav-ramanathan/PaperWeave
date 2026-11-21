@@ -49,10 +49,11 @@ test('a paper is started from nothing, and a deleted file comes back by restorin
     base64:
       'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mP8z8BQDwAEhQGAhKmMIQAAAABJRU5ErkJggg==',
   };
-  expect(await dropOn(page.locator('main').first(), { file: picture })).toEqual({
-    over: true,
-    drop: true,
-  });
+  // The page came back from the form's post with its words already drawn, and the handler
+  // that takes a drop is put on once the page's script has started: ask until it has.
+  await expect
+    .poll(() => dropOn(page.locator('main').first(), { file: picture }))
+    .toEqual({ over: true, drop: true });
   expect((await dropOn(page.getByLabel(/^A file to upload/), { file: picture })).drop).toBe(false);
 
   // Names that would escape the paper, and names already taken, are refused with a reason.
