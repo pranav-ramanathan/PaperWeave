@@ -235,7 +235,15 @@ export function includeGraph(
   const all = new Set(paths);
   const dir = rootDir(root);
   const via = graphicsPaths(files[root] ?? '');
-  const g: Graph = { order: [], preamble: [], edges: [], missing: [], dynamic: [], cycles: [], base: {} };
+  const g: Graph = {
+    order: [],
+    preamble: [],
+    edges: [],
+    missing: [],
+    dynamic: [],
+    cycles: [],
+    base: {},
+  };
   const body = uncomment(files[root] ?? '').indexOf('\\begin{document}');
   const stack: string[] = [];
   const visit = (from: string, preamble = false, base = '') => {

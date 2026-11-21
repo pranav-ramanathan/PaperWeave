@@ -586,5 +586,7 @@ test('a file reached through \\import is renamed in the lines of the imported fi
     'sections/intro.tex:2 \\input{parts/detail}',
   ]);
   // A root-level include is as before.
-  expect(await propose('top.tex', 'sections/top.tex')).toEqual(['main.tex:4 \\input{sections/top}']);
+  expect(await propose('top.tex', 'sections/top.tex')).toEqual([
+    'main.tex:4 \\input{sections/top}',
+  ]);
 });
