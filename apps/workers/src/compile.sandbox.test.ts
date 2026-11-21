@@ -184,6 +184,72 @@ test('aastex631 builds', async () => {
   expect(readFileSync(join(out, r.pdf!)).subarray(0, 5).toString()).toBe('%PDF-');
 });
 
+// latexmk runs with -norc, so makeglossaries and makeindex run only through our own -e rules.
+// A project in a folder, built with the given engine; the PDF's text comes back.
+const glossaryBuild = async (tex: string, compiler?: 'pdflatex' | 'xelatex' | 'lualatex') => {
+  const project = tmp();
+  mkdirSync(join(project, 'paper'));
+  writeFileSync(join(project, 'paper/main.tex'), tex);
+  const out = tmp();
+  const r = await compile(project, 'paper/main.tex', out, 120, compiler);
+  const text = r.pdf
+    ? execFileSync('pdftotext', [join(out, r.pdf), '-'], { encoding: 'utf8' }).replace(/\s+/g, ' ')
+    : '';
+  return { r, text };
+};
+const GLOSSARIES = (opts: string, body: string) =>
+  `\\documentclass{article}\n\\usepackage[${opts}]{glossaries}\n\\makeglossaries\n${body}\n`;
+const GLOSSARY_ENTRIES = `\\newglossaryentry{qubit}{name={qubit},description={a two-level quantum system}}
+\\newacronym{nmr}{NMR}{nuclear magnetic resonance}
+\\begin{document}
+A \\gls{qubit} and \\gls{nmr}, then \\gls{nmr} again.
+\\printglossaries
+\\end{document}`;
+
+test('a glossaries paper with a root in a folder gets its glossary and acronyms', async () => {
+  const { r, text } = await glossaryBuild(GLOSSARIES('acronym', GLOSSARY_ENTRIES));
+  expect(r.diagnostics.filter((d) => d.severity === 'error')).toEqual([]);
+  expect(r.ok).toBe(true);
+  expect(text).toContain('a two-level quantum system');
+  expect(text).toContain('nuclear magnetic resonance');
+});
+
+test('a nomencl paper gets its nomenclature', async () => {
+  const { r, text } = await glossaryBuild(
+    `\\documentclass{article}\n\\usepackage{nomencl}\n\\makenomenclature\n\\begin{document}\n$c$ \\nomenclature{$c$}{speed of light in vacuum}\n\\printnomenclature\n\\end{document}\n`,
+  );
+  expect(r.ok).toBe(true);
+  expect(text).toContain('speed of light in vacuum');
+});
+
+test('glossaries with the numbers option gets the numbers glossary', async () => {
+  const { r, text } = await glossaryBuild(
+    GLOSSARIES(
+      'numbers',
+      `\\newglossaryentry{pi}{type=numbers,sort={3.14},name={3.14},description={ratio of a circle to its diameter}}
+\\begin{document}\n\\glsadd{pi}\n\\printglossaries\n\\end{document}`,
+    ),
+  );
+  expect(r.ok).toBe(true);
+  expect(text).toContain('ratio of a circle to its diameter');
+});
+
+test('glossaries with xindy fails with the glossary diagnostic (xindy is not in the image)', async () => {
+  const { r } = await glossaryBuild(GLOSSARIES('xindy', GLOSSARY_ENTRIES));
+  expect(r.ok).toBe(false);
+  expect(r.diagnostics).toContainEqual({
+    severity: 'error',
+    message: 'The glossary could not be made. The build log has the details.',
+  });
+});
+
+test.each(['xelatex', 'lualatex'] as const)('a %s glossaries paper gets its glossary', async (e) => {
+  const { r, text } = await glossaryBuild(GLOSSARIES('acronym', GLOSSARY_ENTRIES), e);
+  expect(r.ok).toBe(true);
+  expect(text).toContain('a two-level quantum system');
+  expect(text).toContain('nuclear magnetic resonance');
+});
+
 test('shell escape is off', async () => {
   const project = tmp();
   cpSync(join(FIXTURES, 'probes/shell-escape.tex'), join(project, 'main.tex'));
