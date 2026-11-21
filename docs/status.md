@@ -986,11 +986,9 @@ Two things about tests, found on the way and not about the product:
 - **Found by** trying the second of things after the build fault: restores and renames done
   twice, a file deleted and made again and then restored both ways, restores across a chart's
   drawing and across a change to its data. Only this turned up.
-- **Seen there and left as it is.** After a restore to a revision whose data is older than
-  the chart's last drawing, the chart says "out of date" although the files that came back
-  are of that older data, and it cannot be drawn again until the data is described again. The
-  record of what a chart was drawn from is one row, not one for each revision. It errs towards
-  asking a person to look.
+- **Seen there, and since put right.** After a restore to a revision whose data is older than
+  the chart's last drawing, the chart used to say "out of date" although the files that came
+  back were of that older data. See "A chart is judged by the files in the paper" below.
 
 ## An editor whose sign-in has ended
 
@@ -3676,6 +3674,44 @@ and the files are one moment. Only the database is read while they are held; the
 before. `exportReview`, `listThreads`, `listProposals` and `loadUpdates` take a transaction client
 as well as the pool. Test: `reviewdata.sandbox.test.ts` types between the cut and the review read
 (fails on the old code).
+
+## A chart is judged by the files in the paper
+
+- **What was wrong.** `stale` compared the data's version with `charts.drawn_digest`, one row
+  set by the last drawing. A restore puts `charts/<name>.pdf` and `.png` back without touching
+  that row. Draw at data v1, change and approve the data (v2), cut a revision, redraw, restore
+  that revision: the paper held v2 data with the v1 drawing and the chart said it was fresh, so
+  `submissionChecks` said ready and the old figure shipped in the ZIP and PDF. The reverse
+  (restore to a v1 revision, data back to v1) said "out of date" wrongly.
+- **Now** `listCharts` collects the data versions (`record.data.sha256`) of every `chart_draws`
+  row whose two digests are those of the files now in the paper. A drawn chart is stale unless
+  that list holds the data's current version (and a deleted data file has none, so it is stale).
+  Several draws of the same bytes: any match is fresh. If no draw matches both files, the old
+  `drawn_digest` rule applies. No migration; `submit.ts` reads `stale` and needed no change.
+- **Held by** `charts.sandbox.test` (false fresh, false stale) and `submit.sandbox.test` (not
+  ready after the restore). The false-fresh and false-ready tests and the false-stale one all
+  failed on the old code.
+- **Not done: the chart's spec.** The same hole exists for a spec change, a redraw and a
+  restore. The message says "its data has changed", which does not fit, so the spec is not
+  compared; a restored drawing of an older spec still shows as fresh.
+
+## A repeated label counts when TeX says it is defined twice
+
+The pre-submission checks treated every label written twice in the source as a problem. Text TeX
+skips (an old paragraph in `\iffalse ... \fi`, the other arm of an `\ifwide ... \else ... \fi`)
+defines nothing, so such papers could never be ready though TeX builds them without a warning.
+Like undefined labels, missing citations and missing files, a duplicate now defers to TeX when the
+newest build is of the paper as it stands: if TeX did not warn "multiply defined" for the label,
+it is a warning. A stale or missing build still reads the source alone. With cleveref, TeX also
+warns about `key@cref`; that is now counted as the same label, so it is listed once.
+
+| Paper                                                         | Before               | After                         |
+| ------------------------------------------------------------- | -------------------- | ----------------------------- |
+| Same label inside `\iffalse ... \fi`, built                   | problem, never ready | warning, ready                |
+| Same label in both arms of `\ifwide ... \else ... \fi`, built | problem, never ready | warning, ready                |
+| Label really defined twice, built                             | one problem          | one problem                   |
+| `\iffalse` paper edited and not rebuilt                       | problem              | problem (and the stale build) |
+| cleveref, label really defined twice                          | two problems         | one problem                   |
 
 ## Decisions waiting on the owner
 
