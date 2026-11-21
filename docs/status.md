@@ -3156,6 +3156,41 @@ the last two items.
   on Vercel each instance serves few requests at once; before the limit, such a request waited
   until the platform cut it off.
 
+## A long PDF read through
+
+**What was wrong.** The PDF pane drew a page when it first came near the window and never let go
+of it: after reading a paper to its end, every page still held its canvas. Measured in a
+Chromium window of 1440 x 900 at a pixel ratio of 2, reading each page in turn (a canvas is
+1164 x 1646 pixels there, 7.7 MB):
+
+| Pages       | Canvases holding a picture | Bytes in them | Last page painted | PDF workers after 5 rebuilds | Elements under `.pdf` |
+| ----------- | -------------------------- | ------------- | ----------------- | ---------------------------- | --------------------- |
+| 30, before  | 30                         | 230 MB        | yes               | 1                            | 181                   |
+| 120, before | 120                        | 920 MB        | yes               | 1                            | 721                   |
+| 30, now     | 2                          | 15 MB         | yes               | 1                            | 181                   |
+| 120, now    | 2                          | 15 MB         | yes               | 1                            | 721                   |
+
+The tab did not crash and no page went blank, at 920 MB on this machine; the cost is memory
+for as long as the pane is open, and a build swaps in new pages. A rebuilt PDF starts with
+every page empty and draws the ones near the window (two of them, in each paper). The probe
+(a throwaway script, not kept) also showed that a rebuild leaves one PDF worker, not more, and
+that 120 pages are 721 elements, so the words were left alone.
+
+**Now.** `PdfView.tsx` follows pages in and out of the window. A page that leaves it gets
+a canvas of size zero and loses `data-drawn`; one that comes back is drawn again. A page is
+drawn or released by one call at a time, because PDF.js throws if a canvas is given a second
+`render()` while the first is running (checked in the installed pdfjs-dist 6.5.438). After
+a render the page's operator list is freed with `page.cleanup()`. The words of a page are made
+once and kept, so they can still be selected and read aloud.
+
+**Held by.** `synctex.spec.ts`, "a long PDF read to its end keeps pictures only of the pages
+near the window": a 30-page paper is read page by page; at most 8 canvases hold a picture, the
+last page's is one of them, and page 1, scrolled back to, is drawn again with its words once.
+On the old code it fails with 30. Ten runs, and ten with `E2E_CPU_THROTTLE=4`, all passed. Run: unit 155, browser 108 of 108.
+
+**Not changed.** A page scrolled back to is blank for the time of one render. The words of
+pages already read stay in the page. Safari's canvas limit is untested.
+
 ## Decisions waiting on the owner
 
 See "What I need from you" in `docs/plan.md`. None blocks C1.
