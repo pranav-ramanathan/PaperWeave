@@ -420,8 +420,9 @@ test('a page left open by one person does not carry on as the next person to sig
   await tab.goto('/sign-in');
   await signIn(tab, second.email);
   // The first person's page stops. What they typed is not saved under the second's name.
+  // (It also says what was typed was not saved, as for any locked editor with edits unsent.)
   await expect(status(page)).toHaveText(
-    'You no longer have access to this file, or it has been deleted.',
+    'You no longer have access to this file, or it has been deleted. What you typed while offline was not saved. Copy what you need from it.',
     { timeout: 20_000 },
   );
   await tab.goto(page.url());
