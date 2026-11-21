@@ -5,8 +5,8 @@ Read this first. Update it in every pull request.
 ## Done
 
 - **Scaffold.** pnpm workspace, TypeScript, ESLint, Prettier, Vitest, Playwright, CI.
-- **Fixtures.** `fixtures/`: article, IEEE and AMS multi-file papers, encoding variants, a
-  shell-escape probe. `fixtures/digests.json` pins their bytes; run `node fixtures/digest.mjs`
+- **Fixtures.** `fixtures/`: article, IEEE and AMS multi-file papers, five papers written the way
+  real ones are (`real-*`), encoding variants, a shell-escape probe. `fixtures/digests.json` pins their bytes; run `node fixtures/digest.mjs`
   after changing one on purpose.
 - **C1: accounts and papers.** `packages/server` (migrations, sign-in through Better Auth,
   `authorize()`, projects, members, invitations, blob store) and the web pages that use it. Web
@@ -41,7 +41,9 @@ Read this first. Update it in every pull request.
     cm-super was missing, and `babel` had only English and Greek, so `[ngerman]`, `[french]` and
     the rest failed with "Unknown option". Added `cm-super-minimal` (it has the T1 Type 1 fonts)
     and `texlive-lang-` german, french, spanish, italian, portuguese, european (dutch among
-    others), polish and cyrillic. Image size 1.49 GB to 1.61 GB (content size 412 MB to 448 MB);
+    others), polish and cyrillic. Image size 1.49 GB to 1.61 GB (content size 412 MB to 448 MB;
+    `cm-super-minimal` was later replaced by the full `cm-super`, see "Five papers written the way
+    real ones are");
     a clean build of the image took about 2m40 here. Left out: texlive-fonts-extra (newtxtext,
     libertine, inconsolata), very large and not needed by acmart sigconf. The toolchain image ID
     is in the cache key, so builds cached before this are not reused. Sandbox tests build a T1
@@ -3265,6 +3267,86 @@ changed a fixture, `docs/import-matrix.md` or the build image.
   `FUZZ=20000` on the old code, and at `FUZZ=20000` and `FUZZ=30000` on the new.
 - **Not changed.** `includes()` in `graph.ts` blanks everything after a `%` before it matches, so
   `\url{a%20b} \input{x}` on one line still hides the `\input`.
+
+## Five papers written the way real ones are
+
+`fixtures/real-natbib`, `real-biblatex-subfiles`, `real-tikz`, `real-acm` and `real-xelatex` (invented
+prose, 2 to 6 files each) were imported, built with the real sandbox, and walked through Chromium:
+import and report, the visual view of each `.tex` file, a word typed into the first editable
+paragraph and one just after the first raw atom, a formula opened, a citation and a reference tried,
+the build, the downloaded ZIP compared file by file with what went in, and the ZIP with build
+details rebuilt outside the app with the command in `paperweave-toolchain.json`. The walk script
+is not in the repository. The five fixtures are in `docs/import-matrix.md`.
+
+| Fixture                  | Root, compiler                              | Editable visually, by file                                             | Build (sandbox)            | Walk                                          |
+| ------------------------ | ------------------------------------------- | ---------------------------------------------------------------------- | -------------------------- | --------------------------------------------- |
+| `real-natbib`            | `main.tex`, pdflatex                        | `main.tex` 38%, `sections/method.tex` 36%                              | ok, 2.3 s, no warnings     | typed words only differ                       |
+| `real-biblatex-subfiles` | `main.tex`, pdflatex                        | `main.tex` 0% (only commands), the other five files 100%               | ok, 3.5 s, biber ran       | typed words only differ                       |
+| `real-tikz`              | `main.tex`, pdflatex                        | `main.tex` 24%; the standalone `aaa-icon.tex` is not part of the paper | ok, 1.9 s                  | typed words only differ (after the fix below) |
+| `real-acm`               | `main.tex`, pdflatex                        | `main.tex` 38%                                                         | ok, 2.6 s, 3 font warnings | typed words only differ                       |
+| `real-xelatex`           | `main.tex`, xelatex (from `% !TEX program`) | `main.tex` 48%, `chapters/gaps.tex` 100%                               | ok, 2.6 s                  | typed words only differ                       |
+
+The root, the compiler, every file in the report and the include graph were right for all five.
+No `error` block appeared in any file. `real-biblatex-subfiles` lists `intro.tex` and
+`sections/model.tex` as other files that could be the root (they are subfiles with their own
+`\documentclass`), and `real-tikz` lists `aaa-icon.tex`; the root chosen was `main.tex` each time.
+The build panel said "The PDF is up to date." for every file of every paper; no build in the walk
+had an error or a warning shown.
+
+**Faults found, by the plan's classes, and fixed** (each with a test that fails on the old code):
+
+- **Diff touches bytes other than the typed word** (the data-loss class; found by the walk, first
+  of all). In `real-tikz`, typing just after `\lstinline|push(q, x % 8)|` put a line break into
+  the file before the typed word, and the space after the atom was lost. `guard()` in
+  `packages/bridge/src/translate.ts` takes any unescaped `%` earlier on the line for a comment and
+  starts a new line so that typing is not swallowed by it; here the `%` is inside code. `\verb`,
+  `\url{..%20..}` and `\href` were the same. It now skips the arguments of `\verb`, `\lstinline`,
+  `\mintinline`, `\url`, `\href`, `\nolinkurl` and `\path`. Test in `bridge.test.ts` (types after
+  each, and after a real comment): the old code gives `Call \lstinline|push(q, x % 8)|\n z keeps on.`.
+  Nothing was lost beyond a line break and a space; it would have changed the paragraph's
+  spacing in the PDF and, before a blank line, split it.
+- **Reproducibility fault, ours.** A revision saved with the text of one already built is not built
+  again: its build takes the earlier build's PDF, stamped with the earlier revision's time. The
+  manifest gave the new revision's own time as `SOURCE_DATE_EPOCH`, so the outside rebuild differed
+  in its dates for pdflatex (64 bytes) and in most of its bytes for xelatex (17,282 of 18,477). The
+  manifest now follows the cached build back to the build that made the PDF
+  (`revisionEntries` in `revisions.ts`). Sandbox test in `revisions.sandbox.test.ts` saves a second
+  revision of the same text 1.5 s later and rebuilds from its ZIP; on the old code the SHA-256
+  differs. All five fixtures rebuilt outside the app to the same bytes after the fix; before it,
+  all five differed.
+- **Toolchain gap.** `real-acm` did not build: "pdfTeX error (font expansion): auto expansion is
+  only possible with scalable fonts." `acmart` falls back to Computer Modern when `libertine` is
+  missing; `\ccsdesc` prints `\textbullet`, a TS1 symbol; `cm-super-minimal` holds T1 only, so TeX
+  made a bitmap of `tcrm0900` and `microtype` cannot expand a bitmap. The image now has the full
+  `cm-super` (`infra/tex/Dockerfile`; 52 MB installed instead of 6 MB). Image size 1.61 GB to
+  1.72 GB, compressed 448 MB to 502 MB. **The toolchain image ID changes, so builds cached before
+  are not reused; the owner should know the image grew.** It is its own commit, so it can be
+  dropped; then `real-acm` fails to build and its sandbox test with it. Sandbox test: T1 text
+  symbols under `microtype` (finds `mktexpk` in the log on the old image).
+- Not faults: the five parser and graph faults listed above did not recur on the new papers.
+  The predictions in the plan about the image (lmodern, T1, acmart, fontspec, polyglossia,
+  unicode-math, biber, tikz, pgfplots, listings, minted, algorithm2e, siunitx, cleveref, subfiles,
+  natbib and biblatex missing) were measured and are wrong: all are installed. Not installed:
+  `newtxtext`, `newtxmath`, `libertine`, `inconsolata`; `acmart` warns and builds without them.
+
+**Design limits measured** (valid, stored correctly, build; shown raw and edited in the source
+view; recorded in `docs/import-matrix.md`, nothing built for them): `\footnote{}`, `{\bf ..}`,
+`\textsc{}`, `\SI`, `\qty`, `\num`, `\url`, `\href` and `\foreignlanguage` are one raw atom each
+(`\textbf` and `\emph` are editable); `description`, a list with `\item[label]`, and a list with a
+list inside it are one raw block each; `tikzpicture`, pgfplots, `lstlisting`, `algorithm`,
+`CCSXML`, `\ccsdesc`, `\keywords`, `teaserfigure` and the `acmart` title block are raw blocks; a
+`figure` with `subfigure`s offers the first caption for editing. A citation or a reference is
+shown in place with its source as its title; a double click opens a formula but does nothing on a
+citation or a reference (the visual view inserts them through the menu). Pressing Enter with one
+selected splits the paragraph there, as it does for any selected thing. Prose editable visually:
+`real-natbib` 38%, `real-biblatex-subfiles` 81%, `real-tikz` 24%, `real-acm` 38%,
+`real-xelatex` 72%, against 66% to 82% for the three older fixtures.
+
+- **Run:** unit 166 (29 files), sandbox 261 passed and 1 skipped (33 files), lint and typecheck
+  clean, browser suite 119 of 119 (16 minutes), including the new import test.
+- **Not changed.** `acmart` with the fonts it asks for (`libertine`, `newtxmath`, `inconsolata`):
+  adding `texlive-fonts-extra` is 1.4 GB installed. `\subimport` is still resolved from the
+  root's folder.
 
 ## Decisions waiting on the owner
 
