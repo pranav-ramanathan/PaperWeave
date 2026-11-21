@@ -105,6 +105,12 @@ export async function person(browser: Browser, who: string) {
   refusals(context);
   opened.push(context);
   const page = await context.newPage();
+  // A slow machine, on request: E2E_CPU_THROTTLE=4 makes every page four times slower.
+  const throttle = Number(process.env.E2E_CPU_THROTTLE);
+  if (throttle > 1) {
+    const cdp = await context.newCDPSession(page);
+    await cdp.send('Emulation.setCPUThrottlingRate', { rate: throttle });
+  }
   return { page, email: address(who) };
 }
 
