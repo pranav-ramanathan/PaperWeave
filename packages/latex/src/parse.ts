@@ -1,7 +1,7 @@
 // Lossless LaTeX block parser. Every character of the source belongs to exactly one piece of
 // exactly one block, so a wrong parse can change what is displayed but never what is stored.
 
-import { CITES, REFS } from './labels.ts';
+import { CITES, MULTICITES, REFS } from './labels.ts';
 
 export type Mark = 'emph' | 'textbf' | 'textit' | 'texttt';
 
@@ -443,6 +443,46 @@ function parseInto(
     return -1;
   };
 
+  /** Index after spaces, and one line break if no blank line follows it: where TeX looks next. */
+  const skipWs = (k: number) => {
+    while (isS(src[k])) k++;
+    if (src[k] === '\n') {
+      let m = k + 1;
+      while (isS(src[m])) m++;
+      if (m < n && src[m] !== '\n') return m;
+    }
+    return k;
+  };
+  /**
+   * Index after one `[pre][post]{keys}` of a citation, with an `<pre>` note and, first in a
+   * multicite, `(pre)(post)` notes, and whitespace between all of them; -1 if it is not whole.
+   */
+  const citeUnit = (from: number, parens: boolean) => {
+    let k = from;
+    if (parens)
+      for (;;) {
+        const q = skipWs(k);
+        const close = src[q] === '(' ? src.indexOf(')', q) : -1;
+        if (close < 0 || /\n[ \t]*\n/.test(src.slice(q, close))) break;
+        k = close + 1;
+      }
+    k = skipWs(k);
+    if (src[k] === '<') {
+      const close = src.indexOf('>', k);
+      if (close < 0 || /\n[ \t]*\n/.test(src.slice(k, close))) return -1;
+      k = close + 1;
+    }
+    for (let b = 0; b < 2; b++) {
+      k = skipWs(k);
+      if (src[k] !== '[') break;
+      const end = bracket(k);
+      if (end < 0) return -1;
+      k = end;
+    }
+    k = skipWs(k);
+    return src[k] === '{' ? group(k) : -1;
+  };
+
   /** Parse inline content from i. Returns where it stopped; b0 is the block start. */
   const inline = (
     i: number,
@@ -558,13 +598,14 @@ function parseInto(
           }
           type = 'ref';
         } else if (CITE.has(name)) {
+          // \cite [p] {k}, \cite<pre>{k}, and a multicite's `(pre)(post)` and repeated units.
+          const multi = MULTICITES.has(name);
           let k = src[j] === '*' ? j + 1 : j;
-          for (let b = 0; b < 2 && src[k] === '['; b++) {
-            const end = bracket(k);
+          for (let unit = 0; unit === 0 || multi; unit++) {
+            const end = citeUnit(k, multi && unit === 0);
             if (end < 0) break;
-            k = end;
+            k = e = end;
           }
-          if (src[k] === '{') e = group(k);
           type = 'cite';
         } else if (name in TEXT_ESC && src.startsWith('{}', j)) {
           push('esc', i, j + 2, { ch: TEXT_ESC[name] });

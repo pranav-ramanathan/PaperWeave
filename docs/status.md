@@ -3647,6 +3647,23 @@ import report, rename, release).
 Not covered: a comment body or an evidence string on another file that quotes the held data in a
 person's own words. That is free text, and nothing can tell it from any other sentence.
 
+## Grammar findings stay out of every form of citation
+
+Gate E3 (no grammar finding inside an equation, unit, code, path or citation) leaked for three
+spellings of a citation, because the parser's cite atom ended early: a biblatex multicite
+(`\\autocites[see][12]{a}[adn compare][15]{b}`) was cut after its first group, so the later notes
+were prose; `\\cite [p] {k}` was not read as a citation at all; and an angle-bracket note
+(`\\cite<pre>{k}`) was not either. The cite atom now skips whitespace (one line break, never a
+blank line), an `<...>` note, a multicite's leading `(pre)(post)` notes and its repeated
+`[pre][post]{keys}` units. A later unit counts only if whole, so `\\textcites{a} [see below]` still
+reads "[see below]" as prose.
+
+`CITES` gained the multicites (`cites`, `parencites`, `textcites`, `autocites`, `footcites`,
+`smartcites`, `supercites`, and the capitalised four biblatex has), exported as `MULTICITES`. It is
+shared, so `citeIndex` reads every group too, and `\\cite<pre>{k}` now yields its key: the citation
+index and the visual editor's atoms agree with the grammar view. Tests: five in `prose.test.ts`
+and `labels.test.ts` (fail on the old code), one in `grammar.sandbox.test.ts`.
+
 ## Decisions waiting on the owner
 
 See "What I need from you" in `docs/plan.md`. None blocks C1.

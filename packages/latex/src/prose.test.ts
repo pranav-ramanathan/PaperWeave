@@ -101,7 +101,9 @@ test('only running text is prose; code, keys, formulas and commands are never to
 /** Whether any character of `words` in `src` is prose. */
 const proseIn = (src: string, words: string) => {
   const at = src.indexOf(words);
-  return prose(src).segments.some((s) => s.kind === 'text' && s.from < at + words.length && s.to > at);
+  return prose(src).segments.some(
+    (s) => s.kind === 'text' && s.from < at + words.length && s.to > at,
+  );
 };
 
 test('a biblatex multicite is one citation, to its last group', () => {

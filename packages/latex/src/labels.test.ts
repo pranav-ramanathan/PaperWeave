@@ -81,7 +81,8 @@ test('a % in an address or in inline code is not a comment hiding what follows',
 });
 
 test('a multicite names the keys of every one of its groups', () => {
-  const src = 'See \\autocites(g)(h)[see][12]{a, b}[c][d]{e}{f} and \\cite<x>{k} and \\cite [p] {m}.';
+  const src =
+    'See \\autocites(g)(h)[see][12]{a, b}[c][d]{e}{f} and \\cite<x>{k} and \\cite [p] {m}.';
   expect(citeIndex(src).map((u) => u.key)).toEqual(['a', 'b', 'e', 'f', 'k', 'm']);
   const text = '\\textcites{a} [not part of it]';
   expect(citeIndex(text).map((u) => u.key)).toEqual(['a']);
