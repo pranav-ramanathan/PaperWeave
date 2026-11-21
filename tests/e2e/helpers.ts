@@ -86,6 +86,20 @@ export function refusals(context: BrowserContext) {
   });
 }
 
+/**
+ * Hold back the page's scripts, as a slow line does. Call what it returns to let them through.
+ * Go to the page with `waitUntil: 'domcontentloaded'`: the default would wait for the scripts.
+ */
+export async function scriptsHeld(page: Page) {
+  let go!: () => void;
+  const gate = new Promise<void>((r) => (go = r));
+  await page.route(/\/_next\/static\/.+\.js(\?|$)/, async (route) => {
+    await gate;
+    await route.continue().catch(() => {}); // the page may have gone by then
+  });
+  return go;
+}
+
 let people = 0;
 /** The test now running, and the browser windows it has opened through `person`. */
 let running = '';

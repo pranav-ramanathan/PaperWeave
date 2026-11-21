@@ -5,7 +5,7 @@ import { mkdtempSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { writeZip } from '../../packages/server/src/archive';
-import { address, audit, emailedLink, MAIL, person, run, signIn } from './helpers';
+import { address, audit, emailedLink, MAIL, person, run, scriptsHeld, signIn } from './helpers';
 
 test('sign in, create a paper, invite people, and keep outsiders out', async ({ browser }) => {
   const owner = await person(browser, 'owner');
@@ -169,6 +169,25 @@ test('a button pressed twice does its work once', async ({ browser }) => {
 
   await page.goto('/projects');
   await audit(page, 'the list of papers');
+});
+
+test("the sign-in form works for someone quicker than the page's script", async ({ browser }) => {
+  const visitor = await person(browser, 'quick');
+  const { page } = visitor;
+  const release = await scriptsHeld(page);
+  await page.goto('/sign-in?next=%2Fprojects', { waitUntil: 'domcontentloaded' });
+  await page.getByLabel('Email address').fill(visitor.email);
+  // Nothing can send it yet, and Enter in the field must not post it as a plain GET.
+  await expect(page.getByRole('button', { name: 'Email me a sign-in link' })).toBeDisabled();
+  await page.getByLabel('Email address').press('Enter');
+  expect(page.url()).not.toContain('email=');
+  // Scripts let through: what was typed is what is sent.
+  release();
+  const button = page.getByRole('button', { name: 'Email me a sign-in link' });
+  await expect(button).toBeEnabled();
+  await button.click();
+  await expect(page.getByRole('status')).toContainText('Check');
+  await expect(page.getByRole('status')).toContainText(visitor.email);
 });
 
 test('sign-in never sends people to another site', async ({ browser }) => {

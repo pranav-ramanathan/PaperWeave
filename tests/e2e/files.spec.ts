@@ -7,12 +7,45 @@ import { mkdtempSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { readZip, writeZip } from '../../packages/server/src/archive';
-import { dropOn, person, run, selectWord, showSource, signIn, typingSaved } from './helpers';
+import {
+  dropOn,
+  person,
+  run,
+  scriptsHeld,
+  selectWord,
+  showSource,
+  signIn,
+  typingSaved,
+} from './helpers';
 
 const source = (page: Page) => page.locator('.editor .cm-content');
 const editorStatus = (page: Page) =>
   page.getByRole('region', { name: /^Editor for/ }).getByRole('status');
+const PICTURE = {
+  name: 'p.png',
+  type: 'image/png',
+  base64:
+    'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mP8z8BQDwAEhQGAhKmMIQAAAABJRU5ErkJggg==',
+};
 const buildStatus = (page: Page) => page.locator('.build').getByRole('status');
+
+test("a file dropped before the page's script has started is not opened in its place", async ({
+  browser,
+}) => {
+  const who = await person(browser, 'files-early');
+  const { page } = who;
+  await page.goto('/sign-in');
+  await signIn(page, who.email);
+  await expect(page.getByRole('heading', { name: 'Your papers' })).toBeVisible();
+  const release = await scriptsHeld(page);
+  await page.goto('/projects', { waitUntil: 'domcontentloaded' });
+  await expect(page.getByRole('heading', { name: 'Your papers' })).toBeVisible();
+  expect(await dropOn(page.locator('main').first(), { file: PICTURE })).toEqual({
+    over: true,
+    drop: true,
+  });
+  release();
+});
 
 test('a paper is started from nothing, and a deleted file comes back by restoring', async ({
   browser,
@@ -49,11 +82,10 @@ test('a paper is started from nothing, and a deleted file comes back by restorin
     base64:
       'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mP8z8BQDwAEhQGAhKmMIQAAAABJRU5ErkJggg==',
   };
-  // The page came back from the form's post with its words already drawn, and the handler
-  // that takes a drop is put on once the page's script has started: ask until it has.
-  await expect
-    .poll(() => dropOn(page.locator('main').first(), { file: picture }))
-    .toEqual({ over: true, drop: true });
+  expect(await dropOn(page.locator('main').first(), { file: picture })).toEqual({
+    over: true,
+    drop: true,
+  });
   expect((await dropOn(page.getByLabel(/^A file to upload/), { file: picture })).drop).toBe(false);
 
   // Names that would escape the paper, and names already taken, are refused with a reason.
