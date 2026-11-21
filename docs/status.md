@@ -3561,6 +3561,18 @@ sigconf PDF embeds a Libertine font (`pdffonts`). The 11 of them failed on the o
   sync server do not pass `exactPlace` and behave as before. No migration.
 - A restore that brings the sentence back leaves the proposal stale: the restored characters are
   new ones, and a place cannot be re-attached (there are no words to find it by).
+- **Review data.** `exportReview` now writes `stale: true` for every open or accepted proposal that
+  is stale (before: accepted only) and `placeLost: true` for one whose place was lost; both are
+  optional, the format is still `paperweave-review-1`. Import used to place every open proposal by
+  its words, which undid staleness: an insertion arrived fresh and Accept wrote in the wrong place,
+  and a word changed in the source and typed once elsewhere arrived fresh on the other copy. Now an
+  open stale proposal with words is anchored at the start of the file (it reads as stale, Accept
+  answers `conflict`, "Find these words again" stays the person's choice, and `reviseProposal`
+  refuses the closed-up stretch). An open stale insertion (or one with `placeLost`) is left out and
+  reported in `missing`: "A proposal to add “…” in main.tex: the place it was to be added at was
+  no longer in the file." Accepted proposals are unchanged. Files exported before this change carry
+  no flag and import as they did: placed by their words, so they can still arrive fresh. No
+  migration.
 
 ## Decisions waiting on the owner
 

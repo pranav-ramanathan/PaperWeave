@@ -11,6 +11,7 @@ import {
   listProposals,
   propose,
   reattachProposal,
+  reviseProposal,
   undoAccept,
 } from './proposals.ts';
 import { exportReview, locateQuote, REVIEW_FILE } from './reviewdata.ts';
@@ -307,8 +308,8 @@ async function trip(projectId: string) {
     report: (await importReport(t.pool, users.importer.id, arrived.id))!,
   };
 }
-const replaceIn = (file: string, from: string, to: string) =>
-  editFile(t.pool, store, file, users.owner.id, (text) => {
+const replaceIn = (file: string, from: string, to: string, by = users.owner.id) =>
+  editFile(t.pool, store, file, by, (text) => {
     const at = text.toString().indexOf(from);
     text.delete(at, from.length);
     text.insert(at, to);
@@ -634,7 +635,11 @@ test('a stale proposal whose words are gone still arrives, and can find them aga
   const [now] = await listProposals(t.pool, store, users.importer.id, id);
   expect(now).toMatchObject({ status: 'open', stale: true });
   const [file] = await listFiles(t.pool, users.importer.id, id);
-  await replaceIn(file.id, 'quick', 'slow');
+  // The closed-up stretch is not revised into a proposal about wherever it sits.
+  expect(
+    await code(reviseProposal(t.pool, store, users.importer.id, id, now.id, { replacement: 'x' })),
+  ).toBe('conflict');
+  await replaceIn(file.id, 'quick', 'slow', users.importer.id);
   await reattachProposal(t.pool, store, users.importer.id, id, now.id);
   expect((await listProposals(t.pool, store, users.importer.id, id))[0]).toMatchObject({
     status: 'open',
