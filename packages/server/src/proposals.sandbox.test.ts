@@ -38,7 +38,7 @@ async function paper() {
   const zip = await writeZip([{ path: 'main.tex', bytes: Buffer.from(MAIN) }]);
   const [project] = await importZip(t.pool, store, users.owner.id, zip, 'Proposals');
   for (const who of ['editor', 'reviewer', 'viewer'] as const) {
-    const { token } = await invite(t.pool, users.owner.id, project.id, users[who].email, who);
+    const { token } = await invite(t.pool, users.owner.id, project.id, users[who].email, who, 1000);
     await acceptInvitation(t.pool, users[who].id, token);
   }
   const [{ id: file }] = await listFiles(t.pool, users.owner.id, project.id);
