@@ -3519,6 +3519,31 @@ sigconf PDF embeds a Libertine font (`pdffonts`). The 11 of them failed on the o
 - This is one commit (the Dockerfile), so it can be dropped if the owner finds the size too much;
   the tests for these fonts would then be dropped with it.
 
+## Glossaries and nomenclature are built
+
+- latexmk runs with `-norc`, so it had no rules for `makeglossaries` or nomencl. A `glossaries`
+  paper built with exit 0 and an empty glossary (`.glo`, `.acn` and `.slo` written, `.gls`, `.acr`
+  and `.sls` never), a `nomencl` paper had an empty nomenclature (`.nlo`, no `.nls`), and nothing
+  warned, so "Check before submitting" called it ready.
+- `-norc` stays. Our own rules, `LATEXMK_RULES` in `packages/latex/src/latexmk.ts`, are passed with
+  `-e`, which latexmk honours with `-norc`. `.glo`, `.acn` and `.slo` run `makeglossaries`; `.nlo`
+  runs `makeindex -s nomencl.ist`, unless the `.aux` has `\@istfilename`, when the `.nlo` is the
+  `numbers` glossary of `glossaries` and `makeglossaries` is run. All use list-form `system()`, so
+  no shell reads a file name, and the string has no single quote. The worker and the command in a
+  revision download's `paperweave-toolchain.json` both use it, so the ZIP rebuilds the same PDF
+  (a sandbox test runs the manifest command as written in the image, and compares bytes).
+- A failed rule is now an error: "The glossary could not be made. The build log has the details."
+  (latexmk's "Collected error summary" names a `cusdep` rule).
+- **With `\usepackage[xindy]{glossaries}` the build now fails.** xindy is not in the image. It used
+  to build with exit 0 and an empty glossary. This follows the BibTeX precedent: a tool that cannot
+  run is an error, not a quiet empty list. The fix for the author is to drop the option.
+- Not changed: with `nomain` and only a custom `\newglossary` extension, no rule fires, so that
+  glossary is still empty.
+- Tests: `compile.sandbox.test.ts` (acronym glossary with the root in a folder, nomencl, `numbers`,
+  xindy, XeLaTeX and LuaLaTeX; six, all failing on the old code), `diagnostics.test.ts` (an excerpt
+  captured from a real xindy build), `revisions.sandbox.test.ts` in both packages.
+- `docs/import-matrix.md` does not mention glossaries, so it is unchanged.
+
 ## Decisions waiting on the owner
 
 See "What I need from you" in `docs/plan.md`. None blocks C1.

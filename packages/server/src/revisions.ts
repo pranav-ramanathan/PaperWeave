@@ -1,6 +1,6 @@
 // Revisions: the paper frozen at a moment. Cutting, naming, comparing, restoring and exporting.
 import { createHash } from 'node:crypto';
-import { decodeFile } from '@paperweave/latex';
+import { LATEXMK_RULES, decodeFile } from '@paperweave/latex';
 import type pg from 'pg';
 import { checkPath, type Entry, writeZip, zipStream } from './archive.ts';
 import { mapLimit, READS, readAhead } from './batch.ts';
@@ -485,7 +485,7 @@ async function revisionEntries(
         image: built?.image ?? null,
         // PDF timestamps are set from this, so a rebuild gives the same bytes.
         sourceDateEpoch: epoch,
-        command: `SOURCE_DATE_EPOCH=${epoch} latexmk -norc -cd ${engine} -no-shell-escape -bibtex-cond -interaction=nonstopmode ${shellPath(revision.root)}`,
+        command: `SOURCE_DATE_EPOCH=${epoch} latexmk -norc -cd ${engine} -no-shell-escape -bibtex-cond -interaction=nonstopmode -e '${LATEXMK_RULES}' ${shellPath(revision.root)}`,
         files: Object.fromEntries(shared.map((f) => [f.path, `sha256:${f.digest}`])),
         charts,
         // Data files left out of this archive on purpose: their authors keep them back.

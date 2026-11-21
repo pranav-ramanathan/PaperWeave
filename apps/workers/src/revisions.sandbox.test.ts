@@ -21,7 +21,7 @@ import { afterAll, beforeAll, expect, test } from 'vitest';
 import { FIXTURES } from '../../../packages/latex/src/testutil.ts';
 import { TEST_ENV, testDb } from '../../../packages/server/src/testing.ts';
 import { buildNext, imageId } from './builder.ts';
-import { compile, type Compiler } from './compile.ts';
+import { compile, sandbox, type Compiler } from './compile.ts';
 
 const store = blobStore(TEST_ENV);
 const image = imageId();
@@ -96,6 +96,45 @@ test.each(['article-basic', 'ieee-multifile', 'ams-multifile'])(
     expect(sha256(again)).toBe(sha256(pdf));
   },
 );
+
+test('the ZIP of a glossaries paper, with its command run as written, makes the same PDF', async () => {
+  const tex = `\\documentclass{article}
+\\usepackage[acronym]{glossaries}
+\\makeglossaries
+\\newglossaryentry{qubit}{name={qubit},description={a two-level quantum system}}
+\\newacronym{nmr}{NMR}{nuclear magnetic resonance}
+\\begin{document}
+A \\gls{qubit} and \\gls{nmr}.
+\\printglossaries
+\\end{document}
+`;
+  const [project] = await importZip(
+    t.pool,
+    store,
+    owner.id,
+    await writeZip([{ path: 'paper/main.tex', bytes: Buffer.from(tex) }]),
+    'Glossary',
+  );
+  const revision = await saveRevision(t.pool, store, owner.id, project.id, 'Submission');
+  await requestBuild(t.pool, owner.id, project.id, { revisionId: revision.id });
+  expect(await buildNext(t.pool, store, image)).toBe(true);
+  const pdf = await revisionPdf(t.pool, store, owner.id, project.id, revision.id);
+
+  const dir = mkdtempSync(join(tmpdir(), 'paperweave-gloss-'));
+  const { zip } = await exportRevision(t.pool, store, owner.id, project.id, revision.id, true);
+  writeFileSync(join(dir, 'g.zip'), zip);
+  execFileSync('unzip', ['-q', join(dir, 'g.zip'), '-d', join(dir, 'src')]);
+  const manifest = JSON.parse(readFileSync(join(dir, 'src/paperweave-toolchain.json'), 'utf8'));
+  // The command, word for word, in the toolchain image, with nothing from the app.
+  const run = await sandbox(join(dir, 'src'), ['sh', '-c', manifest.command], 60, {}, '');
+  expect(run.code, run.output.slice(-500)).toBe(0);
+  const rebuilt = readFileSync(join(dir, 'src', manifest.root.replace(/\.tex$/, '.pdf')));
+  expect(sha256(rebuilt)).toBe(sha256(pdf));
+  writeFileSync(join(dir, 'g.pdf'), rebuilt);
+  const text = execFileSync('pdftotext', [join(dir, 'g.pdf'), '-'], { encoding: 'utf8' });
+  expect(text).toContain('a two-level quantum system');
+  expect(text).toContain('nuclear magnetic resonance');
+});
 
 test('a revision saved with the text of one already built rebuilds to the same PDF outside the app', async () => {
   const p = await paper('article-basic');
