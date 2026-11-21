@@ -3109,6 +3109,26 @@ Changed on the way, and worth keeping:
   still runs inside one request (a job queue for imports is not built; see "So a job queue for imports is still not built"), and the page says only
   "Working…" or "No answer from the server yet" during it.
 
+### Five small faults from a review, and a teardown
+
+Found by a code review on 21 November; each fixed with a test that fails on the old code, except
+the last two items.
+
+- **A comment deleted while it was being changed.** `editComment` now skips deleted rows, and
+  rechecks when the update changes nothing (same words: fine; deleted: `not_found`).
+- **Raw HTML row of `docs/security-review.md`.** It now names the one `dangerouslySetInnerHTML`, in
+  `app/layout.tsx` (a constant script with the nonce). No test.
+- **Grammar checker that does not answer.** The note is shown and the findings and marks are
+  kept; a 503 still clears them.
+- **The file store's body timer.** A HEAD arms none, readers clear it once the body is read, and a
+  body with no content-length gets ten minutes, not 10 s.
+- **An upload form restored after Back.** `pageshow` also clears the "uploaded, waiting" state,
+  enables the file field and removes the `key` and `name` fields. Tested by dispatching `pageshow`
+  after a large upload; a real bfcache restore is not exercised.
+- **Editor teardown.** `live.current` is cleared before the views are destroyed, so the awareness
+  listener has nothing to redraw. No new test.
+- **Run.** Unit 155, sandbox 248 (1 skipped, not new), browser 106 of 106.
+
 ## Decisions waiting on the owner
 
 See "What I need from you" in `docs/plan.md`. None blocks C1.
