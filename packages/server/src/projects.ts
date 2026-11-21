@@ -107,6 +107,21 @@ export async function getProject(
   return { ...rows[0], role };
 }
 
+/** The TeX engines a paper may be built with: what the `projects.compiler` check allows. */
+export const COMPILERS = ['pdflatex', 'xelatex', 'lualatex'] as const;
+
+/** Choose the engine the paper is built with. The next revision and build carry it. */
+export async function setCompiler(db: Db, userId: string, projectId: string, compiler: string) {
+  await authorize(db, userId, id(projectId), 'file.write');
+  if (!(COMPILERS as readonly string[]).includes(compiler))
+    throw new AppError('invalid_input', `The compiler is one of ${COMPILERS.join(', ')}.`);
+  await db.query(
+    `update projects set compiler = $2, manifest_version = manifest_version + 1
+     where id = $1 and compiler <> $2`,
+    [projectId, compiler],
+  );
+}
+
 export async function listMembers(db: Db, userId: string, projectId: string): Promise<Member[]> {
   await authorize(db, userId, id(projectId), 'project.read');
   const { rows } = await db.query(

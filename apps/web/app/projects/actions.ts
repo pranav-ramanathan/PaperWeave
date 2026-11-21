@@ -24,6 +24,7 @@ import {
   setLanguageSettings,
   setModelProcessing,
   setRole,
+  setCompiler,
   setRootFile,
   withdrawInvitation,
 } from '@paperweave/server';
@@ -189,6 +190,15 @@ export async function rootAction(projectId: string, fileId: string) {
   await act(back, async () => {
     await setRootFile(db(), user.id, projectId, fileId);
     return `${back}?root=1`;
+  });
+}
+
+export async function compilerAction(projectId: string, form: FormData) {
+  const back = `/projects/${projectId}`;
+  const user = await requireUser(back);
+  await act(back, async () => {
+    await setCompiler(db(), user.id, projectId, text(form, 'compiler'));
+    return `${back}?compiler=1`;
   });
 }
 

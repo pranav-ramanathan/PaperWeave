@@ -5,6 +5,7 @@ import {
   AppError,
   withScope,
   can,
+  COMPILERS,
   citationChecks,
   citationReport,
   firstSteps,
@@ -46,6 +47,7 @@ import {
   renameAction,
   restoreAction,
   roleAction,
+  compilerAction,
   rootAction,
   saveRevisionAction,
 } from '../actions';
@@ -71,6 +73,7 @@ async function Project({
     deleted?: string;
     in?: string;
     root?: string;
+    compiler?: string;
     relabelled?: string;
     moved?: string;
     before?: string;
@@ -171,7 +174,8 @@ async function Project({
     (e) => allEntries || e.cited || checks.lookups[e.key] || checks.evidence[e.key]?.length,
   );
   const unlisted = oneOfEach.length - listedEntries.length;
-  const { error, invited, saved, revision, restored, building, added, deleted, root } = query;
+  const { error, invited, saved, revision, restored, building, added, deleted, root, compiler } =
+    query;
   const canWrite = can(project.role, 'file.write');
   const owner = project.role === 'owner';
   const showLabels = labels.labels.length > 0 || labels.undefined.length > 0;
@@ -220,6 +224,7 @@ async function Project({
         </Result>
       )}
       {root && <Result>Root file changed.</Result>}
+      {compiler && <Result>Compiler changed.</Result>}
 
       {owner && !(steps.written && steps.built && steps.shared && steps.downloaded) && (
         <section aria-labelledby="first-steps">
@@ -317,6 +322,21 @@ async function Project({
               Check before submitting
             </Link>
           </p>
+          {canWrite && (
+            <form action={compilerAction.bind(null, id)} className="inline">
+              <label>
+                Change compiler{' '}
+                <select name="compiler" defaultValue={project.compiler}>
+                  {COMPILERS.map((c) => (
+                    <option key={c} value={c}>
+                      {c === 'pdflatex' ? 'pdfLaTeX' : c === 'xelatex' ? 'XeLaTeX' : 'LuaLaTeX'}
+                    </option>
+                  ))}
+                </select>
+              </label>{' '}
+              <Once type="submit">Save compiler</Once>
+            </form>
+          )}
           <Wide label="Table of files">
             <table>
               <thead>

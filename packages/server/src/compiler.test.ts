@@ -1,0 +1,68 @@
+import { expect, test } from 'vitest';
+import { describeImport } from './import.ts';
+
+const doc = (pre: string, body = 'Hi.') =>
+  `\\documentclass{article}\n${pre}\n\\begin{document}\n${body}\n\\end{document}\n`;
+const compiler = (files: Record<string, string>) =>
+  describeImport(Object.entries(files).map(([path, t]) => ({ path, bytes: Buffer.from(t) }))).report
+    .compiler;
+
+test('a package that needs XeTeX, loaded from a preamble file the root inputs', () => {
+  expect(
+    compiler({
+      'main.tex': doc('\\input{preamble}'),
+      'preamble.tex': '\\usepackage[no-math]{fontspec}\n',
+    }),
+  ).toBe('xelatex');
+});
+
+test('a package loaded by the paper own class or style, through RequirePackage', () => {
+  expect(
+    compiler({
+      'main.tex': '\\documentclass{my}\n\\begin{document}Hi.\\end{document}\n',
+      'my.cls': '\\LoadClass{article}\n\\RequirePackage{fontspec}\n',
+    }),
+  ).toBe('xelatex');
+  expect(
+    compiler({
+      'main.tex': doc('\\usepackage{my}'),
+      'my.sty': '\\RequirePackage{amsmath, unicode-math}\n',
+    }),
+  ).toBe('xelatex');
+});
+
+test('a commented-out package does not count', () => {
+  expect(compiler({ 'main.tex': doc('% \\usepackage{fontspec}') })).toBe('pdflatex');
+  expect(compiler({ 'main.tex': doc('\\input{p}'), 'p.tex': '% \\usepackage{fontspec}\n' })).toBe(
+    'pdflatex',
+  );
+});
+
+test('ctex, its classes and luatexja are recognised', () => {
+  expect(compiler({ 'main.tex': doc('\\usepackage{ctex}') })).toBe('xelatex');
+  expect(
+    compiler({ 'main.tex': '\\documentclass{ctexart}\n\\begin{document}\\end{document}\n' }),
+  ).toBe('xelatex');
+  expect(compiler({ 'main.tex': doc('\\usepackage[a]{amsmath,luatexja}') })).toBe('lualatex');
+});
+
+test('an include after \\begin{document}, or a class the paper does not hold, is not followed', () => {
+  expect(
+    compiler({
+      'main.tex': doc('', '\\input{late}'),
+      'late.tex': '\\usepackage{fontspec}\n',
+    }),
+  ).toBe('pdflatex');
+  expect(
+    compiler({ 'main.tex': doc('\\usepackage{fontspec}', '').replace('fontspec', 'graphicx') }),
+  ).toBe('pdflatex');
+});
+
+test('the magic comment wins', () => {
+  expect(
+    compiler({ 'main.tex': '% !TEX program = lualatex\n' + doc('\\usepackage{fontspec}') }),
+  ).toBe('lualatex');
+  expect(compiler({ 'main.tex': '% !TEX program = pdflatex\n' + doc('\\usepackage{ctex}') })).toBe(
+    'pdflatex',
+  );
+});

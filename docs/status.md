@@ -3429,6 +3429,26 @@ nested sub-import are now in `graph.order`, so labels, citations and import see 
   name inside the import folder would shadow it, and that is not checked. `\subfile` was
   not checked. Starred forms (`\import*`) are treated as unstarred.
 
+## The compiler can be changed, and is guessed better
+
+- Before, `projects.compiler` was set by import and by restoring a revision, and nothing else:
+  a paper whose engine was guessed wrong could never build. `setCompiler` (packages/server/src/projects.ts)
+  now sets it. It needs `file.write` (a viewer or reviewer gets `permission_denied`, a non-member
+  `not_found`), accepts only `pdflatex`, `xelatex` and `lualatex` (`invalid_input` otherwise), does
+  nothing for an unchanged value, and bumps `manifest_version`. The revision's content key and the
+  stale-build check already included the compiler, so the next revision is a new one and an old
+  build shows as behind. The paper's page has a "Change compiler" select and a "Save compiler"
+  button, shown to writers.
+- The guess (`compilerFor` in import.ts) still obeys `% !TEX program = ...` first. Otherwise it reads
+  `\usepackage`, `\RequirePackage`, `\documentclass` and `\LoadClass` (option lists and comma
+  lists included), with comments blanked, in the root's preamble, in the files the root reads
+  before `\begin{document}`, and in the paper's own `.sty` and `.cls` those load. xelatex: `fontspec`,
+  `unicode-math`, `xeCJK`, `polyglossia`, `ctex` and the `ctex*` classes. lualatex: `luacode`,
+  `luatextra`, `luatexja`; lualatex wins if both appear. A commented-out package, an `\input` after
+  `\begin{document}` and a system class the paper does not hold are not read.
+- Limit: a package loaded by a system class or package (not the paper's own) is not seen.
+  Whether a `\usepackage` inside an `\if` branch is live is not checked.
+
 ## Decisions waiting on the owner
 
 See "What I need from you" in `docs/plan.md`. None blocks C1.

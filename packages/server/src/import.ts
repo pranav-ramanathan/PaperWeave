@@ -6,8 +6,10 @@ import {
   coverage,
   decodeFile,
   DEFAULT_TRANSPARENT,
+  type Graph,
   includeGraph,
   parse,
+  uncomment,
   theoremEnvs,
 } from '@paperweave/latex';
 import type pg from 'pg';
@@ -65,14 +67,58 @@ const isRoot = (text: string) =>
 const dirOf = (path: string) =>
   path.includes('/') ? path.slice(0, path.lastIndexOf('/') + 1) : '';
 
-/** `% !TEX program = xelatex`, or packages that only work on one engine. */
-function compilerFor(root: string): Compiler {
-  const magic = /^%\s*!TEX\s+(?:TS-)?program\s*=\s*(\w+)/im.exec(root)?.[1].toLowerCase();
+const ENGINE_OF: Record<string, Compiler> = {
+  luacode: 'lualatex',
+  luatexja: 'lualatex',
+  luatextra: 'lualatex',
+  fontspec: 'xelatex',
+  xeCJK: 'xelatex',
+  'unicode-math': 'xelatex',
+  polyglossia: 'xelatex',
+  ctex: 'xelatex',
+  ctexart: 'xelatex',
+  ctexrep: 'xelatex',
+  ctexbook: 'xelatex',
+  ctexbeamer: 'xelatex',
+};
+const LOADS =
+  /\\(?:usepackage|RequirePackage|documentclass|LoadClass)\*?(?:\[[^\]]*\])?\s*\{([^{}]*)\}/g;
+
+/**
+ * `% !TEX program = xelatex`, or else packages that only work on one engine, loaded in the
+ * preamble: the root's, the files it reads before \begin{document}, and the paper's own
+ * styles and classes those load. Comments do not count.
+ */
+function compilerFor(texts: Record<string, string>, root: string, graph: Graph): Compiler {
+  const magic = /^%\s*!TEX\s+(?:TS-)?program\s*=\s*(\w+)/im.exec(texts[root])?.[1].toLowerCase();
   if (magic === 'xelatex' || magic === 'lualatex' || magic === 'pdflatex') return magic;
-  if (/\\usepackage(\[[^\]]*\])?\{[^}]*\b(luacode|luatextra)\b/.test(root)) return 'lualatex';
-  if (/\\usepackage(\[[^\]]*\])?\{[^}]*\b(fontspec|xeCJK|unicode-math|polyglossia)\b/.test(root))
-    return 'xelatex';
-  return 'pdflatex';
+  const rootText = uncomment(texts[root]);
+  const body = rootText.indexOf('\\begin{document}');
+  const scanned = new Set<string>(graph.preamble);
+  // Support files (styles, classes) the preamble files load, and those they load in turn.
+  const queue = [root, ...graph.preamble];
+  for (let from = queue.shift(); from !== undefined; from = queue.shift())
+    for (const e of graph.edges)
+      if (
+        e.from === from &&
+        e.kind === 'support' &&
+        /\.(sty|cls)$/.test(e.to) &&
+        !scanned.has(e.to)
+      ) {
+        scanned.add(e.to);
+        queue.push(e.to);
+      }
+  const found = new Set<Compiler>();
+  const scan = (text: string) => {
+    for (const m of text.matchAll(LOADS))
+      for (const name of m[1].split(',')) {
+        const engine = ENGINE_OF[name.trim()];
+        if (engine) found.add(engine);
+      }
+  };
+  scan(body < 0 ? rootText : rootText.slice(0, body));
+  for (const p of scanned) if (p !== root) scan(uncomment(texts[p] ?? ''));
+  return found.has('lualatex') ? 'lualatex' : found.has('xelatex') ? 'xelatex' : 'pdflatex';
 }
 
 const NO_ROOT =
@@ -217,7 +263,7 @@ export function describeImport(
     report: {
       root,
       otherRoots: candidates.slice(1),
-      compiler: compilerFor(texts[root]),
+      compiler: compilerFor(texts, root, graph),
       files,
       skipped,
       missing: graph.missing,
