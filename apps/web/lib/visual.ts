@@ -20,7 +20,7 @@ import {
 import { Editor, Extension, type Node } from '@tiptap/core';
 import type { Node as PMNode } from '@tiptap/pm/model';
 import { NodeSelection, Plugin, Selection, TextSelection } from '@tiptap/pm/state';
-import { Decoration, DecorationSet } from '@tiptap/pm/view';
+import { Decoration, DecorationSet, type EditorView } from '@tiptap/pm/view';
 import katex from 'katex';
 import * as Y from 'yjs';
 import { bibliography, onBibliography } from './bibliography';
@@ -80,6 +80,16 @@ export function renderMath(
     // A copy: the renderer writes into what it is given.
     macros: { ...opts.macros },
   });
+}
+
+/** The caret to the first (or last) place text can be typed, or with `extend` the selection out to it. */
+function edge(view: EditorView, end: boolean, extend: boolean) {
+  const { doc, selection } = view.state;
+  const to = Selection.findFrom(doc.resolve(end ? doc.content.size : 0), end ? -1 : 1, true);
+  if (!to) return false;
+  const next = extend ? TextSelection.create(doc, selection.anchor, to.head) : to;
+  view.dispatch(view.state.tr.setSelection(next).scrollIntoView());
+  return true;
 }
 
 function el<K extends keyof HTMLElementTagNameMap>(tag: K, className: string, text = '') {
@@ -802,6 +812,12 @@ export function createVisual(opts: {
           'Mod-y': () => !!undo.redo() || true,
           'Mod-Shift-z': () => !!undo.redo() || true,
           'Mod-i': emph,
+          // The paper starts and ends with drawn blocks (the preamble, \end{document}), where the
+          // browser's own move to the start or end of the document finds no caret.
+          'Mod-Home': ({ editor: e }) => edge(e.view, false, false),
+          'Mod-End': ({ editor: e }) => edge(e.view, true, false),
+          'Shift-Mod-Home': ({ editor: e }) => edge(e.view, false, true),
+          'Shift-Mod-End': ({ editor: e }) => edge(e.view, true, true),
           'Shift-Enter': () => {
             say('A line break inside a paragraph is made in the source, with \\\\.');
             return true;
@@ -834,7 +850,10 @@ export function createVisual(opts: {
       attributes: { 'aria-label': opts.label, role: 'textbox', 'aria-multiline': 'true' },
       // These keys act where the caret is on the screen, even straight after a caret key.
       handleKeyDown: (view, e) => {
-        if (!view.composing && (e.key === 'Enter' || e.key === 'Backspace' || e.key === 'Delete'))
+        if (
+          !view.composing &&
+          ['Enter', 'Backspace', 'Delete', 'ArrowLeft', 'ArrowRight'].includes(e.key)
+        )
           catchUp();
         return false;
       },

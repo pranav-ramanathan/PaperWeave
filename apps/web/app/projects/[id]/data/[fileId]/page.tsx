@@ -1,4 +1,5 @@
 import { Wide } from '../../../../Wide';
+import Result from '../../../../Result';
 import { AppError, can, COLUMN_TYPES, datasetProposal } from '@paperweave/server';
 import Link from '../../../../Go';
 import Once from '../../../../Once';
@@ -63,7 +64,7 @@ export default async function Describe({
         </h1>
         {back}
       </header>
-      {error && <p role="alert">{error}</p>}
+      {error && <Result alert>{error}</Result>}
       <p>
         {guess.rows} {guess.rows === 1 ? 'row' : 'rows'}, {guess.columns.length}{' '}
         {guess.columns.length === 1 ? 'column' : 'columns'}. Below is a guess at what each column

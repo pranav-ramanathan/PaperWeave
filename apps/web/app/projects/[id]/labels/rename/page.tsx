@@ -1,4 +1,5 @@
 import { AppError, proposeLabelRename } from '@paperweave/server';
+import Result from '../../../../Result';
 import Link from '../../../../Go';
 import Once from '../../../../Once';
 import { notFound } from 'next/navigation';
@@ -50,7 +51,7 @@ export default async function RenameLabel({
         </h1>
         {back}
       </header>
-      {error && <p role="alert">{error}</p>}
+      {error && <Result alert>{error}</Result>}
       <p>
         This would change {places} {places === 1 ? 'line' : 'lines'} in {files.length}{' '}
         {files.length === 1 ? 'file' : 'files'}: the label itself and every reference to it. Nothing

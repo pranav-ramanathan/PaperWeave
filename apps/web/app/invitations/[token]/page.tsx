@@ -1,4 +1,5 @@
 import Link from '../../Go';
+import Result from '../../Result';
 import Once from '../../Once';
 import { currentUser, invitationOf, requireUser } from '../../../lib/server';
 import SignOut from '../../SignOut';
@@ -59,7 +60,7 @@ export default async function Invitation({
     return (
       <main className="page narrow">
         <h1>This invitation is for someone else</h1>
-        {error && <p role="alert">{error}</p>}
+        {error && <Result alert>{error}</Result>}
         <p>
           This invitation is for {invitation.email}; you are signed in as {user.email}.
         </p>
@@ -70,7 +71,7 @@ export default async function Invitation({
   return (
     <main className="page narrow">
       <h1>Join &ldquo;{invitation.project}&rdquo;</h1>
-      {error && <p role="alert">{error}</p>}
+      {error && <Result alert>{error}</Result>}
       <p>
         You were invited as {invitation.role === 'editor' ? 'an' : 'a'} {invitation.role}. You are
         signed in as {user.email}.

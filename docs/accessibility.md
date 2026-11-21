@@ -29,7 +29,8 @@ Where this stands, what holds it there, and what nobody has checked yet.
   for someone who can only read, on a file long enough to scroll.
 - **One flow with the keyboard alone**: Tab into the visual editor, select words with Shift and
   the arrow keys, Tab to the comments, start a thread on the selection, go back to the toolbar,
-  show the caret's line in the PDF, and Tab to the PDF itself.
+  show the caret's line in the PDF (Shift+Tab to the toolbar, End, Enter), and Tab to the PDF
+  itself.
 
 - **A narrow window.** The same pages, and a drawn chart and the differences between two
   revisions, at 320 CSS pixels wide, which is what a 1280-pixel window becomes at 400% zoom:
@@ -73,6 +74,32 @@ Where this stands, what holds it there, and what nobody has checked yet.
   has the keyboard, and the next Tab is the next field of that form's part. Changing, saving,
   cancelling and deleting a comment, replying, and changing a proposal leave the keyboard in
   that part of the page.
+
+- **The toolbar is one Tab stop** (`keys.spec`). It is a `role="toolbar"` named "Editor tools",
+  with its three groups inside. Tab enters it on one button and leaves it; Left and Right move
+  along the 11 buttons and go round at the ends; Home and End go to the ends; it remembers the
+  button that was left, and still does when the Edit group goes (the source view has 3
+  buttons). Measured on the small paper: from the toolbar to the text 11 Tab presses, now 1;
+  from the top of the file's page to the text, without the skip link, 15, now 5.
+- **Ctrl+Home and Ctrl+End in the visual editor** (`keys.spec`) put the caret at the start of
+  the first text and the end of the last text, and with Shift select out to them. They did
+  nothing before: the paper starts and ends with drawn blocks (the preamble and
+  `\end{document}`), and the browser's own move to the start or end of the document found no
+  place for a caret. Checked with Ctrl in Chromium only; Cmd+Home on a Mac uses the same
+  binding, and Cmd+Up and Cmd+Down have not been tried.
+- **The other pages' refusal lines have the keyboard** (`keys.spec`): the checks before
+  submitting, a data file, a chart, the two renames and an invitation (both of its lines). This
+  was tried by loading the address a refusal returns to, with `?error=` on it, not by provoking
+  each refusal. The checks page and a chart that is waiting to be drawn reload themselves every
+  2 seconds; while the address carries `?error=`, the line takes the keyboard again each time.
+- **A formula is opened for editing with the keyboard** (`keys.spec`). With the caret before an
+  inline formula, Right selects it and Enter opens "Edit formula" on the LaTeX field; Apply puts
+  the keyboard back in the text. From the top of the test paper Right is pressed 5 or 6 times
+  (over the preamble, then the words). A display formula is selected by Down from the paragraph
+  above (1 to 4 presses in 12 runs, depending on where the caret was) and Enter opens it. The
+  browser stepped over an inline formula before: with the editor's selection one key behind,
+  Left and Right now bring it up to date first, as Enter, Backspace and Delete already did. 11 of
+  12 runs failed without that and 12 of 12 passed with it. Straight after Apply, five presses of Down did not reach the display formula; one press of Right first did.
 
 Other browser tests hold narrower things: composing text with an input method while someone
 else edits the same paragraph (`spike.spec`), switching views with the selection kept
@@ -146,21 +173,21 @@ client would. The paper was `fixtures/ieee-multifile`, a second person was invit
     the button or the heading, and the live line says "Comment changed.", "Reply sent.",
     "Comment deleted." or "Proposal changed.". A Reply, Save or Propose button that is waiting is
     `aria-disabled` and not `disabled`: Chromium took the keyboard off a disabled button.
+  - The toolbar is one Tab stop, reached with Shift+Tab from the text, and moved along with the
+    arrow keys, Home and End (11 Tab presses before, 1 now).
+  - The refusal lines of the checks, data, chart, rename and invitation pages take the keyboard
+    like the others.
+  - Right and Left could step over an inline formula without selecting it, so Enter did not
+    open it; they now do.
 - **Not changed.**
   - The visual view has no way to make or change a heading, by any means (the toolbar has
     Emphasise, Undo, Redo and the insert buttons). A heading is typed in the source view. This
     is a feature, not a fix.
-  - Editing an existing formula from the keyboard (Enter on a selected formula) was not
-    confirmed: the arrow keys selected a display formula and raw blocks in one run, and an inline
-    formula could not be reached the same way in the run that tried it.
   - Pressing Alt+T within about a tenth of a second of closing the table window with Escape did
     not open it once; slower, it did. Not reproduced since.
   - The same result twice in a row (Build pressed twice gives `?building=1` both times) does not
     take the keyboard again. Loading an address that still carries a result takes it again.
   - The 47 stops inside the Revisions table, from the name field to a row's ZIP link.
-  - The other pages' error lines (data, chart, submit, rename, invitations) are not yet
-    focused the same way.
-  - The toolbar has 11 buttons before the text, each a Tab stop.
 
 ## Status without colour
 
@@ -176,6 +203,8 @@ client would. The paper was `fixtures/ieee-multifile`, a second person was invit
 
 ## Not checked
 
+- **The toolbar with a screen reader.** Its role, name and groups are checked by the audit only;
+  nobody has listened to it.
 - **A real screen reader.** Nothing here has been listened to with NVDA, JAWS or VoiceOver. The
   audit checks names and roles; it does not check that what is announced makes sense, or that
   live regions speak at the right moments. This is the largest gap.
