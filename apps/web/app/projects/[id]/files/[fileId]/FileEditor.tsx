@@ -729,6 +729,8 @@ export default function FileEditor(props: {
       }
       pending.clear();
       waiting.clear();
+      // The awareness listener reaches the editor through this; provider.destroy() below fires it.
+      live.current = null;
       saving.destroy();
       visual?.destroy();
       view.destroy();
