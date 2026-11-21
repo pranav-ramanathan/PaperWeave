@@ -348,7 +348,14 @@ export async function listCharts(
             c.drawn_digest, c.caption, c.alt, f.path, f.digest, f.eol, f.bom, f.head_seq,
             (select count(*) from files k where k.project_id = c.project_id
                and k.path in ('charts/' || c.name || '.pdf', 'charts/' || c.name || '.png'))::int as kept,
-            (select max(r.created_at) from chart_requests r where r.project_id = c.project_id) as asked_at
+            (select max(r.created_at) from chart_requests r where r.project_id = c.project_id) as asked_at,
+            -- The data versions of every drawing whose two files are the ones now in the paper.
+            (select coalesce(array_agg(distinct d.record->'data'->>'sha256'), '{}')
+               from chart_draws d
+               join files fp on fp.project_id = c.project_id and fp.path = 'charts/' || c.name || '.pdf'
+               join files fg on fg.project_id = c.project_id and fg.path = 'charts/' || c.name || '.png'
+               where d.project_id = c.project_id and d.name = c.name
+                 and d.pdf_digest = fp.digest and d.png_digest = fg.digest) as shown_from
      from charts c left join files f on f.id = c.dataset_file_id
      where c.project_id = $1 order by c.name`,
     [projectId],
@@ -371,7 +378,14 @@ export async function listCharts(
       problem: r.problem,
       leftOut: r.left_out,
       drawnAt: r.drawn_at?.toISOString() ?? null,
-      stale: r.status === 'drawn' && versions.get(r.dataset_file_id) !== r.drawn_digest,
+      // Judged by the files in the paper, which a restore can change without the chart row: any
+      // drawing of those exact files made from the data as it is now means they are current.
+      // With no such drawing on record, by the row of the last drawing.
+      stale:
+        r.status === 'drawn' &&
+        (r.shown_from.length
+          ? !r.shown_from.includes(versions.get(r.dataset_file_id))
+          : versions.get(r.dataset_file_id) !== r.drawn_digest),
       waitingSince: r.status === 'queued' ? (r.asked_at?.toISOString() ?? null) : null,
       missing: r.drawn_at !== null && r.kept < 2,
       alt: r.alt,
