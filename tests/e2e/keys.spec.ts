@@ -6,7 +6,17 @@ import { mkdtempSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { writeZip } from '../../packages/server/src/archive';
-import { address, audit, person, run, showSource, signIn } from './helpers';
+import {
+  address,
+  audit,
+  emailedLink,
+  person,
+  run,
+  showSource,
+  showVisual,
+  signIn,
+  sourceText,
+} from './helpers';
 
 const MAIN = [
   '\\documentclass{article}',
@@ -171,10 +181,16 @@ test('the window for an equation takes what is typed straight after it opens', a
 });
 
 /** Sign in, import MAIN as a paper, and stay on the paper's page (or open its file). */
-async function paper(browser: Parameters<typeof person>[0], who: string, open = false) {
+async function paper(
+  browser: Parameters<typeof person>[0],
+  who: string,
+  open = false,
+  main = MAIN,
+  extra: { path: string; bytes: Buffer }[] = [],
+) {
   const { page, email } = await person(browser, who);
   const zip = join(mkdtempSync(join(tmpdir(), 'paperweave-e2e-')), `${who} ${run}.zip`);
-  writeFileSync(zip, await writeZip([{ path: 'main.tex', bytes: Buffer.from(MAIN) }]));
+  writeFileSync(zip, await writeZip([{ path: 'main.tex', bytes: Buffer.from(main) }, ...extra]));
   await page.goto('/sign-in');
   await signIn(page, email);
   await page.getByLabel('Or import a ZIP of a LaTeX project').setInputFiles(zip);
@@ -182,7 +198,7 @@ async function paper(browser: Parameters<typeof person>[0], who: string, open = 
   await page.waitForURL(/\/projects\/[^/]+$/);
   if (open) {
     await page.getByRole('link', { name: 'main.tex' }).first().click();
-    await expect(page.locator('.editor .visual .ProseMirror')).toContainText('Latency');
+    await expect(page.locator('.editor .visual .ProseMirror[contenteditable=true]')).toBeVisible();
   }
   return page;
 }
@@ -333,4 +349,165 @@ test('a comment is changed, replied to and deleted, and a proposal changed, with
   await expect
     .poll(() => focused(page))
     .toMatchObject({ name: 'Change the proposal', region: 'Proposed changes' });
+});
+
+test('the toolbar is one Tab stop, and the arrow keys move along it', async ({ browser }) => {
+  test.setTimeout(180_000);
+  const page = await paper(browser, 'keys-toolbar', true);
+  const bar = page.getByRole('toolbar', { name: 'Editor tools' });
+  await expect(bar.getByRole('button')).toHaveCount(11);
+  await expect(bar.locator('button[tabindex="0"]')).toHaveCount(1);
+
+  await tabTo(page, 'Visual');
+  expect(await tabTo(page, 'main.tex, visual editor')).toBe(1);
+  const name = async () => (await focused(page)).name;
+  const press = async (key: string) => {
+    await page.keyboard.press(key);
+    return name();
+  };
+  expect(await press('Shift+Tab')).toBe('Visual');
+  expect(await press('ArrowRight')).toBe('Source');
+  expect(await press('ArrowRight')).toBe('Emphasise');
+  expect(await press('End')).toBe('Show in PDF');
+  expect(await press('ArrowRight')).toBe('Visual');
+  expect(await press('ArrowLeft')).toBe('Show in PDF');
+  expect(await press('Home')).toBe('Visual');
+
+  // The stop is the button that was left.
+  for (let i = 0; i < 7; i++) await page.keyboard.press('ArrowRight');
+  expect(await name()).toBe('Equation');
+  expect(await press('Tab')).toBe('main.tex, visual editor');
+  expect(await press('Shift+Tab')).toBe('Equation');
+
+  await page.keyboard.press('Enter');
+  const insert = page.getByRole('dialog', { name: 'Insert an equation' });
+  await expect(insert).toBeVisible();
+  await page.keyboard.type('x');
+  await expect(insert.getByLabel('LaTeX')).toHaveValue('x');
+  await page.keyboard.press('Escape');
+  await expect.poll(name).toBe('main.tex, visual editor');
+
+  // The source view has three buttons, and the stop survives the Edit group going.
+  await page.keyboard.press('Shift+Tab');
+  await page.keyboard.press('Home');
+  await page.keyboard.press('ArrowRight');
+  await page.keyboard.press('Enter');
+  await expect.poll(name).toBe('LaTeX source of main.tex');
+  expect(await press('Shift+Tab')).toBe('Source');
+  expect(await press('End')).toBe('Show in PDF');
+  expect(await press('ArrowRight')).toBe('Visual');
+  await expect(bar.getByRole('button')).toHaveCount(3);
+  await audit(page, 'the file page with its toolbar');
+
+  await showVisual(page);
+  await page.goto(page.url().split('#')[0]);
+  await expect(page.locator('.editor .visual .ProseMirror[contenteditable=true]')).toBeVisible();
+  const top = await tabTo(page, 'main.tex, visual editor');
+  console.log(`Tab presses from the top of the file page to the text, skip link not used: ${top}`);
+});
+
+test("another page's refusal has the keyboard", async ({ browser }) => {
+  test.setTimeout(240_000);
+  const page = await paper(
+    browser,
+    'keys-err',
+    false,
+    MAIN.replace('\\section{Results}', '\\section{Results}\\label{sec:results}'),
+    [{ path: 'data.csv', bytes: Buffer.from('x,y\n1,2\n2,4\n3,6\n') }],
+  );
+  const id = /\/projects\/([^/?#]+)/.exec(page.url())![1];
+  const idOf = async (link: string) =>
+    /\/([^/?#]+)$/.exec((await page.locator(link).first().getAttribute('href'))!)![1];
+  const mainId = await idOf(`a[href^="/projects/${id}/files/"]`);
+  const csvId = await idOf(`a[href^="/projects/${id}/data/"]`);
+
+  const guest = address('keys-err-guest');
+  await page.getByLabel('Their email address').fill(guest);
+  await page.getByLabel('Their email address').press('Enter');
+  await expect(page.getByRole('status')).toHaveText(`Invitation sent to ${guest}.`);
+  const invite = new URL(await emailedLink(guest, '/invitations/')).pathname;
+
+  const taken = async (who: Page, path: string) => {
+    await who.goto(`${path}${path.includes('?') ? '&' : '?'}error=Tried`);
+    await expect(who.getByRole('alert').filter({ hasText: 'Tried' }), path).toBeVisible();
+    await expect.poll(() => focused(who), { message: path }).toMatchObject({ name: 'Tried' });
+  };
+  for (const path of [
+    `/projects/${id}/submit`,
+    `/projects/${id}/charts/new`,
+    `/projects/${id}/data/${csvId}`,
+    `/projects/${id}/files/${mainId}/rename?to=paper.tex`,
+    `/projects/${id}/labels/rename?from=sec:results&to=sec:res`,
+  ])
+    await taken(page, path);
+
+  // The invitation has two lines: for the person it is for, and for someone else.
+  for (const who of [guest, address('keys-err-other')]) {
+    const other = (await person(browser, who.split('@')[0].replace(`-${run}`, ''))).page;
+    await other.goto('/sign-in');
+    await signIn(other, who);
+    await taken(other, invite);
+  }
+});
+
+test('a formula is opened for editing with the keyboard', async ({ browser }) => {
+  test.setTimeout(180_000);
+  const page = await paper(
+    browser,
+    'keys-formula',
+    true,
+    [
+      '\\documentclass{article}',
+      '\\begin{document}',
+      'Let $T$ be the text.',
+      '',
+      '\\begin{equation}',
+      'a = b',
+      '\\end{equation}',
+      '\\end{document}',
+      '',
+    ].join('\n'),
+  );
+  await tabTo(page, 'main.tex, visual editor');
+  await page.keyboard.press('ControlOrMeta+Home');
+  // From the top, Right goes over the preamble and then the words; it stops on the formula.
+  const inline = page.locator('.editor .visual .ProseMirror-selectednode.pw-math:not(.pw-block)');
+  let rights = 0;
+  while (rights < 15 && !(await inline.count())) {
+    await page.keyboard.press('ArrowRight');
+    rights++;
+  }
+  await expect(inline).toHaveCount(1);
+  console.log(`ArrowRight presses from the top to the inline formula: ${rights}`);
+  await page.keyboard.press('Enter');
+  const dialog = page.getByRole('dialog', { name: 'Edit formula' });
+  await expect(dialog).toBeVisible();
+  const field = dialog.getByLabel('LaTeX');
+  await expect(field).toHaveValue('$T$');
+  await expect(field).toBeFocused();
+  await page.keyboard.press('ControlOrMeta+A');
+  await page.keyboard.type('$T_1$');
+  await tabTo(page, 'Apply');
+  await page.keyboard.press('Enter');
+  await expect(dialog).toBeHidden();
+  await expect.poll(async () => (await focused(page)).name).toBe('main.tex, visual editor');
+
+  // A display formula: down from the paragraph above selects it, and Enter opens it.
+  await page.keyboard.press('ArrowRight');
+  let downs = 0;
+  const selected = page.locator('.editor .visual .ProseMirror-selectednode.pw-math');
+  while (downs < 8 && !(await selected.count())) {
+    await page.keyboard.press('ArrowDown');
+    downs++;
+  }
+  await expect(selected).toHaveCount(1);
+  console.log(`ArrowDown presses from the paragraph to the display formula: ${downs}`);
+  await page.keyboard.press('Enter');
+  await expect(dialog).toBeVisible();
+  await expect(field).toHaveValue(/^\\begin\{equation\}/);
+  await page.keyboard.press('Escape');
+  await expect(dialog).toBeHidden();
+
+  await showSource(page);
+  expect(await sourceText(page)).toContain('Let $T_1$ be');
 });

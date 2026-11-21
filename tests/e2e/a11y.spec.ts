@@ -166,7 +166,9 @@ test('a thread is started and a line is shown in the PDF with the keyboard alone
   );
 
   // Back up to the toolbar: the caret's line is shown in the PDF, and the page says so.
-  await tabTo('Show in PDF', 'Shift+Tab');
+  await tabTo('Visual', 'Shift+Tab');
+  await page.keyboard.press('End');
+  await expect(page.getByRole('button', { name: 'Show in PDF' })).toBeFocused();
   await page.keyboard.press('Enter');
   await expect(page.locator('.build .pdf-said')).toHaveText('Shown on page 1 of the PDF.');
   // The PDF itself can be reached and scrolled from the keyboard.

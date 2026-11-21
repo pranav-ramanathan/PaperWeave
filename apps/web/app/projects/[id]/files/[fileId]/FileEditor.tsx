@@ -17,6 +17,7 @@ import { createVisual, type Visual } from '../../../../../lib/visual';
 import type { LanguageFinding, Proposal, Thread } from '@paperweave/server';
 import Language from './Language';
 import Proposals from './Proposals';
+import Toolbar from './Toolbar';
 import Threads, { type Member, type Stretch } from './Threads';
 import {
   CitationPicker,
@@ -794,7 +795,7 @@ export default function FileEditor(props: {
         </span>
       </div>
       {props.visual && (
-        <div className="toolbar">
+        <Toolbar label="Editor tools">
           <span role="group" aria-label="View">
             {(['visual', 'source'] as const).map((m) => (
               <button
@@ -855,7 +856,7 @@ export default function FileEditor(props: {
           <span className="note" aria-live="polite">
             {note}
           </span>
-        </div>
+        </Toolbar>
       )}
       <div id="text" tabIndex={-1}>
         <div className="visual" ref={visualHost} hidden={mode !== 'visual'} />
