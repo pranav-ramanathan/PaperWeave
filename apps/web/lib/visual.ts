@@ -834,7 +834,10 @@ export function createVisual(opts: {
       attributes: { 'aria-label': opts.label, role: 'textbox', 'aria-multiline': 'true' },
       // These keys act where the caret is on the screen, even straight after a caret key.
       handleKeyDown: (view, e) => {
-        if (!view.composing && (e.key === 'Enter' || e.key === 'Backspace' || e.key === 'Delete'))
+        if (
+          !view.composing &&
+          ['Enter', 'Backspace', 'Delete', 'ArrowLeft', 'ArrowRight'].includes(e.key)
+        )
           catchUp();
         return false;
       },
