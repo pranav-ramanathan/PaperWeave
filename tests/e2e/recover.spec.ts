@@ -931,9 +931,9 @@ for (const how of ['delete', 'remove'] as const) {
       'You no longer have access to this file, or it has been deleted.',
       { timeout: 30_000 },
     );
+    await expect(bodyTab.getByRole('button', { name: /Apply my edits/ })).toHaveCount(0);
     await expect(status(bodyTab)).toContainText('not saved');
     await expect(status(bodyTab)).not.toContainText('restored to an earlier revision');
-    await expect(bodyTab.getByRole('button', { name: /Apply my edits/ })).toHaveCount(0);
     // Locked, but what was typed can still be read and selected.
     await expect(source(bodyTab)).toHaveAttribute('contenteditable', 'false');
     await expect(source(bodyTab)).toContainText('% body typed offline');
