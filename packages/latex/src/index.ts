@@ -9,3 +9,4 @@ export * from './floats.ts';
 export * from './synctex.ts';
 export * from './prose.ts';
 export * from './escape.ts';
+export * from './latexmk.ts';

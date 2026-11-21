@@ -458,3 +458,26 @@ test('when BibTeX also found no \\bibdata or \\bibstyle, "cites nothing" is not 
     { severity: 'error', message: 'The paper has no \\bibliographystyle{\u2026}.' },
   ]);
 });
+
+test('a custom-dependency rule that failed says the glossary could not be made', () => {
+  // From a real build of \usepackage[xindy]{glossaries}, where xindy is not installed.
+  const output = [
+    "Run number 1 of rule 'cusdep glo gls main'",
+    'makeglossaries version 4.51 (2022-11-02)',
+    'sh: 1: xindy: not found',
+    'Latexmk: Errors, so I did not complete making targets',
+    'Collected error summary (may duplicate other messages):',
+    "  cusdep glo gls main: Command for 'cusdep glo gls main' gave return code 32512",
+    'Latexmk: Undoing directory change',
+    '',
+    '***Call to xindy failed***',
+    "Rule 'cusdep glo gls main', function 'pw_gls'",
+    '   failed with return code = 32512',
+  ].join('\n');
+  expect(diagnostics('(./main.tex)', output)).toEqual([
+    {
+      severity: 'error',
+      message: 'The glossary could not be made. The build log has the details.',
+    },
+  ]);
+});

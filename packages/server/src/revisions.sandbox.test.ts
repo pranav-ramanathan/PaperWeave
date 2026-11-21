@@ -5,6 +5,7 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterAll, beforeAll, expect, test } from 'vitest';
 import * as Y from 'yjs';
+import { LATEXMK_RULES } from '@paperweave/latex';
 import { readZip, writeZip } from './archive.ts';
 import { blobStore } from './blobs.ts';
 import { exportZip, importZip, listFiles } from './import.ts';
@@ -191,7 +192,7 @@ test('a revision never changes, and its export can say how to rebuild it', async
     image: null,
   });
   expect(manifest.command).toBe(
-    `SOURCE_DATE_EPOCH=${manifest.sourceDateEpoch} latexmk -norc -cd -pdf -no-shell-escape -bibtex-cond -interaction=nonstopmode main.tex`,
+    `SOURCE_DATE_EPOCH=${manifest.sourceDateEpoch} latexmk -norc -cd -pdf -no-shell-escape -bibtex-cond -interaction=nonstopmode -e '${LATEXMK_RULES}' main.tex`,
   );
   expect(Object.keys(manifest.files).sort()).toEqual(['body.tex', 'fig.png', 'main.tex']);
   // Without the manifest, the archive is the paper's files and nothing else.
