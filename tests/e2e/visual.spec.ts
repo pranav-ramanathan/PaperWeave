@@ -5,7 +5,18 @@ import { mkdtempSync, readdirSync, readFileSync, statSync, writeFileSync } from 
 import { tmpdir } from 'node:os';
 import { join, relative } from 'node:path';
 import { readZip, writeZip } from '../../packages/server/src/archive';
-import { clickAfter, dropOn, emailedLink, person, run, showSource, signIn } from './helpers';
+import {
+  audit,
+  clickAfter,
+  dropOn,
+  emailedLink,
+  person,
+  run,
+  showSource,
+  sourceText,
+  showVisual,
+  signIn,
+} from './helpers';
 
 const FIXTURE = join(import.meta.dirname, '../../fixtures/ieee-multifile');
 const VISUAL = '.editor .visual .ProseMirror';
@@ -99,9 +110,10 @@ test('visual edits reach the source through the server, byte for byte', async ({
 
   // Typing in the visual view arrives in the other person's source.
   await typeAfter(owner.page, VISUAL, 'opposite', ' and simpler');
-  await expect(editor.page.locator(SOURCE)).toContainText(
-    'takes the opposite and simpler approach',
-  );
+  // The owner's caret is drawn there too, with their name.
+  await expect
+    .poll(() => sourceText(editor.page))
+    .toContain('takes the opposite and simpler approach');
 
   // The owner goes offline and edits visually while the editor edits the same sentence in source.
   await owner.page.context().setOffline(true);
@@ -113,16 +125,16 @@ test('visual edits reach the source through the server, byte for byte', async ({
   await expect(status(owner.page)).toHaveText('All edits saved.', { timeout: 30_000 });
   const both = 'a splice (visual) of a few characters (source), ';
   await expect(owner.page.locator(VISUAL)).toContainText(both);
-  await expect(editor.page.locator(SOURCE)).toContainText(both);
+  await expect.poll(() => sourceText(editor.page)).toContain(both);
 
   // Emphasis is a structural edit: the server checks and makes it, and it can be undone.
   await pick(owner.page, VISUAL, 'Reviewers');
   await owner.page.getByRole('button', { name: 'Emphasise' }).click();
-  await expect(editor.page.locator(SOURCE)).toContainText('\\emph{Reviewers} then see');
+  await expect.poll(() => sourceText(editor.page)).toContain('\\emph{Reviewers} then see');
   await expect(owner.page.locator(`${VISUAL} em`, { hasText: 'Reviewers' })).toBeVisible();
   await owner.page.getByRole('button', { name: 'Undo' }).click();
-  await expect(editor.page.locator(SOURCE)).not.toContainText('\\emph{Reviewers}');
-  await expect(editor.page.locator(SOURCE)).toContainText(both);
+  await expect.poll(() => sourceText(editor.page)).not.toContain('\\emph{Reviewers}');
+  await expect.poll(() => sourceText(editor.page)).toContain(both);
 
   // Switching views carries the selection across, both ways.
   await pick(owner.page, VISUAL, 'organised');
@@ -521,4 +533,115 @@ test('the ordinary keys', async ({ browser }) => {
   await page.keyboard.type('NEW');
   await expect(page.locator(VISUAL)).toContainText('NEW');
   expect(await text()).toMatch(/deltaend\.\s*\n\s*\nNEW/);
+});
+
+/** The text of the caret's paragraph up to where another person's caret is drawn. */
+const textBeforeCaret = (page: Page, name: string) =>
+  page.evaluate((n) => {
+    const caret = [...document.querySelectorAll('.visual .remote-caret')].find(
+      (e) => e.getAttribute('data-name') === n,
+    );
+    const p = caret?.closest('p');
+    if (!caret || !p) return null;
+    const range = document.createRange();
+    range.setStart(p, 0);
+    range.setEnd(caret.parentNode!, [...caret.parentNode!.childNodes].indexOf(caret as ChildNode));
+    return range.toString();
+  }, name);
+const caretOf = (page: Page, name: string) =>
+  page.locator(`.visual .remote-caret[data-name="${name}"]`);
+
+test('each person sees where the other is, in either view', async ({ browser }) => {
+  const owner = await person(browser, 'car-owner');
+  const editor = await person(browser, 'car-editor');
+  const reviewer = await person(browser, 'car-reviewer');
+  const main = [
+    '\\documentclass{article}',
+    '\\begin{document}',
+    'Latency stays below forty milliseconds for the opposite approach to scaling.',
+    '\\end{document}',
+    '',
+  ].join('\n');
+  const zip = join(mkdtempSync(join(tmpdir(), 'paperweave-e2e-')), `Carets ${run}.zip`);
+  writeFileSync(zip, await writeZip([{ path: 'main.tex', bytes: Buffer.from(main) }]));
+  await owner.page.goto('/sign-in');
+  await signIn(owner.page, owner.email);
+  await owner.page.getByLabel('Or import a ZIP of a LaTeX project').setInputFiles(zip);
+  await owner.page.getByRole('button', { name: 'Import ZIP' }).click();
+  await expect(owner.page.getByRole('heading', { name: `Carets ${run}` })).toBeVisible();
+  for (const [who, role] of [
+    [editor, 'editor'],
+    [reviewer, 'reviewer'],
+  ] as const) {
+    await owner.page.getByLabel('Their email address').fill(who.email);
+    await owner.page.getByLabel('Their role').selectOption(role);
+    await owner.page.getByRole('button', { name: 'Send invitation' }).click();
+    await expect(owner.page.getByRole('status')).toContainText(who.email);
+    await who.page.goto(await emailedLink(who.email, '/invitations/'));
+    await signIn(who.page, who.email);
+    await who.page.getByRole('button', { name: 'Join this paper' }).click();
+    await expect(
+      who.page.getByText(`You are ${role === 'editor' ? 'an' : 'a'} ${role}`),
+    ).toBeVisible();
+  }
+  await owner.page.getByRole('link', { name: 'main.tex' }).first().click();
+  await expect(status(owner.page)).toHaveText('All edits saved.');
+  await editor.page.goto(owner.page.url());
+  await expect(editor.page.locator(VISUAL)).toContainText('opposite approach');
+  await expect(status(editor.page)).toHaveText('All edits saved.');
+
+  // Both in the visual view: the owner's caret is drawn where it is, with the owner's name.
+  await clickAfter(owner.page, VISUAL, 'opposite');
+  await expect(caretOf(editor.page, owner.email)).toBeVisible();
+  await expect
+    .poll(() => textBeforeCaret(editor.page, owner.email))
+    .toMatch(/^Latency .* the opposite$/);
+
+  // It stays where it is when someone types before it, and follows the owner's keys.
+  await typeAfter(editor.page, VISUAL, 'Latency', ' Zed');
+  await expect(owner.page.locator(VISUAL)).toContainText('Latency Zed stays');
+  await expect
+    .poll(() => textBeforeCaret(editor.page, owner.email))
+    .toMatch(/^Latency Zed .* opposite$/);
+  for (let i = 0; i < 3; i++) await owner.page.keyboard.press('ArrowRight');
+  await expect
+    .poll(() => textBeforeCaret(editor.page, owner.email))
+    .toMatch(/^Latency Zed .* opposite ap$/);
+
+  // The name is drawn, not written in the text: it is not read, selected or copied.
+  await expect(editor.page.locator(VISUAL)).not.toContainText(owner.email);
+  await pick(editor.page, VISUAL, 'scaling');
+  expect(await selected(editor.page)).toBe('scaling');
+  // Nor is it in a selection reaching across the caret.
+  const across = await editor.page.evaluate(() => {
+    const p = document.querySelector('.visual .ProseMirror p')!;
+    getSelection()!.selectAllChildren(p);
+    return getSelection()!.toString();
+  });
+  expect(across).toContain('the opposite approach');
+  expect(across).not.toContain(owner.email);
+
+  // Across views: the owner's caret shows in the editor's source, and the editor's in the
+  // owner's visual view.
+  await showSource(editor.page);
+  await expect(editor.page.locator('.editor .cm-ySelectionCaret')).toHaveCount(1);
+  await pick(editor.page, SOURCE, 'milliseconds');
+  await expect(caretOf(owner.page, editor.email)).toBeVisible();
+  await expect(owner.page.locator('.visual .remote-selection').first()).toHaveText('milliseconds');
+
+  // The owner's selection is shown to the editor in the visual view.
+  await showVisual(editor.page);
+  await pick(owner.page, VISUAL, 'forty');
+  await expect(editor.page.locator('.visual .remote-selection').first()).toHaveText('forty');
+
+  // A reviewer sees it too, and the page is still accessible with a caret drawn.
+  await reviewer.page.goto(owner.page.url());
+  await expect(caretOf(reviewer.page, owner.email)).toBeVisible();
+  await expect.poll(() => textBeforeCaret(reviewer.page, owner.email)).toMatch(/forty$/);
+  await audit(editor.page, "visual view with another person's caret");
+
+  // When the owner leaves, the caret goes.
+  await owner.page.close();
+  await expect(caretOf(editor.page, owner.email)).toHaveCount(0, { timeout: 30_000 });
+  await expect(caretOf(reviewer.page, owner.email)).toHaveCount(0);
 });

@@ -120,6 +120,10 @@ export function createVisual(opts: {
    * and `y` are where on the page; `formula` is set when it was asked for on a formula.
    */
   menu?(at: { x: number; y: number; formula?: () => void }): void;
+  /** The person's caret moved, or the text changed under it, while the editor had focus (source offsets). */
+  moved?(anchor: number, head: number): void;
+  /** Other people's carets, as source offsets, computed fresh on each call. */
+  carets?(): { from: number; to: number; head: number; name: string; color: string }[];
 }) {
   const { undo, say } = opts;
   // eslint-disable-next-line prefer-const -- the editor's plugins need the bridge, which needs the editor's schema
@@ -711,6 +715,52 @@ export function createVisual(opts: {
               },
             },
           }),
+          // Where the other people are: a caret with their name, and their selection.
+          new Plugin({
+            props: {
+              decorations: (state) => {
+                const others = bridge && opts.carets?.();
+                if (!bridge || !others?.length) return null;
+                const size = state.doc.content.size;
+                const at = (off: number) => Math.min(size, fromSrc(bridge.model, state.doc, off));
+                return DecorationSet.create(
+                  state.doc,
+                  others.flatMap((c) => {
+                    const pos = at(c.head);
+                    // Not in running text (the preamble, say): nowhere to draw it.
+                    if (!state.doc.resolve(pos).parent.inlineContent) return [];
+                    const out = [
+                      Decoration.widget(
+                        pos,
+                        () => {
+                          // No text node: the name is drawn by the stylesheet, so that it is not
+                          // in the text that is read, selected or copied.
+                          const e = document.createElement('span');
+                          e.className = 'remote-caret';
+                          e.setAttribute('aria-hidden', 'true');
+                          e.contentEditable = 'false';
+                          e.setAttribute('data-name', c.name);
+                          e.style.borderColor = c.color;
+                          e.style.setProperty('--c', c.color);
+                          return e;
+                        },
+                        { key: c.name + c.color, side: -1, ignoreSelection: true },
+                      ),
+                    ];
+                    const [from, to] = [at(c.from), at(c.to)];
+                    if (to > from)
+                      out.push(
+                        Decoration.inline(from, to, {
+                          class: 'remote-selection',
+                          style: `background-color:${c.color}33`,
+                        }),
+                      );
+                    return out;
+                  }),
+                );
+              },
+            },
+          }),
         ],
         onTransaction: ({ transaction }) => {
           // Not the bridge's own (remote updates and server answers come in as 'projection'), nor
@@ -724,6 +774,17 @@ export function createVisual(opts: {
           // An edit going through is the answer to any note about the last refused one.
           if (transaction.docChanged && !transaction.getMeta('projection')) say('');
           bridge?.applied(transaction);
+          if (
+            bridge &&
+            (transaction.selectionSet || transaction.docChanged) &&
+            editor.view.hasFocus()
+          ) {
+            const { anchor, head } = transaction.selection;
+            opts.moved?.(
+              toSrc(bridge.model, transaction.doc, anchor, -1),
+              toSrc(bridge.model, transaction.doc, head, -1),
+            );
+          }
         },
         addKeyboardShortcuts: () => ({
           'Mod-z': ({ editor: e }) => {
@@ -884,6 +945,11 @@ export function createVisual(opts: {
       marked = ranges;
       // Nothing changes but what is drawn.
       editor.view.dispatch(editor.state.tr.setMeta('marks', true));
+    },
+    /** Draw other people's carets again, as they are now. */
+    redrawCarets() {
+      // Nothing changes but what is drawn.
+      editor.view.dispatch(editor.state.tr.setMeta('carets', true));
     },
     /** Where a place in the visual document is in the source text. */
     toSource: (pos: number, side: -1 | 1) => toSrc(bridge.model, editor.state.doc, pos, side),

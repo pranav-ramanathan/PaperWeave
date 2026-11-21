@@ -397,7 +397,10 @@ export default function FileEditor(props: {
           .map(([, s]) => s.user?.name)
           .filter((n): n is string => typeof n === 'string'),
       );
-    awareness.on('change', seen);
+    awareness.on('change', () => {
+      seen();
+      live.current?.visual?.redrawCarets();
+    });
 
     // One undo history per person, for both views: undo never takes back someone else's edit.
     const undo = new Y.UndoManager(text);
@@ -509,6 +512,48 @@ export default function FileEditor(props: {
           editMath: (src, apply) => setFormula({ src, place: null, apply }),
           ask: (what) => asks.current[what](),
           menu: setMenu,
+          // The source editor publishes the caret only while it has focus; this is the same
+          // field, from the visual view.
+          moved: (a, h) => {
+            const cursor = awareness.getLocalState()?.cursor;
+            const anchor = Y.createRelativePositionFromTypeIndex(text, a);
+            const head = Y.createRelativePositionFromTypeIndex(text, h);
+            if (
+              cursor?.anchor &&
+              cursor.head &&
+              Y.compareRelativePositions(Y.createRelativePositionFromJSON(cursor.anchor), anchor) &&
+              Y.compareRelativePositions(Y.createRelativePositionFromJSON(cursor.head), head)
+            )
+              return;
+            awareness.setLocalStateField('cursor', {
+              anchor: Y.relativePositionToJSON(anchor),
+              head: Y.relativePositionToJSON(head),
+            });
+          },
+          carets: () =>
+            [...awareness.getStates()].flatMap(([id, s]) => {
+              if (id === doc.clientID || !s.cursor?.anchor || !s.cursor.head) return [];
+              try {
+                const at = (r: unknown) => {
+                  const p = Y.createAbsolutePositionFromRelativePosition(
+                    Y.createRelativePositionFromJSON(r),
+                    doc,
+                  );
+                  return p && p.type === text ? p.index : null;
+                };
+                const [a, h] = [at(s.cursor.anchor), at(s.cursor.head)];
+                if (a == null || h == null) return [];
+                // Names and colours come from the other person's browser: unverified.
+                const name = typeof s.user?.name === 'string' ? s.user.name.slice(0, 80) : '';
+                const color =
+                  typeof s.user?.color === 'string' && /^#[0-9a-f]{6}$/i.test(s.user.color)
+                    ? s.user.color
+                    : COLOURS[0];
+                return [{ from: Math.min(a, h), to: Math.max(a, h), head: h, name, color }];
+              } catch {
+                return [];
+              }
+            }),
         })
       : null;
     // Like the source view, shut until the file has arrived.

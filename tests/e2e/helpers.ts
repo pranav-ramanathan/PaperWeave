@@ -117,6 +117,16 @@ export const caretLine = (page: Page) =>
   });
 
 /** On a file's page, switch to the LaTeX source view. The choice is remembered by the browser. */
+/**
+ * The text of the source editor without other people's carets: the editor draws each one with
+ * the person's name as text, in among the words.
+ */
+export const sourceText = (page: Page) =>
+  page.locator('.editor .cm-content').evaluate((el) => {
+    const copy = el.cloneNode(true) as HTMLElement;
+    for (const caret of copy.querySelectorAll('.cm-ySelectionCaret')) caret.remove();
+    return copy.textContent ?? '';
+  });
 export const showSource = (page: Page) =>
   page.getByRole('group', { name: 'View' }).getByRole('button', { name: 'Source' }).click();
 

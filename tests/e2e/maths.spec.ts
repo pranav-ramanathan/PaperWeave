@@ -5,7 +5,7 @@ import { mkdtempSync, readdirSync, readFileSync, statSync, writeFileSync } from 
 import { tmpdir } from 'node:os';
 import { join, relative } from 'node:path';
 import { readZip, writeZip } from '../../packages/server/src/archive';
-import { person, run, showSource, showVisual, signIn } from './helpers';
+import { person, run, showSource, showVisual, signIn, sourceText } from './helpers';
 
 const FIXTURE = join(import.meta.dirname, '../../fixtures/ieee-multifile');
 const VISUAL = '.editor .visual .ProseMirror';
@@ -57,7 +57,8 @@ test('a formula is edited in place, with a preview, and without overwriting anyo
   await expect(box).toContainText('This cannot be drawn here');
   await box.getByRole('button', { name: 'Apply' }).click();
   await expect(box).toBeHidden();
-  await expect(source(other)).toContainText('Let $T_0 \\in \\RR$ be the source text');
+  // The other person's caret is drawn there too, with their name.
+  await expect.poll(() => sourceText(other)).toContain('Let $T_0 \\in \\RR$ be the source text');
   await expect(inline).toHaveClass(/pw-raw/);
 
   // Once the paper defines the macro, the formula is drawn.
