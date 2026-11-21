@@ -94,7 +94,7 @@ Where this stands, what holds it there, and what nobody has checked yet.
   2 seconds; while the address carries `?error=`, the line takes the keyboard again each time.
 - **A formula is opened for editing with the keyboard** (`keys.spec`). With the caret before an
   inline formula, Right selects it and Enter opens "Edit formula" on the LaTeX field; Apply puts
-  the keyboard back in the text. From the top of the test paper Right is pressed 5 or 6 times
+  the keyboard back in the text. Enter opens any selected inline atom the same way (a citation, a reference, a footnote, other raw LaTeX), as "Edit citation", "Edit reference", "Edit footnote" or "Edit LaTeX". From the top of the test paper Right is pressed 5 or 6 times
   (over the preamble, then the words). A display formula is selected by Down from the paragraph
   above (1 to 4 presses in 12 runs, depending on where the caret was) and Enter opens it. The
   browser stepped over an inline formula before: with the editor's selection one key behind,

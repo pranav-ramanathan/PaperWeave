@@ -1,5 +1,5 @@
 import { floatParts } from '../../latex/src/floats.ts';
-import { fragment, rng } from '../../latex/src/testutil.ts';
+import { fragment, rng, soup } from '../../latex/src/testutil.ts';
 import { NodeSelection, TextSelection } from '@tiptap/pm/state';
 import { expect, test } from 'vitest';
 import * as Y from 'yjs';
@@ -586,4 +586,139 @@ test('Backspace at the start of a paragraph after a heading does nothing and say
   r.select(body.start - 3, body.start);
   expect(r.dispatch(r.state.tr.delete(body.start - 3, body.start))).toBe(false);
   expect(refused).toBe(1);
+});
+
+/** The inline atoms of a replica, with where each is. */
+function inlineAtoms(r: ReturnType<typeof replica>) {
+  const found: { pos: number; src: string; type: string }[] = [];
+  r.state.doc.descendants((node, pos) => {
+    if (node.isAtom && node.isInline && typeof node.attrs.src === 'string' && node.attrs.src)
+      found.push({ pos, src: node.attrs.src, type: node.type.name });
+  });
+  return found;
+}
+function rewrite(r: ReturnType<typeof replica>, old: string, now: string) {
+  const a = inlineAtoms(r).find((x) => x.src === old)!;
+  expect(a, old).toBeDefined();
+  const c = r.bridge.atomCommand(r.state, a.pos, old)!;
+  const out = r.bridge.rewriteCommand(c, now);
+  return { c, out };
+}
+
+test('an inline atom is rewritten to exactly the new bytes, or the rewrite is refused', () => {
+  const doc =
+    'See \\citep{a} here.\\footnote{Old note.} Use {\\bf x} and \\sys{}x now.\n\\newcommand{\\sys}{S}\n';
+  const accepted: [string, string][] = [
+    ['\\citep{a}', '\\citep[p.~3]{a,b}'],
+    ['\\footnote{Old note.}', '\\footnote{New \\emph{note}.}'],
+    ['{\\bf x}', '\\textbf{x}'],
+  ];
+  for (const [old, now] of accepted) {
+    const r = replica(doc);
+    const before = r.src;
+    const { out } = rewrite(r, old, now);
+    expect(typeof out, old).toBe('object');
+    expect(r.bridge.applyCommand(out as never)).toBe('applied');
+    expect(r.src).toBe(before.replace(old, now));
+    r.check();
+  }
+  const refused: [string, string][] = [
+    ['\\footnote{Old note.}', '\\footnote{x'],
+    ['\\footnote{Old note.}', 'a\n\nb'],
+    ['\\citep{a}', '\\citep{a} %'],
+    ['\\sys{}', '\\sys'],
+    ['\\citep{a}', '\\begin{equation}x\\end{equation}'],
+  ];
+  for (const [old, now] of refused) {
+    const r = replica(doc);
+    const before = r.src;
+    expect(rewrite(r, old, now).out, `${old} -> ${now}`).toBe('spills');
+    expect(r.src).toBe(before);
+  }
+  // A macro definition is never rewritten, not even to what it says already.
+  const r = replica(doc);
+  const def = r.src.match(/\\newcommand\{\\sys\}\{S\}/)![0];
+  const found = inlineAtoms(r).find((x) => x.src.startsWith('\\newcommand'));
+  if (found) {
+    const c = r.bridge.atomCommand(r.state, found.pos, def)!;
+    expect(r.bridge.rewriteCommand(c, def)).toBe('spills');
+    expect(r.bridge.rewriteCommand(c, 'x')).toBe('spills');
+  }
+  // An atom that changed after the command was built is a conflict.
+  const s = replica(doc);
+  const { c } = rewrite(s, '\\citep{a}', '\\citep{a}');
+  s.ytext.insert(s.src.indexOf('{a}') + 1, 'z');
+  expect(s.bridge.rewriteCommand(c, '\\citep{b}')).toBe('conflict');
+});
+
+test('every inline atom of every fixture can be rewritten to what it already says', () => {
+  let n = 0;
+  for (const [path, text] of Object.entries(fixtures)) {
+    const r = replica(text);
+    for (const a of inlineAtoms(r)) {
+      const c = r.bridge.atomCommand(r.state, a.pos, a.src)!;
+      const out = r.bridge.rewriteCommand(c, a.src);
+      // Definitions are the one kind refused, and they are not drawn as chips to open.
+      if (
+        out === 'spills' &&
+        /^\\(?:newcommand|renewcommand|providecommand|DeclareRobustCommand|newenvironment|renewenvironment|def|gdef|edef|xdef|let|newtheorem|DeclareMathOperator)\b/.test(
+          a.src,
+        )
+      )
+        continue;
+      expect(typeof out, `${path}: ${a.src.slice(0, 40)}`).toBe('object');
+      n++;
+    }
+  }
+  expect(n).toBeGreaterThan(20);
+});
+
+test(`${N} rewrites of an inline atom change its bytes and nothing else, or are refused`, () => {
+  const paths = Object.keys(fixtures);
+  let yes = 0;
+  let no = 0;
+  for (let seed = 0, done = 0; done < N; seed++) {
+    const r = rng(seed);
+    const rep = replica(fixtures[paths[seed % paths.length]]);
+    const atoms = inlineAtoms(rep);
+    if (!atoms.length) continue;
+    for (let step = 0; step < 8 && done < N && atoms.length; step++, done++) {
+      const a = r.pick(atoms);
+      const was = rep.src;
+      const cps = Array.from(a.src);
+      const [x, y] = [r.int(cps.length + 1), r.int(cps.length + 1)].sort((u, v) => u - v);
+      const mutate = cps.slice(0, x).join('') + soup(r, r.int(3)) + cps.slice(y).join('');
+      const now = r.int(2) ? soup(r, 1 + r.int(4)) : mutate;
+      const where = `seed ${seed} step ${step}: ${JSON.stringify(a.src)} -> ${JSON.stringify(now)}`;
+      try {
+        const c = rep.bridge.atomCommand(rep.state, a.pos, a.src);
+        if (!c) {
+          // The atoms were listed before an earlier rewrite moved them: list again.
+          atoms.splice(0, atoms.length, ...inlineAtoms(rep));
+          done--;
+          continue;
+        }
+        const out = rep.bridge.rewriteCommand(c, now);
+        if (out === 'spills' || out === 'conflict') {
+          expect(rep.src, where).toBe(was);
+          no++;
+          continue;
+        }
+        expect(rep.bridge.applyCommand(out)).toBe('applied');
+        yes++;
+        // The bytes before and after the atom are as they were.
+        const at = Y.createAbsolutePositionFromRelativePosition(c.from, rep.ydoc)!.index;
+        expect(rep.src.slice(0, at), where).toBe(was.slice(0, at));
+        expect(rep.src.slice(at + now.length), where).toBe(was.slice(at + a.src.length));
+        expect(rep.src.slice(at, at + now.length), where).toBe(now);
+        rep.check();
+        atoms.splice(0, atoms.length, ...inlineAtoms(rep));
+      } catch (err) {
+        throw new Error(`${where}: ${(err as Error).message}`, { cause: err });
+      }
+    }
+  }
+  console.log(`atom rewrite fuzz: ${yes} accepted, ${no} refused of ${yes + no}`);
+  expect(yes).toBeGreaterThan(N / 100);
+  expect(no).toBeGreaterThan(N / 100);
 });
