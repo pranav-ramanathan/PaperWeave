@@ -66,6 +66,17 @@ test('T1 without lmodern uses outline fonts, not generated bitmaps', async () =>
   expect(r.log).not.toMatch(/mktexpk|\.\d+pk\b/);
 });
 
+test('T1 text symbols with font expansion use outline fonts too', async () => {
+  // \textbullet and \texteuro are TS1 text-companion symbols; their fonts exist as outlines only
+  // in the full cm-super. microtype expands fonts, which a generated bitmap cannot do.
+  const { r } = await buildSource(
+    '\\documentclass{article}\n\\usepackage[T1]{fontenc}\n\\usepackage{textcomp}\n\\usepackage{microtype}\n\\begin{document}\n\\small \\textbullet{} \\texteuro{} \\textregistered\n\\end{document}\n',
+  );
+  expect(r.diagnostics.filter((d) => d.severity === 'error')).toEqual([]);
+  expect(r.ok).toBe(true);
+  expect(r.log).not.toMatch(/mktexpk|\.\d+pk\b/);
+});
+
 test.each([
   ['ngerman', '', 'Gr\\"u\\ss{}e aus M\\"unchen'],
   ['french', '\\usepackage[T1]{fontenc}', "Voil\\`a un \\'et\\'e fran\\c{c}ais~!"],
