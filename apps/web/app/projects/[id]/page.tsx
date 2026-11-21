@@ -153,7 +153,7 @@ async function Project({
   const note = (path: string, readonly: string | null) => {
     const f = about.get(path);
     if (readonly === 'binary') return '';
-    if (readonly === 'not-utf8') return 'Not UTF-8: kept as it is, cannot be edited here';
+    if (readonly === 'not-utf8') return 'Not UTF-8 text: kept as it is, cannot be edited here';
     if (readonly === 'mixed-newlines')
       return 'Mixed line endings: kept as it is, cannot be edited here';
     if (f?.sourceOnly) return 'Definitions: edited in source only';
