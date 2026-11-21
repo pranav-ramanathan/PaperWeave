@@ -44,12 +44,17 @@ A paper's page with 5,000 revisions, in a browser, measured once by hand: 183 KB
 quarter of a second. Before the list of revisions was limited to the newest fifty automatic
 ones and those people named: 15.8 MB and 8.4 s (1.6 MB and 0.9 s with 500).
 
+A PDF read through in the pane, in a browser at a pixel ratio of 2, measured once by hand
+with a window of 1440 x 900: 30 pages held 230 MB of canvases and 120 pages 920 MB, since every
+page read kept its picture. Now a page that leaves the window lets go of its picture: 15 MB
+for either (two pages).
+
 ## Not measured
 
 - Many files open at once on one sync server. (Many people in one file is held by a test,
   `sync.sandbox.test`: thirty connections making 600 edits to one file were all saved and
   agreed in about a second, with nothing lost. It is a test of nothing being lost, with a
   loose limit on time, not a measurement of how many people a server can carry.)
-- Papers much larger than the fixtures: hundreds of files, or a hundred pages.
+- Papers much larger than the fixtures: hundreds of files, or the build time of a hundred pages and typing in such a paper.
 - Anything over a real network. Everything here ran on one machine.
 - A build queue under load: one worker built one paper at a time here.
