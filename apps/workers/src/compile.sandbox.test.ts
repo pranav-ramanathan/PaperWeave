@@ -129,6 +129,52 @@ test.each([
   expect(readFileSync(join(out, r.pdf!)).subarray(0, 5).toString()).toBe('%PDF-');
 });
 
+// Packages and fonts that live in texlive-fonts-extra.
+test.each([
+  ['inconsolata', '\\usepackage{inconsolata}', '\\texttt{x}'],
+  ['bbm', '\\usepackage{bbm}', '$\\mathbbm{1}$'],
+  ['dsfont', '\\usepackage{dsfont}', '$\\mathds{1}$'],
+  ['newtxtext and newtxmath', '\\usepackage{newtxtext,newtxmath}', 'x $x^2$'],
+  ['libertine', '\\usepackage{libertine}', 'x'],
+  ['fontawesome5', '\\usepackage{fontawesome5}', '\\faGithub'],
+  ['mathabx', '\\usepackage{mathabx}', '$x \\leq y$'],
+  ['bbold', '\\usepackage{bbold}', '$\\mathbb{1}$'],
+])('%s builds', async (_name, pre, body) => {
+  const { r, out } = await buildSource(
+    `\\documentclass{article}\n${pre}\n\\begin{document}\n${body}\n\\end{document}\n`,
+  );
+  expect(r.diagnostics.filter((d) => d.severity === 'error')).toEqual([]);
+  expect(r.ok).toBe(true);
+  expect(readFileSync(join(out, r.pdf!)).subarray(0, 5).toString()).toBe('%PDF-');
+});
+
+// Fonts loaded by name, which XeLaTeX finds through fontconfig and LuaLaTeX through its own
+// font-name database, built in a temporary texmf-var on every build.
+test.each(['xelatex', 'lualatex'] as const)('%s loads Libertinus Serif by name', async (engine) => {
+  const project = tmp();
+  writeFileSync(
+    join(project, 'main.tex'),
+    '\\documentclass{article}\n\\usepackage{fontspec}\n\\setmainfont{Libertinus Serif}\n\\begin{document}\nx\n\\end{document}\n',
+  );
+  const out = tmp();
+  const t0 = Date.now();
+  const r = await compile(project, 'main.tex', out, 60, engine);
+  console.log(`${engine} build took ${Date.now() - t0} ms`);
+  expect(r.diagnostics.filter((d) => d.severity === 'error')).toEqual([]);
+  expect(r.timedOut).toBeFalsy();
+  expect(r.ok).toBe(true);
+  expect(readFileSync(join(out, r.pdf!)).subarray(0, 5).toString()).toBe('%PDF-');
+});
+
+test.runIf(havePdfinfo)('acmart sigconf sets text in Libertine, not Computer Modern', async () => {
+  const { r, out } = await buildSource(
+    '\\documentclass[sigconf,nonacm]{acmart}\n\\begin{document}\n\\title{T}\n\\maketitle\nSome text.\n\\end{document}\n',
+  );
+  expect(r.ok).toBe(true);
+  const fonts = execFileSync('pdffonts', [join(out, r.pdf!)], { encoding: 'utf8' });
+  expect(fonts).toMatch(/Libertine/i);
+});
+
 test('aastex631 builds', async () => {
   const { r, out } = await buildSource(
     '\\documentclass{aastex631}\n\\begin{document}\n\\title{T}\nx\n\\end{document}\n',
