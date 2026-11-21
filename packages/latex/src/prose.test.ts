@@ -97,3 +97,45 @@ test('only running text is prose; code, keys, formulas and commands are never to
     inProse(prose(broken).segments, broken.indexOf('the') + 3, broken.indexOf('the') + 4),
   ).toBe(false);
 });
+
+/** Whether any character of `words` in `src` is prose. */
+const proseIn = (src: string, words: string) => {
+  const at = src.indexOf(words);
+  return prose(src).segments.some((s) => s.kind === 'text' && s.from < at + words.length && s.to > at);
+};
+
+test('a biblatex multicite is one citation, to its last group', () => {
+  const src = 'We agree \\autocites[see][12]{a}[adn compare][15]{b} on this.';
+  expect(proseIn(src, 'adn')).toBe(false);
+  expect(inProse(prose(src).segments, src.indexOf('adn'), src.indexOf('adn') + 3)).toBe(false);
+  expect(proseIn(src, '\\autocites[see][12]{a}[adn compare][15]{b}')).toBe(false);
+  expect(kindOf(src, 'We agree')).toBe('text');
+  expect(kindOf(src, 'on this')).toBe('text');
+});
+
+test('a multicite with global notes in parentheses has no prose inside', () => {
+  const src = 'Yes \\parencites(global adn)(post)[a][b]{x}[c][d]{y} indeed.';
+  expect(proseIn(src, '\\parencites(global adn)(post)[a][b]{x}[c][d]{y}')).toBe(false);
+  expect(kindOf(src, 'indeed')).toBe('text');
+});
+
+test('whitespace between a citation command and its arguments is part of the citation', () => {
+  const src = 'See \\cite [p] {k} here.';
+  expect(proseIn(src, '\\cite [p] {k}')).toBe(false);
+  expect(kindOf(src, 'See')).toBe('text');
+  expect(kindOf(src, 'here')).toBe('text');
+});
+
+test('an angle-bracket note of a citation is not prose', () => {
+  const src = 'See \\cite<adn>{k} here.';
+  expect(proseIn(src, '\\cite<adn>{k}')).toBe(false);
+  expect(kindOf(src, 'here')).toBe('text');
+});
+
+test('a plain citation with a note and the text around it read as before', () => {
+  const src = 'Known work \\cite[p. 3]{k} says so.';
+  expect(proseIn(src, '\\cite[p. 3]{k}')).toBe(false);
+  expect(kindOf(src, 'Known work')).toBe('text');
+  expect(kindOf(src, 'says so')).toBe('text');
+  expect(read(src).trim()).toBe('Known work [1] says so.');
+});
