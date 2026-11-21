@@ -30,6 +30,7 @@ import {
   modelProcessing,
 } from '@paperweave/server';
 import Link from '../../Go';
+import Result from '../../Result';
 import { notFound } from 'next/navigation';
 import { blobs, db, requireUser } from '../../../lib/server';
 import {
@@ -174,6 +175,10 @@ async function Project({
   const { error, invited, saved, revision, restored, building, added, deleted, root } = query;
   const canWrite = can(project.role, 'file.write');
   const owner = project.role === 'owner';
+  const showLabels = labels.labels.length > 0 || labels.undefined.length > 0;
+  const showBibliography = cited.entries.length > 0 || cited.missing.length > 0;
+  const showData = dataFiles.length > 0;
+  const showReview = threads.length + proposals.length > 0;
   return (
     <main className="page">
       <header className="bar">
@@ -191,25 +196,31 @@ async function Project({
           All papers
         </Link>
       </header>
-      {error && <p role="alert">{error}</p>}
-      {invited && <p role="status">Invitation sent to {invited}.</p>}
-      {query.cancelled && <p role="status">Invitation to {query.cancelled} cancelled.</p>}
-      {saved && <p role="status">Role changed.</p>}
-      {revision && <p role="status">Saved as revision {revision}.</p>}
-      {restored && <p role="status">Restored. The paper is now revision {restored}.</p>}
-      {building && <p role="status">Building the PDF for that revision. Reload in a moment.</p>}
+      <nav aria-label="On this page" className="onpage">
+        <a href="#files">Files</a>
+        {showLabels && <a href="#labels">Labels and references</a>}
+        {showBibliography && <a href="#bibliography">Bibliography</a>}
+        {showData && <a href="#data">Data</a>}
+        {showReview && <a href="#review">Review</a>}
+        <a href="#language">Language</a>
+        <a href="#assistance">Writing assistance</a>
+        <a href="#revisions">Revisions</a>
+        <a href="#people">People</a>
+        {owner && <a href="#invite">Invite someone</a>}
+      </nav>
+      {error && <Result alert>{error}</Result>}
       {added && (
-        <p role="status">
+        <Result>
           Added <code>{added}</code>.
-        </p>
+        </Result>
       )}
       {deleted && (
-        <p role="status">
+        <Result>
           Deleted <code>{deleted}</code>. Revision {query.in} still has it: restore that revision to
           bring it back.
-        </p>
+        </Result>
       )}
-      {root && <p role="status">Root file changed.</p>}
+      {root && <Result>Root file changed.</Result>}
 
       {owner && !(steps.written && steps.built && steps.shared && steps.downloaded) && (
         <section aria-labelledby="first-steps">
@@ -252,33 +263,35 @@ async function Project({
           </ol>
         </section>
       )}
-      {query.described && <p role="status">Description approved.</p>}
+      {query.described && <Result>Description approved.</Result>}
       {query.looked && (
-        <p role="status">
+        <Result>
           Looked up <code>{query.looked}</code>. The result is beside it below.
-        </p>
+        </Result>
       )}
       {query.checked && (
-        <p role="status">
+        <Result>
           Recorded an evidence check for <code>{query.checked}</code>.
-        </p>
+        </Result>
       )}
       {query.moved && (
-        <p role="status">
+        <Result>
           Renamed to <code>{query.moved}</code>
           {query.places && query.places !== '0'
             ? `, and updated ${query.places} ${query.places === '1' ? 'place that names' : 'places that name'} it.`
             : ', and no line needed changing.'}
-        </p>
+        </Result>
       )}
       {query.relabelled && (
-        <p role="status">
+        <Result>
           Renamed to <code>{query.relabelled}</code> in {query.places}{' '}
           {query.places === '1' ? 'place' : 'places'}.
-        </p>
+        </Result>
       )}
 
-      <h2>Files</h2>
+      <h2 id="files" tabIndex={-1}>
+        Files
+      </h2>
       {files.length > 0 && (
         <>
           <p>
@@ -437,9 +450,11 @@ async function Project({
         </>
       )}
 
-      {(labels.labels.length > 0 || labels.undefined.length > 0) && (
+      {showLabels && (
         <>
-          <h2 id="labels">Labels and references</h2>
+          <h2 id="labels" tabIndex={-1}>
+            Labels and references
+          </h2>
           <p>
             {labels.labels.length} {labels.labels.length === 1 ? 'label' : 'labels'}.{' '}
             {labels.undefined.length + labels.duplicates.length === 0
@@ -496,9 +511,11 @@ async function Project({
         </>
       )}
 
-      {(cited.entries.length > 0 || cited.missing.length > 0) && (
+      {showBibliography && (
         <>
-          <h2 id="bibliography">Bibliography</h2>
+          <h2 id="bibliography" tabIndex={-1}>
+            Bibliography
+          </h2>
           <p>
             {cited.entries.length} {cited.entries.length === 1 ? 'entry' : 'entries'}.{' '}
             {cited.missing.length + cited.duplicates.length === 0
@@ -707,9 +724,11 @@ async function Project({
         </>
       )}
 
-      {dataFiles.length > 0 && (
+      {showData && (
         <>
-          <h2 id="data">Data</h2>
+          <h2 id="data" tabIndex={-1}>
+            Data
+          </h2>
           <p>
             A CSV file becomes data once someone has said what its columns hold. Charts are drawn
             only from a file as it was when its description was approved.
@@ -784,9 +803,11 @@ async function Project({
         </>
       )}
 
-      {threads.length + proposals.length > 0 && (
+      {showReview && (
         <>
-          <h2 id="review">Review</h2>
+          <h2 id="review" tabIndex={-1}>
+            Review
+          </h2>
           {openThreads.length + openProposals.length === 0 && (
             <p>Every thread is resolved and every proposed change is decided.</p>
           )}
@@ -824,8 +845,10 @@ async function Project({
         </>
       )}
 
-      <h2 id="language">Language</h2>
-      {query.language && <p role="status">Language settings saved.</p>}
+      <h2 id="language" tabIndex={-1}>
+        Language
+      </h2>
+      {query.language && <Result>Language settings saved.</Result>}
       <form action={languageAction.bind(null, id)}>
         <label>
           Spelling
@@ -865,8 +888,10 @@ async function Project({
         {canWrite && <Once type="submit">Save language settings</Once>}
       </form>
 
-      <h2 id="assistance">Writing assistance</h2>
-      {query.assistance && <p role="status">Saved.</p>}
+      <h2 id="assistance" tabIndex={-1}>
+        Writing assistance
+      </h2>
+      {query.assistance && <Result>Saved.</Result>}
       <p>
         A review by a language model reads the passage it is asked about and proposes changes, which
         are never made unless someone accepts them. For that, the passage is sent to the
@@ -889,7 +914,12 @@ async function Project({
         </p>
       )}
 
-      <h2 id="revisions">Revisions</h2>
+      <h2 id="revisions" tabIndex={-1}>
+        Revisions
+      </h2>
+      {revision && <Result>Saved as revision {revision}.</Result>}
+      {restored && <Result>Restored. The paper is now revision {restored}.</Result>}
+      {building && <Result>Building the PDF for that revision. Reload in a moment.</Result>}
       <p>
         A revision is the whole paper at one moment. Its ZIP and its PDF always belong together.
       </p>
@@ -998,7 +1028,11 @@ async function Project({
         </p>
       )}
 
-      <h2>People</h2>
+      <h2 id="people" tabIndex={-1}>
+        People
+      </h2>
+      {saved && <Result>Role changed.</Result>}
+      {query.cancelled && <Result>Invitation to {query.cancelled} cancelled.</Result>}
       <Wide label="Table of people">
         <table>
           <thead>
@@ -1066,7 +1100,10 @@ async function Project({
               </ul>
             </section>
           )}
-          <h2>Invite someone</h2>
+          <h2 id="invite" tabIndex={-1}>
+            Invite someone
+          </h2>
+          {invited && <Result>Invitation sent to {invited}.</Result>}
           <form action={inviteAction.bind(null, id)}>
             <label>
               Their email address

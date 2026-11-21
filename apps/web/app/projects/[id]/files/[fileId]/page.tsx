@@ -49,6 +49,9 @@ async function FilePage({
   if (file.projectId !== project.id) notFound();
   return (
     <main className="editor">
+      <a className="skip" href="#text">
+        Skip to the text
+      </a>
       <header className="bar">
         <h1>{project.name}</h1>
         <Link prefetch={false} href={`/projects/${id}`}>

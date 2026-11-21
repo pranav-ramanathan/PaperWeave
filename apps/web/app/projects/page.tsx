@@ -3,6 +3,7 @@ import Link from '../Go';
 import { db, requireUser } from '../../lib/server';
 import DirectUpload from '../DirectUpload';
 import Once from '../Once';
+import Result from '../Result';
 import SignOut from '../SignOut';
 import { createAction } from './actions';
 
@@ -23,8 +24,8 @@ export default async function Projects({
         <span>{user.email}</span>
         <SignOut />
       </header>
-      {error && <p role="alert">{error}</p>}
-      {imported && <p role="status">Imported {imported} papers from the archive.</p>}
+      {error && <Result alert>{error}</Result>}
+      {imported && <Result>Imported {imported} papers from the archive.</Result>}
       {projects.length ? (
         <ul className="list">
           {projects.map((p) => (

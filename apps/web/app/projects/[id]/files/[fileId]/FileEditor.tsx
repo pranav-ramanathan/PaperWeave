@@ -857,24 +857,26 @@ export default function FileEditor(props: {
           </span>
         </div>
       )}
-      <div className="visual" ref={visualHost} hidden={mode !== 'visual'} />
-      <FormulaBox request={formula} macros={macros.current} onDone={() => setFormula(null)} />
-      <ReferencePicker request={picker} projectId={projectId} onDone={() => setPicker(null)} />
-      <CitationPicker request={citing} projectId={projectId} onDone={() => setCiting(null)} />
-      <FloatBox request={float} projectId={projectId} onDone={() => setFloat(null)} />
-      <EditorMenu
-        at={menu}
-        onClose={() => {
-          setMenu(null);
-          live.current?.visual?.focus();
-        }}
-        onReference={askReference}
-        onCitation={askCitation}
-        onEquation={askEquation}
-        onFigure={askFigure}
-        onTable={askTable}
-      />
-      <div className="source" ref={host} hidden={mode !== 'source'} />
+      <div id="text" tabIndex={-1}>
+        <div className="visual" ref={visualHost} hidden={mode !== 'visual'} />
+        <FormulaBox request={formula} macros={macros.current} onDone={() => setFormula(null)} />
+        <ReferencePicker request={picker} projectId={projectId} onDone={() => setPicker(null)} />
+        <CitationPicker request={citing} projectId={projectId} onDone={() => setCiting(null)} />
+        <FloatBox request={float} projectId={projectId} onDone={() => setFloat(null)} />
+        <EditorMenu
+          at={menu}
+          onClose={() => {
+            setMenu(null);
+            live.current?.visual?.focus();
+          }}
+          onReference={askReference}
+          onCitation={askCitation}
+          onEquation={askEquation}
+          onFigure={askFigure}
+          onTable={askTable}
+        />
+        <div className="source" ref={host} hidden={mode !== 'source'} />
+      </div>
       {props.visual && (
         <Language
           projectId={projectId}
