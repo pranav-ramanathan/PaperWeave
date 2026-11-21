@@ -1,5 +1,5 @@
 import { expect, test } from 'vitest';
-import { auxLabels, labelIndex } from './labels.ts';
+import { auxLabels, citeIndex, labelIndex } from './labels.ts';
 import { fixtureFiles } from './testutil.ts';
 
 const text = (path: string) => Buffer.from(fixtureFiles()[path]).toString();
@@ -78,4 +78,12 @@ test('a % in an address or in inline code is not a comment hiding what follows',
   expect(labelIndex(src).refs.map((r) => r.key)).toEqual([
     ...['sec:a', 'sec:b', 'sec:c', 'sec:d', 'sec:e'],
   ]);
+});
+
+test('a multicite names the keys of every one of its groups', () => {
+  const src =
+    'See \\autocites(g)(h)[see][12]{a, b}[c][d]{e}{f} and \\cite<x>{k} and \\cite [p] {m}.';
+  expect(citeIndex(src).map((u) => u.key)).toEqual(['a', 'b', 'e', 'f', 'k', 'm']);
+  const text = '\\textcites{a} [not part of it]';
+  expect(citeIndex(text).map((u) => u.key)).toEqual(['a']);
 });

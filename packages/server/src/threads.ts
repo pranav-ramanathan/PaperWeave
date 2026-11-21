@@ -57,7 +57,7 @@ const bad = (why: string) => new AppError('invalid_input', why);
 
 /** A file's text as the log has it. */
 async function textOf(
-  pool: pg.Pool,
+  pool: Db,
   store: BlobStore,
   fileId: string,
   logs?: Map<string, Uint8Array[]>,
@@ -345,7 +345,7 @@ export async function reattachThread(
 
 /** The threads of a paper, or of one of its files, oldest first, each with where it stands now. */
 export async function listThreads(
-  pool: pg.Pool,
+  pool: Db,
   store: BlobStore,
   userId: string,
   projectId: string,

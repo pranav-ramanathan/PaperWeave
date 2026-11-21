@@ -3647,6 +3647,36 @@ import report, rename, release).
 Not covered: a comment body or an evidence string on another file that quotes the held data in a
 person's own words. That is free text, and nothing can tell it from any other sentence.
 
+## Grammar findings stay out of every form of citation
+
+Gate E3 (no grammar finding inside an equation, unit, code, path or citation) leaked for three
+spellings of a citation, because the parser's cite atom ended early: a biblatex multicite
+(`\\autocites[see][12]{a}[adn compare][15]{b}`) was cut after its first group, so the later notes
+were prose; `\\cite [p] {k}` was not read as a citation at all; and an angle-bracket note
+(`\\cite<pre>{k}`) was not either. The cite atom now skips whitespace (one line break, never a
+blank line), an `<...>` note, a multicite's leading `(pre)(post)` notes and its repeated
+`[pre][post]{keys}` units. A later unit counts only if whole, so `\\textcites{a} [see below]` still
+reads "[see below]" as prose.
+
+`CITES` gained the multicites (`cites`, `parencites`, `textcites`, `autocites`, `footcites`,
+`smartcites`, `supercites`, and the capitalised four biblatex has), exported as `MULTICITES`. It is
+shared, so `citeIndex` reads every group too, and `\\cite<pre>{k}` now yields its key: the citation
+index and the visual editor's atoms agree with the grammar view. Tests: five in `prose.test.ts`
+and `labels.test.ts` (fail on the old code), one in `grammar.sandbox.test.ts`.
+
+## A download with its review, while someone types
+
+The ZIP "with review data" cut a revision, then read the live text to place each thread and
+proposal by its words and what stands around them. Typing between the two meant the review
+described text that differed from the ZIP's files, so on import a quote with the same words
+elsewhere could not be told apart: a proposal was reported missing and a thread came in detached.
+
+The review is now read inside the cut's own transaction (`within`), with every file held, so it
+and the files are one moment. Only the database is read while they are held; the store is sent to
+before. `exportReview`, `listThreads`, `listProposals` and `loadUpdates` take a transaction client
+as well as the pool. Test: `reviewdata.sandbox.test.ts` types between the cut and the review read
+(fails on the old code).
+
 ## Decisions waiting on the owner
 
 See "What I need from you" in `docs/plan.md`. None blocks C1.

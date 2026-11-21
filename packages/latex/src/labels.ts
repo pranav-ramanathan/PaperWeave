@@ -12,12 +12,21 @@ export const REFS = new Set([
   ...['cref', 'Cref', 'cpageref', 'Cpageref', 'namecref', 'crefrange', 'Crefrange', 'labelcref'],
   ...['fref', 'Fref', 'zcref', 'zcpageref', 'hyperref'],
 ]);
+/**
+ * biblatex's multicites: `\\autocites(pre)(post)[pre][post]{keys}[pre][post]{keys}...`. Their keys
+ * sit in several brace groups, which keyUses and the parser both read to the last one.
+ */
+export const MULTICITES = new Set([
+  ...['cites', 'parencites', 'textcites', 'autocites', 'footcites', 'smartcites', 'supercites'],
+  ...['Cites', 'Parencites', 'Textcites', 'Autocites'],
+]);
 /** The commands that name a bibliography key, for parse and citeIndex alike. */
 export const CITES = new Set([
   ...['cite', 'citep', 'citet', 'citealt', 'citealp', 'citeauthor', 'citeyear', 'citeyearpar'],
   ...['citenum', 'citetitle', 'nocite', 'parencite', 'textcite', 'autocite', 'footcite'],
   ...['smartcite', 'supercite', 'fullcite', 'footfullcite', 'Cite', 'Citep', 'Citet'],
   ...['Parencite', 'Textcite', 'Autocite', 'Citeauthor'],
+  ...MULTICITES,
 ]);
 const VERBATIM = /^\\begin\{(verbatim\*?|lstlisting|minted|Verbatim|comment)\}/;
 
@@ -114,25 +123,43 @@ function keyUses(src: string, wanted: (command: string) => boolean): Use[] {
       i = (close > 0 ? close : p) - 1;
       continue;
     }
-    // Optional arguments come first: \cref[x]{..}, \citep[see][p.~3]{..}.
-    for (;;) {
-      while (src[p] === ' ') p++;
-      if (src[p] !== '[') break;
-      p = src.indexOf(']', p) + 1 || src.length;
-    }
-    // crefrange takes two groups; everything else one.
-    for (let group = 0; group < (name[1].endsWith('range') ? 2 : 1) && src[p] === '{'; group++) {
-      const close = src.indexOf('}', p);
-      if (close < 0) break;
-      let keyAt = p + 1;
-      for (const part of src.slice(p + 1, close).split(',')) {
-        const key = part.trim();
-        const at = keyAt + part.indexOf(key);
-        keyAt += part.length + 1;
-        if (!key || /[#\\{]/.test(key)) continue;
-        out.push({ key, command: name[1], at: i, end: close + 1, keyAt: at });
+    // Optional arguments come first: \\cref[x]{..}, \\citep[see][p.~3]{..}. A multicite repeats
+    // `[pre][post]{keys}` after global `(pre)(post)` notes; \\cite<pre>{..} has an angle note.
+    const multi = MULTICITES.has(name[1]);
+    const cite = CITES.has(name[1]);
+    for (let unit = 0; unit === 0 || multi; unit++) {
+      let u = p;
+      if (multi && unit === 0)
+        for (;;) {
+          while (src[u] === ' ') u++;
+          const close = src[u] === '(' ? src.indexOf(')', u) : -1;
+          if (close < 0) break;
+          u = close + 1;
+        }
+      while (src[u] === ' ') u++;
+      if (cite && src[u] === '<' && src.indexOf('>', u) > 0) u = src.indexOf('>', u) + 1;
+      for (;;) {
+        while (src[u] === ' ') u++;
+        if (src[u] !== '[') break;
+        u = src.indexOf(']', u) + 1 || src.length;
       }
-      p = close + 1;
+      // A later unit that is not a whole `[..]{..}` is not part of the citation.
+      if (unit > 0 && src[u] !== '{') break;
+      // crefrange takes two groups; everything else one.
+      for (let group = 0; group < (name[1].endsWith('range') ? 2 : 1) && src[u] === '{'; group++) {
+        const close = src.indexOf('}', u);
+        if (close < 0) break;
+        let keyAt = u + 1;
+        for (const part of src.slice(u + 1, close).split(',')) {
+          const key = part.trim();
+          const at = keyAt + part.indexOf(key);
+          keyAt += part.length + 1;
+          if (!key || /[#\\{]/.test(key)) continue;
+          out.push({ key, command: name[1], at: i, end: close + 1, keyAt: at });
+        }
+        u = close + 1;
+      }
+      p = u;
     }
     i = p - 1;
   }

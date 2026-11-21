@@ -100,6 +100,20 @@ test('mistakes in the prose are found, and nothing is found in what is not prose
   }
 });
 
+test('nothing is found inside a citation, however it is written', async () => {
+  const p = await paper(
+    [
+      '\\documentclass{article}',
+      '\\begin{document}',
+      'We agree \\autocites[see][12]{a}[adn recieve][15]{b} on this,',
+      'and \\cite [teh servr] {k} with \\cite<adn recieve>{k} too.',
+      '\\end{document}',
+      '',
+    ].join('\n'),
+  );
+  for (const f of await check(p)) expect(f.words).not.toMatch(/adn|teh|servr|recieve/);
+});
+
 test('a paper chooses its spelling, its own words and the rules it does without', async () => {
   const p = await paper();
   expect(await languageSettings(t.pool, users.viewer.id, p.id)).toEqual({

@@ -3,6 +3,7 @@
 // goes out with the words it is about and what stands around them, and is placed by those when
 // it comes back in.
 import type pg from 'pg';
+import type { Db } from './db.ts';
 import * as Y from 'yjs';
 import { z } from 'zod';
 import { authorize } from './authz.ts';
@@ -102,7 +103,7 @@ export type ReviewImport = {
 };
 
 /** A file's saved text as a document, by path. */
-async function texts(pool: pg.Pool, store: BlobStore, projectId: string) {
+async function texts(pool: Db, store: BlobStore, projectId: string) {
   const { rows } = await pool.query(
     'select id, path from files where project_id = $1 and eol is not null',
     [projectId],
@@ -122,7 +123,7 @@ async function texts(pool: pg.Pool, store: BlobStore, projectId: string) {
 
 /** A paper's threads and proposed changes, as a document to keep. */
 export async function exportReview(
-  pool: pg.Pool,
+  pool: Db,
   store: BlobStore,
   userId: string,
   projectId: string,
