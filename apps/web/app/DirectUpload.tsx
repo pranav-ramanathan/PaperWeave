@@ -59,15 +59,23 @@ export default function DirectUpload(props: {
   const [problem, setProblem] = useState('');
   const [sending, setSending] = useState<{ name: string; done: number; of: number } | null>(null);
   const held = useRef<(() => void) | null>(null);
+  /** What the post added to the form: the file field it disabled and the fields it appended. */
+  const posted = useRef<{ input: HTMLInputElement; added: HTMLInputElement[] } | null>(null);
   const hold = () => {
     held.current ??= waiting();
   };
   // A page restored from the back/forward cache, or a failed upload (which dispatches this
-  // itself), is not waiting any more.
+  // itself), is not waiting any more, and its form is as it was before the post.
   useEffect(() => {
     const release = () => {
       held.current?.();
       held.current = null;
+      setSending(null);
+      if (posted.current) {
+        posted.current.input.disabled = false;
+        for (const h of posted.current.added) h.remove();
+        posted.current = null;
+      }
     };
     window.addEventListener('pageshow', release);
     return () => window.removeEventListener('pageshow', release);
@@ -114,9 +122,9 @@ export default function DirectUpload(props: {
             h.name = name;
             h.value = value;
             form.append(h);
+            return h;
           };
-          hidden('key', key);
-          hidden('name', file.name);
+          posted.current = { input, added: [hidden('key', key), hidden('name', file.name)] };
           input.disabled = true; // a disabled field is not posted
           hold();
           form.submit(); // does not run this handler again
