@@ -160,6 +160,8 @@ export default function FileEditor(props: {
   /** The selected stretch as two places that move with the text, and how to select one again. */
   const stretch = useRef<(orCaret?: boolean) => Stretch | null>(() => null);
   const showStretch = useRef<(from: string, to: string) => boolean>(() => false);
+  /** Where a stretch stands in this copy of the text now, as fresh places and its words. */
+  const standing = useRef<(from: string, to: string) => Stretch | null>(() => null);
   /** The file's threads as last read, and how to mark their stretches where they now stand. */
   const threadsNow = useRef<Thread[]>([]);
   const proposalsNow = useRef<Proposal[]>([]);
@@ -671,6 +673,17 @@ export default function FileEditor(props: {
       }
       return true;
     };
+    // Yjs undo writes deleted characters again as new ones, and follows the old ones to them in
+    // memory: this copy is the only one that knows where the words stand.
+    standing.current = (a, b) => {
+      const [from, to] = [whereIs(a), whereIs(b)];
+      if (from < 0 || to <= from) return null;
+      const place = (index: number, side: number) =>
+        toBase64(
+          Y.encodeRelativePosition(Y.createRelativePositionFromTypeIndex(text, index, side)),
+        );
+      return { from: place(from, 0), to: place(to, -1), words: text.toString().slice(from, to) };
+    };
     lineNow.current = () => {
       if (visual && modeNow.current === 'visual') visual.catchUp();
       return view.state.doc.lineAt(
@@ -937,6 +950,7 @@ export default function FileEditor(props: {
         canComment={props.canComment}
         members={props.members}
         selection={() => stretch.current()}
+        standing={(from, to) => standing.current(from, to)}
         onThreads={(list) => {
           threadsNow.current = list;
           markThreads.current();

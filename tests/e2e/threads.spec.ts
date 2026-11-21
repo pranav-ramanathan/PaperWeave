@@ -216,6 +216,72 @@ async function mentionMails(to: string, count: number): Promise<string[]> {
   throw new Error(`fewer than ${count} mention emails reached ${to}`);
 }
 
+test('a thread survives a deletion that is undone, for everyone and after a reload', async ({
+  browser,
+}) => {
+  test.setTimeout(150_000);
+  const owner = await person(browser, 'undo-owner');
+  const reviewer = await person(browser, 'undo-reviewer');
+  const zip = join(mkdtempSync(join(tmpdir(), 'paperweave-e2e-')), `Undo ${run}.zip`);
+  writeFileSync(zip, await writeZip([{ path: 'main.tex', bytes: Buffer.from(MAIN) }]));
+  await owner.page.goto('/sign-in');
+  await signIn(owner.page, owner.email);
+  await owner.page.getByLabel('Or import a ZIP of a LaTeX project').setInputFiles(zip);
+  await owner.page.getByRole('button', { name: 'Import ZIP' }).click();
+  await owner.page.getByLabel('Their email address').fill(reviewer.email);
+  await owner.page.getByLabel('Their role').selectOption('reviewer');
+  await owner.page.getByRole('button', { name: 'Send invitation' }).click();
+  await expect(owner.page.getByRole('status')).toContainText(reviewer.email);
+  await reviewer.page.goto(await emailedLink(reviewer.email, '/invitations/'));
+  await signIn(reviewer.page, reviewer.email);
+  await reviewer.page.getByRole('button', { name: 'Join this paper' }).click();
+  await expect(reviewer.page.getByText('You are a reviewer')).toBeVisible();
+  await reviewer.page.getByRole('link', { name: 'main.tex' }).first().click();
+  const theirs = reviewer.page.getByRole('region', { name: 'Comments' });
+  await selectWord(reviewer.page, VISUAL, 'forty');
+  await theirs.getByRole('button', { name: 'Comment on the selected text' }).click();
+  await theirs.getByLabel('Comment', { exact: true }).fill('Median or tail?');
+  await theirs.getByRole('button', { name: 'Start thread' }).click();
+  const thread = (page: typeof owner.page) =>
+    page.getByRole('article', { name: 'Thread on “forty”' });
+  await expect(thread(reviewer.page)).toContainText('Median or tail?');
+
+  await owner.page.goto(reviewer.page.url());
+  await expect(thread(owner.page)).toContainText('Median or tail?');
+  await showSource(owner.page);
+  const mark = '.editor .cm-content .thread-mark';
+  await expect(owner.page.locator(mark)).toHaveText('forty');
+
+  // The owner deletes the commented line by mistake, and it is saved.
+  await selectWord(owner.page, '.editor .cm-content', 'Latency');
+  await owner.page.keyboard.press('Home');
+  await owner.page.keyboard.press('Shift+End');
+  await owner.page.keyboard.press('Backspace');
+  await typingSaved(owner.page);
+  await expect(thread(owner.page)).toContainText('This text has been deleted.', {
+    timeout: 15_000,
+  });
+  // Then undoes it, and that is saved too.
+  await owner.page.keyboard.press('ControlOrMeta+z');
+  await typingSaved(owner.page);
+  await expect(thread(owner.page)).not.toContainText('This text has been deleted.', {
+    timeout: 15_000,
+  });
+  await expect(thread(owner.page).getByRole('button', { name: 'Show in the text' })).toBeVisible();
+
+  // The other person sees it marked, and so does everyone after a reload.
+  await expect(reviewer.page.locator(`${VISUAL} .thread-mark`)).toHaveText('forty', {
+    timeout: 20_000,
+  });
+  await reviewer.page.reload();
+  await expect(reviewer.page.locator(`${VISUAL} .thread-mark`)).toHaveText('forty');
+  await expect(thread(reviewer.page)).not.toContainText('This text has been deleted.');
+  await owner.page.reload();
+  await showSource(owner.page);
+  await expect(owner.page.locator(mark)).toHaveText('forty');
+  await expect(thread(owner.page).getByRole('button', { name: 'Show in the text' })).toBeVisible();
+});
+
 test('the link in a mention email opens the comment it is about, signed out or in, resolved or not', async ({
   browser,
 }) => {
