@@ -3466,6 +3466,29 @@ nested sub-import are now in `graph.order`, so labels, citations and import see 
 Not changed: still not installed, checked with `kpsewhich` on the new image: `pstricks.sty`,
 `CJKutf8.sty`, `dsfont.sty`, `bbm.sty`, `newtxtext.sty`.
 
+## Program source files are kept on import
+
+- `.py`, `.c`, `.java`, `.m`, `.R`, `.json` and the rest of the list in `SOURCE`
+  (`packages/server/src/archive.ts`) were left out of an import, although `\lstinputlisting{code/a.py}`
+  reads them and `graph.ts` follows it. The build then failed with "File `code/a(.py)' not found"
+and no PDF; the file also could not be added or renamed afterwards, because `checkPath`shares the
+rule. They are now wanted, and`TEXT_FILE` includes them, so they open as text and can be
+co-authored. The match is case-insensitive (`plot.R`).
+- `decodeFile` now treats content with a NUL byte as not editable (stored read-only, like non-UTF-8).
+  It did not before, for any extension; a NUL cannot be held in a database text column.
+- `paperweave-toolchain.json` is reserved. Every revision download writes it, and re-import used to
+  drop it only because `.json` was unwanted. `readZip` now skips it ("written by PaperWeave on
+  download", in a folder too, as in the `src/` of a submission) and `checkPath` refuses the name.
+- Files are never served raw: `picture/route.ts` serves only picture types with a signed type and
+  `nosniff`, and the build and download routes use fixed types. `.html` and `.js` are never
+  sent with their own content type.
+
+Not changed:
+
+- Files without an extension (`Makefile`) and `.ipynb` are still skipped.
+- Papers imported before this change lack these files; they can now be added by hand.
+- `\inputminted` still does not build, because shell escape is off, but its file is now kept.
+
 ## Decisions waiting on the owner
 
 See "What I need from you" in `docs/plan.md`. None blocks C1.
@@ -3476,6 +3499,8 @@ One more, found since:
   ever, and so is every automatic revision. See "What a paper keeps for ever" above for how
   fast that adds up. The PDFs of old automatic revisions can be made again, so dropping them
   loses nothing a person wrote; nothing does so today.
+- **Should a build with LaTeX errors still show its PDF, and may submit or export use it?** Today
+  any error means no PDF: `compile.ts` keeps the PDF only on exit 0, and latexmk runs without `-f`.
 
 ## How things fit
 

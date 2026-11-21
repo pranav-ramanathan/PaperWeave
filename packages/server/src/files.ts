@@ -10,7 +10,7 @@ import {
   rootDir,
 } from '@paperweave/latex';
 import type pg from 'pg';
-import { checkPath, type Limits, LIMITS } from './archive.ts';
+import { checkPath, type Limits, LIMITS, SOURCE } from './archive.ts';
 import { authorize } from './authz.ts';
 import type { BlobStore } from './blobs.ts';
 import { type Db, transaction } from './db.ts';
@@ -28,8 +28,10 @@ import { cutRevision, renameFile } from './revisions.ts';
 import { loadUpdates } from './sync.ts';
 
 /** Extensions that hold text the editors can open. Everything else is kept as bytes. */
-export const TEXT_FILE =
-  /\.(tex|ltx|bib|bst|cls|sty|bbx|cbx|def|cfg|clo|tikz|pgf|pdf_tex|dat|lua|ist|inc|fd|ldf|csv|tsv|txt|md)$/i;
+export const TEXT_FILE = new RegExp(
+  `\\.(tex|ltx|bib|bst|cls|sty|bbx|cbx|def|cfg|clo|tikz|pgf|pdf_tex|dat|lua|ist|inc|fd|ldf|csv|tsv|txt|md|${SOURCE})$`,
+  'i',
+);
 
 /** The newline style, byte order mark or read-only reason to record for a file's bytes. */
 export function fileMeta(path: string, bytes: Uint8Array) {

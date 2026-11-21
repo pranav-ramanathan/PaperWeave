@@ -1,12 +1,16 @@
 // Needs the services in infra/compose.yaml. Run: pnpm test:sandbox
 import { readdirSync, readFileSync, statSync } from 'node:fs';
-import { join, relative } from 'node:path';
+import { mkdirSync, mkdtempSync, writeFileSync } from 'node:fs';
+import { tmpdir } from 'node:os';
+import { dirname, join, relative } from 'node:path';
 import { crc32, deflateRawSync, gzipSync } from 'node:zlib';
 import { afterAll, beforeAll, expect, test } from 'vitest';
+import { compile } from '../../../apps/workers/src/compile.ts';
 import { type Entry, LIMITS, readZip, writeZip } from './archive.ts';
 import { blobStore } from './blobs.ts';
+import { exportRevision, listRevisions, saveRevision } from './revisions.ts';
 import { exportZip, importReport, importZip, listFiles } from './import.ts';
-import { setRootFile } from './files.ts';
+import { createFile, setRootFile } from './files.ts';
 import { acceptInvitation, createProject, invite, listProjects, getProject } from './projects.ts';
 import { TEST_ENV, testDb } from './testing.ts';
 
@@ -533,4 +537,94 @@ test('a paper that is alone is named after its ZIP, several keep their folders',
   );
   const several = await reportOf(owner.id, [file('a/main.tex', doc()), file('b/main.tex', doc())]);
   expect(several.made.map((p) => p.name)).toEqual(['a', 'b']);
+});
+
+async function buildOf(project: string) {
+  const dir = mkdtempSync(join(tmpdir(), 'paperweave-src-'));
+  for (const e of (await readZip(await exportZip(t.pool, store, owner.id, project))).entries) {
+    mkdirSync(dirname(join(dir, e.path)), { recursive: true });
+    writeFileSync(join(dir, e.path), e.bytes);
+  }
+  const r = await compile(dir, 'main.tex', join(dir, '__out'), 120);
+  return r.ok ? 'ok' : r.diagnostics.filter((d) => d.severity === 'error').map((d) => d.message);
+}
+
+test('program source and data files are kept, build, and survive an export and a re-import', async () => {
+  const main = [
+    '\\documentclass{article}',
+    '\\usepackage{listings}',
+    '\\begin{document}',
+    '\\lstinputlisting[language=Python]{code/a.py}',
+    '\\end{document}',
+    '',
+  ].join('\n');
+  const py = Buffer.from('print("hi")\nx = 1\n');
+  const sources = ['src/x.c', 'Main.java', 'fit.m', 'plot.R', 'cfg.json'];
+  const zip = await writeZip([
+    { path: 'main.tex', bytes: Buffer.from(main) },
+    { path: 'code/a.py', bytes: py },
+    ...sources.map((path) => ({ path, bytes: Buffer.from('// ' + path + '\n') })),
+    { path: 'notes.docx', bytes: Buffer.from('PK') },
+    { path: 'a.exe', bytes: Buffer.from('MZ') },
+  ]);
+  const [project] = await importZip(t.pool, store, owner.id, zip, 'Sources');
+  const report = (await importReport(t.pool, owner.id, project.id))!;
+  expect(report.skipped.map((s) => s.path).sort()).toEqual(['a.exe', 'notes.docx']);
+  expect(report.files.map((f) => f.path).sort()).toEqual(
+    ['main.tex', 'code/a.py', ...sources].sort(),
+  );
+  // Text, so editable: no read-only mark on any of them.
+  for (const f of report.files) expect(f, f.path).not.toHaveProperty('readonly');
+  expect(await buildOf(project.id)).toBe('ok');
+
+  // The export holds the source byte for byte, and a file PaperWeave itself writes.
+  const out = await readZip(await exportZip(t.pool, store, owner.id, project.id));
+  expect(Buffer.from(out.entries.find((e) => e.path === 'code/a.py')!.bytes).equals(py)).toBe(true);
+
+  // A revision's download also holds PaperWeave's own file; reading it back skips it.
+  await saveRevision(t.pool, store, owner.id, project.id, 'first');
+  const [{ id: revision }] = (await listRevisions(t.pool, owner.id, project.id)) as unknown as {
+    id: string;
+  }[];
+  const raw = (await exportRevision(t.pool, store, owner.id, project.id, revision, true)).zip;
+  const read = await readZip(raw);
+  expect(read.skipped).toEqual([
+    { path: 'paperweave-toolchain.json', reason: 'written by PaperWeave on download' },
+  ]);
+  const [again] = await importZip(t.pool, store, owner.id, raw, 'Again');
+  await saveRevision(t.pool, store, owner.id, again.id, 'again');
+  const [{ id: revision2 }] = (await listRevisions(t.pool, owner.id, again.id)) as unknown as {
+    id: string;
+  }[];
+  const second = await readZip(
+    (await exportRevision(t.pool, store, owner.id, again.id, revision2, true)).zip,
+  );
+  expect(second.skipped.filter((s) => s.path === 'paperweave-toolchain.json')).toHaveLength(1);
+  expect(Buffer.from(second.entries.find((e) => e.path === 'code/a.py')!.bytes).equals(py)).toBe(
+    true,
+  );
+  expect(second.entries.map((e) => e.path).sort()).toEqual(out.entries.map((e) => e.path).sort());
+
+  // The name belongs to PaperWeave.
+  await expect(
+    createFile(t.pool, store, owner.id, again.id, 'paperweave-toolchain.json'),
+  ).rejects.toThrow(/written by PaperWeave on download/);
+});
+
+test('source files that are not UTF-8 text, or hold NUL bytes, are kept but read-only', async () => {
+  const zip = await writeZip([
+    {
+      path: 'main.tex',
+      bytes: Buffer.from('\\documentclass{article}\\begin{document}x\\end{document}\n'),
+    },
+    { path: 'latin.py', bytes: Buffer.from([0x63, 0xe9, 0x0a]) },
+    { path: 'nul.c', bytes: Buffer.from([0x61, 0, 0x62]) },
+    { path: 'ok.py', bytes: Buffer.from('x = 1\n') },
+  ]);
+  const [project] = await importZip(t.pool, store, owner.id, zip, 'Odd');
+  const report = (await importReport(t.pool, owner.id, project.id))!;
+  const by = new Map(report.files.map((f) => [f.path, f]));
+  expect(by.get('latin.py')).toEqual({ path: 'latin.py', readonly: 'not-utf8' });
+  expect(by.get('nul.c')).toEqual({ path: 'nul.c', readonly: 'not-utf8' });
+  expect(by.get('ok.py')).toEqual({ path: 'ok.py' });
 });

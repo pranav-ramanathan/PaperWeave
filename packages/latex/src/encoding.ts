@@ -8,6 +8,8 @@ export type Decoded =
 
 export function decodeFile(bytes: Uint8Array): Decoded {
   let text: string;
+  // NUL is valid UTF-8, but not text anyone edits, and a database text column cannot hold it.
+  if (bytes.includes(0)) return { editable: false, reason: 'not-utf8' };
   try {
     text = new TextDecoder('utf-8', { fatal: true, ignoreBOM: true }).decode(bytes);
   } catch {
