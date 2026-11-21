@@ -20,9 +20,21 @@ export type Limits = typeof LIMITS;
 export type Entry = { path: string; bytes: Uint8Array };
 export type Skipped = { path: string; reason: string };
 
+/**
+ * Program source and data files that \lstinputlisting and the like read. Case does not matter
+ * (the regexes are /i), so plot.R is kept.
+ */
+export const SOURCE =
+  'py|c|h|cc|cpp|hpp|java|m|r|jl|js|ts|rs|go|rb|pl|sh|sql|hs|ml|scala|kt|swift|cs|f|f90|asm|s|v|vhd|json|ya?ml|xml|toml|ini|html|css';
+
 /** What a LaTeX project is made of. Anything else in an archive is listed and left out. */
-const WANTED =
-  /\.(tex|ltx|bib|bst|cls|sty|bbx|cbx|def|cfg|clo|tikz|pgf|pdf_tex|dat|lua|ist|inc|fd|ldf|ttf|otf|png|jpe?g|pdf|eps|csv|tsv|txt|md)$/i;
+const WANTED = new RegExp(
+  `\\.(tex|ltx|bib|bst|cls|sty|bbx|cbx|def|cfg|clo|tikz|pgf|pdf_tex|dat|lua|ist|inc|fd|ldf|ttf|otf|png|jpe?g|pdf|eps|csv|tsv|txt|md|${SOURCE})$`,
+  'i',
+);
+/** Written into every export by PaperWeave; read back never, or the next export would hold it twice. */
+const TOOLCHAIN = /(^|\/)paperweave-toolchain\.json$/;
+const TOOLCHAIN_REASON = 'written by PaperWeave on download';
 /** Pictures LaTeX is not able to read as they are. */
 const PICTURE = /\.(svg|gif|tiff?|bmp)$/i;
 const PICTURE_REASON = 'LaTeX cannot use this picture as it is: convert it to PDF or PNG';
@@ -73,6 +85,8 @@ export function checkPath(path: unknown, limits: Limits = LIMITS): string {
   )
     return 'it must be a plain path inside the paper';
   if (PICTURE.test(path)) return PICTURE_REASON;
+  if (TOOLCHAIN.test(path))
+    return 'paperweave-toolchain.json is written by PaperWeave on download, so it cannot be a file of the paper';
   if (SYSTEM.test(path) || BUILD.test(path) || !WANTED.test(path))
     return 'it is not a file type a paper uses';
   return '';
@@ -131,15 +145,17 @@ export function readZip(
         const reason =
           isReview || BBL.test(path)
             ? ''
-            : BUILD.test(path)
-              ? BBL_REASON
-              : /(^|\/)\.?latexmkrc$/.test(path)
-                ? 'build script, never run'
-                : PICTURE.test(path)
-                  ? PICTURE_REASON
-                  : !WANTED.test(path)
-                    ? 'not a file type a paper uses'
-                    : '';
+            : TOOLCHAIN.test(path)
+              ? TOOLCHAIN_REASON
+              : BUILD.test(path)
+                ? BBL_REASON
+                : /(^|\/)\.?latexmkrc$/.test(path)
+                  ? 'build script, never run'
+                  : PICTURE.test(path)
+                    ? PICTURE_REASON
+                    : !WANTED.test(path)
+                      ? 'not a file type a paper uses'
+                      : '';
         if (reason) {
           skipped.push({ path, reason });
           return file.readEntry();

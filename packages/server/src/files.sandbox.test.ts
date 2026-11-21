@@ -590,3 +590,68 @@ test('a file reached through \\import is renamed in the lines of the imported fi
     'main.tex:4 \\input{sections/top}',
   ]);
 });
+
+test('a source file can be added as text, and renaming a listing to .py keeps the paper building', async () => {
+  const main = SUPPORT.replace('code/a.txt', 'code/a.txt');
+  const zip = await writeZip([
+    { path: 'main.tex', bytes: Buffer.from(main) },
+    {
+      path: 'styles/mine.sty',
+      bytes: Buffer.from('\\ProvidesPackage{mine}\n\\newcommand{\\mineword}{styled}\n'),
+    },
+    { path: 'code/a.txt', bytes: Buffer.from('listing line\n') },
+    { path: 'data.csv', bytes: Buffer.from('a,b\n1,2\n2,3\n') },
+  ]);
+  const [project] = await importZip(t.pool, store, owner.id, zip, 'Source');
+  const b = await createFile(t.pool, store, owner.id, project.id, 'code/b.py');
+  expect((await openFile(t.pool, owner.id, b)).canWrite).toBe(true);
+  const row = await t.pool.query('select readonly_reason from files where id = $1', [b]);
+  expect(row.rows[0].readonly_reason).toBeNull();
+  await expect(
+    createFile(t.pool, store, owner.id, project.id, 'paperweave-toolchain.json'),
+  ).rejects.toThrow(/written by PaperWeave on download/);
+  // Not UTF-8, or with NUL bytes: stored as bytes, not edited.
+  const latin = await createFile(
+    t.pool,
+    store,
+    owner.id,
+    project.id,
+    'l.py',
+    Buffer.from([0x63, 0xe9]),
+  );
+  const nul = await createFile(
+    t.pool,
+    store,
+    owner.id,
+    project.id,
+    'n.c',
+    Buffer.from([0x61, 0, 0x62]),
+  );
+  const marks = await t.pool.query('select readonly_reason from files where id = any($1)', [
+    [latin, nul],
+  ]);
+  expect(marks.rows.every((r) => r.readonly_reason)).toBe(true);
+
+  const ids = Object.fromEntries(
+    (await listFiles(t.pool, owner.id, project.id)).map((f) => [f.path, f.id]),
+  );
+  const proposal = await proposeFileRename(
+    t.pool,
+    store,
+    owner.id,
+    project.id,
+    ids['code/a.txt'],
+    'code/a.py',
+  );
+  await renameFileAndReferences(
+    t.pool,
+    store,
+    owner.id,
+    project.id,
+    ids['code/a.txt'],
+    'code/a.py',
+    proposal.digest,
+  );
+  expect(proposal.changes.map((c) => c.after)).toEqual(['\\lstinputlisting{code/a.py}']);
+  expect(await buildsFine(project.id)).toBe('ok');
+});
