@@ -19,6 +19,7 @@ import {
   listFiles,
   readZip,
   requestBuild,
+  restoreRevision,
   saveChart,
   saveRevision,
   submissionChecks,
@@ -241,6 +242,51 @@ async function verdict(name: string, files: Record<string, string>) {
   const problems = found.findings.filter((f) => f.level === 'problem');
   return { ...found, problems, text: problems.map((f) => `${f.kind}: ${f.message}`) };
 }
+
+test('a paper whose chart was put back to an older drawing of its data is not ready', async () => {
+  const main =
+    '\\documentclass{article}\n\\usepackage{graphicx}\n\\begin{document}\n\\includegraphics{charts/latency}\n\\end{document}\n';
+  const zip = await writeZip([
+    { path: 'main.tex', bytes: Buffer.from(main) },
+    { path: 'data/latency.csv', bytes: Buffer.from(CSV) },
+  ]);
+  const [project] = await importZip(t.pool, store, users.owner.id, zip, 'Restored chart');
+  const csv = (await listFiles(t.pool, users.owner.id, project.id)).find((f) =>
+    f.path.endsWith('.csv'),
+  )!.id;
+  const approve = async () =>
+    approveDataset(t.pool, store, users.owner.id, project.id, csv, {
+      version: (await datasetProposal(t.pool, store, users.owner.id, project.id, csv)).version,
+      columns: COLUMNS,
+      missing: [],
+    });
+  const spec = { kind: 'line', x: 'day', y: 'latency (ms)', name: 'latency', dataset: csv };
+  await approve();
+  const chartId = await saveChart(t.pool, store, users.owner.id, project.id, spec);
+  expect(await drawNext(t.pool, store, image)).toBe(true);
+  await editFile(t.pool, store, csv, users.owner.id, (text) =>
+    text.insert(text.length, '2024-03-04,41\n'),
+  );
+  await approve();
+  const cut = await saveRevision(t.pool, store, users.owner.id, project.id, 'Old drawing');
+  await saveChart(t.pool, store, users.owner.id, project.id, { ...spec, id: chartId });
+  expect(await drawNext(t.pool, store, image)).toBe(true);
+  const build = async () => {
+    await requestBuild(t.pool, users.owner.id, project.id);
+    expect(await buildNext(t.pool, store, image)).toBe(true);
+    return submissionChecks(t.pool, store, users.owner.id, project.id);
+  };
+  expect(await build()).toMatchObject({ ready: true });
+  await restoreRevision(t.pool, store, users.owner.id, project.id, cut.id);
+  const after = await build();
+  expect(after.ready).toBe(false);
+  expect(after.findings).toContainEqual({
+    level: 'problem',
+    kind: 'chart',
+    message: 'The chart "latency" is out of date: its data has changed.',
+    chartId,
+  });
+}, 900_000);
 
 test('a thebibliography paper is ready, and a key it does not have is the one problem', async () => {
   const clean = await verdict('Hand bib', {

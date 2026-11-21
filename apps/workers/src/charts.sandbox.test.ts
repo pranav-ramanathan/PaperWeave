@@ -226,6 +226,52 @@ test('a chart whose files have left the paper says so, and drawing it again puts
   await redraw();
 }, 120_000);
 
+/**
+ * Draw at data v1, change and approve the data, and draw again. With `cutAtV2` a revision is
+ * cut once the data is v2 but before the redraw (its chart files are the v1 drawing); without
+ * it one is cut right after the first drawing, when the data was v1.
+ */
+async function drawnTwice(p: { id: string; csv: string }, cutAtV2: boolean) {
+  await approve(p);
+  const id = await saveChart(t.pool, store, users.owner.id, p.id, {
+    ...LINE,
+    name: 'latency',
+    dataset: p.csv,
+  });
+  expect(await drawNext(t.pool, store, image)).toBe(true);
+  const atV1 = cutAtV2
+    ? null
+    : await saveRevision(t.pool, store, users.owner.id, p.id, 'Drawn at v1');
+  await editFile(t.pool, store, p.csv, users.owner.id, (text) =>
+    text.insert(text.length, '2024-03-04,41,Lab\n'),
+  );
+  await approve(p);
+  const atV2 = cutAtV2
+    ? await saveRevision(t.pool, store, users.owner.id, p.id, 'Data v2, old drawing')
+    : null;
+  await saveChart(t.pool, store, users.owner.id, p.id, { ...LINE, id });
+  expect(await drawNext(t.pool, store, image)).toBe(true);
+  return { id, atV1, atV2 };
+}
+
+test('a chart is out of date when a restore brings back a drawing of older data than the paper has', async () => {
+  const p = await paper();
+  const { id, atV2 } = await drawnTwice(p, true);
+  expect(await charts(p)).toMatchObject([{ status: 'drawn', stale: false }]);
+  await restoreRevision(t.pool, store, users.owner.id, p.id, atV2!.id);
+  expect(await charts(p)).toMatchObject([{ status: 'drawn', stale: true, missing: false }]);
+  await saveChart(t.pool, store, users.owner.id, p.id, { ...LINE, id });
+  expect(await drawNext(t.pool, store, image)).toBe(true);
+  expect(await charts(p)).toMatchObject([{ status: 'drawn', stale: false, missing: false }]);
+}, 120_000);
+
+test('a chart is not out of date when a restore brings back the drawing of the data restored with it', async () => {
+  const p = await paper();
+  const { atV1 } = await drawnTwice(p, false);
+  await restoreRevision(t.pool, store, users.owner.id, p.id, atV1!.id);
+  expect(await charts(p)).toMatchObject([{ status: 'drawn', stale: false, missing: false }]);
+}, 120_000);
+
 test('a chart carries its caption, its description and the record of how it was made', async () => {
   const p = await paper();
   await approve(p);
