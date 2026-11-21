@@ -9,7 +9,7 @@ RUN apt-get update \
       texlive-latex-base texlive-latex-recommended texlive-latex-extra \
       texlive-xetex texlive-luatex \
       texlive-publishers texlive-science texlive-fonts-recommended texlive-bibtex-extra \
-      cm-super \
+      cm-super texlive-plain-generic \
       texlive-lang-german texlive-lang-french texlive-lang-spanish texlive-lang-italian \
       texlive-lang-portuguese texlive-lang-european texlive-lang-polish texlive-lang-cyrillic \
       librsvg2-bin fonts-dejavu-core \

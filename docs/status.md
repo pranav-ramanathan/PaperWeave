@@ -3449,6 +3449,23 @@ nested sub-import are now in `graph.order`, so labels, citations and import see 
 - Limit: a package loaded by a system class or package (not the paper's own) is not seen.
   Whether a `\usepackage` inside an `\if` branch is live is not checked.
 
+## `texlive-plain-generic` added to the image
+
+- `texlive-latex-extra` only recommends `texlive-plain-generic`, and the image installs with
+  `--no-install-recommends`, so these papers failed with no PDF: `\usepackage[normalem]{ulem}`
+  (`\sout`), `soul` (`\hl`), `changes` (needs `ulem`), `datetime2` (needs `tracklang.sty`) and
+  `\documentclass{aastex631}` (needs `epsf.sty`). The package is now in `infra/tex/Dockerfile`; all
+  four of `ulem.sty`, `soul.sty`, `tracklang.sty` and `epsf.sty` are found by `kpsewhich`. Sandbox
+  tests in `compile.sandbox.test.ts` build each one (they fail on the old image with
+  "File `ulem.sty' not found" and the like). The `aastex631`test puts`\title`after`\begin{document}`, which that class needs.
+- Image size 1.72 GB to 1.78 GB, compressed 502 MB to 506 MB.
+- **The image ID is part of the build cache key, so every paper rebuilds once after the image is
+  pulled or rebuilt** (as with the `cm-super` change above). Output bytes do not change for papers
+  that already built: the full sandbox suite, including the ZIP rebuild tests, passes.
+
+Not changed: still not installed, checked with `kpsewhich` on the new image: `pstricks.sty`,
+`CJKutf8.sty`, `dsfont.sty`, `bbm.sty`, `newtxtext.sty`.
+
 ## Decisions waiting on the owner
 
 See "What I need from you" in `docs/plan.md`. None blocks C1.
