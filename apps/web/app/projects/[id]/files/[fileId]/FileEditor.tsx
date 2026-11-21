@@ -187,7 +187,11 @@ export default function FileEditor(props: {
   const [picker, setPicker] = useState<{ apply: FormulaRequest['apply'] } | null>(null);
   const [citing, setCiting] = useState<{ apply: FormulaRequest['apply'] } | null>(null);
   const [float, setFloat] = useState<FloatRequest | null>(null);
-  const [menu, setMenu] = useState<{ x: number; y: number; formula?: () => void } | null>(null);
+  const [menu, setMenu] = useState<{
+    x: number;
+    y: number;
+    edit?: { name: string; run(): void };
+  } | null>(null);
   /** Start inserting something where the caret is. The place is fixed now, not when it is done. */
   const insertHere = (then: (apply: FormulaRequest['apply']) => void) => {
     const apply = live.current?.visual?.insertion();
@@ -511,6 +515,7 @@ export default function FileEditor(props: {
           picture: (target) =>
             `/projects/${projectId}/picture?target=${encodeURIComponent(target)}`,
           editMath: (src, apply) => setFormula({ src, place: null, apply }),
+          editAtom: (what, src, apply) => setFormula({ src, place: null, what, apply }),
           ask: (what) => asks.current[what](),
           menu: setMenu,
           // The source editor publishes the caret only while it has focus; this is the same

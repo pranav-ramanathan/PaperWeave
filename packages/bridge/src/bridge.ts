@@ -5,7 +5,7 @@ import { ReplaceStep } from '@tiptap/pm/transform';
 import { type EditorState, Selection, TextSelection, type Transaction } from '@tiptap/pm/state';
 import * as Y from 'yjs';
 import { locate, model, type Model, projector, toSrc } from './project.ts';
-import { diff, type Edit, emphEdit, translate, type Translation } from './translate.ts';
+import { contained, diff, type Edit, emphEdit, translate, type Translation } from './translate.ts';
 
 export type Host = { getState(): EditorState; dispatch(tr: Transaction): void };
 
@@ -18,6 +18,9 @@ export type Command = {
   replacement: string;
 };
 export type CommandResult = 'applied' | 'duplicate' | 'conflict';
+
+/** Half of a surrogate pair: one UTF-16 unit of a character that was cut in two. */
+const HALF = /[\ud800-\udbff](?![\udc00-\udfff])|(?<![\ud800-\udbff])[\udc00-\udfff]/;
 
 export class Bridge {
   model: Model;
@@ -233,6 +236,37 @@ export class Bridge {
       expected: src.slice(start, end),
       replacement,
     };
+  }
+
+  /**
+   * Put `replacement` in place of what the command names, an inline atom, if the text around it
+   * would still be read as it was: nothing outside it changes, and what it is replaced with
+   * stays in the same paragraph or list item. 'spills' if not; 'conflict' if the atom's text
+   * has changed since the command was built.
+   */
+  rewriteCommand(c: Command, replacement: string): Command | 'conflict' | 'spills' {
+    const doc = this.ytext.doc!;
+    const from = Y.createAbsolutePositionFromRelativePosition(c.from, doc)?.index;
+    const to = Y.createAbsolutePositionFromRelativePosition(c.to, doc)?.index;
+    const src = this.model.parsed.src;
+    if (
+      from == null ||
+      to == null ||
+      src !== this.ytext.toString() ||
+      src.slice(from, to) !== c.expected
+    )
+      return 'conflict';
+    // Half of an emoji, before or after, cannot be put back as it was: the shared text would
+    // turn it into U+FFFD.
+    if (HALF.test(replacement) || HALF.test(src.slice(from, to))) return 'spills';
+    const text = src.slice(0, from) + replacement + src.slice(to);
+    const old = this.model.parsed;
+    // The visual document is built from the incremental parse, so both it and a full parse must
+    // agree that nothing around the atom moved.
+    return contained(old, reparse(old, text), from, to - from, replacement.length) &&
+      contained(old, parse(text, old.transparent), from, to - from, replacement.length)
+      ? { ...c, key: crypto.randomUUID(), replacement }
+      : 'spills';
   }
 
   /**

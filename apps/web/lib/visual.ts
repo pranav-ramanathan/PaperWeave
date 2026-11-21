@@ -123,13 +123,24 @@ export function createVisual(opts: {
    * overwritten.
    */
   editMath?(src: string, apply: (replacement: string) => Promise<CommandResult>): void;
+  /**
+   * The person asked to edit an inline atom: a citation, a reference, a footnote, other raw
+   * LaTeX. `apply` replaces its source, but answers 'spills' (and changes nothing) if that
+   * would change how the text around it is read.
+   */
+  editAtom?(
+    what: 'citation' | 'reference' | 'footnote' | 'LaTeX',
+    src: string,
+    apply: (replacement: string) => Promise<CommandResult | 'spills'>,
+  ): void;
   /** The person asked, from the keyboard, to insert a reference, a citation or an equation. */
   ask?(what: 'reference' | 'citation' | 'equation' | 'figure' | 'table'): void;
   /**
    * The person asked for the menu of things to do here: a right click, or the menu key. `x`
-   * and `y` are where on the page; `formula` is set when it was asked for on a formula.
+   * and `y` are where on the page; `edit` is set when it was asked for on a formula or an
+   * inline atom: `name` says which, and `run` opens it.
    */
-  menu?(at: { x: number; y: number; formula?: () => void }): void;
+  menu?(at: { x: number; y: number; edit?: { name: string; run(): void } }): void;
   /** The person's caret moved, or the text changed under it, while the editor had focus (source offsets). */
   moved?(anchor: number, head: number): void;
   /** Other people's carets, as source offsets, computed fresh on each call. */
@@ -196,6 +207,28 @@ export function createVisual(opts: {
       opts.run({ ...c, key: crypto.randomUUID(), replacement }),
     );
   };
+  /** What an inline atom is called, in the window that edits it. */
+  const atomName = (node: PMNode) =>
+    node.type.name === 'cite'
+      ? 'citation'
+      : node.type.name === 'ref'
+        ? 'reference'
+        : node.type.name === 'raw_inline' && node.attrs.src.startsWith('\\footnote')
+          ? 'footnote'
+          : 'LaTeX';
+  /** Open the inline atom at `pos` for editing as LaTeX; what it says now is what an edit must find. */
+  const openAtom = (pos: number, node: PMNode) => {
+    const src: string = node.attrs.src;
+    const c = bridge.atomCommand(editor.state, pos, src);
+    // Putting back what is there screens out what must not be touched: macro definitions.
+    if (!c || typeof bridge.rewriteCommand(c, src) === 'string')
+      return say('That cannot be edited here. Edit it in the source.');
+    resume = { from: editor.state.selection.from, to: editor.state.selection.to, acted };
+    opts.editAtom!(atomName(node), src, async (replacement) => {
+      const next = bridge.rewriteCommand(c, replacement);
+      return typeof next === 'string' ? next : opts.run(next);
+    });
+  };
   const emph = () => {
     catchUp();
     const c = bridge.emphCommand(editor.state);
@@ -249,8 +282,12 @@ export function createVisual(opts: {
     if (opts.editMath && opts.editable) dom.ondblclick = () => openMath(getPos() ?? 0, src);
     return { dom, destroy: labelled ? onNumbers(draw) : undefined };
   };
+  /** A double click opens an inline atom for editing. So does Enter, when it is selected. */
+  const opensAtom = (dom: HTMLElement, node: PMNode, getPos: () => number | undefined) => {
+    if (opts.editAtom && opts.editable) dom.ondblclick = () => openAtom(getPos() ?? 0, node);
+  };
   /** A citation shows its keys, says on hover what they cite, and is marked if one has no entry. */
-  const cite = (node: PMNode) => {
+  const cite = (node: PMNode, getPos: () => number | undefined) => {
     const src: string = node.attrs.src;
     const dom = el('span', 'pw-atom pw-cite');
     const keys = src
@@ -268,10 +305,11 @@ export function createVisual(opts: {
       dom.setAttribute('aria-label', `citation: ${said.join('; ')}`);
     };
     draw();
+    opensAtom(dom, node, getPos);
     return { dom, destroy: onBibliography(draw) };
   };
   /** A reference shows the number its label has in the PDF, as the PDF prints it. */
-  const ref = (node: PMNode) => {
+  const ref = (node: PMNode, getPos: () => number | undefined) => {
     const src: string = node.attrs.src;
     const dom = el('span', 'pw-atom pw-ref');
     const m = /^\\(\w+)\*?(?:\[[^\]]*\])*\{([^}]*)\}(?:\{([^}]*)\})?/.exec(src);
@@ -296,13 +334,16 @@ export function createVisual(opts: {
       age(dom, src);
     };
     draw();
+    opensAtom(dom, node, getPos);
     return { dom, destroy: onNumbers(draw) };
   };
-  const chip = (label: (src: string) => string) => (node: PMNode) => {
-    const dom = el('span', `pw-atom pw-${node.type.name}`, label(node.attrs.src));
-    dom.title = node.attrs.src;
-    return { dom };
-  };
+  const chip =
+    (label: (src: string) => string) => (node: PMNode, getPos: () => number | undefined) => {
+      const dom = el('span', `pw-atom pw-${node.type.name}`, label(node.attrs.src));
+      dom.title = node.attrs.src;
+      opensAtom(dom, node, getPos);
+      return { dom };
+    };
   /** Text as it reads, for showing: `100\\%` as 100%. What is edited is always the LaTeX itself. */
   const shown = (latex: string) => latex.replace(/\\([%&_#$])/g, '$1');
   /**
@@ -834,19 +875,19 @@ export function createVisual(opts: {
           'Alt-c': () => (opts.ask && opts.editable ? (opts.ask('citation'), true) : false),
           'Alt-g': () => (opts.ask && opts.editable ? (opts.ask('figure'), true) : false),
           'Alt-t': () => (opts.ask && opts.editable ? (opts.ask('table'), true) : false),
-          // Enter on a selected formula opens it for editing.
+          // Enter on a selected formula, or inline atom, opens it for editing.
           Enter: ({ editor: e }) => {
             const { selection } = e.state;
             const node = e.state.doc.nodeAt(selection.from);
-            if (
-              !opts.editMath ||
-              !opts.editable ||
-              selection.empty ||
-              !node?.type.name.startsWith('math_')
-            )
-              return false;
+            if (!opts.editable || selection.empty || !node) return false;
             if (selection.to !== selection.from + node.nodeSize) return false;
-            openMath(selection.from, node.attrs.src);
+            if (node.type.name.startsWith('math_')) {
+              if (!opts.editMath) return false;
+              openMath(selection.from, node.attrs.src);
+              return true;
+            }
+            if (!opts.editAtom || !node.isInline || !node.isAtom) return false;
+            openAtom(selection.from, node);
             return true;
           },
         }),
@@ -913,12 +954,15 @@ export function createVisual(opts: {
     // A click on a formula lands inside it (`inside`) or just beside it.
     const pos = hit ? (hit.inside >= 0 ? hit.inside : hit.pos) : editor.state.selection.from;
     const node = editor.state.doc.nodeAt(pos);
-    const formula = node?.type.name.startsWith('math_')
-      ? () => openMath(pos, node.attrs.src)
-      : undefined;
+    const edit =
+      node?.type.name.startsWith('math_') && opts.editMath
+        ? { name: 'formula', run: () => openMath(pos, node.attrs.src) }
+        : node?.isInline && node.isAtom && opts.editAtom
+          ? { name: atomName(node), run: () => openAtom(pos, node) }
+          : undefined;
     // The caret goes where the click was, so that what is inserted goes there too.
-    if (hit && !formula) selectAt(hit.pos);
-    opts.menu({ ...at, formula });
+    if (hit && !edit) selectAt(hit.pos);
+    opts.menu({ ...at, edit });
   };
   editor.view.dom.addEventListener('contextmenu', onMenu);
 

@@ -51,15 +51,16 @@ to their source. Measured on the `real-*` fixtures and on small samples:
 
 - `\footnote{}`, `{\bf ...}`, `\textsc{}`, `\SI{}{}`, `\qty{}{}`, `\num{}`, `\url{}`,
   `\href{}{}` and `\foreignlanguage{}{}` inside a paragraph: one raw atom each. The words
-  around them are editable; the words inside them are not.
+  around them are editable; the words inside them are changed as LaTeX, in a box that a double
+  click or Enter opens.
 - `description`, a list with `\item[label]`, and a list with another list inside it: the whole
   environment is one raw block.
 - `tikzpicture`, `pgfplots` axes, `lstlisting`, `algorithm`, `figure` and `table` (the caption of
   a figure or table is edited through its own control, the first of several in `subfigure`s),
   `CCSXML`, `\ccsdesc`, `\keywords`, `teaserfigure` and the title block of `acmart`.
 - `\subfile`, `\import`, `\include` and `\input` lines, and a subfile's own preamble.
-- A citation or a reference is shown in place with its source as its title; it is changed in
-  the source view (the visual view inserts new ones, and opens a formula with a double click).
+- A citation or a reference is shown in place with its source as its title; it is changed as
+  LaTeX in the same box (a double click or Enter opens it, as it does a formula).
 - A `.tex` file that is a root of its own (`standalone`, a subfile) is listed as another file that
   could be the root. The root chosen is the shallowest, then one named `main`, then the one that
   brings in the most files.

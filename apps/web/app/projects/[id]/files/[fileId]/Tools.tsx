@@ -8,7 +8,7 @@ import { type RefObject, useEffect, useRef, useState } from 'react';
 import { numbers } from '../../../../../lib/numbers';
 import { renderMath } from '../../../../../lib/visual';
 
-type Apply = (latex: string) => Promise<CommandResult>;
+type Apply = (latex: string) => Promise<CommandResult | 'spills'>;
 
 /** A native dialog that is open exactly while `open` is true. It holds the focus while open. */
 function useDialog(open: boolean): RefObject<HTMLDialogElement | null> {
@@ -24,7 +24,13 @@ function useDialog(open: boolean): RefObject<HTMLDialogElement | null> {
  * A formula to edit (`place` null: `src` is its whole source, delimiters and all) or to insert
  * (`place` says where: in the line, or on a line of its own with a number).
  */
-export type FormulaRequest = { src: string; place: null | 'inline' | 'display'; apply: Apply };
+export type FormulaRequest = {
+  src: string;
+  place: null | 'inline' | 'display';
+  apply: Apply;
+  /** Set for an inline atom that is not a formula (a citation, say): no preview, and edits that spill are refused. */
+  what?: string;
+};
 
 export function FormulaBox(props: {
   request: FormulaRequest | null;
@@ -59,7 +65,7 @@ export function FormulaBox(props: {
         ? `\\begin{equation}\n  ${draft.trim()}\n\\end{equation}`
         : draft;
   useEffect(() => {
-    if (!request || !preview.current) return;
+    if (!request || request.what || !preview.current) return;
     try {
       renderMath(preview.current, latex, { macros });
       setUndrawable('');
@@ -74,10 +80,15 @@ export function FormulaBox(props: {
     try {
       // A formula on its own line needs its own lines in the source too.
       const result = await request.apply(place === 'display' ? `\n${latex}\n` : latex);
-      if (result !== 'conflict') return onDone();
-      setProblem(
-        'Someone changed this formula while you were editing it. Copy your text if you want to keep it, cancel, and open the formula again.',
-      );
+      if (result === 'spills')
+        setProblem(
+          'This would change how the text around it is read (an unclosed brace, a blank line, a % at the end, or a command run into the next word). Fix it here, or make the change in the source.',
+        );
+      else if (result === 'conflict')
+        setProblem(
+          `Someone changed this ${request.what ? '' : 'formula '}while you were editing it. Copy your text if you want to keep it, cancel, and open it again.`,
+        );
+      else return onDone();
     } catch {
       setProblem('That edit could not be made. Check the connection and try again.');
     } finally {
@@ -92,7 +103,13 @@ export function FormulaBox(props: {
           void apply();
         }}
       >
-        <h2 id="formula-title">{request?.place ? 'Insert an equation' : 'Edit formula'}</h2>
+        <h2 id="formula-title">
+          {request?.place
+            ? 'Insert an equation'
+            : request?.what
+              ? `Edit ${request.what}`
+              : 'Edit formula'}
+        </h2>
         {request?.place && (
           <fieldset>
             <legend>Where it goes</legend>
@@ -129,9 +146,9 @@ export function FormulaBox(props: {
             }}
           />
         </label>
-        <p className="label">As it will look</p>
-        <div className="preview" ref={preview} />
-        {undrawable && draft.trim() && (
+        {!request?.what && <p className="label">As it will look</p>}
+        {!request?.what && <div className="preview" ref={preview} />}
+        {!request?.what && undrawable && draft.trim() && (
           <p className="note">
             This cannot be drawn here ({undrawable}). It can still be applied: the PDF is what
             decides.
@@ -518,7 +535,7 @@ export function CitationPicker(props: {
 
 /** The menu that opens on a right click, or the menu key, in the visual view. */
 export function EditorMenu(props: {
-  at: { x: number; y: number; formula?: () => void } | null;
+  at: { x: number; y: number; edit?: { name: string; run(): void } } | null;
   onClose(): void;
   onReference(): void;
   onCitation(): void;
@@ -544,7 +561,7 @@ export function EditorMenu(props: {
   }, [at, onClose]);
   if (!at) return null;
   const items: [string, () => void][] = [
-    ...(at.formula ? ([['Edit formula…', at.formula]] as [string, () => void][]) : []),
+    ...(at.edit ? ([[`Edit ${at.edit.name}…`, at.edit.run]] as [string, () => void][]) : []),
     ['Insert a reference…', props.onReference],
     ['Insert a citation…', props.onCitation],
     ['Insert an equation…', props.onEquation],

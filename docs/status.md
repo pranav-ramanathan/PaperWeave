@@ -3348,6 +3348,37 @@ selected splits the paragraph there, as it does for any selected thing. Prose ed
   adding `texlive-fonts-extra` is 1.4 GB installed. `\subimport` is still resolved from the
   root's folder.
 
+## Inline atoms opened from the visual view
+
+A citation, a reference, a footnote, `\url`, `\href`, `\textsc`, `{\bf ..}`, `\SI` or any other
+raw inline LaTeX is opened by a double click, by Enter when it is selected, or from the context menu
+("Edit citation…", "Edit reference…", "Edit footnote…", "Edit LaTeX…"). The formula box opens on its
+source with no preview; Apply replaces exactly that atom's bytes through the server's command path
+(`Bridge.atomCommand`, then `Bridge.rewriteCommand`, a compare-and-swap on the atom's text). The
+picker for citations is not changed. A macro definition (`\newcommand`, `\def`, ...) is refused at
+open with "edit it in the source".
+
+- **What is refused.** `rewriteCommand` splices the new text into the source and parses it, both
+  incrementally and in full; `contained` (`packages/bridge/src/translate.ts`) then requires every
+  piece and block outside the atom to be the same, shifted by the change in length, and the new
+  pieces to cover exactly the replacement, in the same block and list item. If not, the answer is
+  `'spills'`, nothing is sent, and the box stays open with the reason. This refuses an unclosed `{`,
+  a blank line, a trailing `%`, a command run into the next word, `\begin{..}`, `$$` and `\item`.
+  It also refuses a replacement, or an atom, with half of a surrogate pair in it: the shared text
+  turns that into U+FFFD. A found case: `\` followed by an emoji is parsed as an atom that ends
+  inside the emoji.
+- **Formulas** keep their own path (`openMath`), without this check.
+- **Enter on a selected inline atom opens it.** It split the paragraph there before (see "Five
+  papers written the way real ones are"). A selected block atom is as it was.
+- **Fuzz.** `FUZZ=N` generated rewrites (`soup` or a mutated copy of the atom, on a random inline
+  atom of a random fixture): a refused one leaves the source as it was; an accepted one changes
+  the bytes of that atom and no others, and the visual document is the projection of the source.
+  100000 ran with 28203 accepted and 71797 refused; 300000 with 85320 and 214680. Before the check
+  of a full parse was added, one run of 300000 found a rewrite of `$\delta$` that the incremental
+  parse read differently from a full parse (seed 25218).
+- **Run:** unit 169 (29 files), sandbox 261 passed and 1 skipped (33 files), lint and typecheck
+  clean, browser suite 120 of 120 (16 minutes), including `atoms.spec`.
+
 ## Decisions waiting on the owner
 
 See "What I need from you" in `docs/plan.md`. None blocks C1.
