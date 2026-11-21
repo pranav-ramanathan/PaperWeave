@@ -3004,6 +3004,22 @@ Changed on the way, and worth keeping:
 - **Now** the test presses End after the click, so that the caret is at the end of the paragraph
   however fast the clicks are. With `E2E_CPU_THROTTLE=4`, 40 of 40 pass. `E2E_CPU_THROTTLE=<n>`
   slows every page the tests open by that factor (`person` in `tests/e2e/helpers.ts`).
+
+### The whole browser suite with the pages slowed down
+
+- **What was tried.** On 21 November, every browser test with `E2E_CPU_THROTTLE=4`: 102 ran,
+  101 passed, in 20 minutes. Only the pages made by `person` are slowed; a second page a test
+  opens itself runs at full speed.
+- **Found.** `files.spec` "a paper is started from nothing…" failed 7 of 10 slowed, 0 of 10 at
+  full speed. Just after adding a file, the page comes back from the form's post with its words
+  already drawn, and the test dropped a file on it at once. The handler that stops a dropped
+  file from being opened in place of the app (`Dropped.tsx`) is put on once the page's script
+  has started, so the drop came before it: neither `dragover` nor `drop` was taken. Waiting
+  five seconds first, it passed 10 of 10.
+- **Now** the test asks again until the drop is taken, and only then checks that the file field
+  is left alone. Slowed, 10 of 10 pass (7 of 10 failed before). A person can drop a file on a
+  page before its script has started, on a slow line; the browser then opens the file in
+  place of the page. Not changed.
 - Not changed: the editor, which does what its tests say (an insert goes at the caret, or after
   the selection).
 
