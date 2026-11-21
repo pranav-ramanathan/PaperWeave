@@ -15,7 +15,7 @@ import {
 } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { auxLabels, norm, rootDir } from '@paperweave/latex';
+import { LATEXMK_RULES, auxLabels, norm, rootDir } from '@paperweave/latex';
 
 export const IMAGE = process.env.PAPERWEAVE_TEX_IMAGE ?? 'paperweave-tex';
 /** The image's unprivileged user. */
@@ -204,6 +204,13 @@ export function diagnostics(log: string, output = '', dir = ''): Diagnostic[] {
       severity: 'error',
       message: 'The bibliography could not be made. The build log has the details.',
     });
+  // A custom-dependency rule (makeglossaries, or makeindex for nomencl) failed: latexmk says so
+  // in its summary, and whatever the tool said went to its own .glg or .nlg file, not the TeX log.
+  if (/^Collected error summary[^\n]*\n(?:[ \t]+.*\n)*?[ \t]+cusdep\b/m.test(output))
+    out.push({
+      severity: 'error',
+      message: 'The glossary could not be made. The build log has the details.',
+    });
   // An error in a file that is not the author's is not placed in it.
   for (let i = 0; i < out.length; i++) {
     const { file, message } = out[i];
@@ -338,6 +345,8 @@ export async function compile(
         ...['latexmk', '-norc', ...(dashed ? [] : ['-cd']), ENGINE[compiler], '-no-shell-escape'],
         // -bibtex-cond: BibTeX only where there is a .bib file, so a ready-made .bbl is left be.
         ...['-bibtex-cond', '-interaction=nonstopmode'],
+        // Our own rules for glossaries and nomenclature: -norc leaves latexmk with none.
+        ...['-e', LATEXMK_RULES],
         // "./": a name that begins with "-" is a path, not an option.
         ...['-file-line-error', '-synctex=1', `./${dashed ? name : root}`],
       ],
