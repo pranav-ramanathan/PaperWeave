@@ -297,6 +297,49 @@ test('renaming a file shows the lines that name it, and changes them with it', a
   );
 });
 
+test('a file named in two groups of \\import is renamed group by group', async () => {
+  const zip = await writeZip(
+    Object.entries({
+      'main.tex': [
+        '\\documentclass{article}',
+        '\\begin{document}',
+        '\\import{sections/}{method} and \\subimport{sections}{results}',
+        '\\end{document}',
+        '',
+      ].join('\n'),
+      'sections/method.tex': 'Method.\n',
+      'sections/results.tex': 'Results.\n',
+    }).map(([path, text]) => ({ path, bytes: Buffer.from(text) })),
+  );
+  const [project] = await importZip(t.pool, store, owner.id, zip, 'Imported');
+  const ids = Object.fromEntries(
+    (await listFiles(t.pool, owner.id, project.id)).map((f) => [f.path, f.id]),
+  );
+  const rename = async (from: string, to: string) => {
+    const proposal = await proposeFileRename(t.pool, store, owner.id, project.id, ids[from], to);
+    await renameFileAndReferences(
+      t.pool,
+      store,
+      owner.id,
+      project.id,
+      ids[from],
+      to,
+      proposal.digest,
+    );
+    return proposal.changes.map((c) => `${c.path}:${c.line} ${c.after}`);
+  };
+  // Only the file group changes when the folder is the same; the folder keeps its slash style.
+  expect(await rename('sections/method.tex', 'sections/approach.tex')).toEqual([
+    'main.tex:3 \\import{sections/}{approach} and \\subimport{sections}{results}',
+  ]);
+  expect(await rename('sections/results.tex', 'parts/results.tex')).toEqual([
+    'main.tex:3 \\import{sections/}{approach} and \\subimport{parts}{results}',
+  ]);
+  expect((await content(project.id))['main.tex']).toContain(
+    '\\import{sections/}{approach} and \\subimport{parts}{results}',
+  );
+});
+
 test('a file rename is refused whole when the lines have changed, and can leave them alone when asked', async () => {
   const p = await named();
   const intro = p.ids['sections/intro.tex'];

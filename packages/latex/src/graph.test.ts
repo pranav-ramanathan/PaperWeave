@@ -77,3 +77,43 @@ test('verbatim bodies are not read, and \\\\% is a comment', () => {
   expect(named('50\\% \\input{a}')).toEqual(['a=a']);
   expect(named('\\\\\\% \\input{a}')).toEqual(['a=a']);
 });
+
+test('\\import, \\subimport and \\includefrom name a folder and a file in two groups', () => {
+  const root = [
+    '\\documentclass{article}\\begin{document}',
+    '\\import{sections/}{method}',
+    '\\subimport{sections}{res}',
+    '\\includefrom{}{tail}',
+    '\\import{sections/}{gone} % \\import{sections/}{commented}',
+    '\\end{document}',
+  ].join('\n');
+  const files = {
+    'main.tex': root,
+    'sections/method.tex': 'M',
+    'sections/res.tex': 'R',
+    'tail.tex': 'T',
+  };
+  const g = includeGraph(files, 'main.tex');
+  expect(g.order).toEqual(['main.tex', 'sections/method.tex', 'sections/res.tex', 'tail.tex']);
+  expect(g.edges).toEqual([
+    { from: 'main.tex', to: 'sections/method.tex', kind: 'input' },
+    { from: 'main.tex', to: 'sections/res.tex', kind: 'input' },
+    { from: 'main.tex', to: 'tail.tex', kind: 'input' },
+  ]);
+  // The missing one is reported where its file name stands.
+  expect(g.missing).toEqual([
+    { from: 'main.tex', target: 'sections/gone', at: root.indexOf('gone') },
+  ]);
+  const inc = includes(root).filter((i) => i.import);
+  expect(
+    inc.map((i) => [i.target, root.slice(i.targetAt, i.targetAt + i.import!.file.length)]),
+  ).toEqual([
+    ['sections/method', 'method'],
+    ['sections/res', 'res'],
+    ['tail', 'tail'],
+    ['sections/gone', 'gone'],
+  ]);
+  expect(
+    inc.map((i) => root.slice(i.import!.dirAt, i.import!.dirAt + i.import!.dir.length)),
+  ).toEqual(['sections/', 'sections', '', 'sections/']);
+});
