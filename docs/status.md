@@ -3615,6 +3615,22 @@ renames to one name could hit the unique index and surface a raw 23505; it now t
 same `conflict` ("Another file already has that name.") that `createFile` already gave. Tests: two
 in `files.sandbox.test.ts`, held in place by the lock wait and a barrier, not sleeps.
 
+## "Restored while you were offline" no longer fires wrongly, or fails to
+
+The editor holds unsent edits when a ticket names a newer restore than it last saw. It only learned
+the number from tickets, so a restore made while it was connected (which arrives as ordinary edits)
+left it stale, and its next offline spell with an unsent edit was held falsely. Separately, the
+number was taken as seen when the ticket was fetched; if that attempt died and the person typed
+before the next one, the edits merged into the restored text unasked. Now `restoreRevision` runs
+`pg_notify('restored', '<project>:<number>')` in its transaction; the sync server listens, brings
+each open file of that paper up to its log, and only then sends `{ restored: n }` to those
+connections, so the edits reach the socket first. When the listener reconnects it sends each open
+paper its current number, one query per paper. The editor takes the maximum of what it has and what
+it is told, and commits the ticket's number only in `onSynced`. Tests: one in `sync.sandbox.test.ts`
+(announced, and after the edits); three in `recover.spec.ts` (restore while connected, restore that
+leaves the open file alone, and a connection that dies after its ticket). The last holds the order
+with routes, not sleeps.
+
 ## Decisions waiting on the owner
 
 See "What I need from you" in `docs/plan.md`. None blocks C1.

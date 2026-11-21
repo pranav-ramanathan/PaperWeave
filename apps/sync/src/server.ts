@@ -69,6 +69,20 @@ export async function startSync(opts: {
    */
   const tellRole = (connection: Connection<Context>, role: string) =>
     connection.sendStateless(JSON.stringify({ role, canWrite: !connection.readOnly }));
+  /**
+   * Tell the editors of a paper that it was restored, as number `n`. Their files are brought up
+   * to their logs first, so the restored text reaches each socket before this does.
+   */
+  const tellRestored = async (projectId: string, n: number, catchUpFirst = true) => {
+    for (const [name, document] of [...server.hocuspocus.documents]) {
+      const mine = (document.getConnections() as Connection<Context>[]).filter(
+        (c) => c.context.projectId === projectId,
+      );
+      if (!mine.length) continue;
+      if (catchUpFirst) await catchUp(name, 1);
+      for (const c of mine) c.sendStateless(JSON.stringify({ restored: n }));
+    }
+  };
   const server = new Server<Context>({
     port: opts.port,
     quiet: true,
@@ -296,9 +310,13 @@ export async function startSync(opts: {
   // server, and when someone signs out.
   const stopListening = await listen(
     opts.databaseUrl,
-    ['acl', 'file_edits', 'session_ended'],
+    ['acl', 'file_edits', 'session_ended', 'restored'],
     async (channel, payload) => {
       if (channel === 'session_ended') return signedOut(payload);
+      if (channel === 'restored') {
+        const [projectId, number] = payload.split(':');
+        return tellRestored(projectId, Number(number));
+      }
       if (channel === 'file_edits') {
         // An edit made on the server (a restore, say): it is already in the log, so it only
         // needs to reach the people who have the file open.
@@ -314,6 +332,18 @@ export async function startSync(opts: {
       await recheck();
       await signedOut();
       for (const name of server.hocuspocus.documents.keys()) await catchUp(name, 1);
+      // A restore announced meanwhile was not heard either: say where each open paper stands.
+      const papers = new Set<string>();
+      for (const document of server.hocuspocus.documents.values())
+        for (const c of document.getConnections() as Connection<Context>[])
+          papers.add(c.context.projectId);
+      for (const projectId of papers) {
+        const { rows } = await pool.query(
+          "select coalesce(max(number), 0)::int as n from revisions where project_id = $1 and kind = 'restore'",
+          [projectId],
+        );
+        await tellRestored(projectId, rows[0].n, false);
+      }
     },
   );
 
