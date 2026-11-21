@@ -111,6 +111,8 @@ export default function Proposals(props: {
 }) {
   const { projectId, fileId, canPropose, canDecide, canReview } = props;
   const [reviewing, setReviewing] = useState(false);
+  // Set at once by a press: state is seen only after the next draw, too late for a second press.
+  const asking = useRef(false);
   const [proposals, setProposals] = useState<Proposal[] | null>(null);
   const [starting, setStarting] = useState<Stretch | null>(null);
   const [revising, setRevising] = useState<string | null>(null);
@@ -368,10 +370,13 @@ export default function Proposals(props: {
       {canPropose && canReview && !starting && (
         <button
           type="button"
-          disabled={reviewing}
+          aria-disabled={reviewing || undefined}
           onClick={async () => {
+            // aria-disabled, not disabled, so the button keeps the keyboard while it is busy.
+            if (asking.current) return;
             const picked = props.selection();
             if (!picked?.words) return setNote('Select the passage to review first.');
+            asking.current = true;
             setReviewing(true);
             setNote('Asking the model. This can take a minute…');
             const res = await fetch(`/projects/${projectId}/review`, {
@@ -384,6 +389,7 @@ export default function Proposals(props: {
               proposed?: number;
               asked?: number;
             } | null;
+            asking.current = false;
             setReviewing(false);
             await read();
             setNote(

@@ -588,3 +588,34 @@ test('Ctrl+Home and Ctrl+End go to the start and the end of the text, with Shift
   await page.keyboard.press('Shift+ControlOrMeta+End');
   expect((await selected()).trimEnd()).toMatch(/proposal is here\.$/);
 });
+
+test('Compile now keeps the keyboard while the PDF is built', async ({ browser }) => {
+  test.setTimeout(180_000);
+  const page = await paper(browser, 'keys-compile', true);
+  const build = page.locator('.build');
+  const status = build.getByRole('status');
+  await expect(status).toHaveText('The PDF is up to date.', { timeout: 60_000 });
+  const builds: string[] = [];
+  page.on('request', (r) => {
+    if (r.method() === 'POST' && r.url().endsWith('/builds')) builds.push(r.url());
+  });
+
+  // Behind the text, and not built by itself: the button is the way to the PDF.
+  await build.getByRole('checkbox', { name: 'Compile automatically' }).uncheck();
+  await showSource(page);
+  await page.locator('.editor .cm-content').click();
+  await page.keyboard.type('x');
+  await expect(status).toHaveText('The PDF is behind the text.', { timeout: 30_000 });
+
+  await tabTo(page, 'Compile now');
+  await page.keyboard.press('Enter');
+  await expect(status).toHaveText('Compiling…');
+  expect((await focused(page)).name).toBe('Compile now');
+  // Pressed again while it builds, by Enter and by Space: nothing is sent.
+  await page.keyboard.press('Enter');
+  await page.keyboard.press('Space');
+  expect((await focused(page)).name).toBe('Compile now');
+  await expect(status).toHaveText('The PDF is up to date.', { timeout: 60_000 });
+  expect((await focused(page)).name).toBe('Compile now');
+  expect(builds).toHaveLength(1);
+});

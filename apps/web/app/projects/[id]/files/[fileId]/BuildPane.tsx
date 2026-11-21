@@ -53,10 +53,17 @@ export default function BuildPane({
 
   // Asks now, whatever the clock says: set by the poll below.
   const askNow = useRef(() => {});
+  // Set at once by a press: state would be seen only after the next draw.
+  const posting = useRef(false);
   const compile = useCallback(async () => {
-    const res = await fetch(url, { method: 'POST', signal: AbortSignal.timeout(15_000) }).catch(
-      () => null,
-    );
+    // One post at a time: a second press before the first is answered does nothing.
+    if (posting.current) return;
+    posting.current = true;
+    const res = await fetch(url, { method: 'POST', signal: AbortSignal.timeout(15_000) })
+      .catch(() => null)
+      .finally(() => {
+        posting.current = false;
+      });
     setProblem(
       res?.ok
         ? ''
@@ -210,7 +217,16 @@ export default function BuildPane({
         </span>
         {canBuild && (
           <>
-            <button type="button" onClick={compile} disabled={building}>
+            <button
+              type="button"
+              onClick={() => {
+                // aria-disabled, not disabled: a disabled button drops the keyboard to the
+                // page. While a build is under way a press does nothing (builds are
+                // rate-limited).
+                if (!building) void compile();
+              }}
+              aria-disabled={building || undefined}
+            >
               Compile now
             </button>
             <label>
