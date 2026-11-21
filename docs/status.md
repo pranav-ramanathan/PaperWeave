@@ -3774,6 +3774,22 @@ Coming back online, the editor said "This paper was restored to an earlier revis
 - The model now checks whether the restore added a revision. If it did not, the paper as it stood is that restore revision itself, and every mark stored before must be in it. The invariant (acknowledged text is never lost) is unchanged.
 - Also fails on main and on 1c68346, so it was long-standing and found by a new random seed.
 
+## A comment's text deleted, then brought back with undo
+
+- **What was wrong.** Undo writes the deleted characters again as new ones, and a thread's
+  places stayed on the old ones. After a deleted sentence was undone, the thread said "This text
+  has been deleted" for everyone though the file read as before. Only the tab that undid still
+  marked the words, and a reload lost that. "Attach to the same words again" refused when the
+  words occurred twice.
+- **What happens now.** The tab that undid is the only one that knows where the words stand. When
+  it reads a detached thread and finds the words, it sends their places to the server, which
+  attaches the thread only if the thread is detached, both places are in the saved text, and
+  the words there match the thread's fingerprint. Anything else is refused and the thread
+  stays detached; the tab tries again at its next reading. Viewers and outsiders are refused as
+  before. Deleting again (redo) detaches the thread, correctly.
+- **Not done.** Proposed changes have the same fault: after an undo they go stale. Left as a
+  follow-up.
+
 ## Decisions waiting on the owner
 
 See "What I need from you" in `docs/plan.md`. None blocks C1.
