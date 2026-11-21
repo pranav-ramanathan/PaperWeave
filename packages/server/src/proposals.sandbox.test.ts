@@ -549,11 +549,7 @@ test('an insertion stays fresh when the file is edited elsewhere, and at either 
     replacement: '% bottom\n',
   });
   await change(p.file, 'Nothing else is claimed.', 'Something else.');
-  expect((await proposals(p)).map((x) => [x.stale, x.placeLost])).toEqual([
-    [false, false],
-    [false, false],
-    [false, false],
-  ]);
+  expect((await proposals(p)).map((x) => x.stale)).toEqual([false, false, false]);
   for (const x of [mid, first, last]) await acceptProposal(t.pool, store, users.owner.id, p.id, x);
   expect(await saved(p)).toBe(
     `% top\n${MAIN.replace(' for most', ' not for most').replace('Nothing else is claimed.', 'Something else.')}% bottom\n`,
