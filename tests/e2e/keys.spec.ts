@@ -12,10 +12,12 @@ import {
   emailedLink,
   person,
   run,
+  selectWord,
   showSource,
   showVisual,
   signIn,
   sourceText,
+  typingSaved,
 } from './helpers';
 
 const MAIN = [
@@ -618,4 +620,42 @@ test('Compile now keeps the keyboard while the PDF is built', async ({ browser }
   await expect(status).toHaveText('The PDF is up to date.', { timeout: 60_000 });
   expect((await focused(page)).name).toBe('Compile now');
   expect(builds).toHaveLength(1);
+});
+
+test('Attach to the same words again keeps the keyboard and says what happened', async ({
+  browser,
+}) => {
+  test.setTimeout(180_000);
+  const page = await paper(browser, 'keys-attach', true);
+  const comments = page.getByRole('region', { name: 'Comments' });
+
+  await selectLine(page, 1, 'Latency');
+  await tabTo(page, 'Comment on the selected text');
+  await page.keyboard.press('Enter');
+  await page.keyboard.type('Where did this go?');
+  await tabTo(page, 'Start thread');
+  await page.keyboard.press('Enter');
+  await expect(page.getByRole('article', { name: /^Thread on/ })).toContainText(
+    'Where did this go?',
+  );
+
+  // The words are deleted, so the thread is detached, and then written again by hand (not
+  // undone), in a comment line where they occur once: only the button can attach it.
+  await showSource(page);
+  await selectWord(page, '.editor .cm-content', 'Latency');
+  await page.keyboard.press('Backspace');
+  await typingSaved(page);
+  await expect(comments).toContainText('This text has been deleted.', { timeout: 15_000 });
+  await page.keyboard.press('ControlOrMeta+End');
+  await page.keyboard.type('% Latency');
+  await typingSaved(page);
+
+  await tabTo(page, 'Attach to the same words again');
+  await page.keyboard.press('Enter');
+  await expect(comments.locator('[aria-live=polite]')).toHaveText('The words were found again.');
+  await expect(comments).not.toContainText('This text has been deleted.');
+  // The button is gone: the keyboard is on something in the comments, not on the page.
+  const now = await focused(page);
+  expect(now.name).not.toBe('(nothing has the keyboard)');
+  expect(now.region).toBe('Comments');
 });
