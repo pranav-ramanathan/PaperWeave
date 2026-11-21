@@ -204,6 +204,8 @@ export async function setRootFile(
     await db.query('select id from files where project_id = $1 order by path for update', [
       projectId,
     ]);
+    // Asked again with the files held: a role lowered while this waited is in force.
+    await authorize(db, userId, id(projectId), 'file.write');
     const { rowCount } = await db.query(
       `update projects set root_file_id = $2, manifest_version = manifest_version + 1
        where id = $1 and exists (
