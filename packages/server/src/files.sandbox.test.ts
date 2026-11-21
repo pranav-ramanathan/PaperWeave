@@ -7,6 +7,7 @@ import { afterAll, beforeAll, expect, test } from 'vitest';
 import { compile } from '../../../apps/workers/src/compile.ts';
 import { LIMITS, readZip, writeZip } from './archive.ts';
 import { blobStore } from './blobs.ts';
+import { AppError } from './errors.ts';
 import {
   createFile,
   deleteFile,
@@ -265,6 +266,68 @@ test('typing that queues behind a delete is refused, and the revision holds all 
   const [saved] = await listRevisions(t.pool, owner.id, p.id);
   await restoreRevision(t.pool, store, owner.id, p.id, saved.id);
   expect((await content(p.id))['intro.tex']).toBe('Edited. Intro text.\n');
+});
+
+/** What a call comes to: its result, or the error's code (a raw database error shows as its SQLSTATE). */
+const outcome = (run: Promise<unknown>) =>
+  run.then(
+    () => 'ok',
+    (e) => (e instanceof AppError ? e.code : `raw:${e.code ?? e.message}`),
+  );
+
+test('making a file the root while it is being deleted is refused cleanly, and the root stays live', async () => {
+  const p = await paper();
+  let rooting!: Promise<string>;
+  const deleting = outcome(
+    deleteFile(
+      holdingFiles(async () => {
+        rooting = outcome(setRootFile(t.pool, owner.id, p.id, p.intro));
+        await untilSomeoneWaits();
+      }),
+      store,
+      owner.id,
+      p.id,
+      p.intro,
+    ),
+  );
+  expect(await deleting).toBe('ok');
+  expect(await rooting).toBe('not_found');
+  const { rows } = await t.pool.query(
+    `select p.root_file_id, f.deleted_at from projects p join all_files f on f.id = p.root_file_id
+     where p.id = $1`,
+    [p.id],
+  );
+  expect(rows).toHaveLength(1);
+  expect(rows[0].root_file_id).toBe(p.main);
+  expect(rows[0].deleted_at).toBeNull();
+});
+
+test('two renames to the same new name: one wins, the other is told the name is taken', async () => {
+  const p = await paper();
+  // Each checks that the name is free, then waits for the other to have checked too.
+  let checked = 0;
+  let both!: () => void;
+  const bothChecked = new Promise<void>((r) => (both = r));
+  const racing = new Proxy(t.pool, {
+    get(target, prop) {
+      const v = Reflect.get(target, prop);
+      if (prop !== 'query') return typeof v === 'function' ? v.bind(target) : v;
+      return async (sql: string, params?: unknown[]) => {
+        const result = await target.query(sql, params);
+        if (/path = \$2 and id <> \$3/.test(sql)) {
+          if (++checked === 2) both();
+          await bothChecked;
+        }
+        return result;
+      };
+    },
+  });
+  const results = await Promise.all([
+    outcome(renameFile(racing, owner.id, p.id, p.main, 'same.tex')),
+    outcome(renameFile(racing, owner.id, p.id, p.intro, 'same.tex')),
+  ]);
+  expect(results.sort()).toEqual(['conflict', 'ok']);
+  expect((await paths(p.id)).filter((x) => x === 'same.tex')).toHaveLength(1);
 });
 
 test('a person whose role is lowered while their delete waits is refused, and the file stays', async () => {

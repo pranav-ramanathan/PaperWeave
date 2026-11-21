@@ -187,18 +187,40 @@ export async function removeFile(db: Db, projectId: string, fileId: string) {
   await db.query("select pg_notify('acl', $1)", [projectId]);
 }
 
-/** Make a .tex file the one the paper is built from. */
-export async function setRootFile(db: Db, userId: string, projectId: string, fileId: string) {
-  await authorize(db, userId, id(projectId), 'file.write');
-  const { rowCount } = await db.query(
-    `update projects set root_file_id = $2, manifest_version = manifest_version + 1
-     where id = $1 and exists (
-       select 1 from files where id = $2 and project_id = $1 and eol is not null and path ~* '\\.(tex|ltx)$'
-     )`,
-    [projectId, id(fileId)],
-  );
-  if (!rowCount)
+/**
+ * Make a .tex file the one the paper is built from. The files are held first and the paper
+ * after, the order a delete's revision takes: the other order deadlocks with it, through the
+ * root's foreign key. The file is checked again with them held, so a file that was just
+ * deleted is not found, rather than made the root.
+ */
+export async function setRootFile(
+  pool: pg.Pool,
+  userId: string,
+  projectId: string,
+  fileId: string,
+) {
+  await authorize(pool, userId, id(projectId), 'file.write');
+  await transaction(pool, async (db) => {
+    await db.query('select id from files where project_id = $1 order by path for update', [
+      projectId,
+    ]);
+    // Asked again with the files held: a role lowered while this waited is in force.
+    await authorize(db, userId, id(projectId), 'file.write');
+    const { rowCount } = await db.query(
+      `update projects set root_file_id = $2, manifest_version = manifest_version + 1
+       where id = $1 and exists (
+         select 1 from files where id = $2 and project_id = $1 and eol is not null and path ~* '\\.(tex|ltx)$'
+       )`,
+      [projectId, id(fileId)],
+    );
+    if (rowCount) return;
+    const gone = await db.query(
+      'select 1 from all_files where id = $1 and project_id = $2 and deleted_at is not null',
+      [id(fileId), projectId],
+    );
+    if (gone.rowCount) throw new AppError('not_found', 'No such file.');
     throw new AppError('invalid_input', 'Only a .tex file of this paper can be the root.');
+  });
 }
 
 /** `path` as written from the directory `dir` (which ends in a slash, or is empty). */

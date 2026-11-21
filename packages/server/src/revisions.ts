@@ -624,10 +624,18 @@ export async function renameFile(
     [projectId, path, id(fileId)],
   );
   if (taken.rows[0]) throw new AppError('conflict', 'Another file already has that name.');
-  const { rowCount } = await db.query(
-    'update files set path = $3 where id = $1 and project_id = $2',
-    [fileId, projectId, path],
-  );
+  const { rowCount } = await db
+    .query('update files set path = $3 where id = $1 and project_id = $2', [
+      fileId,
+      projectId,
+      path,
+    ])
+    .catch((err) => {
+      // The unique index decides, so two people choosing the same name cannot both succeed.
+      if (err.code === '23505')
+        throw new AppError('conflict', 'Another file already has that name.');
+      throw err;
+    });
   if (!rowCount) throw new AppError('not_found', 'No such file.');
   await db.query('update projects set manifest_version = manifest_version + 1 where id = $1', [
     projectId,

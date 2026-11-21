@@ -3589,6 +3589,32 @@ edit queued behind a delete is refused, the file's `head_seq` equals the revisio
 gives back the text as it was; a role lowered mid-delete refuses the delete) and
 `sync.sandbox.test.ts` (no log entry above the revision's `seq`, editor closed with `no-access`).
 
+## A connection that was still loading its file when access changed
+
+Hocuspocus registers a connection only after the file has been read, and `recheck` and `signedOut`
+walk only registered connections. Someone removed, lowered or signed out in that window was missed:
+their socket stayed open and they went on reading live. Now the `connected` hook looks first
+(`look`, the body `recheck` uses for each connection): write access, role message and `4403
+no-access`; then, for a ticket that names a sign-in, whether that session still exists (`4401
+signed-out`). If the database cannot answer there, the socket is closed with `try-again`, which the
+editor retries. Tests: three in `sync.sandbox.test.ts`, on a second server whose store holds reads
+back until released.
+
+Limit: Hocuspocus drains messages queued before `connected`, so a person removed in the window may
+still receive the text as of their valid ticket. Only the live reading stops.
+
+## A root change racing a delete, and two renames to one name
+
+Two races found by forcing interleavings. `setRootFile` updated the project and then, through the
+root's foreign key, needed the file; a delete (inside `cutRevision`) holds the files and then
+updates the project, so the two deadlocked and `setRootFile` failed with a raw 40P01. It now takes
+the files and then the project, in one transaction, the same order as the delete, and checks the
+file again with them held: a file deleted a moment before gives `not_found`, and the root never
+points at a deleted file. `renameFile` checked that the name was free and then updated, so two
+renames to one name could hit the unique index and surface a raw 23505; it now turns that into the
+same `conflict` ("Another file already has that name.") that `createFile` already gave. Tests: two
+in `files.sandbox.test.ts`, held in place by the lock wait and a barrier, not sleeps.
+
 ## Decisions waiting on the owner
 
 See "What I need from you" in `docs/plan.md`. None blocks C1.

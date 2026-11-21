@@ -282,6 +282,104 @@ test('taking away write access stops writes at once; removal ends the connection
   expect(editor.text.toString()).not.toContain('SECRET');
 });
 
+/**
+ * A second server whose store holds back every read until the test lets it go, so that a
+ * connection is in the stretch where its file is still being read: not yet registered with the
+ * library, and so not seen by anything that walks the open connections. `started` says a read
+ * has begun, so that nothing here is timed with sleeps.
+ */
+async function slowLoading(
+  run: (hold: { started: Promise<void>; release: () => void; port: number }) => Promise<void>,
+) {
+  let begin!: () => void;
+  let release!: () => void;
+  const started = new Promise<void>((r) => (begin = r));
+  const open = new Promise<void>((r) => (release = r));
+  const slow = startSync({
+    pool: t.pool,
+    store: {
+      ...store,
+      get: async (digest: string) => {
+        begin();
+        await open;
+        return store.get(digest);
+      },
+    },
+    secret: SECRET,
+    port: sync.port + 500,
+    databaseUrl: t.url,
+  });
+  const server = await slow;
+  try {
+    await run({ started, release, port: server.port });
+  } finally {
+    release();
+    closeAll();
+    await server.stop();
+  }
+}
+
+test('someone removed while the file is still being read is closed, and never reads on', async () => {
+  const { project, file } = await paper();
+  await slowLoading(async ({ started, release, port }) => {
+    const editor = client(users.editor, file, port);
+    await started;
+    await removeMember(t.pool, users.owner.id, project, users.editor.id);
+    // The owner joins the same reading, and types once it is done.
+    const owner = client(users.owner, file, port);
+    release();
+    await until('the editor to be closed for good', () =>
+      editor.state.reasons.some((r) => r.endsWith('no-access')),
+    );
+    await until('the owner to have the file', () => owner.text.toString().includes('Hello.'));
+    owner.text.insert(0, 'SECRET ');
+    await saved(owner);
+    await new Promise((r) => setTimeout(r, 300));
+    expect(editor.text.toString()).not.toContain('SECRET');
+  });
+});
+
+test('a role lowered while the file is still being read is in force when it opens', async () => {
+  const { file, project } = await paper();
+  await slowLoading(async ({ started, release, port }) => {
+    const editor = client(users.editor, file, port);
+    await started;
+    await setRole(t.pool, users.owner.id, project, users.editor.id, 'viewer');
+    release();
+    await until('the editor to be told its role', () => editor.state.replies.some((r) => r.role));
+    await until('the file to arrive', () => editor.text.toString().includes('Hello.'));
+    const told = editor.state.replies.filter((r) => r.role);
+    expect(told.at(-1)).toMatchObject({ role: 'viewer', canWrite: false });
+    expect(told.some((r) => r.canWrite)).toBe(false);
+    const seq = await headSeq(file);
+    editor.text.insert(0, 'AFTER ');
+    await new Promise((r) => setTimeout(r, 400));
+    expect(await headSeq(file)).toBe(seq);
+  });
+});
+
+test('a sign-in that ends while the file is still being read closes the connection', async () => {
+  const { file } = await paper();
+  await t.signIn(users.second.email);
+  const [id]: string[] = (
+    await t.pool.query(
+      'select id from session where "userId" = $1 order by "createdAt" desc limit 1',
+      [users.second.id],
+    )
+  ).rows.map((r) => r.id);
+  await slowLoading(async ({ started, release, port }) => {
+    const c = client(users.second, file, port, () =>
+      syncTicket(SECRET, users.second.id, file, 60, id),
+    );
+    await started;
+    await t.pool.query('delete from session where id = $1', [id]);
+    release();
+    await until('the connection to be closed', () =>
+      c.state.reasons.some((r) => r.endsWith('signed-out')),
+    );
+  });
+});
+
 test('every connection to the database is lost at once, and the server carries on', async () => {
   const { project, file } = await paper();
   const owner = client(users.owner, file);
