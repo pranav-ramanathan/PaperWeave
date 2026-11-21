@@ -712,3 +712,82 @@ test('data kept back from downloads keeps its comments and proposals back too', 
   expect(JSON.stringify(out)).not.toContain('ROWCHANGED');
   expect(out.held).toEqual([{ file: 'data/secret.csv', threads: 1, proposals: 1 }]);
 });
+
+/** The pool, acting once on the first statement it runs after a transaction has committed. */
+function afterCommit(act: () => Promise<void>) {
+  let committed = false;
+  let done = false;
+  const bind = (target: object, prop: string | symbol) => {
+    const v = Reflect.get(target, prop);
+    return typeof v === 'function' ? v.bind(target) : v;
+  };
+  const spy = new Proxy(t.pool, {
+    get(target, prop) {
+      if (prop === 'query')
+        return async (sql: string, params?: unknown[]) => {
+          if (committed && !done) {
+            done = true;
+            await act();
+          }
+          return target.query(sql, params);
+        };
+      if (prop === 'connect')
+        return async () => {
+          const client = await target.connect();
+          return new Proxy(client, {
+            get: (c, p) =>
+              p === 'query'
+                ? async (sql: string, params?: unknown[]) => {
+                    const r = await c.query(sql, params);
+                    if (typeof sql === 'string' && sql.trim() === 'commit') committed = true;
+                    return r;
+                  }
+                : bind(c, p),
+          });
+        };
+      return bind(target, prop);
+    },
+  });
+  return { spy, acted: () => done };
+}
+
+test('typing between the cut and the review read does not unplace the review', async () => {
+  const p = await paper();
+  // The second "run was": told from the first only by what stands around it.
+  await startThread(t.pool, store, users.reviewer.id, p.id, p.file, {
+    ...(await ends(p.file, 'run was', 1)),
+    body: 'Why the second?',
+  });
+  await propose(t.pool, store, users.reviewer.id, p.id, p.file, {
+    ...(await ends(p.file, 'run was', 1)),
+    replacement: 'run, by contrast, was',
+  });
+  const { spy, acted } = afterCommit(() =>
+    editFile(t.pool, store, p.file, users.owner.id, (text) => {
+      const at = text.toString().indexOf('The second');
+      text.delete(at, 'The second'.length);
+      text.insert(at, 'A later');
+    }),
+  );
+  const zip = await exportZip(spy, store, users.owner.id, p.id, { review: true });
+  const packed = await readZip(zip);
+  // The files are the paper as it was cut; the review has to describe those words.
+  expect(Buffer.from(packed.entries[0].bytes).toString()).toContain('The second run was fast.');
+  const [arrived] = await importZip(t.pool, store, users.importer.id, zip, 'Arrived');
+  expect((await importReport(t.pool, users.importer.id, arrived.id))!.review).toEqual({
+    threads: 1,
+    proposals: 1,
+    detached: 0,
+    missing: [],
+  });
+  const [th] = await listThreads(t.pool, store, users.importer.id, arrived.id);
+  expect([th.state, th.now]).toEqual(['attached', 'run was']);
+  const [pr] = await listProposals(t.pool, store, users.importer.id, arrived.id);
+  expect(pr.now).toBe('run was');
+  expect(pr.flags).toEqual([]);
+  // The edit did land, in the paper itself, after the cut.
+  expect(acted()).toBe(true);
+  const live = new Y.Doc();
+  for (const u of await loadUpdates(t.pool, store, p.file)) Y.applyUpdate(live, u);
+  expect(live.getText(TEXT).toString()).toContain('A later run was fast.');
+});
