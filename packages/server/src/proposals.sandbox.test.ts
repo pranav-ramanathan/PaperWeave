@@ -436,7 +436,12 @@ test('after an undo, the person who undid tells where the words stand, and the p
 });
 
 test('places on other words than the proposal was about are refused', async () => {
-  const { p, id } = await twice();
+  // The words stand once, so that a search alone would attach it.
+  const p = await paper();
+  const id = await propose(t.pool, store, users.reviewer.id, p.id, p.file, {
+    ...(await ends(p.file, 'below 40 ms')),
+    replacement: 'under 40 ms',
+  });
   await deleteAndUndo(p.file);
   const other = await ends(p.file, 'Nothing else');
   expect(await code(reattachProposal(t.pool, store, users.reviewer.id, p.id, id, other))).toBe(
