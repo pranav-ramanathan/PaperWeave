@@ -7,8 +7,12 @@ import {
   decodeFile,
   encodeFile,
   findRoot,
+  CITES,
+  citeIndex,
   includeGraph,
+  labelIndex,
   parse,
+  REFS,
   reparse,
 } from './index.ts';
 import { assertLossless, FIXTURES, fixtureFiles, fragment, rng, soup } from './testutil.ts';
@@ -221,4 +225,59 @@ test('a $ inside a brace group of inline math does not end the formula', () => {
   expect(atomsOf('Let $a{b$ be $c$.').atoms).toEqual(['math:$a{b$', 'math:$c$']);
   // And a formula cannot reach across a blank line to find its brace.
   expect(atomsOf('Let $a{b$ be.\n\nThen } here $c$.\n').atoms.slice(0, 1)).toEqual(['math:$a{b$']);
+});
+
+test('\\lstinline and \\mintinline take their argument as it is, like \\verb', () => {
+  for (const code of [
+    '\\lstinline|x % y|',
+    '\\lstinline[language=C]!a % {b!',
+    '\\lstinline{x % y}',
+    '\\mintinline{python}|x % y|',
+    '\\mintinline[fontsize=\\small]{c}{a % {b} c}',
+  ]) {
+    const src = `Use ${code} here.\n\nNext.\n`;
+    expect(atomsOf(src), code).toEqual({ atoms: [`raw:${code}`], kinds: ['para', 'para'] });
+    const p = parse(src).blocks[0].body;
+    if (p.kind !== 'para') throw new Error('not a paragraph');
+    const last = p.pieces.filter((x) => x.k === 'text').at(-1)!;
+    expect(p.text.slice(last.s, last.e), code).toBe('here.');
+  }
+  // Without a closing delimiter it stops at the end of the line, as \verb does.
+  expect(atomsOf('Use \\lstinline|x y\nnext line\n').atoms).toEqual(['raw:\\lstinline|x y']);
+  // A command named in prose, with no delimiter after it, takes nothing with it.
+  expect(atomsOf('The \\lstinline command.\n').atoms).toEqual(['raw:\\lstinline']);
+});
+
+/** A use of the command `name` of the form its package writes, naming the keys `a` (and `b`). */
+const use = (name: string) => {
+  if (name === 'hyperref') return '\\hyperref[a]{text}';
+  const groups = name.endsWith('range') ? '{a}{b}' : '{a,b}';
+  return `\\${name}${CITES.has(name) ? '[see][p.~3]' : ''}${groups}`;
+};
+
+test('every reference and citation the label index finds is a ref or cite atom', () => {
+  for (const name of [...REFS, ...CITES]) {
+    const src = `See ${use(name)} for more.\n\nNext.\n`;
+    const found = [...labelIndex(src).refs, ...citeIndex(src)].map((u) => u.command);
+    expect(found, name).toContain(name);
+    const { atoms } = atomsOf(src);
+    // \hyperref[key]{text} has prose in its braces, so it stays a raw command.
+    const type = name === 'hyperref' ? 'raw' : REFS.has(name) ? 'ref' : 'cite';
+    expect(atoms, name).toEqual([`${type}:${use(name)}`]);
+  }
+});
+
+test('\\crefrange is one atom with both of its groups', () => {
+  expect(atomsOf('From \\crefrange{a}{b} on, \\Cref{c}.').atoms).toEqual([
+    'ref:\\crefrange{a}{b}',
+    'ref:\\Cref{c}',
+  ]);
+});
+
+test('\\nameref, \\vref, \\citealp, \\citeyearpar and capitalised forms are references and citations', () => {
+  const src =
+    'A \\nameref{a} \\vref{b} \\Cref{c} \\citealp{d} \\citealt[p.~2]{e} \\citeyearpar{f} \\Textcite{g}.';
+  expect(atomsOf(src).atoms.map((a) => a.split(':')[0])).toEqual([
+    ...['ref', 'ref', 'ref', 'cite', 'cite', 'cite', 'cite'],
+  ]);
 });

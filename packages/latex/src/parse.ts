@@ -1,6 +1,8 @@
 // Lossless LaTeX block parser. Every character of the source belongs to exactly one piece of
 // exactly one block, so a wrong parse can change what is displayed but never what is stored.
 
+import { CITES, REFS } from './labels.ts';
+
 export type Mark = 'emph' | 'textbf' | 'textit' | 'texttt';
 
 /** A contiguous source range inside a block. Offsets are relative to the block start. */
@@ -43,11 +45,10 @@ const HEAD: Record<string, number> = {
   subparagraph: 5,
 };
 const STYLE = new Set(['emph', 'textbf', 'textit', 'texttt']);
-const REF = new Set(['ref', 'eqref', 'cref', 'Cref', 'autoref', 'pageref']);
-const CITE = new Set([
-  ...['cite', 'citep', 'citet', 'citeauthor', 'citeyear', 'nocite'],
-  ...['parencite', 'textcite', 'autocite', 'footcite'],
-]);
+// The same commands labels.ts indexes, so that every reference it counts is a ref or cite atom here.
+// \hyperref[key]{text} is left out: its key is in the brackets and its braces hold prose.
+const REF = new Set([...REFS].filter((n) => n !== 'hyperref'));
+const CITE = CITES;
 /** Commands whose first brace group is verbatim: a % in it is part of the address. */
 const VERB_ARG = new Set(['url', 'nolinkurl', 'path', 'href']);
 /** Commands whose argument is written between delimiters, as \verb|x| or \lstinline{x}. */
@@ -516,8 +517,21 @@ function parseInto(
         let e = -1;
         let type: Piece['type'] = 'raw';
         if (REF.has(name)) {
-          const k = src[j] === '*' ? j + 1 : j;
-          if (src[k] === '{') e = group(k);
+          let k = src[j] === '*' ? j + 1 : j;
+          for (let b = 0; b < 2 && src[k] === '['; b++) {
+            const end = bracket(k);
+            if (end < 0) break;
+            k = end;
+          }
+          // \crefrange{first}{last} names two labels, in two groups.
+          for (let g = 0; g < (name.endsWith('range') ? 2 : 1) && src[k] === '{'; g++) {
+            const end = group(k);
+            if (end < 0) {
+              e = -1;
+              break;
+            }
+            k = e = end;
+          }
           type = 'ref';
         } else if (CITE.has(name)) {
           let k = src[j] === '*' ? j + 1 : j;

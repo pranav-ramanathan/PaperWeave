@@ -6,12 +6,14 @@ export type LabelDef = { key: string; at: number; end: number; keyAt: number };
 /** One key inside a `\ref{...}` or one of its relatives. */
 export type RefUse = { key: string; command: string; at: number; end: number; keyAt: number };
 
-const REFS = new Set([
+/** The commands that name a label, for parse and labelIndex alike. */
+export const REFS = new Set([
   ...['ref', 'eqref', 'pageref', 'autoref', 'nameref', 'vref', 'Vref', 'vpageref', 'subref'],
   ...['cref', 'Cref', 'cpageref', 'Cpageref', 'namecref', 'crefrange', 'Crefrange', 'labelcref'],
   ...['fref', 'Fref', 'zcref', 'zcpageref', 'hyperref'],
 ]);
-const CITES = new Set([
+/** The commands that name a bibliography key, for parse and citeIndex alike. */
+export const CITES = new Set([
   ...['cite', 'citep', 'citet', 'citealt', 'citealp', 'citeauthor', 'citeyear', 'citeyearpar'],
   ...['citenum', 'citetitle', 'nocite', 'parencite', 'textcite', 'autocite', 'footcite'],
   ...['smartcite', 'supercite', 'fullcite', 'footfullcite', 'Cite', 'Citep', 'Citet'],
