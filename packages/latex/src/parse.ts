@@ -285,20 +285,29 @@ function parseInto(
     }
     return -1;
   };
-  /** Index where inline math starting before i closes, or -1 if it does not close in time. */
-  const mathEnd = (i: number, closes: (q: number) => boolean) => {
+  /**
+   * Index where inline math starting before i closes, or -1 if it does not close in time. A
+   * brace group is skipped whole, so the $ in $x \text{ if $y$ holds}$ do not end the formula.
+   * Braces that never balance before the paragraph ends are taken as plain characters.
+   */
+  const mathEnd = (i: number, closes: (q: number) => boolean, braces = true): number => {
     let k = i;
+    let d = 0;
     while (k < n) {
-      if (closes(k)) return k;
+      if (d === 0 && closes(k)) return k;
       const c = src[k];
       if (c === '\\') {
-        if (hardAt(k)) return -1;
+        if (hardAt(k)) break;
         k = cmdEnd(k);
       } else if (c === '%') k = eol(k);
-      else if (c === '\n' && blankAt(k)) return -1;
-      else k++;
+      else if (c === '\n' && blankAt(k)) break;
+      else {
+        if (braces && c === '{') d++;
+        else if (braces && c === '}' && d > 0) d--;
+        k++;
+      }
     }
-    return -1;
+    return braces && d > 0 ? mathEnd(i, closes, false) : -1;
   };
   const envName = (j: number) => {
     ENV.lastIndex = j;

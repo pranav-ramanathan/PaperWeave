@@ -211,3 +211,14 @@ test('a % in the address of a link is part of the address, not a comment', () =>
     kinds: ['para', 'para'],
   });
 });
+
+test('a $ inside a brace group of inline math does not end the formula', () => {
+  const f = '$x \\text{ if $y$ holds}$';
+  expect(atomsOf(`Let ${f} be so.`).atoms).toEqual([`math:${f}`]);
+  const g = '\\(x \\text{ if $y$ holds}\\)';
+  expect(atomsOf(`Let ${g} be so.`).atoms).toEqual([`math:${g}`]);
+  // Braces that never close are plain characters: the formula ends at the next $, as before.
+  expect(atomsOf('Let $a{b$ be $c$.').atoms).toEqual(['math:$a{b$', 'math:$c$']);
+  // And a formula cannot reach across a blank line to find its brace.
+  expect(atomsOf('Let $a{b$ be.\n\nThen } here $c$.\n').atoms.slice(0, 1)).toEqual(['math:$a{b$']);
+});
