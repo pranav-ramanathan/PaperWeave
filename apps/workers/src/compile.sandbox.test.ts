@@ -243,12 +243,15 @@ test('glossaries with xindy fails with the glossary diagnostic (xindy is not in 
   });
 });
 
-test.each(['xelatex', 'lualatex'] as const)('a %s glossaries paper gets its glossary', async (e) => {
-  const { r, text } = await glossaryBuild(GLOSSARIES('acronym', GLOSSARY_ENTRIES), e);
-  expect(r.ok).toBe(true);
-  expect(text).toContain('a two-level quantum system');
-  expect(text).toContain('nuclear magnetic resonance');
-});
+test.each(['xelatex', 'lualatex'] as const)(
+  'a %s glossaries paper gets its glossary',
+  async (e) => {
+    const { r, text } = await glossaryBuild(GLOSSARIES('acronym', GLOSSARY_ENTRIES), e);
+    expect(r.ok).toBe(true);
+    expect(text).toContain('a two-level quantum system');
+    expect(text).toContain('nuclear magnetic resonance');
+  },
+);
 
 test('shell escape is off', async () => {
   const project = tmp();
