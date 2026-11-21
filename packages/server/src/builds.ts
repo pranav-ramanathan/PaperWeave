@@ -163,6 +163,9 @@ export async function latestBuilds(
          || (select count(*) from threads t where t.project_id = p.id and t.status = 'resolved') || '.'
          || (select count(*) from thread_comments c join threads t on t.id = c.thread_id
              where t.project_id = p.id) || '.'
+         || (select coalesce(max(greatest(c.edited_at, c.deleted_at))::text, '')
+             from thread_comments c join threads t on t.id = c.thread_id
+             where t.project_id = p.id) || '.'
          || (select md5(coalesce(string_agg(t.id || md5(t.anchor_from || t.anchor_to), ',' order by t.id), ''))
              from threads t where t.project_id = p.id) || '.'
          || (select md5(coalesce(string_agg(

@@ -255,7 +255,9 @@ async function checksOf(
   const waiting = (
     await pool.query(
       `select (select count(*)::int from threads t join files f on f.id = t.file_id
-                where t.project_id = $1 and t.status = 'open') as threads,
+                where t.project_id = $1 and t.status = 'open'
+                  and exists (select 1 from thread_comments c
+                              where c.thread_id = t.id and c.deleted_at is null)) as threads,
               (select count(*)::int from proposals p join files f on f.id = p.file_id
                 where p.project_id = $1 and p.status = 'open') as proposals`,
       [projectId],

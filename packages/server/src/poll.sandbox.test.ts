@@ -10,7 +10,14 @@ import { acceptInvitation, invite } from './projects.ts';
 import { acceptProposal, closeProposal, propose, reviseProposal } from './proposals.ts';
 import { editFile, loadUpdates, TEXT } from './sync.ts';
 import { TEST_ENV, testDb } from './testing.ts';
-import { reply, setThreadStatus, startThread } from './threads.ts';
+import {
+  deleteComment,
+  editComment,
+  listThreads,
+  reply,
+  setThreadStatus,
+  startThread,
+} from './threads.ts';
 
 const store = blobStore(TEST_ENV);
 let t: Awaited<ReturnType<typeof testDb>>;
@@ -158,4 +165,26 @@ test('the review mark moves with every comment and proposal, and with nothing el
   const typed = await same('typing');
   expect(typed.edits).not.toBe(after.edits);
   expect(typed.review).toBe(after.review);
+});
+
+test('the review mark moves when a comment is changed and when it is deleted', async () => {
+  const started = await startThread(t.pool, store, users.owner.id, project, file, {
+    ...(await ends('Nothing else')),
+    body: 'Which else?',
+  });
+  await reply(t.pool, users.owner.id, project, started.id, { body: 'None.' });
+  const [thread] = (await listThreads(t.pool, store, users.owner.id, project)).filter(
+    (x) => x.id === started.id,
+  );
+  const mark = async () => (await marks()).review;
+  const was = await mark();
+  expect(await mark()).toBe(was);
+  await editComment(t.pool, users.owner.id, project, started.id, thread.comments[0].id, {
+    body: 'Which other claims?',
+  });
+  const edited = await mark();
+  expect(edited).not.toBe(was);
+  expect(await mark()).toBe(edited);
+  await deleteComment(t.pool, users.owner.id, project, started.id, thread.comments[1].id);
+  expect(await mark()).not.toBe(edited);
 });

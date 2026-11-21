@@ -7,7 +7,10 @@ import { importZip, listFiles } from './import.ts';
 import { acceptInvitation, invite } from './projects.ts';
 import { editFile, loadUpdates, TEXT } from './sync.ts';
 import { TEST_ENV, testDb } from './testing.ts';
+import { submissionChecks } from './submit.ts';
 import {
+  deleteComment,
+  editComment,
   listThreads,
   MENTION_EMAILS_PER_HOUR,
   reattachThread,
@@ -324,4 +327,153 @@ test('part of a comment past the limit is emailed: only as many as the hour allo
   );
   expect(two.mentioned).toHaveLength(1);
   expect(two.limited).toBe(true);
+});
+
+test('a comment is changed by its author and deleted by its author or the owner', async () => {
+  const p = await paper();
+  const other = await paper();
+  const first = await startThread(t.pool, store, users.reviewer.id, p.id, p.file, {
+    ...(await ends(p.file, 'below 40 ms')),
+    body: 'Median or tail?',
+  });
+  await reply(t.pool, users.owner.id, p.id, first.id, { body: 'Tail, then.' });
+  const [started] = await threads(p);
+  const [mine, theirs] = started.comments;
+
+  // The author changes their own: trimmed, marked as changed, the same words are not a change.
+  await editComment(t.pool, users.reviewer.id, p.id, first.id, mine.id, { body: '  Median?  ' });
+  let [thread] = await threads(p);
+  expect(thread.comments[0]).toMatchObject({ body: 'Median?', author: 'reviewer@example.org' });
+  expect(thread.comments[0].editedAt).toEqual(expect.any(String));
+  expect(thread.comments[1].editedAt).toBeNull();
+  const when = thread.comments[0].editedAt;
+  await editComment(t.pool, users.reviewer.id, p.id, first.id, mine.id, { body: 'Median?' });
+  expect((await threads(p))[0].comments[0].editedAt).toBe(when);
+
+  // What the reader may do is told to the page, and decided again by the server.
+  const seen = async (who: keyof typeof users) =>
+    (await listThreads(t.pool, store, users[who].id, p.id))[0].comments.map((c) => [
+      c.yours,
+      c.removable,
+    ]);
+  expect(await seen('reviewer')).toEqual([
+    [true, true],
+    [false, false],
+  ]);
+  expect(await seen('owner')).toEqual([
+    [false, true],
+    [true, true],
+  ]);
+  expect(await seen('viewer')).toEqual([
+    [false, false],
+    [false, false],
+  ]);
+
+  // Empty and too long words; and who may not.
+  for (const bad of ['  ', '', 5, 'x'.repeat(5001)])
+    expect(
+      await code(editComment(t.pool, users.reviewer.id, p.id, first.id, mine.id, { body: bad })),
+    ).toBe('invalid_input');
+  const edit = (who: keyof typeof users, project: string, thread: string, comment: string) =>
+    code(editComment(t.pool, users[who].id, project, thread, comment, { body: 'Changed.' }));
+  expect(await edit('owner', p.id, first.id, mine.id)).toBe('permission_denied');
+  expect(await edit('viewer', p.id, first.id, mine.id)).toBe('permission_denied');
+  expect(await edit('outsider', p.id, first.id, mine.id)).toBe('not_found');
+  expect(await edit('reviewer', other.id, first.id, mine.id)).toBe('not_found');
+  expect(await edit('reviewer', p.id, '00000000-0000-4000-8000-000000000000', mine.id)).toBe(
+    'not_found',
+  );
+  expect(await edit('reviewer', p.id, first.id, '00000000-0000-4000-8000-000000000000')).toBe(
+    'not_found',
+  );
+  const second = await startThread(t.pool, store, users.reviewer.id, p.id, p.file, {
+    ...(await ends(p.file, 'Nothing else')),
+    body: 'Which else?',
+  });
+  expect(await edit('reviewer', p.id, second.id, mine.id)).toBe('not_found');
+  expect((await threads(p))[0].comments[0].body).toBe('Median?');
+
+  // Deleting: not by another reviewer-level person, the viewer or an outsider; by the owner.
+  const del = (who: keyof typeof users, project: string, thread: string, comment: string) =>
+    code(deleteComment(t.pool, users[who].id, project, thread, comment));
+  expect(await del('reviewer', p.id, first.id, theirs.id)).toBe('permission_denied');
+  expect(await del('viewer', p.id, first.id, theirs.id)).toBe('permission_denied');
+  expect(await del('outsider', p.id, first.id, theirs.id)).toBe('not_found');
+  expect(await del('owner', other.id, first.id, theirs.id)).toBe('not_found');
+  expect(await del('owner', p.id, second.id, theirs.id)).toBe('not_found');
+  expect((await threads(p))[0].comments).toHaveLength(2);
+  expect(await del('owner', p.id, first.id, theirs.id)).toBe('ok');
+  [thread] = await threads(p);
+  expect(thread.comments.map((c) => c.body)).toEqual(['Median?']);
+  // The row is kept, with nothing left of its words.
+  const row = (
+    await t.pool.query('select body, deleted_at from thread_comments where id = $1', [theirs.id])
+  ).rows[0];
+  expect(row.body).toBe('');
+  expect(row.deleted_at).toBeInstanceOf(Date);
+  // A deleted comment can be neither changed nor deleted again.
+  expect(await edit('owner', p.id, first.id, theirs.id)).toBe('not_found');
+  expect(await del('owner', p.id, first.id, theirs.id)).toBe('not_found');
+
+  // The author deletes their own, and a thread with no comment left is gone, from the paper
+  // and from its file.
+  expect(await del('reviewer', p.id, first.id, mine.id)).toBe('ok');
+  expect((await threads(p)).map((x) => x.id)).toEqual([second.id]);
+  expect((await listThreads(t.pool, store, users.owner.id, p.id, p.file)).map((x) => x.id)).toEqual(
+    [second.id],
+  );
+});
+
+test('a paper whose only thread has no comment left has no unfinished review', async () => {
+  const p = await paper();
+  const made = await startThread(t.pool, store, users.reviewer.id, p.id, p.file, {
+    ...(await ends(p.file, 'below 40 ms')),
+    body: 'Oops, wrong paper.',
+  });
+  const warned = async () =>
+    (await submissionChecks(t.pool, store, users.owner.id, p.id)).findings.filter(
+      (f) => f.kind === 'review',
+    );
+  expect(await warned()).toEqual([
+    { level: 'warning', kind: 'review', message: '1 thread is still open.' },
+  ]);
+  const [{ comments }] = await threads(p);
+  await deleteComment(t.pool, users.reviewer.id, p.id, made.id, comments[0].id);
+  expect(await warned()).toEqual([]);
+});
+
+test('deleting comments does not reset the limit on mention emails', async () => {
+  await t.pool.query('delete from thread_comments');
+  const p = await paper();
+  const first = await startThread(
+    t.pool,
+    store,
+    users.reviewer.id,
+    p.id,
+    p.file,
+    { ...(await ends(p.file, 'below 40 ms')), body: 'One.', mentions: [users.owner.id] },
+    2,
+  );
+  const second = await reply(
+    t.pool,
+    users.reviewer.id,
+    p.id,
+    first.id,
+    { body: 'Two.', mentions: [users.owner.id] },
+    2,
+  );
+  expect(second.mentioned).toHaveLength(1);
+  // Delete both, then a third is still past the limit of two.
+  for (const c of (await threads(p))[0].comments)
+    await deleteComment(t.pool, users.reviewer.id, p.id, first.id, c.id);
+  const again = await startThread(
+    t.pool,
+    store,
+    users.reviewer.id,
+    p.id,
+    p.file,
+    { ...(await ends(p.file, 'below 40 ms')), body: 'Three.', mentions: [users.owner.id] },
+    2,
+  );
+  expect(again).toMatchObject({ mentioned: [], limited: true });
 });

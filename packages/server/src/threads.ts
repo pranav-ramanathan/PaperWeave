@@ -3,7 +3,7 @@
 // with the words it was about.
 import type pg from 'pg';
 import * as Y from 'yjs';
-import { authorize } from './authz.ts';
+import { authorize, can } from './authz.ts';
 import { type BlobStore, sha256 } from './blobs.ts';
 import type { Db } from './db.ts';
 import { AppError } from './errors.ts';
@@ -17,6 +17,12 @@ export type ThreadComment = {
   /** Email addresses of the people it was addressed to. */
   mentions: string[];
   createdAt: string;
+  /** When its author last changed the words, or null. */
+  editedAt: string | null;
+  /** The reader wrote it. A hint for the page: the server decides again on every change. */
+  yours: boolean;
+  /** The reader may delete it. A hint for the page, as above. */
+  removable: boolean;
 };
 export type Thread = {
   id: string;
@@ -208,6 +214,63 @@ export async function reply(
   return { fileId: thread.file_id, ...(await toEmail(db, mentions, userId, perHour)) };
 }
 
+/** The author of a comment that is in the thread, in the paper and not deleted. */
+async function authorOf(db: Db, projectId: string, threadId: string, commentId: string) {
+  const row = (
+    await db.query(
+      `select c.author from thread_comments c join threads t on t.id = c.thread_id
+       where c.id = $1 and t.id = $2 and t.project_id = $3 and c.deleted_at is null`,
+      [id(commentId), id(threadId), projectId],
+    )
+  ).rows[0];
+  if (!row) throw new AppError('not_found', 'No such comment.');
+  return row.author as string | null;
+}
+
+/** Change the words of a comment. Only its author may; its mentions stay and nobody is emailed. */
+export async function editComment(
+  db: Db,
+  userId: string,
+  projectId: string,
+  threadId: string,
+  commentId: string,
+  input: { body: unknown },
+): Promise<void> {
+  await authorize(db, userId, id(projectId), 'comment.write');
+  const author = await authorOf(db, projectId, threadId, commentId);
+  if (author !== userId)
+    throw new AppError('permission_denied', 'Only the person who wrote a comment can change it.');
+  const said = body(input.body);
+  // Saving the same words again is not a change.
+  await db.query(
+    'update thread_comments set body = $2, edited_at = now() where id = $1 and body <> $2',
+    [id(commentId), said],
+  );
+}
+
+/**
+ * Delete a comment, for everyone: its author or the paper's owner may. The row stays, with its
+ * words wiped, so that the mention-email limit still counts it.
+ */
+export async function deleteComment(
+  db: Db,
+  userId: string,
+  projectId: string,
+  threadId: string,
+  commentId: string,
+): Promise<void> {
+  const role = await authorize(db, userId, id(projectId), 'comment.write');
+  const author = await authorOf(db, projectId, threadId, commentId);
+  if (author !== userId && role !== 'owner')
+    throw new AppError(
+      'permission_denied',
+      "Only the person who wrote a comment, or the paper's owner, can delete it.",
+    );
+  await db.query("update thread_comments set body = '', deleted_at = now() where id = $1", [
+    id(commentId),
+  ]);
+}
+
 /** Mark a thread as dealt with, or open it again. */
 export async function setThreadStatus(
   db: Db,
@@ -285,23 +348,24 @@ export async function listThreads(
   projectId: string,
   fileId?: string,
 ): Promise<Thread[]> {
-  await authorize(pool, userId, id(projectId), 'project.read');
+  const role = await authorize(pool, userId, id(projectId), 'project.read');
   const { rows } = await pool.query(
     `select t.id, t.file_id, f.path, t.anchor_from, t.anchor_to, t.excerpt, t.context_before,
             t.context_after, t.fingerprint, t.status, t.created_at,
             coalesce(u.email, t.imported_author) as email
      from threads t join files f on f.id = t.file_id left join "user" u on u.id = t.created_by
      where t.project_id = $1 and ($2::uuid is null or t.file_id = $2)
+       and exists (select 1 from thread_comments c where c.thread_id = t.id and c.deleted_at is null)
      order by t.created_at, t.id`,
     [projectId, fileId === undefined ? null : id(fileId)],
   );
   const comments = (
     await pool.query(
-      `select c.id, c.thread_id, c.body, c.created_at,
+      `select c.id, c.thread_id, c.body, c.created_at, c.author as author_id, c.edited_at,
               coalesce(u.email, c.imported_author) as email,
               array(select m.email from "user" m where m.id = any(c.mentions) order by m.email) as mentions
        from thread_comments c left join "user" u on u.id = c.author
-       where c.thread_id = any($1) order by c.created_at, c.id`,
+       where c.thread_id = any($1) and c.deleted_at is null order by c.created_at, c.id`,
       [rows.map((r) => r.id)],
     )
   ).rows;
@@ -340,6 +404,9 @@ export async function listThreads(
           body: c.body,
           mentions: c.mentions,
           createdAt: c.created_at.toISOString(),
+          editedAt: c.edited_at?.toISOString() ?? null,
+          yours: c.author_id === userId,
+          removable: role === 'owner' || (c.author_id === userId && can(role, 'comment.write')),
         })),
     });
   }
