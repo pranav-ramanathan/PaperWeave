@@ -915,9 +915,7 @@ async function offlineThenGone(
     await expect(owner.page.getByRole('status')).toContainText('Deleted body.tex.');
   } else {
     await owner.page.getByRole('button', { name: `Remove ${editor.email}` }).click();
-    await expect(owner.page.getByRole('button', { name: `Remove ${editor.email}` })).toHaveCount(
-      0,
-    );
+    await expect(owner.page.getByRole('button', { name: `Remove ${editor.email}` })).toHaveCount(0);
   }
   await mainTab.context().setOffline(false);
   return { owner, mainTab, bodyTab, paper };

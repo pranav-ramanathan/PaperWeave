@@ -300,7 +300,12 @@ export default function FileEditor(props: {
         // were made to text that is no longer there. They are held until the person decides.
         // `null` is not a restore: the file is gone or this person has lost access. The ticket is
         // returned, and the sync server refuses it, which locks the editor (see refuse).
-        if (restored != null && restoreSeen !== null && restored !== restoreSeen && saving.unsaved) {
+        if (
+          restored != null &&
+          restoreSeen !== null &&
+          restored !== restoreSeen &&
+          saving.unsaved
+        ) {
           restoreHeld = restored;
           update({ held: true });
           setLocked(true);
