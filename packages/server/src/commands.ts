@@ -1,6 +1,6 @@
 // Structural edits: replace one stretch of a file's text, but only if it still reads as the
 // author saw it. Typing merges; a command either lands exactly as meant or not at all.
-import { contained, DEFAULT_TRANSPARENT, parse } from '@paperweave/latex';
+import { containedNear } from '@paperweave/latex';
 import type pg from 'pg';
 import * as Y from 'yjs';
 import type { BlobStore } from './blobs.ts';
@@ -143,19 +143,10 @@ export async function runCommand(
     const now = text.toString();
     if (from < 0 || to < from || now.slice(from, to) !== c.expected)
       return { result: 'conflict', text: now };
-    if (c.contained) {
-      const after = now.slice(0, from) + c.replacement + now.slice(to);
-      if (
-        !contained(
-          parse(now, DEFAULT_TRANSPARENT),
-          parse(after, DEFAULT_TRANSPARENT),
-          from,
-          to - from,
-          c.replacement.length,
-        )
-      )
-        return { result: 'conflict', text: now };
-    }
+    // Parses a window around the edit, not the file: the whole file is too slow inside the row
+    // lock, and too large to parse at MAX_FILE_TEXT. A window past its cap is refused.
+    if (c.contained && !containedNear(now, from, to - from, c.replacement))
+      return { result: 'conflict', text: now };
     if (
       opts.exactPlace &&
       c.expected === '' &&

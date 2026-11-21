@@ -1,5 +1,5 @@
 // Whether replacing one inline atom's source left the text around it read as it was.
-import { type Parsed, textblocks } from './parse.ts';
+import { BRK, DEFAULT_TRANSPARENT, HARD, type Parsed, parse, textblocks } from './parse.ts';
 
 type Leaf = { s: number; e: number; own: string; tag: string; atom: boolean; def: boolean };
 
@@ -68,4 +68,86 @@ export function contained(
   if (b[i].s !== from || b[j - 1].e !== from + len || len === 0) return false;
   for (let k = i; k < j; k++) if (b[k].own !== a[i].own) return false;
   return true;
+}
+
+/** The most source `containedNear` will parse. One paragraph with no blank line can be any size. */
+export const WINDOW_CAP = 256 * 1024;
+/** Same margin as `reparse`: a boundary the edit itself touches does not count as one. */
+const MARGIN = 24;
+
+/**
+ * `contained` for the text `now` and a replacement of its bytes [from, from + was), parsing only a
+ * window around the edit instead of the whole file, so the cost follows the paragraph and not the
+ * file (a full parse of 50 MB runs out of memory).
+ *
+ * The window runs from two paragraphs before the edit to two paragraphs after it. Its start is
+ * the last blank line, or heading, that lies before `from - MARGIN` (the rule `reparse` restarts
+ * on, since the parser treats those as safe places to begin), taken twice; its end is the second
+ * blank line after `to + MARGIN`, or the end of the text. The second paragraph on each side means
+ * a replacement that spills into its neighbour is still seen to.
+ *
+ * It does not use `reparse`: that needs a parse of the whole file to start from, which is the cost
+ * being avoided, and it still parses on to the end of the file.
+ *
+ * If the window would pass WINDOW_CAP (one giant paragraph, say) the answer is false, which the
+ * callers report as a conflict. It never falls back to a full parse: refusing is safe, a crash is
+ * not. A window that would take in `\begin{document}` starts at 0 instead, for the preamble.
+ */
+export function containedNear(
+  now: string,
+  from: number,
+  was: number,
+  replacement: string,
+  transparent: ReadonlySet<string> = DEFAULT_TRANSPARENT,
+): boolean {
+  const to = from + was;
+  const n = now.length;
+  const floor = Math.max(0, from - WINDOW_CAP);
+  /** Start of the paragraph before `at`, or -1 if it lies past the floor. */
+  const startBefore = (at: number): number => {
+    if (at <= 0) return 0;
+    const cut = Math.max(0, at - MARGIN);
+    let bb = -1;
+    for (
+      let j = now.lastIndexOf('\n', cut);
+      j > floor && bb < 0;
+      j = now.lastIndexOf('\n', j - 1)
+    ) {
+      let q = j - 1;
+      while (now[q] === ' ' || now[q] === '\t') q--;
+      if (now[q] === '\n') bb = q;
+    }
+    if (bb < 0 && floor > 0) return -1;
+    let at2 = Math.max(bb, 0);
+    HARD.lastIndex = at2;
+    for (let h = HARD.exec(now); h && h.index + h[0].length <= cut; h = HARD.exec(now))
+      at2 = h.index;
+    return at2;
+  };
+  const s1 = startBefore(from);
+  const s = s1 < 0 ? -1 : startBefore(s1);
+  if (s < 0) return false;
+  // Two paragraphs on: the end of the second blank-line break after `to + MARGIN`.
+  let e = Math.min(n, to + MARGIN);
+  for (let k = 0; k < 2 && e < n; k++) {
+    BRK.lastIndex = e;
+    const m = BRK.exec(now);
+    e = m ? m.index + (k === 1 ? 0 : m[0].length) : n;
+    if (e - s > WINDOW_CAP) return false;
+  }
+  if (e - s > WINDOW_CAP) return false;
+  let start = s;
+  if (start > 0 && now.slice(start, e).includes('\\begin{document}')) {
+    start = 0;
+    if (e > WINDOW_CAP) return false;
+  }
+  const before = now.slice(start, e);
+  const after = now.slice(start, from) + replacement + now.slice(to, e);
+  return contained(
+    parse(before, transparent),
+    parse(after, transparent),
+    from - start,
+    was,
+    replacement.length,
+  );
 }

@@ -1,5 +1,12 @@
 // Keeps one visual document in step with one shared LaTeX text.
-import { contained, DEFAULT_TRANSPARENT, parse, reparse, sourceOnly } from '@paperweave/latex';
+import {
+  contained,
+  containedNear,
+  DEFAULT_TRANSPARENT,
+  parse,
+  reparse,
+  sourceOnly,
+} from '@paperweave/latex';
 import type { Node as PMNode, Schema } from '@tiptap/pm/model';
 import { ReplaceStep } from '@tiptap/pm/transform';
 import { type EditorState, Selection, TextSelection, type Transaction } from '@tiptap/pm/state';
@@ -315,20 +322,8 @@ export class Bridge {
       }
     }
     // shortcut: same check as runCommand's, with the default transparent set.
-    if (c.contained) {
-      const now = this.ytext.toString();
-      const after = now.slice(0, from) + c.replacement + now.slice(to);
-      if (
-        !contained(
-          parse(now, DEFAULT_TRANSPARENT),
-          parse(after, DEFAULT_TRANSPARENT),
-          from,
-          to - from,
-          c.replacement.length,
-        )
-      )
-        return 'conflict';
-    }
+    if (c.contained && !containedNear(this.ytext.toString(), from, to - from, c.replacement))
+      return 'conflict';
     this.seen.add(c.key);
     this.splice([{ from, to, insert: c.replacement }]);
     return 'applied';
