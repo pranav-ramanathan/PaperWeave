@@ -53,7 +53,7 @@ function Change(props: {
         <input value={reason} onChange={(e) => setReason(e.target.value)} maxLength={1000} />
       </label>
       {problem && <p role="alert">{problem}</p>}
-      <button type="submit" disabled={busy}>
+      <button type="submit" aria-disabled={busy || undefined}>
         {props.button}
       </button>
       <button type="button" onClick={props.onCancel}>
@@ -149,6 +149,17 @@ export default function Proposals(props: {
   const opener = useRef<HTMLButtonElement>(null);
   const wasStarting = useRef(false);
   const [moved, setMoved] = useState(0);
+  const section = useRef<HTMLElement>(null);
+  const wasRevising = useRef<string | null>(null);
+  // "Change the proposal" is replaced by its form, and comes back when the form closes.
+  useEffect(() => {
+    const before = wasRevising.current;
+    wasRevising.current = revising;
+    if (!revising && before && document.activeElement === document.body)
+      (
+        section.current?.querySelector<HTMLElement>(`[data-revise="${before}"]`) ?? heading.current
+      )?.focus();
+  }, [revising]);
   // A proposal that was decided has moved to the other list, and the button the keyboard was on with it.
   useEffect(() => {
     if (moved && document.activeElement === document.body) heading.current?.focus();
@@ -233,7 +244,10 @@ export default function Proposals(props: {
             onCancel={() => setRevising(null)}
             send={async (replacement, reason) => {
               const wrong = await post(`${url}/${p.id}`, { action: 'revise', replacement, reason });
-              if (!wrong) setRevising(null);
+              if (!wrong) {
+                setRevising(null);
+                setNote('Proposal changed.');
+              }
               return wrong;
             }}
           />
@@ -273,7 +287,7 @@ export default function Proposals(props: {
                 </button>
               )}
             {p.status === 'open' && !gone(p) && (p.mine || canDecide) && (
-              <button type="button" onClick={() => setRevising(p.id)}>
+              <button type="button" data-revise={p.id} onClick={() => setRevising(p.id)}>
                 Change the proposal
               </button>
             )}
@@ -295,7 +309,7 @@ export default function Proposals(props: {
   const open = proposals?.filter((p) => p.status === 'open' || held(p)) ?? [];
   const decided = proposals?.filter((p) => p.status !== 'open' && !held(p)) ?? [];
   return (
-    <section className="threads" id="proposals" aria-label="Proposed changes">
+    <section className="threads" id="proposals" aria-label="Proposed changes" ref={section}>
       <h2 ref={heading} tabIndex={-1}>
         Proposed changes
       </h2>

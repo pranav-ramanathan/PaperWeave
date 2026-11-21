@@ -86,7 +86,7 @@ function Say(props: {
         </fieldset>
       )}
       {problem && <p role="alert">{problem}</p>}
-      <button type="submit" disabled={busy}>
+      <button type="submit" aria-disabled={busy || undefined}>
         {props.button}
       </button>
       {props.onCancel && (
@@ -133,6 +133,24 @@ export default function Threads(props: {
   const opener = useRef<HTMLButtonElement>(null);
   const wasStarting = useRef(false);
   const [moved, setMoved] = useState(0);
+  const section = useRef<HTMLElement>(null);
+  const was = useRef<{ editing: string | null; removing: string | null }>({
+    editing: null,
+    removing: null,
+  });
+  // Change and Delete are replaced by what they open. The keyboard goes to the question, and
+  // back to the button when the form or the question closes (or to the heading, if the comment is gone).
+  useEffect(() => {
+    const before = was.current;
+    was.current = { editing: editing?.comment ?? null, removing };
+    const go = (selector: string) =>
+      (section.current?.querySelector<HTMLElement>(selector) ?? heading.current)?.focus();
+    if (removing && !before.removing) go(`[data-ask="${removing}"]`);
+    else if (!removing && before.removing && document.activeElement === document.body)
+      go(`[data-delete="${before.removing}"]`);
+    if (!editing && before.editing && document.activeElement === document.body)
+      go(`[data-change="${before.editing}"]`);
+  }, [editing, removing]);
   // A thread that was decided has moved to the other list, and the button the keyboard was on with it.
   useEffect(() => {
     if (moved && document.activeElement === document.body) heading.current?.focus();
@@ -163,7 +181,7 @@ export default function Threads(props: {
   useEffect(() => whenMarked(read), [read]);
 
   /** Post, read the threads again, and return what went wrong, if anything did. */
-  const post = async (to: string, body: object) => {
+  const post = async (to: string, body: object, said = '') => {
     const res = await fetch(to, {
       method: 'POST',
       headers: { 'content-type': 'application/json' },
@@ -176,7 +194,7 @@ export default function Threads(props: {
     if (!res?.ok)
       return answer?.error ?? 'That could not be sent. Check the connection and try again.';
     // What the server has to say about a comment that was saved (the limit on emails).
-    setNote(answer?.note ?? '');
+    setNote(answer?.note || said);
     await read();
     return null;
   };
@@ -245,7 +263,11 @@ export default function Threads(props: {
                   members={[]}
                   onCancel={() => setEditing(null)}
                   send={async (body) => {
-                    const wrong = await post(`${url}/${t.id}`, { comment: c.id, body });
+                    const wrong = await post(
+                      `${url}/${t.id}`,
+                      { comment: c.id, body },
+                      'Comment changed.',
+                    );
                     if (!wrong) setEditing(null);
                     return wrong;
                   }}
@@ -254,22 +276,30 @@ export default function Threads(props: {
                 <p>{c.body}</p>
               )}
               {canComment && c.yours && editing?.comment !== c.id && (
-                <button type="button" onClick={() => setEditing({ thread: t.id, comment: c.id })}>
+                <button
+                  type="button"
+                  data-change={c.id}
+                  onClick={() => setEditing({ thread: t.id, comment: c.id })}
+                >
                   Change
                 </button>
               )}
               {c.removable && removing !== c.id && (
-                <button type="button" onClick={() => setRemoving(c.id)}>
+                <button type="button" data-delete={c.id} onClick={() => setRemoving(c.id)}>
                   Delete
                 </button>
               )}
               {c.removable && removing === c.id && (
-                <span role="group" aria-label="Delete this comment?">
+                <span role="group" aria-label="Delete this comment?" data-ask={c.id} tabIndex={-1}>
                   Delete this comment for everyone?{' '}
                   <button
                     type="button"
                     onClick={async () => {
-                      const wrong = await post(`${url}/${t.id}`, { comment: c.id, delete: true });
+                      const wrong = await post(
+                        `${url}/${t.id}`,
+                        { comment: c.id, delete: true },
+                        'Comment deleted.',
+                      );
                       setRemoving(null);
                       if (wrong) setNote(wrong);
                     }}
@@ -343,7 +373,7 @@ export default function Threads(props: {
             label={`Reply about “${short(t.excerpt, 40)}”`}
             button="Reply"
             members={members}
-            send={(body, mentions) => post(`${url}/${t.id}`, { body, mentions })}
+            send={(body, mentions) => post(`${url}/${t.id}`, { body, mentions }, 'Reply sent.')}
             onDraft={(written) =>
               setDrafts((now) =>
                 written === now.includes(t.id)
@@ -361,7 +391,7 @@ export default function Threads(props: {
   const open = threads?.filter((t) => t.status === 'open' || held(t)) ?? [];
   const resolved = threads?.filter((t) => t.status === 'resolved' && !held(t)) ?? [];
   return (
-    <section className="threads" id="comments" aria-label="Comments">
+    <section className="threads" id="comments" aria-label="Comments" ref={section}>
       <h2 ref={heading} tabIndex={-1}>
         Comments
       </h2>

@@ -56,6 +56,15 @@ Where this stands, what holds it there, and what nobody has checked yet.
   proposal leave the keyboard in that part of the page and say what happened in words. The
   window for an equation takes what is typed straight after it opens.
 
+- **A way past the lists, and the result of a form** (`keys.spec`). A file's page begins with
+  "Skip to the text": Tab, Enter, Tab reaches the visual editor, or the source editor in the
+  source view (3 presses; 14 before on the small paper). The paper's page has an "On this page"
+  list, and "Their email address" is 8 presses from the top (19 before). The line a form
+  leaves ("Saved as revision 1.", "Building the PDF…", "Restored.", "Invitation sent to…")
+  has the keyboard, and the next Tab is the next field of that form's part. Changing, saving,
+  cancelling and deleting a comment, replying, and changing a proposal leave the keyboard in
+  that part of the page.
+
 Other browser tests hold narrower things: composing text with an input method while someone
 else edits the same paragraph (`spike.spec`), switching views with the selection kept
 (`visual.spec`), and the equation, reference, citation, figure and table windows opened from
@@ -112,27 +121,40 @@ client would. The paper was `fixtures/ieee-multifile`, a second person was invit
   says "Please fill out this field."
 - **Fixed above:** the keyboard in the comment, proposal and equation forms; the keyboard after
   they are sent or put away; resolving a thread and deciding a proposal.
-- **Not changed, for a decision.**
-  - After any form that posts (Import ZIP, Send invitation, Save revision, Build the PDF for a
-    revision, Restore) the page is drawn again with nothing focused, and the result ("Invitation
-    sent to…", "Saved as revision N.") is a `role="status"` line that was in the page as it
-    loaded. Whether a screen reader says it has not been listened to. A keyboard user begins
-    again from the top of the page.
-  - There is no way past the lists at the top of a page. The paper's page is 47 Tab stops from
-    the top to "Their email address" and 47 more from the revision's name field to its "ZIP"
-    link; the file's page is 43 stops from the top to the visual editor (the list of files
-    first), 20 on the smaller paper in `keys.spec`. No skip link; the headings and regions are
-    there for a screen reader's own jumps.
+- **Fixed after this walk.**
+  - The result of a form that posts (Send invitation, Save revision, Build the PDF for a
+    revision, Restore, Role changed, Import on the list of papers) is a line that takes the
+    keyboard when it appears or says something new, so the next Tab goes on from the form that
+    was sent. The revision, role and invitation results sit directly under the heading of their
+    own part. A plain visit takes nothing.
+  - The paper's page has a list of links, "On this page", to its sections, and the file's page
+    a "Skip to the text" link that shows when it has the keyboard. Measured on the small paper
+    in `keys.spec`: Tab stops from the top to "Their email address" 19, now 8; to the visual
+    editor 14, now 3 (Tab, Enter, Tab; the same in the source view). On `fixtures/ieee-multifile`
+    the walk counted 47 and 43 before.
+  - Changing, saving, cancelling and deleting a comment, replying, and "Change the proposal" /
+    "Save the proposal" left nothing with the keyboard. The keyboard now goes to the question,
+    the button or the heading, and the live line says "Comment changed.", "Reply sent.",
+    "Comment deleted." or "Proposal changed.". A Reply, Save or Propose button that is waiting is
+    `aria-disabled` and not `disabled`: Chromium took the keyboard off a disabled button.
+- **Not changed.**
   - The visual view has no way to make or change a heading, by any means (the toolbar has
-    Emphasise, Undo, Redo and the insert buttons). A heading is typed in the source view.
-  - The same loss of the keyboard on closing is in the code, and was not walked or changed, for
-    "Change the proposal" (Save the proposal), changing a comment (Save), deleting a comment (the
-    question and its answer) and "Reply".
+    Emphasise, Undo, Redo and the insert buttons). A heading is typed in the source view. This
+    is a feature, not a fix.
   - Editing an existing formula from the keyboard (Enter on a selected formula) was not
     confirmed: the arrow keys selected a display formula and raw blocks in one run, and an inline
     formula could not be reached the same way in the run that tried it.
   - Pressing Alt+T within about a tenth of a second of closing the table window with Escape did
     not open it once; slower, it did. Not reproduced since.
+  - The same result twice in a row (Build pressed twice gives `?building=1` both times) does not
+    take the keyboard again. Loading an address that still carries a result takes it again.
+  - The 47 stops inside the Revisions table, from the name field to a row's ZIP link.
+  - The other pages' error lines (data, chart, submit, rename, invitations) are not yet
+    focused the same way.
+  - The toolbar has 11 buttons before the text, each a Tab stop.
+  - Every page's `<title>` is "PaperWeave" (only `layout.tsx` sets metadata), so a new page
+    announces nothing that tells it from another on load, most of all after a single-ZIP import,
+    which opens the paper's page with no result line.
 
 ## Status without colour
 
