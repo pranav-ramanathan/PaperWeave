@@ -3761,6 +3761,12 @@ An inline atom's replacement was checked for spilling (`contained`) only against
 - **Restore.** `restoreRevision` does not re-validate paths. It replaces the paper with the revision's file set and removes later files, so a later file cannot collide with it. A revision cut before this fix may still hold a colliding pair, and restoring it brings that back. Not fixed here.
 - Tests: `files.sandbox.test.ts` (names, folders, import), `builds.sandbox.test.ts` (a 240-byte name builds).
 
+## Edits typed offline in a file that was deleted, or after losing access
+
+Coming back online, the editor said "This paper was restored to an earlier revision while you were offline" and offered "Apply my edits to the restored paper" when no restore had happened: the file had been deleted, or the person removed from the paper. `/api/sync-ticket` answers `restored: null` then (`lastRestore` threw an `AppError`), and `FileEditor` took `null !== 0` for a restore, held the edits and threw before the sync server was asked, so `refuse()` never ran. Now only a numeric `restored` holds edits (a file deleted and then brought back by a real restore still does). With `null` the ticket is used, the sync server refuses it, and the editor locks as for any other lost access, saying "What you typed while offline was not saved. Copy what you need from it." The locked text stays selectable. `restoreOffered` is set only from a number. With nothing unsent nothing changes. No server change.
+
+- Tests: `tests/e2e/recover.spec.ts` (file deleted; person removed; and the other file's tab still saves, with the owner seeing its edit).
+
 ## Decisions waiting on the owner
 
 See "What I need from you" in `docs/plan.md`. None blocks C1.
