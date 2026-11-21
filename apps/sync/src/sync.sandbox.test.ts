@@ -384,6 +384,74 @@ test('deleting a file closes it for everyone; restoring brings back the same fil
   expect(fresh.text.toString()).toBe(want);
 });
 
+test('typing that queues behind a delete is not acknowledged, and the editor is closed', async () => {
+  const { project, file: main } = await paper();
+  const notes = await createFile(
+    t.pool,
+    store,
+    users.owner.id,
+    project,
+    'notes.tex',
+    Buffer.from('One.\nTwo.\n'),
+  );
+  expect(main).not.toBe(notes);
+  const editor = client(users.editor, notes);
+  await saved(editor);
+  // The delete holds every file row once it has locked them. Just after, the editor types,
+  // and the delete goes on only when that edit is waiting for the rows.
+  let locked = false;
+  let acted = false;
+  const spy = new Proxy(t.pool, {
+    get(target, prop) {
+      const v = Reflect.get(target, prop);
+      if (prop !== 'connect') return typeof v === 'function' ? v.bind(target) : v;
+      return async () => {
+        const c = await target.connect();
+        return new Proxy(c, {
+          get(cc, p) {
+            const w = Reflect.get(cc, p);
+            if (p !== 'query') return typeof w === 'function' ? w.bind(cc) : w;
+            return async (sql: string, params?: unknown[]) => {
+              if (locked && !acted) {
+                acted = true;
+                editor.text.insert(0, 'LATE ');
+                for (let i = 0; i < 400; i++) {
+                  const waiting = await t.pool.query(
+                    `select 1 from pg_stat_activity where datname = current_database()
+                     and wait_event_type = 'Lock' and pid <> pg_backend_pid()`,
+                  );
+                  if (waiting.rowCount) break;
+                  await new Promise((r) => setTimeout(r, 25));
+                }
+              }
+              if (/for update/.test(sql)) locked = true;
+              return cc.query(sql, params);
+            };
+          },
+        });
+      };
+    },
+  });
+  const closedBefore = editor.state.closed;
+  const { revision } = await deleteFile(spy, store, users.owner.id, project, notes);
+  await until('the editor to be closed', () => editor.state.closed > closedBefore);
+  expect(editor.state.reasons.at(-1)).toMatch(/no-access/);
+  const [head] = (await t.pool.query('select head_seq from files where id = $1', [notes])).rows;
+  const rev = (
+    await t.pool.query(
+      `select rf.seq from revision_files rf join revisions r on r.id = rf.revision_id
+       where rf.file_id = $1 and r.project_id = $2 and r.number = $3`,
+      [notes, project, revision],
+    )
+  ).rows[0];
+  const above = await t.pool.query(
+    'select count(*)::int as n from file_updates where file_id = $1 and seq > $2',
+    [notes, rev.seq],
+  );
+  expect(above.rows[0].n).toBe(0);
+  expect(String(head.head_seq)).toBe(String(rev.seq));
+});
+
 test('a structural edit asked for over the connection is answered before it is broadcast', async () => {
   const { project, file } = await paper();
   const owner = client(users.owner, file);
