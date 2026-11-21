@@ -15,7 +15,8 @@ import { dirname, join } from 'node:path';
 import { encodeFile, findRoot, includeGraph, parseSyncTeX, toPdf } from '@paperweave/latex';
 import { expect, test } from 'vitest';
 import { fixtures, replica, visualOp } from '../../../packages/bridge/src/harness.ts';
-import { FIXTURES, rng } from '../../../packages/latex/src/testutil.ts';
+import { describeImport } from '@paperweave/server';
+import { FIXTURES, fixtureFiles, rng } from '../../../packages/latex/src/testutil.ts';
 import { compile, sandbox } from './compile.ts';
 
 const tmp = () => mkdtempSync(join(tmpdir(), 'paperweave-test-'));
@@ -45,6 +46,27 @@ test.each(['article-basic', 'ieee-multifile', 'ams-multifile'])(
       expect(existsSync(path), `${d.file}: ${d.message}`).toBe(true);
       expect(readFileSync(path, 'utf8').split('\n').length).toBeGreaterThanOrEqual(d.line!);
     }
+  },
+);
+
+// Papers written the way real ones are: the packages they load, the root and compiler found
+// from the files alone, and a build with no errors and no citation or reference left undefined.
+test.each(['real-natbib', 'real-biblatex-subfiles', 'real-tikz', 'real-acm', 'real-xelatex'])(
+  '%s builds with the root and compiler an import finds',
+  async (name) => {
+    const entries = Object.entries(fixtureFiles(join(FIXTURES, name))).map(([path, bytes]) => ({
+      path: path.slice(name.length + 1),
+      bytes,
+    }));
+    const { report } = describeImport(entries);
+    const out = tmp();
+    const r = await compile(join(FIXTURES, name), report.root!, out, 120, report.compiler);
+    expect(r.diagnostics.filter((d) => d.severity === 'error')).toEqual([]);
+    expect(r.ok).toBe(true);
+    expect(readFileSync(join(out, r.pdf!)).subarray(0, 5).toString()).toBe('%PDF-');
+    expect(
+      r.diagnostics.filter((d) => /(?:Citation|Reference) .* undefined/.test(d.message)),
+    ).toEqual([]);
   },
 );
 

@@ -1,0 +1,29 @@
+% Synthetic fixture: a paper built from subfiles, in a flat layout and in a folder.
+\documentclass{article}
+\usepackage[T1]{fontenc}
+\usepackage[utf8]{inputenc}
+\usepackage{lmodern}
+\usepackage{amsmath}
+\usepackage{subfiles}
+\usepackage{import}
+\usepackage[backend=biber,style=authoryear]{biblatex}
+\addbibresource{refs.bib}
+\includeonly{sections/discussion}
+
+\title{Scheduling Greenhouse Irrigation}
+\author{N. Abara}
+\date{}
+
+\begin{document}
+\maketitle
+
+\subfile{intro}
+
+\subfile{sections/model}
+
+\import{sections/}{experiments}
+
+\include{sections/discussion}
+
+\printbibliography
+\end{document}

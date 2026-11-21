@@ -1,0 +1,74 @@
+% Synthetic fixture: an ACM conference paper.
+\documentclass[sigconf,nonacm]{acmart}
+\settopmatter{printacmref=false}
+\renewcommand\footnotetextcopyrightpermission[1]{}
+\pagestyle{plain}
+
+\begin{document}
+
+\title{Reading Receipts for Shared Notebooks}
+
+\author{Ines Carvalho}
+\affiliation{%
+  \institution{Example Institute}
+  \city{Porto}
+  \country{Portugal}}
+\email{ines@example.org}
+
+\author{Tomasz Wrona}
+\affiliation{%
+  \institution{Example Institute}
+  \city{Gdansk}
+  \country{Poland}}
+\email{tomasz@example.org}
+
+\begin{abstract}
+Shared notebooks lose track of who has seen which change. We add a small
+receipt to every cell and show that readers notice edits sooner.
+\end{abstract}
+
+\begin{CCSXML}
+<ccs2012>
+ <concept>
+  <concept_id>10003120.10003130</concept_id>
+  <concept_desc>Human-centered computing~Collaborative and social computing</concept_desc>
+  <concept_significance>500</concept_significance>
+ </concept>
+</ccs2012>
+\end{CCSXML}
+
+\ccsdesc[500]{Human-centered computing~Collaborative and social computing}
+
+\keywords{notebooks, awareness, collaboration}
+
+\begin{teaserfigure}
+  \centering
+  \fbox{\parbox{0.8\textwidth}{\centering A notebook cell with its receipt}}
+  \caption{Each cell shows who has read its latest version.}
+  \label{fig:teaser}
+\end{teaserfigure}
+
+\maketitle
+
+\section{Introduction}
+Teams share notebooks for analysis, and a change made late in the evening is
+often missed \cite{prieto20}. Figure~\ref{fig:teaser} shows our remedy.
+
+\section{Design}
+A receipt records the reader and the version. We keep it under
+40~bytes\footnote{Measured on the final prototype.} per cell, and show it
+as a small dot.
+
+\begin{itemize}
+  \item A grey dot means nobody has read the cell.
+  \item A filled dot means every collaborator has.
+\end{itemize}
+
+\section{Study}
+Twelve people used the notebooks for two weeks. Edits were noticed after a median
+of 9 minutes instead of 40.
+
+\bibliographystyle{ACM-Reference-Format}
+\bibliography{refs}
+
+\end{document}

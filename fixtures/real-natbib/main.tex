@@ -1,0 +1,77 @@
+% Synthetic fixture: an article the way many authors write one (T1, lmodern, natbib, cleveref).
+\documentclass[11pt]{article}
+\usepackage[T1]{fontenc}
+\usepackage{lmodern}
+\usepackage{microtype}
+\usepackage{amsmath,amssymb}
+\usepackage{graphicx}
+\usepackage{caption}
+\usepackage{subcaption}
+\usepackage{siunitx}
+\usepackage[numbers,sort&compress]{natbib}
+\usepackage[colorlinks=true,allcolors=blue]{hyperref}
+\usepackage[capitalise]{cleveref}
+
+\newcommand{\Rate}{\lambda}
+
+\title{Tide Gauges Along a Winding Coast}
+\author{R. Okafor \and M. Lindqvist}
+\date{}
+
+\begin{document}
+\maketitle
+
+\begin{abstract}
+We compare three ways of reading a tide gauge that sits in a narrow inlet, and
+show that a simple smoothing rule matches the harbour master's tables.
+\end{abstract}
+
+\section{Introduction}\label{sec:intro}
+Our gauge records the water level every \SI{6}{\minute}, which gives
+\num{240} readings a day. The earlier survey \citep[see][p.~3]{harbour94} used
+hourly values; later work \citealp{inlet07,quay12} kept that habit.
+
+The raw logs are kept at \url{https://example.org/tides/raw%20logs/2024#march}
+and the notes at \href{https://example.org/tides/notes%20v2}{the project page}.\footnote{The
+page is mirrored; see the archive in \cref{sec:method}.}
+
+{\bf Stations.} The three stations are listed below.
+\begin{description}
+  \item[North] A pier gauge, read by hand until 1998.
+  \item[Middle] A float gauge in the stilling well.
+  \item[South] A pressure sensor, new this year.
+\end{description}
+
+\input{sections/method}
+
+\section{Results}\label{sec:results}
+\begin{figure}[ht]
+  \centering
+  \begin{subfigure}[b]{0.45\textwidth}
+    \centering
+    \fbox{\parbox{0.8\textwidth}{\centering raw trace}}
+    \caption{Raw readings.}\label{fig:raw}
+  \end{subfigure}\hfill
+  \begin{subfigure}[b]{0.45\textwidth}
+    \centering
+    \fbox{\parbox{0.8\textwidth}{\centering smoothed trace}}
+    \caption{After smoothing.}\label{fig:smooth}
+  \end{subfigure}
+  \caption{Two views of one week of readings.}\label{fig:both}
+\end{figure}
+
+\Cref{fig:raw,fig:smooth} show the traces side by side, and \cref{fig:both} gives
+the pair. See also \crefrange{eq:level}{eq:rate} and \citet{quay12}.
+
+The level is zero when $x \text{ if $y$ holds}$ and the rate is positive otherwise.
+The mean over the \SI{12.4}{\hour} cycle is
+\begin{equation}\label{eq:rate}
+  \Rate = \frac{1}{T}\int_0^T \dot{h}(t)\,dt .
+\end{equation}
+
+\section{Conclusion}
+A short smoothing window is enough. The data are open, and the code is small.
+
+\bibliographystyle{plainnat}
+\bibliography{refs}
+\end{document}
