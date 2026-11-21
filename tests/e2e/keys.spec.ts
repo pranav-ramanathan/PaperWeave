@@ -526,14 +526,20 @@ test('a formula is opened for editing with the keyboard', async ({ browser }) =>
   await page.keyboard.press('Enter');
   await expect(dialog).toBeHidden();
   await expect.poll(async () => (await focused(page)).name).toBe('main.tex, visual editor');
+  // The edit has reached the text: the formula is drawn again, from what was typed.
+  await expect(page.locator('.editor .visual .pw-math[title="$T_1$"]')).toHaveCount(1);
 
-  // A display formula: down from the paragraph above selects it, and Enter opens it.
+  // A display formula: down from the paragraph above selects it, and Enter opens it. Just after
+  // the editor takes the keyboard back, its caret is put back for a moment, and a key pressed in
+  // that moment can be lost. So each press is given time to show its effect, and is made again if
+  // it has none; the check is not made between the key and the editor drawing what it did.
   await page.keyboard.press('ArrowRight');
   let downs = 0;
   const selected = page.locator('.editor .visual .ProseMirror-selectednode.pw-math');
   while (downs < 8 && !(await selected.count())) {
     await page.keyboard.press('ArrowDown');
     downs++;
+    await selected.waitFor({ timeout: 1000 }).catch(() => undefined);
   }
   await expect(selected).toHaveCount(1);
   console.log(`ArrowDown presses from the paragraph to the display formula: ${downs}`);
