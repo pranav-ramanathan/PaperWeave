@@ -46,10 +46,24 @@ export async function cutRevision(
   store: BlobStore,
   userId: string | null,
   projectId: string,
-  opts: { name?: string; kind?: Revision['kind']; restoredFrom?: string } = {},
+  opts: {
+    name?: string;
+    kind?: Revision['kind'];
+    restoredFrom?: string;
+    /**
+     * More to do in the same transaction, after the cut and with every file still held: the
+     * cut and this happen together or not at all. It runs when the cut found nothing changed, too.
+     */
+    within?: (db: Db) => Promise<void>;
+  } = {},
 ): Promise<{ id: string; number: number }> {
+  const { within, ...rest } = opts;
   const ready = await putEdited(pool, store, projectId);
-  return transaction(pool, (db) => cut(db, store, userId, projectId, { ...opts, ready }));
+  return transaction(pool, async (db) => {
+    const made = await cut(db, store, userId, projectId, { ...rest, ready });
+    await within?.(db);
+    return made;
+  });
 }
 
 /** What a file's text was stored as, and the place in its log that was the text of. */

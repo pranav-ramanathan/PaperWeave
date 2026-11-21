@@ -254,9 +254,9 @@ test('typing that queues behind a delete is refused, and the revision holds all 
   );
   const { revision } = await deleting;
   // The edit was never acknowledged, so nothing is promised that the revision lacks.
-  expect(await late).toBe('permission_denied');
+  expect(await late).toBe('not_found');
   const seqs = await t.pool.query(
-    `select f.head_seq, rf.seq from files f join revision_files rf on rf.file_id = f.id
+    `select f.head_seq, rf.seq from all_files f join revision_files rf on rf.file_id = f.id
      join revisions r on r.id = rf.revision_id where f.id = $1 and r.project_id = $2 and r.number = $3`,
     [p.intro, p.id, revision],
   );

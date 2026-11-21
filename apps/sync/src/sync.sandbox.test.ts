@@ -436,7 +436,7 @@ test('typing that queues behind a delete is not acknowledged, and the editor is 
   const { revision } = await deleteFile(spy, store, users.owner.id, project, notes);
   await until('the editor to be closed', () => editor.state.closed > closedBefore);
   expect(editor.state.reasons.at(-1)).toMatch(/no-access/);
-  const [head] = (await t.pool.query('select head_seq from files where id = $1', [notes])).rows;
+  const [head] = (await t.pool.query('select head_seq from all_files where id = $1', [notes])).rows;
   const rev = (
     await t.pool.query(
       `select rf.seq from revision_files rf join revisions r on r.id = rf.revision_id

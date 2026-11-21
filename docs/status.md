@@ -3574,6 +3574,21 @@ sigconf PDF embeds a Libertine font (`pdffonts`). The 11 of them failed on the o
   no flag and import as they did: placed by their words, so they can still arrive fresh. No
   migration.
 
+## Typing that landed between a delete's revision and its removal
+
+Deleting a file cut a revision in one transaction and hid the file in another. Edits that waited
+for the files while the revision was cut landed after it and before the removal: they were saved,
+acknowledged, and in no revision, while the page said "revision N still has it". Restoring N
+brought the file back without them. Now `cutRevision` takes an optional `within`, run after the cut
+in the same transaction (also when the cut finds nothing changed), and `deleteFile` removes the file
+there, after checking again that the file is live and not the root and that the person may still
+write. Files are locked before the project, as in a restore. The `acl` notification goes out when
+the transaction commits. `appendUpdate` and `appendUpdates` now refuse a file that has been
+deleted, so a queued edit is refused instead of acknowledged. Tests: `files.sandbox.test.ts` (an
+edit queued behind a delete is refused, the file's `head_seq` equals the revision's `seq`, restore
+gives back the text as it was; a role lowered mid-delete refuses the delete) and
+`sync.sandbox.test.ts` (no log entry above the revision's `seq`, editor closed with `no-access`).
+
 ## Decisions waiting on the owner
 
 See "What I need from you" in `docs/plan.md`. None blocks C1.
