@@ -301,21 +301,6 @@ async function Project({
           <p>
             Root file: <code>{project.root ?? 'none'}</code>. Compiler:{' '}
             <code>{project.compiler}</code>.{' '}
-            {canWrite && (
-              <form action={compilerAction.bind(null, id)} className="inline">
-                <label>
-                  Change compiler{' '}
-                  <select name="compiler" defaultValue={project.compiler}>
-                    {COMPILERS.map((c) => (
-                      <option key={c} value={c}>
-                        {c === 'pdflatex' ? 'pdfLaTeX' : c === 'xelatex' ? 'XeLaTeX' : 'LuaLaTeX'}
-                      </option>
-                    ))}
-                  </select>
-                </label>{' '}
-                <Once type="submit">Save compiler</Once>
-              </form>
-            )}{' '}
             {can(project.role, 'project.export') && (
               <>
                 <a href={`/projects/${id}/export`}>Download ZIP</a>{' '}
@@ -337,6 +322,21 @@ async function Project({
               Check before submitting
             </Link>
           </p>
+          {canWrite && (
+            <form action={compilerAction.bind(null, id)} className="inline">
+              <label>
+                Change compiler{' '}
+                <select name="compiler" defaultValue={project.compiler}>
+                  {COMPILERS.map((c) => (
+                    <option key={c} value={c}>
+                      {c === 'pdflatex' ? 'pdfLaTeX' : c === 'xelatex' ? 'XeLaTeX' : 'LuaLaTeX'}
+                    </option>
+                  ))}
+                </select>
+              </label>{' '}
+              <Once type="submit">Save compiler</Once>
+            </form>
+          )}
           <Wide label="Table of files">
             <table>
               <thead>
