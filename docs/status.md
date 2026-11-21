@@ -3214,6 +3214,48 @@ On the old code it fails with 30. Ten runs, and ten with `E2E_CPU_THROTTLE=4`, a
 **Not changed.** A page scrolled back to is blank for the time of one render. The words of
 pages already read stay in the page. Safari's canvas limit is untested.
 
+## Five parser and graph faults found by running real-world LaTeX through it
+
+Found by running `parse`, `coverage` and `includeGraph` on snippets of the kind real papers hold.
+All five were confirmed on the old code, and each has a unit test that fails on it. Nothing here
+changed a fixture, `docs/import-matrix.md` or the build image.
+
+- **`%` in a link.** `See \url{https://ex.org/a%20b} for data.` was an `error` block that ran to
+  the next `\section`: `group()` read the `%` as a comment and never found the brace. The first
+  group of `\url`, `\href`, `\nolinkurl` and `\path` is now read as it is (balanced braces, no
+  comments, never across a blank line) wherever the parser scans over a command. The label index
+  skips these arguments too: `\url{a%20b} \ref{x}` on one line used to hide the `\ref`, so
+  renaming the label left it behind.
+- **`$` inside braces in inline math.** `$x \text{ if $y$ holds}$` was two math atoms with `y`
+  as prose between them. `mathEnd` skips brace groups; braces that do not balance before the
+  paragraph ends are plain characters, as before.
+- **`\lstinline|x % y|`.** Only `\verb` had delimiter handling. `\lstinline` and `\mintinline`
+  now end at their closing delimiter or brace, in `parse.ts` and in the label index.
+- **`\import`, `\subimport`, `\includefrom`** (and `\inputfrom`, `\subinputfrom`,
+  `\subincludefrom`) were not in the include graph, so the files they name had no report and were
+  not part of the paper. They are now, as `input` edges. A file rename rewrites such a line group
+  by group (`nameSplices` in `files.ts`). Not followed: `\subimport` is resolved from the root's
+  folder like every other include, not from the folder of the file that holds it.
+- **One list of reference commands.** `REFS` and `CITES` are exported from `labels.ts` and used
+  by `parse.ts`. `\crefrange`, `\nameref`, `\vref`, `\citealp`, `\citealt`, `\citeyearpar`
+  and the capitalised forms are now `ref` and `cite` atoms. `\crefrange` takes two groups.
+  `\hyperref` stays raw (its key is in brackets, its braces hold prose). The visual view shows both
+  labels of a range, and `\nameref` as its key, since it prints a title.
+- **Fuzz.** `FRAGMENTS` gained `\url{`, `%20`, `\href{`, `\text{`, `\lstinline|` and `\crefrange{`.
+  It found a real fault in the first version of the link fix, and the fix was changed: a verbatim
+  argument scanned inside a block search for `\end{..}` ran past the end of the block, so the
+  incremental reparse reused a block the full parse no longer gave. It now stops at the end of the
+  line there.
+- **Assumptions checked.** `escape.ts` only escapes text and does not read the parse. `prose.ts`
+  gives every atom a stand-in, whatever it holds. The bridge and the visual view take an atom's
+  source whole, so a `%` or a `$` inside one is no trouble; the only reader of an atom's insides
+  is the reference view, which is the change above.
+- **Run:** unit 165 (29 files), sandbox 249 passed and 1 skipped (as before), the browser specs
+  visual, maths, insert, import, labels and citations 16 of 16. The seeded tests passed at
+  `FUZZ=20000` on the old code, and at `FUZZ=20000` and `FUZZ=30000` on the new.
+- **Not changed.** `includes()` in `graph.ts` blanks everything after a `%` before it matches, so
+  `\url{a%20b} \input{x}` on one line still hides the `\input`.
+
 ## Decisions waiting on the owner
 
 See "What I need from you" in `docs/plan.md`. None blocks C1.
