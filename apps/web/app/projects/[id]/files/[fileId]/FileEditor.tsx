@@ -939,6 +939,7 @@ export default function FileEditor(props: {
         canReview={props.canReview}
         selection={() => stretch.current(true)}
         show={(from, to) => showStretch.current(from, to)}
+        standing={(from, to) => standing.current(from, to)}
         onProposals={(list) => {
           proposalsNow.current = list;
           markThreads.current();

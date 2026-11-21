@@ -205,6 +205,18 @@ export async function reviseProposal(
  * Attach a proposal whose place has been lost to the same words where they stand now. Only when
  * there is no doubt which words are meant: they are in the file exactly once. Who may: the same
  * as may change it.
+ *
+ * Or, with `places` (encoded relative positions, as for a new proposal), to the stretch the
+ * caller says holds them. Yjs undo writes deleted characters again as new ones, so only the tab
+ * that undid knows where the words stand. The server checks what it is told: both places are
+ * known to the saved text, the proposal is open and stale, and the words there are exactly
+ * what the proposal expected (no fingerprint is stored, so the words themselves are compared).
+ * Then there is no doubt, however many times the words occur.
+ *
+ * An insertion is never attached from places. It has no words to compare, and nothing is stored
+ * about what stood around it (no context, no fingerprint), so the server cannot tell the place
+ * the caller names from any other caret. Its place also stays lost once its neighbours are
+ * deleted (`placeLost`): that is meant, and an undo is not told apart from a retyping.
  */
 export async function reattachProposal(
   pool: pg.Pool,
@@ -212,11 +224,41 @@ export async function reattachProposal(
   userId: string,
   projectId: string,
   proposalId: string,
+  places?: { from: unknown; to: unknown },
 ): Promise<void> {
   const role = await authorize(pool, userId, id(projectId), 'proposal.create');
   const p = await find(pool, projectId, proposalId);
   if (p.author !== userId && !can(role, 'proposal.decide'))
     throw new AppError('permission_denied', 'Only its author or an editor can change a proposal.');
+  if (places) {
+    const known = (v: unknown) => {
+      if (!(v instanceof Uint8Array) || !v.length || v.length > 100)
+        throw bad('That place in the text cannot be used.');
+      return v;
+    };
+    const [a, b] = [known(places.from), known(places.to)];
+    const { doc, text } = await textOf(pool, store, p.file_id);
+    const [from, to] = [locate(doc, text, a), locate(doc, text, b)];
+    if (from < 0 || to < 0)
+      throw new AppError('conflict', 'That text has not been saved yet. Try again in a moment.');
+    if (p.status !== 'open') throw bad('Only an open proposal can be attached again.');
+    if (p.expected === '')
+      throw new AppError(
+        'conflict',
+        'This proposal is about a place, not words, and a place cannot be found again. Make a new proposal.',
+      );
+    const all = text.toString();
+    const [was, end] = [locate(doc, text, p.anchor_from), locate(doc, text, p.anchor_to)];
+    if (was >= 0 && end >= was && all.slice(was, end) === p.expected)
+      throw bad('That proposal is still attached to its words.');
+    if (to <= from || all.slice(from, to) !== p.expected)
+      throw new AppError('conflict', 'Those are not the words the proposal was about.');
+    await pool.query(
+      "update proposals set anchor_from = $2, anchor_to = $3 where id = $1 and status = 'open'",
+      [p.id, Buffer.from(a), Buffer.from(b)],
+    );
+    return;
+  }
   if (p.status !== 'open' && p.status !== 'accepted')
     throw new AppError('conflict', 'That proposal has been decided.');
   const words: string = p.status === 'open' ? p.expected : p.replacement;
