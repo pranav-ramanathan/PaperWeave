@@ -699,3 +699,169 @@ test('a change whose answer is late is made once', async ({ browser }) => {
   const text = await source(page).innerText();
   expect(text.split('EQK').length - 1).toBe(1);
 });
+
+/** An owner and an editor on a paper of these files, with revision 1 saved as it is. */
+async function sharedPaper(
+  browser: Parameters<typeof person>[0],
+  tag: string,
+  files: { path: string; text: string }[],
+) {
+  const owner = await person(browser, `${tag}-owner`);
+  const editor = await person(browser, `${tag}-editor`);
+  const zip = join(mkdtempSync(join(tmpdir(), 'paperweave-e2e-')), `Recover ${tag} ${run}.zip`);
+  writeFileSync(
+    zip,
+    await writeZip(files.map((f) => ({ path: f.path, bytes: Buffer.from(f.text) }))),
+  );
+  await owner.page.goto('/sign-in');
+  await signIn(owner.page, owner.email);
+  await owner.page.getByLabel('Or import a ZIP of a LaTeX project').setInputFiles(zip);
+  await owner.page.getByRole('button', { name: 'Import ZIP' }).click();
+  await owner.page.getByLabel('Their email address').fill(editor.email);
+  await owner.page.getByRole('button', { name: 'Send invitation' }).click();
+  await expect(owner.page.getByRole('status')).toContainText(editor.email);
+  await owner.page.getByLabel('Name for the paper as it is now').fill('Good');
+  await owner.page.getByRole('button', { name: 'Save revision' }).click();
+  await expect(owner.page.getByRole('status')).toHaveText('Saved as revision 1.');
+  const paper = owner.page.url().split('?')[0];
+  await editor.page.goto(await emailedLink(editor.email, '/invitations/'));
+  await signIn(editor.page, editor.email);
+  await editor.page.getByRole('button', { name: 'Join this paper' }).click();
+  const restore = async () => {
+    await owner.page.goto(paper);
+    await owner.page.getByRole('button', { name: 'Restore revision 1' }).click();
+    await expect(owner.page.getByRole('status')).toContainText('Restored.');
+  };
+  return { owner, editor, paper, restore };
+}
+
+/**
+ * Count the "restored" announcements the editor's page has received. Read off the socket, so a
+ * test can wait until the page has been told, which nothing on the page shows.
+ */
+function countAnnouncements(page: Page) {
+  const seen = { n: 0 };
+  page.on('websocket', (ws) =>
+    ws.on('framereceived', (frame) => {
+      if (String(frame.payload).includes('"restored"')) seen.n++;
+    }),
+  );
+  return seen;
+}
+
+test('a restore made while the editor is connected is not taken for one made while it was away', async ({
+  browser,
+}) => {
+  const { editor, restore } = await sharedPaper(browser, 'rec-live', [
+    { path: 'main.tex', text: MAIN },
+  ]);
+  const told = countAnnouncements(editor.page);
+  await editor.page.getByRole('link', { name: 'main.tex' }).click();
+  await showSource(editor.page);
+  await typeAtStart(editor.page, '% regretted\n');
+  await expect(status(editor.page)).toHaveText('All edits saved.');
+
+  await restore();
+  await expect(source(editor.page)).not.toContainText('% regretted');
+  await expect.poll(() => told.n).toBeGreaterThan(0);
+
+  // Later the editor has an ordinary offline spell with an edit unsent. Nothing was restored
+  // during it: the edit is saved, and nothing is offered for discarding.
+  await editor.page.context().setOffline(true);
+  await expect(status(editor.page)).toContainText('Offline.');
+  await typeAtStart(editor.page, '% typed offline\n');
+  await editor.page.context().setOffline(false);
+  await expect(status(editor.page)).toHaveText('All edits saved.', { timeout: 30_000 });
+  await expect(editor.page.getByRole('button', { name: /Apply my edits/ })).toHaveCount(0);
+  await expect(source(editor.page)).toContainText('% typed offline');
+  await expect(source(editor.page)).toHaveAttribute('contenteditable', 'true');
+});
+
+test('a restore that leaves the open file alone is still known to its editor', async ({
+  browser,
+}) => {
+  const NOTES = 'Some notes.\n';
+  const { owner, editor, paper, restore } = await sharedPaper(browser, 'rec-other', [
+    { path: 'main.tex', text: MAIN },
+    { path: 'notes.tex', text: NOTES },
+  ]);
+  const told = countAnnouncements(editor.page);
+  await editor.page.getByRole('link', { name: 'notes.tex' }).click();
+  await showSource(editor.page);
+  await expect(source(editor.page)).toContainText('Some notes.');
+
+  // The owner changes main.tex, which the editor does not have open, and puts it back.
+  await owner.page.goto(paper);
+  await owner.page.getByRole('link', { name: 'main.tex' }).click();
+  await showSource(owner.page);
+  await typeAtStart(owner.page, '% regretted\n');
+  await expect(status(owner.page)).toHaveText('All edits saved.');
+  await restore();
+  // Nothing in the editor's file changed: only the announcement shows it was told.
+  await expect.poll(() => told.n).toBeGreaterThan(0);
+
+  await editor.page.context().setOffline(true);
+  await expect(status(editor.page)).toContainText('Offline.');
+  await typeAtStart(editor.page, '% typed offline\n');
+  await editor.page.context().setOffline(false);
+  await expect(status(editor.page)).toHaveText('All edits saved.', { timeout: 30_000 });
+  await expect(editor.page.getByRole('button', { name: /Apply my edits/ })).toHaveCount(0);
+  await expect(source(editor.page)).toContainText('% typed offline');
+});
+
+test('a restore is not taken as seen because a ticket was fetched: edits typed before the connection syncs are held', async ({
+  browser,
+}) => {
+  const { editor, restore } = await sharedPaper(browser, 'rec-died', [
+    { path: 'main.tex', text: MAIN },
+  ]);
+  await editor.page.getByRole('link', { name: 'main.tex' }).click();
+  await showSource(editor.page);
+  await typeAtStart(editor.page, '% regretted\n');
+  await expect(status(editor.page)).toHaveText('All edits saved.');
+
+  // Offline with nothing unsent, the paper is restored.
+  await editor.page.context().setOffline(true);
+  await expect(status(editor.page)).toContainText('Offline.');
+  await restore();
+
+  // Back online: the first attempt gets its ticket, which names the restore, and then its
+  // socket dies. The second attempt waits for the person to have typed before it asks for a ticket.
+  let online = false;
+  let tickets = 0;
+  let aborted = false;
+  let served!: () => void;
+  const ticketServed = new Promise<void>((r) => (served = r));
+  let typed!: () => void;
+  const hasTyped = new Promise<void>((r) => (typed = r));
+  await editor.page.route('**/api/sync-ticket**', async (route) => {
+    if (!online) return route.abort();
+    if (++tickets === 1) {
+      await route.continue();
+      served();
+      return;
+    }
+    await hasTyped;
+    await route.continue();
+  });
+  await editor.page.routeWebSocket(/.*/, async (ws) => {
+    if (!online) return ws.close();
+    if (!aborted) {
+      await ticketServed;
+      aborted = true;
+      return ws.close();
+    }
+    ws.connectToServer();
+  });
+  online = true;
+  await editor.page.context().setOffline(false);
+  await expect.poll(() => aborted).toBe(true);
+  await typeAtStart(editor.page, '% typed between\n');
+  typed();
+
+  await expect(status(editor.page)).toContainText('was restored to an earlier revision', {
+    timeout: 30_000,
+  });
+  await expect(status(editor.page)).toContainText('not saved');
+  await expect(source(editor.page)).toHaveAttribute('contenteditable', 'false');
+});

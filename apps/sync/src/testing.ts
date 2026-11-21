@@ -27,6 +27,7 @@ export function connect(
     saved?: boolean;
     role?: string;
     canWrite?: boolean;
+    restored?: number;
     had: string;
   }[] = [];
   const state = { refused: false, closed: 0, reasons: [] as string[], replies };

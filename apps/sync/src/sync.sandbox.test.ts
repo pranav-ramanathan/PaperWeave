@@ -442,6 +442,23 @@ test('restoring a revision reaches people who have the file open, without a relo
   expect(await stored(project)).toBe('% after restore\r\n' + MAIN);
 });
 
+test('a restore is announced to the people who have the file open, after its edits', async () => {
+  const { project, file } = await paper();
+  const good = await saveRevision(t.pool, store, users.owner.id, project, 'Good');
+  const editor = client(users.editor, file);
+  await saved(editor);
+  editor.text.insert(editor.text.toString().indexOf('Hello.'), 'REGRET ');
+  await saved(editor);
+  const told = () => editor.state.replies.filter((r) => r.restored !== undefined);
+  expect(told()).toEqual([]);
+
+  const made = await restoreRevision(t.pool, store, users.owner.id, project, good.id);
+  await until('the editor to be told of the restore', () => told().length > 0);
+  expect(told()[0].restored).toBe(made.number);
+  // The restored text had reached it by then: the signal does not outrun the edits.
+  expect(told()[0].had).toBe(MAIN.replaceAll('\r\n', '\n'));
+});
+
 test('deleting a file closes it for everyone; restoring brings back the same file without doubling text', async () => {
   const { project, file: main } = await paper();
   const notes = await createFile(
