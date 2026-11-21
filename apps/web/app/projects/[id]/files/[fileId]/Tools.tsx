@@ -34,6 +34,7 @@ export function FormulaBox(props: {
   const { request, macros, onDone } = props;
   const box = useDialog(!!request);
   const preview = useRef<HTMLDivElement>(null);
+  const field = useRef<HTMLTextAreaElement>(null);
   const [draft, setDraft] = useState('');
   const [place, setPlace] = useState<FormulaRequest['place']>(null);
   const [problem, setProblem] = useState('');
@@ -44,6 +45,11 @@ export function FormulaBox(props: {
     setDraft(request?.src ?? '');
     setPlace(request?.place ?? null);
     setProblem('');
+  }, [request]);
+  // The window opens on its first control, which for an equation is where it goes. What is typed
+  // next is the formula, so the keyboard starts there (the window's own effect has opened it).
+  useEffect(() => {
+    if (request) field.current?.focus();
   }, [request]);
   /** What goes into the paper: what was typed, inside the delimiters its place calls for. */
   const latex =
@@ -113,6 +119,7 @@ export function FormulaBox(props: {
         <label>
           LaTeX
           <textarea
+            ref={field}
             rows={request?.place ? 3 : 6}
             spellCheck={false}
             value={draft}

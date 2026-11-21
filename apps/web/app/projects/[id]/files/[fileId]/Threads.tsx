@@ -22,6 +22,8 @@ function Say(props: {
   onCancel?(): void;
   /** Told whether something is written here and not yet sent. */
   onDraft?(written: boolean): void;
+  /** Take the keyboard when the form appears (a form the person has just asked for). */
+  autoFocus?: boolean;
 }) {
   const [body, setBody] = useState(props.initial ?? '');
   const [to, setTo] = useState<string[]>([]);
@@ -63,7 +65,7 @@ function Say(props: {
           rows={2}
           maxLength={5000}
           required
-          autoFocus={props.initial !== undefined}
+          autoFocus={props.autoFocus ?? props.initial !== undefined}
         />
       </label>
       {begun && props.members.length > 0 && (
@@ -126,6 +128,20 @@ export default function Threads(props: {
   const [editing, setEditing] = useState<{ thread: string; comment: string } | null>(null);
   const [removing, setRemoving] = useState<string | null>(null);
   const found = useRef(false);
+  /** The heading and the button that starts a thread: where the keyboard goes when what it was on is gone. */
+  const heading = useRef<HTMLHeadingElement>(null);
+  const opener = useRef<HTMLButtonElement>(null);
+  const wasStarting = useRef(false);
+  const [moved, setMoved] = useState(0);
+  // A thread that was decided has moved to the other list, and the button the keyboard was on with it.
+  useEffect(() => {
+    if (moved && document.activeElement === document.body) heading.current?.focus();
+  }, [moved]);
+  // The form for a new thread takes the button's place, and the button comes back when it closes.
+  useEffect(() => {
+    if (wasStarting.current && !starting) opener.current?.focus();
+    wasStarting.current = !!starting;
+  }, [starting]);
   useEffect(() => {
     setNamed(new URLSearchParams(location.search).get('thread'));
   }, []);
@@ -294,10 +310,13 @@ export default function Threads(props: {
             <button
               type="button"
               onClick={async () => {
+                const resolving = t.status === 'open';
                 const wrong = await post(`${url}/${t.id}`, {
-                  status: t.status === 'open' ? 'resolved' : 'open',
+                  status: resolving ? 'resolved' : 'open',
                 });
-                if (wrong) setNote(wrong);
+                if (wrong) return setNote(wrong);
+                setNote(resolving ? 'Thread resolved.' : 'Thread opened again.');
+                setMoved((n) => n + 1);
               }}
             >
               {t.status === 'open' ? 'Resolve' : 'Open again'}
@@ -343,10 +362,13 @@ export default function Threads(props: {
   const resolved = threads?.filter((t) => t.status === 'resolved' && !held(t)) ?? [];
   return (
     <section className="threads" id="comments" aria-label="Comments">
-      <h2>Comments</h2>
+      <h2 ref={heading} tabIndex={-1}>
+        Comments
+      </h2>
       {canComment && !starting && (
         <button
           type="button"
+          ref={opener}
           onClick={() => {
             const picked = props.selection();
             setStarting(picked);
@@ -362,6 +384,7 @@ export default function Threads(props: {
           <Say
             label="Comment"
             button="Start thread"
+            autoFocus
             members={members}
             onCancel={() => setStarting(null)}
             send={async (body, mentions) => {
