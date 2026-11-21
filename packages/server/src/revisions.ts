@@ -454,7 +454,24 @@ async function revisionEntries(
         return [[f.path, away ? { ...from.record, data: { ...data, held: true } } : from.record]];
       }),
     );
-    const epoch = Math.floor(new Date(revision.created_at).getTime() / 1000);
+    // The PDF is stamped with the moment of the revision whose build made it. A build whose
+    // inputs were built before is not made again: it takes that build's PDF (itself maybe
+    // taken from an earlier one), so the stamp is the time of the first revision that was built.
+    const stamped = (
+      await db.query(
+        `with recursive chain as (
+           (select id, revision_id, cached_from from builds
+            where revision_id = $1 and pdf_digest is not null order by created_at desc limit 1)
+           union all
+           select b.id, b.revision_id, b.cached_from
+           from builds b join chain c on b.id = c.cached_from
+         )
+         select r.created_at from chain c join revisions r on r.id = c.revision_id
+         where c.cached_from is null`,
+        [revisionId],
+      )
+    ).rows[0]?.created_at;
+    const epoch = Math.floor(new Date(stamped ?? revision.created_at).getTime() / 1000);
     const engine = { pdflatex: '-pdf', xelatex: '-xelatex', lualatex: '-lualatex' }[
       revision.compiler as string
     ];
