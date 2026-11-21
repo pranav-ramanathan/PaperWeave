@@ -3,6 +3,7 @@ import { afterAll, beforeAll, expect, test } from 'vitest';
 import * as Y from 'yjs';
 import { readZip, writeZip } from './archive.ts';
 import { blobStore } from './blobs.ts';
+import { approveDataset, datasetProposal } from './data.ts';
 import { exportZip, importReport, importZip, listFiles } from './import.ts';
 import { acceptInvitation, invite } from './projects.ts';
 import {
@@ -670,4 +671,44 @@ test('an insertion whose place is intact still arrives fresh and can be accepted
   await acceptProposal(t.pool, store, users.importer.id, id, now.id);
   const [file] = await listFiles(t.pool, users.importer.id, id);
   expect(await saved(file.id)).toContain('below 40 ms (95th percentile) for most edits.');
+});
+
+test('data kept back from downloads keeps its comments and proposals back too', async () => {
+  const CSV = 'site,reading\nlab,SECRETROW 4471\nfield,12\n';
+  const zip = await writeZip([
+    { path: 'main.tex', bytes: Buffer.from(MAIN) },
+    { path: 'data/secret.csv', bytes: Buffer.from(CSV) },
+  ]);
+  const [project] = await importZip(t.pool, store, users.owner.id, zip, 'Held');
+  const files = await listFiles(t.pool, users.owner.id, project.id);
+  const main = files.find((f) => f.path === 'main.tex')!.id;
+  const csv = files.find((f) => f.path === 'data/secret.csv')!.id;
+  await startThread(t.pool, store, users.owner.id, project.id, csv, {
+    ...(await ends(csv, 'SECRETROW 4471')),
+    body: 'Check this row.',
+  });
+  await propose(t.pool, store, users.owner.id, project.id, csv, {
+    ...(await ends(csv, 'SECRETROW 4471')),
+    replacement: 'ROWCHANGED',
+  });
+  await startThread(t.pool, store, users.owner.id, project.id, main, {
+    ...(await ends(main, 'below 40 ms')),
+    body: 'Median or tail?',
+  });
+  const seen = await datasetProposal(t.pool, store, users.owner.id, project.id, csv);
+  await approveDataset(t.pool, store, users.owner.id, project.id, csv, {
+    version: seen.version,
+    columns: [
+      { name: 'site', type: 'text', unit: '' },
+      { name: 'reading', type: 'text', unit: '' },
+    ],
+    missing: [''],
+    exported: false,
+  });
+  const out = await exportReview(t.pool, store, users.owner.id, project.id);
+  expect(out.threads.map((x) => x.file)).toEqual(['main.tex']);
+  expect(out.proposals).toEqual([]);
+  expect(JSON.stringify(out)).not.toContain('SECRETROW');
+  expect(JSON.stringify(out)).not.toContain('ROWCHANGED');
+  expect(out.held).toEqual([{ file: 'data/secret.csv', threads: 1, proposals: 1 }]);
 });

@@ -304,7 +304,7 @@ async function load(db: Db, projectId: string, revisionId: string) {
 }
 
 /** The files whose authors keep them out of downloads: data not marked to be included. */
-async function heldFileIds(db: Db, projectId: string): Promise<Set<string>> {
+export async function heldFileIds(db: Db, projectId: string): Promise<Set<string>> {
   return new Set(
     (
       await db.query('select file_id from datasets where project_id = $1 and not exported', [

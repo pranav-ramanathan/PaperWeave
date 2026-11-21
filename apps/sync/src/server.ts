@@ -80,6 +80,9 @@ export async function startSync(opts: {
       );
       if (!mine.length) continue;
       if (catchUpFirst) await catchUp(name, 1);
+      // Hocuspocus holds document updates until the end of this turn of the event loop, but
+      // sends a stateless message at once: send what it holds first, or the signal outruns it.
+      document.flush();
       for (const c of mine) c.sendStateless(JSON.stringify({ restored: n }));
     }
   };
