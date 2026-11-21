@@ -1,5 +1,7 @@
 // Needs Docker, the TeX image and the services in infra/compose.yaml. Run: pnpm test:sandbox
-import { readdirSync, readFileSync, statSync } from 'node:fs';
+import { execFileSync } from 'node:child_process';
+import { mkdtempSync, readdirSync, readFileSync, statSync, writeFileSync } from 'node:fs';
+import { tmpdir } from 'node:os';
 import { join, relative } from 'node:path';
 import { gunzipSync } from 'node:zlib';
 import {
@@ -10,6 +12,7 @@ import {
   buildOutput,
   createFile,
   deleteFile,
+  exportRevision,
   importReport,
   importZip,
   invite,
@@ -22,6 +25,7 @@ import {
   pdfToSource,
   putFile,
   renameFileAndReferences,
+  setCompiler,
   setRootFile,
   sourceToPdf,
   submissionChecks,
@@ -661,4 +665,30 @@ test('a root whose name begins with a dash is a path to latexmk, not an option',
     expect(errors, root).toEqual([]);
     expect(built, root).toMatchObject({ status: 'succeeded', hasPdf: true });
   }
+});
+
+test('a paper built with the wrong engine fails, and builds once the compiler is changed', async () => {
+  // The magic comment holds the guess at pdflatex, though the paper needs fontspec.
+  const { project, built } = await importAndBuild({
+    'main.tex':
+      '% !TEX program = pdflatex\n\\documentclass{article}\n\\usepackage{fontspec}\n\\begin{document}\nEngine test.\n\\end{document}\n',
+  });
+  expect(built.status).toBe('failed');
+  await setCompiler(t.pool, owner.id, project.id, 'xelatex');
+  const fixed = await build(project.id);
+  expect(fixed).toMatchObject({ status: 'succeeded', hasPdf: true });
+  const { zip } = await exportRevision(
+    t.pool,
+    store,
+    owner.id,
+    project.id,
+    fixed.revisionId!,
+    true,
+  );
+  const file = join(mkdtempSync(join(tmpdir(), 'paperweave-test-')), 'revision.zip');
+  writeFileSync(file, zip);
+  const manifest = JSON.parse(
+    execFileSync('unzip', ['-p', file, 'paperweave-toolchain.json'], { encoding: 'utf8' }),
+  );
+  expect(manifest.compiler).toBe('xelatex');
 });

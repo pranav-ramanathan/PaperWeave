@@ -425,3 +425,35 @@ test('a \\hyperref to nothing is listed on a build that worked', async ({ browse
     /main\.tex:\d+ Hyper reference `nolabel' on page \d+ undefined/,
   );
 });
+
+test('a paper built with the wrong engine is given another on its page, and then builds', async ({
+  browser,
+}) => {
+  test.setTimeout(180_000);
+  const owner = await person(browser, 'engine-owner');
+  // The magic comment holds the engine at pdflatex, though fontspec needs XeTeX or LuaTeX.
+  const main =
+    '% !TEX program = pdflatex\n\\documentclass{article}\n\\usepackage{fontspec}\n\\begin{document}\nEngine paper.\n\\end{document}\n';
+  const zip = join(mkdtempSync(join(tmpdir(), 'paperweave-e2e-')), `Engine ${run}.zip`);
+  writeFileSync(zip, await writeZip([{ path: 'main.tex', bytes: Buffer.from(main) }]));
+
+  await owner.page.goto('/sign-in');
+  await signIn(owner.page, owner.email);
+  await owner.page.getByLabel('Or import a ZIP of a LaTeX project').setInputFiles(zip);
+  await owner.page.getByRole('button', { name: 'Import ZIP' }).click();
+  await expect(owner.page.getByText('Compiler:')).toContainText('pdflatex');
+
+  await owner.page.getByLabel('Change compiler').selectOption('xelatex');
+  await owner.page.getByRole('button', { name: 'Save compiler' }).click();
+  await expect(
+    owner.page.getByRole('status').filter({ hasText: 'Compiler changed.' }),
+  ).toBeVisible();
+  await expect(owner.page.getByText('Compiler:')).toContainText('xelatex');
+
+  await owner.page.getByRole('link', { name: 'main.tex' }).first().click();
+  await showSource(owner.page);
+  await expect(buildStatus(owner.page)).toHaveText('The PDF is up to date.', { timeout: 90_000 });
+  await expect(
+    build(owner.page).getByRole('link', { name: 'Open the PDF by itself' }),
+  ).toBeVisible();
+});

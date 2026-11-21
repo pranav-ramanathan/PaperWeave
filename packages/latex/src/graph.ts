@@ -67,7 +67,7 @@ const GRAPHICS = ['', '.pdf', '.png', '.jpg', '.jpeg', '.PDF', '.PNG', '.JPG', '
 
 // Comments and verbatim text are blanked, not removed, so that every offset is still an offset
 // into the source. A % is a comment unless an odd number of backslashes come before it.
-const uncomment = (src: string) =>
+export const uncomment = (src: string) =>
   src
     .replace(
       /((?:^|[^\\])(?:\\\\)*)%.*$/gm,

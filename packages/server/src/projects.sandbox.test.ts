@@ -8,14 +8,19 @@ import {
   cancelInvitation,
   createProject,
   findInvitation,
+  getProject,
   invite,
   listInvitations,
   listMembers,
   listProjects,
   removeMember,
+  setCompiler,
   setRole,
   withdrawInvitation,
 } from './projects.ts';
+import { blobStore } from './blobs.ts';
+import { createFile } from './files.ts';
+import { cutRevision } from './revisions.ts';
 import { TEST_ENV, testDb } from './testing.ts';
 
 let t: Awaited<ReturnType<typeof testDb>>;
@@ -358,4 +363,36 @@ test('a second invitation to the same address leaves one live invitation, with t
   expect(list[0].role).toBe('viewer');
   expect(await code(acceptInvitation(t.pool, b.id, first.token))).toBe('not_found');
   expect((await acceptInvitation(t.pool, b.id, second.token)).role).toBe('viewer');
+});
+
+test('the compiler can be changed by a writer, and the next revision carries it', async () => {
+  const { id: p } = await createProject(t.pool, users.owner.id, 'Engine');
+  await createFile(
+    t.pool,
+    blobStore(TEST_ENV),
+    users.owner.id,
+    p,
+    'main.tex',
+    Buffer.from('\\documentclass{article}\n\\begin{document}Hi.\\end{document}\n'),
+  );
+  const store = blobStore(TEST_ENV);
+  const { token } = await invite(t.pool, users.owner.id, p, users.reviewer.email, 'reviewer');
+  await acceptInvitation(t.pool, users.reviewer.id, token);
+  const before = await cutRevision(t.pool, store, users.owner.id, p);
+  expect((await getProject(t.pool, users.owner.id, p)).compiler).toBe('pdflatex');
+  await setCompiler(t.pool, users.owner.id, p, 'xelatex');
+  expect((await getProject(t.pool, users.owner.id, p)).compiler).toBe('xelatex');
+  const after = await cutRevision(t.pool, store, users.owner.id, p);
+  expect(after.number).toBe(before.number + 1);
+  const { rows } = await t.pool.query('select compiler from revisions where id = $1', [after.id]);
+  expect(rows[0].compiler).toBe('xelatex');
+  // The same value again changes nothing: no new revision.
+  await setCompiler(t.pool, users.owner.id, p, 'xelatex');
+  expect((await cutRevision(t.pool, store, users.owner.id, p)).number).toBe(after.number);
+  expect(await code(setCompiler(t.pool, users.reviewer.id, p, 'lualatex'))).toBe(
+    'permission_denied',
+  );
+  expect(await code(setCompiler(t.pool, users.outsider.id, p, 'lualatex'))).toBe('not_found');
+  expect(await code(setCompiler(t.pool, users.owner.id, p, 'latex; rm'))).toBe('invalid_input');
+  expect((await getProject(t.pool, users.owner.id, p)).compiler).toBe('xelatex');
 });
