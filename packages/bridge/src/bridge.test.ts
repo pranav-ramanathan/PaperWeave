@@ -438,6 +438,95 @@ test('LaTeX is inserted at the caret, wherever the text has moved to meanwhile',
   expect(r.bridge.insertCommand(r.state.apply(tr), 'x')).toBeNull();
 });
 
+/** A second replica of r's text, and a way to bring what it did back into r. */
+function peer(r: ReturnType<typeof replica>) {
+  const b = replica('', r.ydoc);
+  return {
+    b,
+    merge: () => Y.applyUpdate(r.ydoc, Y.encodeStateAsUpdate(b.ydoc)),
+  };
+}
+const FLOW = 'One.\n\nTwo here.\n\nThree.\n';
+
+test('an insertion whose caret paragraph is deleted by someone else is refused, not moved', () => {
+  const r = replica(FLOW);
+  r.select(textblocks(r).filter((t) => t.para)[1].start + 3);
+  const c = r.bridge.insertCommand(r.state, '~\\cite{knuth}')!;
+  const { b, merge } = peer(r);
+  const at = b.src.indexOf('Two here.');
+  b.ytext.delete(at, 'Two here.\n\n'.length);
+  merge();
+  expect(r.src).toBe('One.\n\nThree.\n');
+  expect(r.bridge.applyCommand(c)).toBe('conflict');
+  expect(r.src).toBe('One.\n\nThree.\n');
+  r.check();
+});
+
+test('an insertion whose deleted text ran into a heading is refused', () => {
+  const src = 'Intro text here.\n\n\\section{Methods}\nBody.\n';
+  const r = replica(src);
+  r.select(textblocks(r).filter((t) => t.para)[0].start + 10);
+  const c = r.bridge.insertCommand(r.state, '~\\cite{knuth}')!;
+  const { b, merge } = peer(r);
+  b.ytext.delete(9, b.src.indexOf('Methods') - 9);
+  merge();
+  expect(r.src).toBe('Intro tex' + 'Methods}\nBody.\n');
+  expect(r.bridge.applyCommand(c)).toBe('conflict');
+  expect(r.src).toBe('Intro texMethods}\nBody.\n');
+});
+
+test('an empty part of an atom is refused if the atom is deleted by someone else', () => {
+  const r = replica(fixtures['ieee-multifile/tables/ablation.tex']);
+  let at = -1;
+  let src = '';
+  r.state.doc.forEach((node, pos) => {
+    if (node.type.name === 'raw_block' && floatParts(node.attrs.src))
+      [at, src] = [pos, node.attrs.src];
+  });
+  const cap = floatParts(src)!.caption!;
+  const c = r.bridge.atomCommand(r.state, at, '\\label{x}', { at: cap.at, end: cap.at })!;
+  expect(c.expected).toBe('');
+  const { b, merge } = peer(r);
+  b.ytext.delete(b.src.indexOf(src), src.length);
+  merge();
+  const was = r.src;
+  expect(r.bridge.applyCommand(c)).toBe('conflict');
+  expect(r.src).toBe(was);
+});
+
+test('an insertion names the character before the caret and the one after', () => {
+  const r = replica(FLOW);
+  r.select(textblocks(r).filter((t) => t.para)[1].start + 3);
+  const c = r.bridge.insertCommand(r.state, 'x')!;
+  const from = Y.decodeRelativePosition(Y.encodeRelativePosition(c.from));
+  const to = Y.decodeRelativePosition(Y.encodeRelativePosition(c.to));
+  expect(from.assoc).toBeLessThan(0);
+  expect(to.assoc).toBe(0);
+  // Stands on 'o' before the caret in "Two", and ' ' after it.
+  const idx = (p: Y.RelativePosition) =>
+    Y.createAbsolutePositionFromRelativePosition(p, r.ydoc)!.index;
+  expect(idx(c.from)).toBe(idx(c.to));
+});
+
+test('an insertion at either end of the file, or after typing elsewhere, still applies', () => {
+  for (const end of [0, 1]) {
+    const r = replica('Only text.\n');
+    const tb = textblocks(r).filter((t) => t.para)[0];
+    r.select(end ? tb.start + 'Only text.'.length : tb.start);
+    const c = r.bridge.insertCommand(r.state, '!')!;
+    expect(r.bridge.applyCommand(c)).toBe('applied');
+    expect(r.src).toBe(end ? 'Only text.!\n' : '!Only text.\n');
+  }
+  const r = replica(FLOW);
+  r.select(textblocks(r).filter((t) => t.para)[1].start + 3);
+  const c = r.bridge.insertCommand(r.state, '!')!;
+  const { b, merge } = peer(r);
+  b.ytext.insert(0, '% note\n');
+  merge();
+  expect(r.bridge.applyCommand(c)).toBe('applied');
+  expect(r.src).toBe('% note\nOne.\n\nTwo! here.\n\nThree.\n');
+});
+
 test('editing one cell of a table changes only that cell, and two people can edit two cells', () => {
   const r = replica(fixtures['ieee-multifile/tables/ablation.tex']);
   const table = () => {

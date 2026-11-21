@@ -628,6 +628,38 @@ const logRows = async (file: string) =>
   (await t.pool.query('select count(*)::int as n from file_updates where file_id = $1', [file]))
     .rows[0].n;
 
+test('an insertion whose neighbours were deleted is refused, and the text is left as it was', async () => {
+  const { project, file } = await paper();
+  const editor = client(users.editor, file);
+  const owner = client(users.owner, file);
+  await saved(editor, owner);
+  const place = editor.text.toString().indexOf('Hello.') + 'Hel'.length;
+  const rel = (i: number, assoc = 0) =>
+    Buffer.from(
+      Y.encodeRelativePosition(Y.createRelativePositionFromTypeIndex(editor.text, i, assoc)),
+    ).toString('base64url');
+  const command = {
+    key: crypto.randomUUID(),
+    from: rel(place, -1),
+    to: rel(place),
+    expected: '',
+    replacement: '~\\cite{knuth}',
+  };
+  // Someone deletes the paragraph, and the server has it before the insertion is asked for.
+  owner.text.delete(owner.text.toString().indexOf('Hello.'), 'Hello.\r\n'.length);
+  await saved(owner, editor);
+  const after = MAIN.replace('Hello.\r\n', '');
+  await until('the delete', () => editor.text.toString() === after);
+  editor.provider.sendStateless(JSON.stringify(command));
+  await until('an answer', () => editor.state.replies.some((r) => r.key === command.key));
+  expect(editor.state.replies.find((r) => r.key === command.key)).toMatchObject({
+    result: 'conflict',
+  });
+  await new Promise((r) => setTimeout(r, 200));
+  expect(await stored(project)).toBe(after);
+  expect(owner.text.toString()).toBe(after);
+});
+
 test('a command reaches people who have the file open, and a stale one tells its author', async () => {
   const { project, file } = await paper();
   const owner = client(users.owner, file);
