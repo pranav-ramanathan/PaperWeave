@@ -1,6 +1,7 @@
-// Whether replacing one inline atom's source left the text around it read as it was.
+// Whether replacing one inline atom's (or display formula's) source left the text around it read as it was.
 import { BRK, DEFAULT_TRANSPARENT, HARD, type Parsed, parse, textblocks } from './parse.ts';
 
+/** `atom` is true for an inline atom and for a display-math block. */
 type Leaf = { s: number; e: number; own: string; tag: string; atom: boolean; def: boolean };
 
 /** Every stretch of source that is read as one thing, in order, with where it sits. */
@@ -16,7 +17,7 @@ function leaves(p: Parsed): Leaf[] {
         e: b.start + b.body.text.length,
         own,
         tag: `${own}:${more}`,
-        atom: false,
+        atom: b.body.kind === 'math',
         def: false,
       });
       return;
@@ -39,7 +40,7 @@ function leaves(p: Parsed): Leaf[] {
 
 /**
  * Whether replacing the `was` bytes at `from` of `old`'s source (one inline atom that is not a
- * definition) with `len` bytes gave `now` with everything else read as it was: every piece and
+ * definition, or one display-math block) with `len` bytes gave `now` with everything else read as it was: every piece and
  * block outside the atom the same, shifted by the change in length, and the new pieces exactly
  * covering the replacement, in the same block and list item.
  */
