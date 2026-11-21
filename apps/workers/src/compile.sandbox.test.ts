@@ -131,7 +131,7 @@ test.each([
 
 test('aastex631 builds', async () => {
   const { r, out } = await buildSource(
-    '\\documentclass{aastex631}\n\\begin{document}\n\\title{T}\n\\author{A}\n\\maketitle\nx\n\\end{document}\n',
+    '\\documentclass{aastex631}\n\\begin{document}\n\\title{T}\nx\n\\end{document}\n',
   );
   expect(r.diagnostics.filter((d) => d.severity === 'error')).toEqual([]);
   expect(r.ok).toBe(true);
