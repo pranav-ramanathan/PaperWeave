@@ -3799,8 +3799,32 @@ Coming back online, the editor said "This paper was restored to an earlier revis
   encoded to a `-` or `_` was refused, silently, and nothing read the threads again. The route
   now accepts both. A refusal because the undo is not yet saved (`conflict`) was never seen: the
   poll waits for the save to show. If it did happen, the retry would come at the next change.
-- **Not done.** Proposed changes have the same fault: after an undo they go stale. Left as a
-  follow-up.
+- **Not done.** Proposed changes had the same fault. Fixed in the next section.
+
+## A proposal's text deleted, then brought back with undo
+
+- **What was wrong.** The same as for a comment: undo writes the deleted words again as new
+  characters, the proposal's places stayed on the old ones, and it went "Out of date" for
+  everyone, with Accept refused, though the file read as before.
+- **What happens now.** When the proposals panel reads an open, out-of-date proposal about words,
+  and this tab finds those exact words at the proposal's old places (the tab that undid does),
+  it sends the new places once (`action: attach` with `from` and `to`) and reads again once.
+  The server attaches only if both places are in the saved text, the proposal is open and
+  out of date, and the words there equal what the proposal expected (a proposal stores no
+  fingerprint, so the words are compared). Otherwise it refuses, silently, and the next reading
+  tries again. The route accepts standard and URL-safe base64, at most 200 characters, both
+  places or neither. Other people and a reload see it fresh at their next poll.
+- **Insertions are not attached again.** A proposal to add text has no words to compare, and
+  nothing is stored about the text around it (no context, no fingerprint), so the server could
+  not tell the place the tab names from any other caret. A place whose neighbour was deleted
+  stays lost on purpose (`placeLost`), and an undo cannot be told from a retyping. They answer
+  `conflict` and the person makes a new proposal. Storing the context at proposing time would
+  allow it; not done.
+- **Not covered.** An accepted proposal whose text was deleted and undone is still attached
+  again only by the old way (the words in the file once).
+- Tests: `proposals.sandbox.test.ts` (places make a proposal fresh with the words twice, and
+  Accept lands at the right place; other words refused; not out of date refused; insertion
+  refused) and `tests/e2e/proposals.spec.ts` (delete, save, Ctrl+Z, save; also after a reload).
 
 ## Decisions waiting on the owner
 
