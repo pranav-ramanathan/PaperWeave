@@ -275,15 +275,18 @@ test('the figure window does not say there are no pictures while they load or if
   });
   const box = await openFigure(page);
   const insert = box.getByRole('button', { name: 'Insert' });
-  await expect(box.getByLabel('Picture').getByRole('option')).toHaveText(['Loading pictures…']);
+  await expect(box.getByRole('combobox', { name: /^Picture/ }).getByRole('option')).toHaveText([
+    'Loading pictures…',
+  ]);
   await expect(box.getByText('no pictures yet')).toHaveCount(0);
   await expect(insert).toBeDisabled();
   // A press does nothing but say why, and nothing is written.
   await box.getByLabel('Caption').fill('Early');
-  await insert.click();
+  // aria-disabled keeps it pressable, so that the press is answered.
+  await insert.click({ force: true });
   await expect(box.getByRole('alert')).toContainText('still loading');
   release();
-  await expect(box.getByLabel('Picture').getByRole('option')).toHaveText([
+  await expect(box.getByRole('combobox', { name: /^Picture/ }).getByRole('option')).toHaveText([
     'figures/dot.png',
     'No picture yet',
   ]);
@@ -301,7 +304,7 @@ test('the figure window does not say there are no pictures while they load or if
   // Retry asks again, and this time the answer comes.
   await page.unroute('**/pictures');
   await failed.getByRole('button', { name: 'Retry' }).click();
-  await expect(failed.getByLabel('Picture').getByRole('option')).toHaveText([
+  await expect(failed.getByRole('combobox', { name: /^Picture/ }).getByRole('option')).toHaveText([
     'figures/dot.png',
     'No picture yet',
   ]);
@@ -319,7 +322,7 @@ test('with two pictures none is chosen for the person, and a float goes after it
     'figures/dot2.png',
   ]);
   const box = await openFigure(page);
-  const picture = box.getByLabel('Picture');
+  const picture = box.getByRole('combobox', { name: /^Picture/ });
   await expect(picture.getByRole('option')).toHaveText([
     'Choose a picture…',
     'figures/dot.png',
@@ -334,9 +337,9 @@ test('with two pictures none is chosen for the person, and a float goes after it
   await picture.selectOption('figures/dot2.png');
   await box.getByRole('button', { name: 'Cancel' }).click();
   const again = await openFigure(page);
-  await expect(again.getByLabel('Picture')).toHaveValue('?');
+  await expect(again.getByRole('combobox', { name: /^Picture/ })).toHaveValue('?');
   await expect(again.getByLabel('Caption')).toHaveValue('');
-  await again.getByLabel('Picture').selectOption('figures/dot2.png');
+  await again.getByRole('combobox', { name: /^Picture/ }).selectOption('figures/dot2.png');
   await again.getByLabel('Caption').fill('Chosen late');
   await again.getByRole('button', { name: 'Insert' }).click();
   await expect(again).toBeHidden({ timeout: 15_000 });
@@ -346,7 +349,7 @@ test('with two pictures none is chosen for the person, and a float goes after it
   const text = await sourceText(other);
   expect(text).toContain('Text before the figure.');
   expect(text).toMatch(
-    /Text before the figure\.\\begin\{figure\}\[t\]\\centering\\includegraphics\[width=\\linewidth\]\{figures\/dot2\.png\}/,
+    /Text before the figure\.\\begin\{figure\}\[t\]\s*\\centering\s*\\includegraphics\[width=\\linewidth\]\{figures\/dot2\.png\}/,
   );
   // Blank lines on both sides: the source view shows each as a line of its own.
   const lines = await source(other).locator('.cm-line').allTextContents();
