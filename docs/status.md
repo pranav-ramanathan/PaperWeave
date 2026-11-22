@@ -260,6 +260,15 @@ Read this first. Update it in every pull request.
     the caret is: a figure with a picture chosen from the paper's files, its description and
     caption; a table of a chosen size with a caption. Each gets a label made from its caption
     that the paper does not already use.
+  - The Figure window tells loading, loaded and failed apart: while the pictures load it says so
+    and Insert waits (`aria-disabled`, with a guard); if they cannot be loaded it says so and
+    offers Retry, rather than "no pictures yet". Each time it opens it starts clean. With two or
+    more pictures none is chosen for the person ("Choose a picture…"); Insert refuses until one
+    is, or "No picture yet" is. One picture is chosen on its own.
+  - A figure or table goes after the end of the paragraph the caret is in, in blank lines, not
+    at the caret, so it does not split a sentence from its citations (`Bridge.floatCommand`,
+    `insertion({ block: true })`). In a list item, a caption or elsewhere it goes at the caret
+    as before.
   - A build that fails outright (a picture the engine cannot read) now reports why. Such errors
     have no file and line and were dropped before.
   - The editor reads the selection in the text before acting even when a toolbar button has

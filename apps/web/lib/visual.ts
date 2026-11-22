@@ -742,21 +742,40 @@ export function createVisual(opts: {
    * Get ready to insert LaTeX where the caret is now. Returns the function that inserts it, by
    * way of the server, or null if the caret is not in running text.
    */
-  const insertion = (
+  const insertion = ({
     skipSpace = false,
+    caretIn,
+    block = false,
+  }: {
+    skipSpace?: boolean;
     /** Where in the inserted text the caret goes, if not at its end. */
-    caretIn?: (latex: string) => number,
-  ): ((latex: string) => Promise<CommandResult>) | null => {
+    caretIn?: (latex: string) => number;
+    /**
+     * A block (a figure, a table): in a paragraph it goes after the paragraph, in blank lines,
+     * not at the caret, and the caret stands after it.
+     */
+    block?: boolean;
+  } = {}): ((latex: string) => Promise<CommandResult>) | null => {
     catchUp();
-    const c = bridge.insertCommand(editor.state, '');
+    const floated = block && bridge.floatsAfter(editor.state);
+    const c = floated
+      ? bridge.floatCommand(editor.state, '')
+      : bridge.insertCommand(editor.state, '');
     if (!c) return null;
+    if (floated) skipSpace = true;
     resume = { from: editor.state.selection.from, to: editor.state.selection.to, acted };
-    return async (latex) => {
+    return async (given) => {
+      const latex = floated ? given.replace(/^\n+|\n+$/g, '') : given;
       const before = moves;
       // Guarded as typed text is, against the text as the earlier commands left it.
       let sent = latex;
       const result = await inOrder(() => {
-        const filled = bridge.fillCommand({ ...c, key: crypto.randomUUID() }, latex);
+        const key = crypto.randomUUID();
+        // Padded against the text as it is now, not as it was when the caret was fixed.
+        const filled = bridge.fillCommand(
+          { ...c, key },
+          floated ? bridge.paddedFloat(c, latex) : latex,
+        );
         sent = filled.replacement;
         return opts.run(filled);
       });
@@ -775,7 +794,8 @@ export function createVisual(opts: {
         while (after < text.length && /\s/.test(text[after])) after++;
       }
       // `after` is past what was inserted, guard after it included; the caret goes before that.
-      if (after != null) after -= caretIn ? sent.length - lead - caretIn(latex) : trail;
+      // A float goes after the whole paragraph: the caret is where the next one starts.
+      if (after != null && !floated) after -= caretIn ? sent.length - lead - caretIn(latex) : trail;
       if (moves !== before)
         resume = null; // the person has gone elsewhere meanwhile
       else if (result !== 'conflict' && after != null) {
@@ -799,7 +819,7 @@ export function createVisual(opts: {
     // now, with the place; the level and the title are only known when the person is done.
     const probe = bridge.headingCommand(editor.state, 'section', 'x');
     const around = probe?.replacement.match(/^(\n*)\\section\{x\}(\n*)$/);
-    const put = around && insertion(true);
+    const put = around && insertion({ skipSpace: true });
     if (!around || !put) return null;
     return (level, title) => put(`${around[1]}\\${level}{${title}}${around[2]}`);
   };
@@ -811,7 +831,8 @@ export function createVisual(opts: {
   const list = (ordered: boolean): (() => Promise<CommandResult>) | null => {
     catchUp();
     const probe = bridge.listCommand(editor.state, ordered);
-    const put = probe && insertion(false, (latex) => latex.indexOf('\\item ') + '\\item '.length);
+    const put =
+      probe && insertion({ caretIn: (latex) => latex.indexOf('\\item ') + '\\item '.length });
     if (!probe || !put) return null;
     return () => put(probe.replacement);
   };

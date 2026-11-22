@@ -146,7 +146,7 @@ test('a chart is drawn from approved data and is out of date once the data chang
   const box = page.getByRole('dialog', { name: 'Insert a figure' });
   await expect(box.getByLabel('Picture').getByRole('option')).toHaveText([
     'charts/latency.pdf',
-    'None yet',
+    'No picture yet',
   ]);
   await expect(box.getByLabel('Caption')).toHaveValue('Latency over four days.');
   await expect(box.getByLabel(/^Description/)).toHaveValue(
