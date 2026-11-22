@@ -10,9 +10,23 @@ type Env = Record<string, string | undefined>;
 /** `url` is the page that asks the person to confirm; `token` is only ever read by that page's action. */
 export type SendLink = (to: { email: string; url: string; token: string }) => Promise<void>;
 
-/** Only ever send people to a path on this site. */
-export const safePath = (next: unknown, fallback = '/projects') =>
-  typeof next === 'string' && /^\/(?!\/)/.test(next) && !next.includes('\\') ? next : fallback;
+/**
+ * Only ever send people to a path on this site. Browsers drop tab, newline and return from an
+ * address, so `/<TAB>/host` leaves the site as `//host`: no control character or space is
+ * allowed, nor a backslash. What is left must still be on this site once parsed.
+ */
+export const safePath = (next: unknown, fallback = '/projects') => {
+  if (typeof next !== 'string' || !/^\/(?!\/)/.test(next)) return fallback;
+  // eslint-disable-next-line no-control-regex
+  if (/[\\\u0000-\u0020\u007f]/.test(next)) return fallback;
+  try {
+    const url = new URL(next, 'http://x.invalid');
+    if (url.origin !== 'http://x.invalid') return fallback;
+    return url.pathname + url.search + url.hash;
+  } catch {
+    return fallback;
+  }
+};
 
 /**
  * What the email carries: a page that changes nothing until its button is pressed. The library's

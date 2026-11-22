@@ -164,7 +164,12 @@ test('a mail scanner that fetches the emailed address does not use the link up o
 });
 
 test('a destination that is not a path on this site is not carried into the emailed address', async () => {
-  for (const bad of ['https://evil.example/x', '//evil.example', '/\\evil.example']) {
+  for (const bad of [
+    'https://evil.example/x',
+    '//evil.example',
+    '/\\evil.example',
+    '/\t/evil.example',
+  ]) {
     await t.auth.handler(
       new Request(`${TEST_ENV.BETTER_AUTH_URL}/api/auth/sign-in/magic-link`, {
         method: 'POST',

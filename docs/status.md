@@ -4313,3 +4313,14 @@ http-equiv="refresh" content="2">`: a reload every 2 seconds that restarts a scr
   press says used; page audited). Tests that sign in go through the page: `testing.ts`
   `signIn` and `helpers.ts` `signIn`/`confirmSignIn`.
 - **Not done:** a scanner that presses buttons would still use the link.
+
+## Sign-in could be sent to another site by a tab
+
+- **Found by** a browser check: `/sign-in?next=/%09/evil.example/x`, signed in, answered with a
+  redirect to `/\t/evil.example/x`, which browsers read as `//evil.example/x`.
+- **Now** `safePath` (`packages/server/src/auth.ts`) refuses any character up to space, DEL and
+  backslash, and the parsed result must stay on this site. Every `next` goes through it (sign-in
+  page, confirm page and action, the emailed address); other redirects are built from the
+  server's own paths.
+- **Held by** `auth.test.ts` (including a property over random strings), `auth.sandbox.test.ts`
+  and `projects.spec` (signed in, and the emailed page with a tab in `next`).

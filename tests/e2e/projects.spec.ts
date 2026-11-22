@@ -254,6 +254,30 @@ test('sign-in never sends people to another site', async ({ browser }) => {
   await expect(visitor.page).toHaveURL(/^http:\/\/localhost:3100\/projects$/);
 });
 
+test('a tab between the slashes does not lead off the site, signed in or from the emailed page', async ({
+  browser,
+}) => {
+  const visitor = await person(browser, 'tab-redirect');
+  await visitor.page.goto('/sign-in');
+  await signIn(visitor.page, visitor.email);
+  // Signed in: the sign-in page sends people on, and only to a path here.
+  for (const next of ['/%09/evil.example/x', '/%0a/evil.example/x', '/%0d/evil.example/x']) {
+    const answer = await visitor.page.request.get(`/sign-in?next=${next}`, { maxRedirects: 0 });
+    expect(answer.status(), next).toBe(307);
+    expect(answer.headers()['location'], next).toBe('/projects');
+  }
+  // The emailed page, with the destination swapped by someone who made the link up.
+  const other = await person(browser, 'tab-confirm');
+  await other.page.goto('/sign-in');
+  await other.page.getByLabel('Email address').fill(other.email);
+  await other.page.getByRole('button', { name: 'Email me a sign-in link' }).click();
+  await expect(other.page.getByRole('status')).toContainText('Check');
+  const link = new URL(await emailedLink(other.email, '/sign-in/confirm'));
+  link.searchParams.set('next', '/\t/evil.example/x');
+  await confirmSignIn(other.page, link.href);
+  await expect(other.page).toHaveURL(/^http:\/\/localhost:3100\/projects$/);
+});
+
 test('every answer says how it may be used: not in a frame, not guessed at, not posted elsewhere', async ({
   request,
 }) => {
