@@ -359,10 +359,16 @@ export type HeadingRequest = {
 };
 
 /** The window that asks for a heading's level and title, and inserts it. */
-export function HeadingBox(props: { request: HeadingRequest | null; onDone(): void }) {
+export function HeadingBox(props: {
+  request: HeadingRequest | null;
+  /** Done with this request: a later one, if there is one, is not done with. */
+  onDone(request: HeadingRequest | null): void;
+}) {
   const { request, onDone } = props;
   const box = useDialog(!!request);
   const field = useRef<HTMLInputElement>(null);
+  /** The request the window was last opened for. */
+  const shown = useRef<HeadingRequest | null>(null);
   const [level, setLevel] = useState<Level>('section');
   const [title, setTitle] = useState('');
   const [problem, setProblem] = useState('');
@@ -374,7 +380,9 @@ export function HeadingBox(props: { request: HeadingRequest | null; onDone(): vo
   }, [request]);
   // The title is what is typed first: the keyboard starts there (the window's own effect has opened it).
   useEffect(() => {
-    if (request) field.current?.focus();
+    if (!request) return;
+    shown.current = request;
+    field.current?.focus();
   }, [request]);
   const insert = async () => {
     if (!request || busy) return;
@@ -388,7 +396,7 @@ export function HeadingBox(props: { request: HeadingRequest | null; onDone(): vo
     setBusy(true);
     try {
       await request.apply(level, text);
-      onDone();
+      onDone(request);
     } catch (err) {
       console.warn('edit not made:', (err as Error).message);
       setProblem('That edit could not be made. Check the connection and try again.');
@@ -397,7 +405,14 @@ export function HeadingBox(props: { request: HeadingRequest | null; onDone(): vo
     }
   };
   return (
-    <dialog ref={box} className="tool" aria-labelledby="heading-title" onClose={onDone}>
+    <dialog
+      ref={box}
+      className="tool"
+      aria-labelledby="heading-title"
+      // A close event can arrive after the window was asked for again (a key pressed just after
+      // Escape): it is about the window that went, so it ends that request and not the new one.
+      onClose={() => !box.current?.open && onDone(shown.current)}
+    >
       <form
         onSubmit={(e) => {
           e.preventDefault();
@@ -427,7 +442,7 @@ export function HeadingBox(props: { request: HeadingRequest | null; onDone(): vo
           <button type="submit" disabled={busy}>
             Insert
           </button>{' '}
-          <button type="button" onClick={onDone}>
+          <button type="button" onClick={() => onDone(request)}>
             Cancel
           </button>
         </p>

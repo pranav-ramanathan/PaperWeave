@@ -912,7 +912,10 @@ export default function FileEditor(props: {
         <ReferencePicker request={picker} projectId={projectId} onDone={() => setPicker(null)} />
         <CitationPicker request={citing} projectId={projectId} onDone={() => setCiting(null)} />
         <FloatBox request={float} projectId={projectId} onDone={() => setFloat(null)} />
-        <HeadingBox request={heading} onDone={() => setHeading(null)} />
+        <HeadingBox
+          request={heading}
+          onDone={(was) => setHeading((now) => (now === was ? null : now))}
+        />
         <EditorMenu
           at={menu}
           onClose={() => {
