@@ -404,3 +404,24 @@ test('\\textless{}, \\textgreater{} and \\textbar{} are one shown character each
     expect(pieces.filter((x) => x.k === 'esc').map((x) => x.ch)).toEqual([ch]);
   }
 });
+
+test('escape writes " as \\symbol{34}, which babel shorthands cannot change', async () => {
+  const { escape } = await import('./escape.ts');
+  expect(escape('say "hi"')).toBe('say \\symbol{34}hi\\symbol{34}');
+});
+
+test('\\symbol{34} is one shown character; other \\symbol{N} stay raw', () => {
+  const pieces = (s: string) =>
+    parse(s).blocks.flatMap((b) => (b.body.kind === 'para' ? b.body.pieces : []));
+  for (const src of ['a \\symbol{34} b\n', '\\symbol{34}x\n']) {
+    expect(
+      pieces(src)
+        .filter((x) => x.k === 'esc')
+        .map((x) => x.ch),
+    ).toEqual(['"']);
+  }
+  expect(parse('\\symbol{34}x\n').blocks.map((b) => b.body.kind)).toEqual(['para', 'ws']);
+  const p = pieces('a \\symbol{35} b\n');
+  expect(p.filter((x) => x.k === 'esc')).toEqual([]);
+  expect(p.filter((x) => x.k === 'atom').map((x) => x.type)).toEqual(['raw']);
+});

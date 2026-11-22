@@ -22,7 +22,7 @@ import {
   toPdf,
 } from '@paperweave/latex';
 import { expect, test } from 'vitest';
-import { fixtures, replica, visualOp } from '../../../packages/bridge/src/harness.ts';
+import { fixtures, replica, textblocks, visualOp } from '../../../packages/bridge/src/harness.ts';
 import { describeImport } from '@paperweave/server';
 import { FIXTURES, fixtureFiles, rng } from '../../../packages/latex/src/testutil.ts';
 import { compile, sandbox } from './compile.ts';
@@ -128,6 +128,21 @@ test.each([
   expect(r.diagnostics.filter((d) => d.severity === 'error')).toEqual([]);
   expect(r.ok).toBe(true);
   expect(r.log).not.toMatch(/mktexpk/);
+});
+
+test('a " typed in the visual view stays a quote under German babel', async () => {
+  const rep = replica('Er sagte x und y.\n');
+  const tb = textblocks(rep)[0];
+  expect(rep.dispatch(rep.state.tr.insertText('"aber" ', tb.start + 9))).toBe(true);
+  expect(rep.src).toContain('\\symbol{34}aber\\symbol{34}');
+  const { r, out } = await buildSource(
+    `\\documentclass{article}\n\\usepackage[ngerman]{babel}\n\\begin{document}\n${rep.src}\\end{document}\n`,
+  );
+  expect(r.diagnostics.filter((d) => d.severity === 'error')).toEqual([]);
+  expect(r.ok).toBe(true);
+  const text = execFileSync('pdftotext', [join(out, r.pdf!), '-'], { encoding: 'utf8' });
+  expect(text).toContain('aber');
+  expect(text).not.toContain('\u00e4ber');
 });
 
 // Packages that live in texlive-plain-generic, which texlive-latex-extra only recommends.

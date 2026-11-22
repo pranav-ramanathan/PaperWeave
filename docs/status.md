@@ -950,6 +950,26 @@ is printed without that field.` (once, though latexmk runs BibTeX again). The su
   not reliable: a class or package may load T1 itself (e.g. through `lmodern`/`fontspec`-like
   packages), so it would warn falsely. Worth doing only as a "may print wrongly" note.
 
+## `"` typed in the visual view changed the next letter under babel
+
+- **Before:** `escape()` passed `"` through bare. Under `babel` with German, Dutch, Spanish
+  (and others) `"` is an active shorthand that swallows the next letter, so `"aber"` typed in
+  the text shipped as `äber` and `"sehr"` as `ßehr`: exit 0, no warning. Without babel it
+  printed a closing quote for both.
+- **Now:** `escape()` writes `\symbol{34}`, which prints a plain `"` with no letter eaten in
+  body text, headings, captions, tables, `\emph`, `\texttt`, in pdfLaTeX (OT1, T1, babel
+  ngerman/dutch/spanish/russian), XeLaTeX and LuaLaTeX. The parser reads it as one shown
+  character, so it shows as `"` and Backspace removes it whole. Typing, multi-paragraph paste
+  and grammar replacements all go through `escape()`. Other `\symbol{N}` stay raw atoms.
+  (`\textquotedbl{}` was not used: it errors under pdfLaTeX's default OT1.)
+- **Not fixed:** a bare `"` already in a source is left as it is and still shows as `"`. A
+  German author who typed `"a` in the visual view expecting `ä` now gets `"a` literally,
+  which is what the view shows; use `\"a` or `ä`.
+- **hyperref:** in a `\section` (or anything bookmarked) `\symbol{34}` makes hyperref log
+  `Token not allowed in a PDF string (Unicode): removing \char`. It is shown as one warning
+  (not an error; the build is ok) and the PDF bookmark just lacks the quote. Not wrapped in
+  `\texorpdfstring`: it exists only with hyperref, so it would fail every paper without it.
+
 ## How long a large import takes
 
 - An import still runs inside its request. Measured at the most files a paper may hold

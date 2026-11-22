@@ -1939,3 +1939,42 @@ describe('< > | typed in the visual view', () => {
     r.check();
   });
 });
+
+describe('" typed in the visual view', () => {
+  const SRC = 'We found p, see a b.\n';
+
+  test('is written as \\symbol{34}, shows as itself, and Backspace removes it whole', () => {
+    const r = replica(SRC);
+    const tb = textblocks(r)[0];
+    expect(r.dispatch(r.state.tr.insertText('"x" ', tb.start + 9))).toBe(true);
+    r.check();
+    expect(r.src).toBe('We found \\symbol{34}x\\symbol{34} p, see a b.\n');
+    expect(shown(r)).toBe('We found "x" p, see a b.');
+    const at = textblocks(r)[0].start + 9;
+    expect(r.dispatch(r.state.tr.delete(at, at + 1))).toBe(true);
+    r.check();
+    expect(r.src).toBe('We found x\\symbol{34} p, see a b.\n');
+  });
+
+  test('two replicas typing it converge', () => {
+    const r = replica(SRC);
+    const { b, merge } = peer(r);
+    expect(r.dispatch(r.state.tr.insertText('"', textblocks(r)[0].start + 3))).toBe(true);
+    expect(b.dispatch(b.state.tr.insertText('"', textblocks(b)[0].start + 14))).toBe(true);
+    merge();
+    Y.applyUpdate(b.ydoc, Y.encodeStateAsUpdate(r.ydoc));
+    expect(b.src).toBe(r.src);
+    expect(r.src.match(/\\symbol\{34\}/g)).toHaveLength(2);
+    r.check();
+    b.check();
+  });
+
+  test('a bare one already in the source shows as itself and its bytes are not touched', () => {
+    const src = 'He said "hi" and left.\n';
+    const r = replica(src);
+    expect(shown(r)).toBe('He said "hi" and left.');
+    expect(r.dispatch(r.state.tr.insertText('X', textblocks(r)[0].start))).toBe(true);
+    expect(r.src).toBe('X' + src);
+    r.check();
+  });
+});

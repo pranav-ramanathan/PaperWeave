@@ -622,6 +622,10 @@ function parseInto(
           push('esc', i, j + 2, { ch: TEXT_ESC[name] });
           i = j + 2;
           continue;
+        } else if (name === 'symbol' && src.startsWith('{34}', j)) {
+          push('esc', i, j + 4, { ch: '"' });
+          i = j + 4;
+          continue;
         }
         if (e < 0) {
           e = unit(i);
@@ -788,7 +792,12 @@ function parseInto(
         if (transparent.has(end.name)) return raw(i, end.end, 'end');
         throw new Unbalanced('para', `\\end{${end.name}} without \\begin`);
       }
-      const inlineCmd = STYLE.has(name) || REF.has(name) || CITE.has(name) || name in TEXT_ESC;
+      const inlineCmd =
+        STYLE.has(name) ||
+        REF.has(name) ||
+        CITE.has(name) ||
+        name in TEXT_ESC ||
+        (name === 'symbol' && src.startsWith('{34}', j));
       if (isL(name[0]) && !inlineCmd && !CODE_INLINE.has(name)) {
         // A command alone on its line (\maketitle, \input{x}, \label{y}) is its own block.
         const e = unit(i);

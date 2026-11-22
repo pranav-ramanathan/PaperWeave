@@ -60,6 +60,8 @@ const FRAGMENTS = [
     '<',
     '>',
     '|',
+    '"',
+    '\\symbol{34}',
   ],
   ...['\\url{', '%20', '\\href{', '\\text{', '\\lstinline|', '\\crefrange{'],
   ...['$\\d', '$\\d}', '\\(lta$', '$\\delta$', '\\😀', '\\😀 x'],
