@@ -48,6 +48,7 @@ function Change(props: {
           autoFocus
         />
       </label>
+      <p className="note">This is LaTeX: write \% for %, \& for &, \_ for _.</p>
       <label>
         Why (optional)
         <input value={reason} onChange={(e) => setReason(e.target.value)} maxLength={1000} />
@@ -243,6 +244,19 @@ export default function Proposals(props: {
             <ul>
               {p.flags.map((flag) => (
                 <li key={flag}>{flag}</li>
+              ))}
+            </ul>
+          </div>
+        )}
+        {p.latex.length > 0 && p.status === 'open' && (
+          <div className="flags">
+            <strong>
+              Written as LaTeX, this would not come out as it reads. Change the proposal, or check
+              before accepting:
+            </strong>
+            <ul>
+              {p.latex.map((message) => (
+                <li key={message}>{message}</li>
               ))}
             </ul>
           </div>

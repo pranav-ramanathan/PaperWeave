@@ -1063,7 +1063,8 @@ Figure~, ...`, with no warning and `check()` passing.
   now adds what typing adds (`guard()`): `{}` before or after where a command name would
   run on or take a `[`/`*`, and a line break after a comment. It is built in the queue, against
   the text the earlier commands left. Not covered: the source-view paste (the source is
-  raw LaTeX there), and proposal and grammar replacements.
+  raw LaTeX there), and grammar replacements. Proposal replacements are warned about, not
+  guarded: see "A proposal that would break as LaTeX says so".
 - **Block-level text only goes where LaTeX can take it.** A copy from mid-item to mid-item
   pasted in a paragraph wrote `Before text.alpha\n\item two` (`Lonely \item`), and two
   paragraphs pasted or a heading or list inserted with the caret in a heading or inside
@@ -4512,3 +4513,24 @@ Found by a three-person walkthrough.
   succeeds. Reports stored earlier have no field and render as before.
 - **Held by** `compiler.test`, `import.sandbox.test` and `tests/e2e/atoms.spec.ts`.
 - **Not done.** The files are not renamed for the user, and the file list does not mark them.
+
+## A proposal that would break as LaTeX says so
+
+- **What was wrong.** A proposal's replacement is stored and applied as LaTeX source, and only
+  its type, length and `\r` were checked. A reviewer typing `12% faster` silently dropped the rest
+  of the source line from the PDF (latexmk exits 0, no warning); `Smith & Jones`, `item_1` and `#2`
+  broke the build; `$5` or `\emph{much` left a group open. The owner saw a card with nothing wrong.
+- **Now** `replacementHazards` (`packages/latex/src/hazards.ts`, pure) is run by `listProposals` for
+  open proposals whose words still stand, and its messages come back as `Proposal.latex`. The card
+  shows them under "Written as LaTeX, this would not come out as it reads". It is advisory: Accept
+  stays allowed. A `%` that opens a comment is found anywhere in the file (`commentOpen`, moved from
+  the bridge into `@paperweave/latex`). An unfinished group or a bare `& # _ ^` is found by parsing
+  only the paragraph around the edit before and after, and reporting what the change adds. The
+  change form says "This is LaTeX: write \% for %, \& for &, \_ for _."
+- **Held by** `hazards.test` (table of cases), `proposals.sandbox.test` and `tests/e2e/proposals.spec.ts`
+  (warning shown, Accept enabled, gone after the change is written with `\%`, axe audit).
+- **Not done.** `%` inside `verbatim` or `lstlisting` is flagged. Unfinished groups and bare
+  characters are not found in raw blocks (captions, tables, nested lists), lists with blank lines
+  between items, or the preamble (the comment check still works there). A paragraph over 40 KB
+  is not parsed. `$5 to $3` written wholly inside the replacement is a valid formula and is not
+  flagged. Critique and grammar replacements are not checked.

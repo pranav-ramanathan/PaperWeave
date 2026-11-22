@@ -265,6 +265,37 @@ test('a proposal marks only the words it changes', async ({ browser }) => {
   await audit(owner.page, 'a proposal with only its changed words marked');
 });
 
+test('a proposal that would break as LaTeX says so, and the owner can still accept it', async ({
+  browser,
+}) => {
+  test.setTimeout(90_000);
+  const owner = await person(browser, 'latexwarn-owner');
+  const zip = join(mkdtempSync(join(tmpdir(), 'paperweave-e2e-')), `LaTeX warning ${run}.zip`);
+  writeFileSync(zip, await writeZip([{ path: 'main.tex', bytes: Buffer.from(MAIN) }]));
+  await owner.page.goto('/sign-in');
+  await signIn(owner.page, owner.email);
+  await owner.page.getByLabel('Or import a ZIP of a LaTeX project').setInputFiles(zip);
+  await owner.page.getByRole('button', { name: 'Import ZIP' }).click();
+  await owner.page.getByRole('link', { name: 'main.tex' }).first().click();
+  await selectWord(owner.page, VISUAL, 'Nothing');
+  await panel(owner.page).getByRole('button', { name: 'Propose a change here' }).click();
+  await expect(panel(owner.page).getByText('This is LaTeX: write')).toBeVisible();
+  await panel(owner.page).getByLabel('Replace it with').fill('Under 5% of what');
+  await panel(owner.page).getByRole('button', { name: 'Propose', exact: true }).click();
+  const card = panel(owner.page).getByRole('article', { name: 'Proposal to change “Nothing”' });
+  await expect(card).toContainText('Written as LaTeX, this would not come out as it reads');
+  await expect(card).toContainText('else is claimed here.');
+  await expect(card.getByRole('button', { name: 'Accept' })).toBeEnabled();
+  await audit(owner.page, 'a proposal with a warning that it would break as LaTeX');
+
+  await card.getByRole('button', { name: 'Change the proposal' }).click();
+  await card.getByLabel('Replace it with').fill('Under 5\\% of what');
+  await card.getByRole('button', { name: 'Save the proposal' }).click();
+  await expect(card).toContainText('Proposed: Under 5\\% of what');
+  await expect(card).not.toContainText('Written as LaTeX, this would not come out as it reads');
+  await expect(card.getByRole('button', { name: 'Accept' })).toBeEnabled();
+});
+
 test('text added at the caret is out of date once the owner retypes the sentence around it', async ({
   browser,
 }) => {
