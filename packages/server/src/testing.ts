@@ -28,14 +28,14 @@ export async function testDb() {
   // Made the way the services make theirs, so that it too survives a connection being lost.
   const pool = connect(url.href);
   await migrate(pool);
-  const links: { email: string; url: string }[] = [];
+  const links: { email: string; url: string; token: string }[] = [];
   const auth = createAuth(pool, async (link) => void links.push(link), TEST_ENV);
   return {
     pool,
     auth,
     /** Every sign-in link "sent" so far. */
     links,
-    /** Sign in by following a real magic link. Returns the user's ID and session cookie. */
+    /** Sign in as the confirm page does, with the emailed link's token. Returns the user's ID and session cookie. */
     async signIn(email: string) {
       const base = TEST_ENV.BETTER_AUTH_URL + '/api/auth';
       const asked = await auth.handler(
@@ -46,7 +46,12 @@ export async function testDb() {
         }),
       );
       if (!asked.ok) throw new Error(`sign-in request failed: ${asked.status}`);
-      const verified = await auth.handler(new Request(links.at(-1)!.url));
+      // What the confirm page's action does when its button is pressed.
+      const verified = await auth.api.magicLinkVerify({
+        query: { token: links.at(-1)!.token },
+        headers: new Headers(),
+        returnHeaders: true,
+      });
       const cookie = verified.headers
         .getSetCookie()
         .map((c) => c.split(';')[0])

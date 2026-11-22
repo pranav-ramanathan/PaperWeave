@@ -13,7 +13,8 @@ export default function SignInForm({ next }: { next: string }) {
   if (state === 'sent')
     return (
       <p role="status">
-        Check <strong>{email}</strong> for a sign-in link. It works once and expires in 15 minutes.
+        Check <strong>{email}</strong> for a sign-in link: it leads to a page where you press
+        &ldquo;Sign in&rdquo;. It works once and expires in 15 minutes.
       </p>
     );
   return (

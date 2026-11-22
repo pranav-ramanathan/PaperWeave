@@ -18,13 +18,21 @@ What it found is fixed in the same change, or listed under "Open" with what to d
 | Compiling                                                                 | Read `compile.ts`; its tests try to reach the network and the shell                                      | No network, no shell escape, no capabilities, read-only root, memory, process and time limits; a `latexmkrc` is never run.                                                                                                                                                                                         |
 | SQL                                                                       | Read every query built from a string                                                                     | All values are parameters. The three places a name is put into SQL take it from a fixed list.                                                                                                                                                                                                                      |
 | Outbound requests                                                         | Read `evidence.ts`, `grammar.ts`, `critique.ts`                                                          | Fixed hosts from configuration; only a DOI, or the text the feature is for, is sent.                                                                                                                                                                                                                               |
-| Sending people elsewhere                                                  | Read `safePath`; a test tries other sites                                                                | Only paths on this site.                                                                                                                                                                                                                                                                                           |
+| Sending people elsewhere                                                  | Read `safePath`; a test tries other sites                                                                | Only paths on this site: no space, control character or backslash, and the parsed result must still be on this site.                                                                                                                                                                                               |
 | Email                                                                     | Read what is sent                                                                                        | Sign-in links, invitations, mentions. A mention carries none of the comment or the text.                                                                                                                                                                                                                           |
 | Logs and metrics                                                          | Searched for logging; read `metrics.ts`                                                                  | IDs, counts and error kinds. Tests seed a secret in a paper and hold that it is on no metrics page.                                                                                                                                                                                                                |
 | Secrets                                                                   | Searched the tree for keys, and the history for environment files                                        | None. `.env*` is ignored; the credentials in `infra/compose.yaml` are for local use and say so.                                                                                                                                                                                                                    |
 | Dependencies                                                              | `pnpm audit --prod`, `pnpm audit`                                                                        | None in what the service runs. One in a development tool, see Open.                                                                                                                                                                                                                                                |
 
 ## Found and fixed
+
+- **Sign-in could send people to another site.** `safePath` only refused a second slash and a
+  backslash, so `/<TAB>/evil.example` passed; browsers drop tab, newline and return from an
+  address, so it became `//evil.example`. Both the sign-in page (when already signed in) and the
+  emailed confirm page followed it. `safePath` now refuses spaces, control characters and
+  backslashes, and the result must parse to a path on this site. Held by `auth.test.ts` and
+  `projects.spec`. Other redirects were checked: the rest are built by the server from its own
+  paths (`seeOther`, `requireUser`, `act`), never from a request's value.
 
 - **An endpoint that compiled LaTeX for anyone.** `/api/spike/compile`, left from the Phase B
   editor workbench, took no sign-in and no origin check. The sandbox was the only thing between
@@ -139,6 +147,18 @@ What it found is fixed in the same change, or listed under "Open" with what to d
   used and cancel it; a second invitation to an address ends the first. A mistyped address no
   longer leaves an owner unable to stop whoever owns it from joining. Service tests hold each,
   and failed on the old code.
+
+- **A mail scanner's fetch used up the sign-in link, and was handed the session.** The emailed
+  link signed in on a plain GET. University mail gateways fetch links before delivery: the
+  scanner got the session cookie, one session row existed for a person who had not yet seen the
+  email, and their own visit found the link used. The email now leads to `/sign-in/confirm`,
+  which shows a page and changes nothing; the button posts to a server action, and only that
+  calls the library's verify. The library's GET `/api/auth/magic-link/verify` is switched off
+  (`disabledPaths`, 404), so an old or crafted link cannot hand a session to a GET. The page
+  does not sign in by script (scanners run scripts), is sent `Cache-Control: no-store`, keeps
+  `Referrer-Policy: same-origin`, and loads nothing from another site. The token and the link
+  are never logged. A service test and a browser test failed on the old code. Not covered: a
+  scanner that submits forms.
 
 ## Open
 

@@ -4296,3 +4296,31 @@ http-equiv="refresh" content="2">`: a reload every 2 seconds that restarts a scr
   audit, focus kept across a tick, the result still appears).
 - **Not done:** no `<noscript>` refresh; without scripts these pages no longer update by
   themselves (the pages need scripts for most else).
+
+## A scanner's fetch no longer uses up the sign-in link
+
+- **Found by** a security look at sign-in: the emailed link signed in on a GET, so a mail
+  gateway that fetches links before delivery used it up and was given the session; the person
+  then found the link "used or expired".
+- **Now** the email links to `/sign-in/confirm?token=...&next=...` (`apps/web/app/sign-in/confirm`).
+  Opening it changes nothing; the "Sign in" button posts to `confirmSignInAction`, which calls
+  `auth().api.magicLinkVerify`, sets the cookies and goes to `next` (checked with `safePath`, now
+  in `auth.ts`). Any failure goes to `/sign-in?link=used`. `/api/auth/magic-link/verify` is
+  switched off in `createAuth` (`disabledPaths`). `SendLink` receives `token`; the email and the
+  "link sent" text say to press the button.
+- **Held by** `auth.sandbox.test.ts` (a scanner's GET leaves no session; the old path is 404; the
+  person can still sign in once) and `projects.spec` (scanner, then person; `next` kept; second
+  press says used; page audited). Tests that sign in go through the page: `testing.ts`
+  `signIn` and `helpers.ts` `signIn`/`confirmSignIn`.
+- **Not done:** a scanner that presses buttons would still use the link.
+
+## Sign-in could be sent to another site by a tab
+
+- **Found by** a browser check: `/sign-in?next=/%09/evil.example/x`, signed in, answered with a
+  redirect to `/\t/evil.example/x`, which browsers read as `//evil.example/x`.
+- **Now** `safePath` (`packages/server/src/auth.ts`) refuses any character up to space, DEL and
+  backslash, and the parsed result must stay on this site. Every `next` goes through it (sign-in
+  page, confirm page and action, the emailed address); other redirects are built from the
+  server's own paths.
+- **Held by** `auth.test.ts` (including a property over random strings), `auth.sandbox.test.ts`
+  and `projects.spec` (signed in, and the emailed page with a tab in `next`).

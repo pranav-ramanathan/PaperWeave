@@ -7,7 +7,44 @@ import { createHash } from 'node:crypto';
 import type pg from 'pg';
 
 type Env = Record<string, string | undefined>;
-export type SendLink = (to: { email: string; url: string }) => Promise<void>;
+/** `url` is the page that asks the person to confirm; `token` is only ever read by that page's action. */
+export type SendLink = (to: { email: string; url: string; token: string }) => Promise<void>;
+
+/**
+ * Only ever send people to a path on this site. Browsers drop tab, newline and return from an
+ * address, so `/<TAB>/host` leaves the site as `//host`: no control character or space is
+ * allowed, nor a backslash. What is left must still be on this site once parsed.
+ */
+export const safePath = (next: unknown, fallback = '/projects') => {
+  if (typeof next !== 'string' || !/^\/(?!\/)/.test(next)) return fallback;
+  // eslint-disable-next-line no-control-regex
+  if (/[\\\u0000-\u0020\u007f]/.test(next)) return fallback;
+  try {
+    const url = new URL(next, 'http://x.invalid');
+    if (url.origin !== 'http://x.invalid') return fallback;
+    return url.pathname + url.search + url.hash;
+  } catch {
+    return fallback;
+  }
+};
+
+/**
+ * What the email carries: a page that changes nothing until its button is pressed. The library's
+ * own link signs in on a plain GET, which mail scanners make before the person sees the email.
+ * `libraryUrl` is read only for where the person was going.
+ */
+export const confirmUrl = (base: string, token: string, libraryUrl: string) => {
+  let next: string | null = null;
+  try {
+    next = new URL(libraryUrl).searchParams.get('callbackURL');
+  } catch {
+    // no address, no destination
+  }
+  const url = new URL('/sign-in/confirm', base);
+  url.searchParams.set('token', token);
+  url.searchParams.set('next', safePath(next));
+  return url.href;
+};
 
 export const SESSION_CACHE_SECONDS = 60;
 
@@ -42,19 +79,26 @@ export const authOptions = (pool: pg.Pool, sendLink: SendLink, env: Env = proces
       // the cache is not read). A fixed value, not a setting: docs/settings.md.
       cookieCache: { enabled: true, maxAge: SESSION_CACHE_SECONDS },
     },
+    // The library's own link signs in on a plain GET. It is not reachable through the handler;
+    // the confirm page's action calls `magicLinkVerify` directly.
+    disabledPaths: ['/magic-link/verify'],
     plugins: [
       magicLink({
         // The link is the credential: store only its hash.
         storeToken: 'hashed',
         expiresIn: 15 * 60,
-        sendMagicLink: async ({ email, url }) => {
+        sendMagicLink: async ({ email, url, token }) => {
           // Said to the person asking as "too many requests", not as a fault of the server.
           if (!(await maySendSignInLink(pool, email)))
             throw new APIError('TOO_MANY_REQUESTS', {
               message: 'Too many sign-in links have been sent to this address. Try again later.',
             });
           try {
-            await sendLink({ email, url });
+            await sendLink({
+              email,
+              url: confirmUrl(env.BETTER_AUTH_URL ?? '', token, url),
+              token,
+            });
           } catch (err) {
             // Not sent, so not counted: someone trying again while the mail is down should
             // not find themselves shut out for an hour once it is back.

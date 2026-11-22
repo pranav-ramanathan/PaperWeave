@@ -31,6 +31,11 @@ const config: NextConfig = {
     },
     // An upload shown as a picture is shown as nothing else. Set here, not in the routes: a
     // header already on the answer wins over a route handler's own. Later entries win.
+    // The address carries a sign-in token: never kept, and never sent on (Referrer-Policy above).
+    {
+      source: '/sign-in/confirm',
+      headers: [{ key: 'Cache-Control', value: 'no-store' }],
+    },
     ...['/projects/:id/picture', '/projects/:id/charts/:chartId/png'].map((source) => ({
       source,
       headers: [{ key: 'Content-Security-Policy', value: "default-src 'none'; sandbox" }],
