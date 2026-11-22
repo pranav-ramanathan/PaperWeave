@@ -339,3 +339,37 @@ test('a contained command on a display formula is applied', async () => {
   const spill = { ...replace(await open(file), now, '\\begin{equation}\nz'), contained: true };
   expect((await runCommand(t.pool, store, owner.id, file, spill)).result).toBe('conflict');
 });
+
+test('a command that would cut an emoji in two is refused, and changes nothing', async () => {
+  const p = await paper();
+  await editFile(t.pool, store, p.main, owner.id, (text) =>
+    text.insert(text.toString().indexOf('beta'), '\u{1F600}'),
+  );
+  const text = await open(p.main);
+  const now = text.toString();
+  const at = (i: number) =>
+    Y.encodeRelativePosition(Y.createRelativePositionFromTypeIndex(text, i));
+  const emoji = now.indexOf('\u{1F600}');
+  const was = await rows(p.main);
+  // Starting between the halves, ending between them, and a replacement that is half an emoji.
+  for (const [from, to, replacement] of [
+    [emoji + 1, emoji + 3, '\\emph{x}'],
+    [emoji - 1, emoji + 1, '\\emph{x}'],
+    [emoji, emoji, '\ud83d'],
+    [emoji + 2, emoji + 2, '\ude00'],
+  ] as const) {
+    const c: Command = {
+      key: randomUUID(),
+      from: at(from),
+      to: at(to),
+      expected: now.slice(from, to),
+      replacement,
+    };
+    expect(await runCommand(t.pool, store, owner.id, p.main, c)).toEqual({
+      result: 'conflict',
+      text: now,
+    });
+  }
+  expect(await rows(p.main)).toBe(was);
+  expect((await open(p.main)).toString()).toBe(now);
+});

@@ -11,3 +11,4 @@ export * from './prose.ts';
 export * from './escape.ts';
 export * from './latexmk.ts';
 export * from './contained.ts';
+export * from './surrogate.ts';

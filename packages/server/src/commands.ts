@@ -1,6 +1,6 @@
 // Structural edits: replace one stretch of a file's text, but only if it still reads as the
 // author saw it. Typing merges; a command either lands exactly as meant or not at all.
-import { containedNear } from '@paperweave/latex';
+import { containedNear, HALF, inPair } from '@paperweave/latex';
 import type pg from 'pg';
 import * as Y from 'yjs';
 import type { BlobStore } from './blobs.ts';
@@ -142,6 +142,9 @@ export async function runCommand(
     });
     const now = text.toString();
     if (from < 0 || to < from || now.slice(from, to) !== c.expected)
+      return { result: 'conflict', text: now };
+    // Half of an emoji is stored as U+FFFD: a cut here would leave this copy differing from every other.
+    if (inPair(now, from) || inPair(now, to) || HALF.test(c.replacement))
       return { result: 'conflict', text: now };
     // Parses a window around the edit, not the file: the whole file is too slow inside the row
     // lock, and too large to parse at MAX_FILE_TEXT. A window past its cap is refused.
