@@ -888,6 +888,26 @@ Built after the security review, which had it as its second open item.
   `epstopdf` possible with shell escape on), converting EPS to PDF on import, or a restricted
   shell escape that allows only `epstopdf`/`gs`. Until then an author converts the file.
 
+## Characters the font lacks vanished from the PDF
+
+- **Before:** with `fontspec` (XeLaTeX, LuaLaTeX) a character the font has no glyph for (CJK in
+  an author line, μ ≤ ≠ ✓ in the text of the default Latin Modern) was left out of the PDF.
+  TeX wrote `Missing character: There is no 王 (U+738B) in font [lmroman12-regular]:...!` to the
+  log, exit 0, and `diagnostics()` read only `... Warning:` lines: the paper was ready.
+  pdfLaTeX with `inputenc` errors instead (`Unicode character ... not set up`, already shown);
+  it writes the line only for a slot the font lacks (`There is no ^^a0 in font cmr10!`).
+- **Now (detected, not fixed):** `diagnostics()` (`apps/workers/src/compile.ts`) reads those lines
+  and gives one warning per file, `Characters not shown: 王 小 明 are not in the font (lmroman12-regular);
+the PDF leaves them out.` (up to 12 distinct characters; invisible ones as `U+200B`; several
+  fonts: "and others"). XeLaTeX writes them while setting the text, so the file is the one being
+  read then: title and author characters land on the file with `\maketitle`, not a line number.
+  LuaLaTeX writes them when a page is shipped out, so there the warning has no file. The
+  submission check makes it a problem (`file` kind, with the file when known) and the build pane
+  lists it under "Built, but some things are not in the PDF".
+- **The fix is the author's:** a font with those glyphs, e.g. `\setmainfont` via fontspec. No
+  fonts were added to the image.
+- Cached builds are redone (`TEX_TEXT` is now `utf8-biber-eps-glyphs`).
+
 ## How long a large import takes
 
 - An import still runs inside its request. Measured at the most files a paper may hold

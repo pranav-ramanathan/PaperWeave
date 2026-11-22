@@ -39,6 +39,8 @@ const UNDEFINED = /^(Citation|Reference|Hyper reference) [`'](.+?)' (?:on page \
 const MULTIPLY = /^Label [`'](.+?)' multiply defined/;
 /** The worker's warning for an EPS picture the PDF has a box for: the paper is not done. */
 const PICTURE = /^Picture not shown: /;
+/** The worker's warning for characters the font lacks: the PDF leaves them out. */
+const MISSING = /^Characters not shown: /;
 const NOT_FOUND = /[`'](.+?)' not found/;
 /** Whether a file TeX could not find ("nosuchfile.tex") is the one a command named ("nosuchfile"). */
 const namesTarget = (found: string, target: string) => {
@@ -318,8 +320,9 @@ async function checksOf(
         if (!reported.has(`${kind}:${key}`)) problem(kind, d.message, where);
         continue;
       }
-      // The PDF has a box where the picture should be, though the build said nothing is wrong.
-      if (fresh && PICTURE.test(d.message)) {
+      // The PDF has a box where the picture should be, or lacks characters, though the build
+      // said nothing is wrong.
+      if (fresh && (PICTURE.test(d.message) || MISSING.test(d.message))) {
         problem('file', d.message, where);
         continue;
       }

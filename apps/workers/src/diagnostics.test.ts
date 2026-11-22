@@ -618,3 +618,107 @@ test('XeLaTeX failing to convert an EPS picture is an error naming the file', ()
   // Said again by the log or a second pass: once.
   expect(diagnostics(output, output, 'paper/')).toEqual([expected]);
 });
+
+// Real XeLaTeX log lines (fontspec; \author{... 王小明}, \input{sec} with μ ≤ ≠ ✓), the file
+// stack as TeX wrote it. The same lines come from LuaLaTeX with ":+tlig;" after the font.
+const XE_LOG = [
+  '(./main.tex',
+  'LaTeX Font Info:    ... okay on input line 6.',
+  '',
+  'Missing character: There is no 王 (U+738B) in font [lmroman12-regular]:mapping=tex-text;!',
+  'Missing character: There is no 小 (U+5C0F) in font [lmroman12-regular]:mapping=tex-text;!',
+  'Missing character: There is no 明 (U+660E) in font [lmroman12-regular]:mapping=tex-text;!',
+  '(./sec.tex',
+  'Missing character: There is no μ (U+03BC) in font [lmroman10-regular]:mapping=tex-text;!',
+  'Missing character: There is no ≤ (U+2264) in font [lmroman10-regular]:mapping=tex-text;!',
+  'Missing character: There is no ≠ (U+2260) in font [lmroman10-regular]:mapping=tex-text;!',
+  'Missing character: There is no ✓ (U+2713) in font [lmroman10-regular]:mapping=tex-text;!',
+  'Missing character: There is no ​ (U+200B) in font [lmroman10-regular]:mapping=tex-text;!',
+  ') [1',
+  '] (./main.aux) )',
+].join('\n');
+
+test('characters the font lacks are one warning per file, naming them and the font', () => {
+  expect(diagnostics(XE_LOG)).toEqual([
+    {
+      severity: 'warning',
+      file: 'main.tex',
+      message:
+        'Characters not shown: 王 小 明 are not in the font (lmroman12-regular); the PDF leaves them out.',
+    },
+    {
+      severity: 'warning',
+      file: 'sec.tex',
+      message:
+        'Characters not shown: μ ≤ ≠ ✓ U+200B are not in the font (lmroman10-regular); the PDF leaves them out.',
+    },
+  ]);
+});
+
+test('the same characters on a second pass, or under LuaLaTeX, are not said twice', () => {
+  const lua = XE_LOG.replaceAll(':mapping=tex-text;', ':+tlig;');
+  expect(diagnostics(XE_LOG + '\n' + XE_LOG)).toEqual(diagnostics(XE_LOG));
+  // LuaTeX writes them when a page is shipped out: no file can be told.
+  expect(diagnostics('This is LuaHBTeX, Version 1.15.0\n' + lua)).toEqual([
+    {
+      severity: 'warning',
+      message:
+        'Characters not shown: 王 小 明 μ ≤ ≠ ✓ U+200B are not in the font (lmroman12-regular and others); the PDF leaves them out.',
+    },
+  ]);
+  // In a folder: placed like other warnings.
+  expect(diagnostics(XE_LOG.replaceAll('./', './paper/'), '', '').map((d) => d.file)).toEqual([
+    'paper/main.tex',
+    'paper/sec.tex',
+  ]);
+});
+
+test('pdfTeX names no code: ^^ forms are decoded, one character once', () => {
+  const log = [
+    '(./main.tex',
+    'Missing character: There is no ^^e9 in font cmr10!',
+    'Missing character: There is no ^^e9 in font cmr10!',
+    'Missing character: There is no ^^00 in font cmr10!',
+    ')',
+  ].join('\n');
+  expect(diagnostics(log)).toEqual([
+    {
+      severity: 'warning',
+      file: 'main.tex',
+      message:
+        'Characters not shown: é U+0000 are not in the font (cmr10); the PDF leaves them out.',
+    },
+  ]);
+});
+
+test('a single character, several fonts and more than twelve characters are kept short', () => {
+  const lines = (c: string, f: string) => `Missing character: There is no ${c} in font ${f}!`;
+  expect(
+    diagnostics(['(./a.tex', lines('^^e9', 'cmr10'), lines('^^e8', 'cmbx10'), ')'].join('\n'))[0]
+      .message,
+  ).toBe(
+    'Characters not shown: é è are not in the font (cmr10 and others); the PDF leaves them out.',
+  );
+  expect(diagnostics(['(./a.tex', lines('^^e9', 'cmr10'), ')'].join('\n'))[0].message).toBe(
+    'Characters not shown: é is not in the font (cmr10); the PDF leaves it out.',
+  );
+  const many = ['(./a.tex', ...[...'abcdefghijklmn'].map((c) => lines(c, 'cmr10')), ')'].join('\n');
+  expect(diagnostics(many)[0].message).toBe(
+    'Characters not shown: a b c d e f g h i j k l and 2 more are not in the font (cmr10); the PDF leaves them out.',
+  );
+});
+
+test('a log without such lines gains no warning', () => {
+  expect(diagnostics('(./main.tex\n[1] )')).toEqual([]);
+});
+
+test('a message that goes on after its line, "(fontspec)  this).", does not end the file being read', () => {
+  const log = [
+    '(./main.tex',
+    'Package fontspec Info: Adjusting the maths setup (use [no-math] to avoid',
+    '(fontspec)             this).',
+    'Missing character: There is no ^^e9 in font cmr10!',
+    ')',
+  ].join('\n');
+  expect(diagnostics(log).map((d) => d.file)).toEqual(['main.tex']);
+});

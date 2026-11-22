@@ -46,6 +46,7 @@ test.each(['article-basic', 'ieee-multifile', 'ams-multifile'])(
     const r = await compile(join(FIXTURES, name), 'main.tex', out);
     expect(r.diagnostics.filter((d) => d.severity === 'error')).toEqual([]);
     expect(r.ok).toBe(true);
+    expect(r.diagnostics.filter((d) => /^Characters not shown: /.test(d.message))).toEqual([]);
     expect(readFileSync(join(out, r.pdf!)).subarray(0, 5).toString()).toBe('%PDF-');
     expect(existsSync(join(out, r.synctex!))).toBe(true);
     // Whatever was warned about is placed where it can be: in a file there is, on a line it has.
@@ -77,6 +78,7 @@ test.each([
   const r = await compile(join(FIXTURES, name), report.root!, out, 120, report.compiler);
   expect(r.diagnostics.filter((d) => d.severity === 'error')).toEqual([]);
   expect(r.ok).toBe(true);
+  expect(r.diagnostics.filter((d) => /^Characters not shown: /.test(d.message))).toEqual([]);
   expect(readFileSync(join(out, r.pdf!)).subarray(0, 5).toString()).toBe('%PDF-');
   expect(
     r.diagnostics.filter((d) => /(?:Citation|Reference) .* undefined/.test(d.message)),
@@ -565,3 +567,47 @@ test('xelatex fails on an EPS paper and names the file', async () => {
       'paper/figs/a.eps is an EPS file, which XeLaTeX cannot convert here. Convert it to PDF.',
   });
 }, 120_000);
+
+// Real papers in other scripts: the font has no glyph, TeX goes on and leaves the character out.
+const glyphPaper = () => {
+  const project = tmp();
+  writeFileSync(
+    join(project, 'main.tex'),
+    '\\documentclass{article}\n\\usepackage{fontspec}\n\\title{T}\n' +
+      '\\author{Nguyễn Văn Thành \\and 王小明}\n\\begin{document}\n\\maketitle\n\\input{sec}\n\\end{document}\n',
+  );
+  writeFileSync(join(project, 'sec.tex'), '5 μm … x ≤ 3 and a ≠ b. Done ✓.\n');
+  return project;
+};
+
+test.each(['xelatex', 'lualatex'] as const)(
+  '%s builds, and says which characters the font left out and where',
+  async (engine) => {
+    const r = await compile(glyphPaper(), 'main.tex', tmp(), 60, engine);
+    expect(r.ok).toBe(true);
+    const not = r.diagnostics.filter((d) => /^Characters not shown: /.test(d.message));
+    // XeTeX writes it as it sets the text, in the file it is reading. LuaTeX writes it when a
+    // page is shipped out, where no file can be told: one warning, for the paper.
+    if (engine === 'xelatex')
+      expect(not).toEqual([
+        expect.objectContaining({
+          severity: 'warning',
+          file: 'main.tex',
+          message: expect.stringMatching(/^Characters not shown: 王 小 明 are not in the font \(/),
+        }),
+        expect.objectContaining({
+          severity: 'warning',
+          file: 'sec.tex',
+          message: expect.stringMatching(/^Characters not shown: μ ≤ ≠ ✓ are not in the font \(/),
+        }),
+      ]);
+    else {
+      expect(not).toHaveLength(1);
+      expect(not[0].file).toBeUndefined();
+      expect(not[0].message).toMatch(
+        /^Characters not shown: 王 小 明 μ ≤ ≠ ✓ are not in the font \(/,
+      );
+    }
+  },
+  120_000,
+);
