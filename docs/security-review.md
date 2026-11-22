@@ -45,6 +45,16 @@ What it found is fixed in the same change, or listed under "Open" with what to d
   (`vitest.config.ts`). **Not covered:** the counts are read then written, so a burst of
   parallel requests can pass a limit by a few.
 
+- **One account could fill the build queue and make everyone wait.** Shown with the real worker:
+  100 papers and 100 builds queued in under a second, none refused; two papers of
+  `\def\x{\x}\x` each ran the 60 s limit and the next person's 1 s build waited 121 s (100 such
+  papers, about 100 minutes). Builds were limited per paper only, taken oldest first, and charts
+  were drawn only when no build was queued. Now one person may have 3 builds waiting or running
+  and ask for 120 an hour over all papers (`BUILDS_WAITING_PER_USER`, `BUILDS_PER_USER_HOUR`),
+  counted under a lock so simultaneous requests cannot pass together; the worker takes the
+  build of whoever has had the fewest done in the last hour, and builds and charts take turns.
+  Service tests hold each and failed on the old code. Still true: accounts share one worker in
+  proportion, and a build may run 60 s; more workers are a deployment decision.
 - **Sign-in limits could be turned against people and walked around.** Four faults, shown with
   the real handler in production mode. (1) Ten sign-in requests for an address, from any
   clients, refused the owner's own request for most of the hour, because ten per hour were
@@ -234,7 +244,7 @@ What it found is fixed in the same change, or listed under "Open" with what to d
 In rough order of how much they matter.
 
 1. **Limits on requests in general.** What costs most is limited: sign-in links (five a
-   minute for a client, ten an hour to an address), builds (120 an hour for a paper), chart
+   minute for a client, ten an hour to an address), builds (120 an hour for a paper, and 3 waiting and 120 an hour for a person), chart
    drawings (120 an hour for a paper), model reviews (30 an hour for a paper), invitations
    (30 an hour for a person, a burst of three then one an hour to an address, 200 an hour in all), and papers started (100 an hour for a person, which with 300
    MB a paper is what bounds how fast one account can fill the store). Reading pages,

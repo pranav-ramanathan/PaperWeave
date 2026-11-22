@@ -55,24 +55,31 @@ export default function BuildPane({
   const askNow = useRef(() => {});
   // Set at once by a press: state would be seen only after the next draw.
   const posting = useRef(false);
-  const compile = useCallback(async () => {
-    // One post at a time: a second press before the first is answered does nothing.
-    if (posting.current) return;
-    posting.current = true;
-    const res = await fetch(url, { method: 'POST', signal: AbortSignal.timeout(15_000) })
-      .catch(() => null)
-      .finally(() => {
-        posting.current = false;
-      });
-    setProblem(
-      res?.ok
-        ? ''
-        : ((await res?.json().catch(() => ({})))?.error ?? 'The build could not be started.'),
-    );
-    // See the build that was asked for, and ask about it quickly from here on.
-    busy.current = true;
-    askNow.current();
-  }, [url]);
+  const compile = useCallback(
+    async (automatic = false) => {
+      // One post at a time: a second press before the first is answered does nothing.
+      if (posting.current) return;
+      posting.current = true;
+      const res = await fetch(url, {
+        method: 'POST',
+        headers: automatic ? { 'x-auto-build': '1' } : {},
+        signal: AbortSignal.timeout(15_000),
+      })
+        .catch(() => null)
+        .finally(() => {
+          posting.current = false;
+        });
+      setProblem(
+        res?.ok
+          ? ''
+          : ((await res?.json().catch(() => ({})))?.error ?? 'The build could not be started.'),
+      );
+      // See the build that was asked for, and ask about it quickly from here on.
+      busy.current = true;
+      askNow.current();
+    },
+    [url],
+  );
 
   useEffect(() => {
     let stop = false;
@@ -106,7 +113,7 @@ export default function BuildPane({
         next.latest?.status === 'queued' || (auto && canBuild && behind && asked.current !== state);
       if (auto && canBuild && idle && behind && asked.current !== state) {
         asked.current = state;
-        void compile();
+        void compile(true);
       }
     };
     askNow.current = () => void poll();

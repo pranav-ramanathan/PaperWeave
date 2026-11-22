@@ -644,6 +644,27 @@ Read this first. Update it in every pull request.
 - **Not done:** a second PUT to an address before the take replaces the object (same length);
   concurrent requests may pass the count together by a few.
 
+## One account cannot fill the build queue
+
+- **Found by** the planner: one account started 100 papers and queued 100 builds in under a
+  second, none refused, and a victim's was the 101st. Two papers of `\def\x{\x}\x` ran the full
+  60 s each; the victim's 1 s build waited 121 s. Builds were counted per paper only, taken
+  oldest first, and the worker drew a chart only when no build was queued.
+- **Now** `requestBuild` counts by requester under a per-person advisory lock: 3 builds waiting
+  or running over all papers and 120 asked for per hour (`BUILDS_WAITING_PER_USER`,
+  `BUILDS_PER_USER_HOUR`), with a message that says why. Every build is queued there (the
+  editor, the submit page's "build and check", a revision's build). The editor's own automatic
+  build (header `x-auto-build`) over a limit is skipped quietly: no error is shown, nothing is queued, and
+  it asks again when the paper next changes; the button still says why. The worker takes the
+  queued build whose requester has had the fewest builds done in the last hour, then the oldest
+  (`takeBuild`; index `builds_requester`, migration 0031), and alternates builds and chart
+  drawings (`takeTurns`) so neither starves the other.
+- **Held by** `packages/server/src/builds.sandbox.test.ts`, `apps/workers/src/builds.sandbox.test.ts`
+  (fair order) and `apps/workers/src/turns.test.ts`; each failed on the old code.
+- **Not done:** several accounts still share one worker in proportion to their requests, and
+  a build runs up to 60 s: more workers are a deployment decision. A running build is not
+  counted in the fair order until it is done.
+
 ## Next
 
 Every item in `docs/plan.md` from the scaffold to Phase F has been built. Since then the work

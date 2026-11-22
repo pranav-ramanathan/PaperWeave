@@ -31,7 +31,32 @@ export const imageId = () =>
   }).trim();
 
 /**
- * Build the oldest queued build, if there is one. Returns whether there was. The row stays
+ * Take (lock) the queued build to do next. Not the oldest: the one whose requester has had the
+ * fewest builds done in the last hour, then the oldest of those, so that one person's many
+ * builds do not stand in front of everyone else's. A build is counted once it is done: while it
+ * runs it is locked and stays queued. Rows other workers hold are skipped.
+ */
+export async function takeBuild(
+  db: Db,
+): Promise<
+  | { id: string; project_id: string; requested_by: string | null; revision_id: string | null }
+  | undefined
+> {
+  return (
+    await db.query(
+      `select b.id, b.project_id, b.requested_by, b.revision_id from builds b
+       where b.status = 'queued'
+       order by (select count(*) from builds d
+                 where d.requested_by = b.requested_by and d.status <> 'queued'
+                   and d.created_at > now() - interval '1 hour'),
+                b.created_at
+       for update of b skip locked limit 1`,
+    )
+  ).rows[0];
+}
+
+/**
+ * Build the next queued build (see `takeBuild`), if there is one. Returns whether there was. The row stays
  * locked for the whole build: if this process dies, the lock goes and another worker takes it.
  */
 export function buildNext(
@@ -43,12 +68,7 @@ export function buildNext(
   // The row is taken `skip locked`, so nobody waits on it, and this worker is next to the
   // database: it may sit between statements for a whole compile.
   const run = async (db: Db) => {
-    const job = (
-      await db.query(
-        `select id, project_id, requested_by, revision_id from builds
-         where status = 'queued' order by created_at for update skip locked limit 1`,
-      )
-    ).rows[0];
+    const job = await takeBuild(db);
     if (!job) return false;
     const finish = (fields: Record<string, unknown>) => {
       const names = Object.keys(fields);

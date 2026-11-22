@@ -2,6 +2,7 @@
 // apps/workers; it takes rows from the builds table.
 import { authorize, can } from './authz.ts';
 import type { BlobStore } from './blobs.ts';
+import type pg from 'pg';
 import type { Db } from './db.ts';
 import { AppError } from './errors.ts';
 import { id } from './projects.ts';
@@ -70,58 +71,132 @@ const COLUMNS = `b.id, b.status, b.created_at as "createdAt", b.finished_at as "
     )
   ) as stale`;
 
+/** Builds one person may have waiting or running at once, across all their papers. */
+export const BUILDS_WAITING_PER_USER = 3;
+/** Builds one person may ask for in an hour, across all their papers. */
+export const BUILDS_PER_USER_HOUR = 120;
+const envCount = (name: string, fallback: number) => {
+  const n = Number(process.env[name]);
+  return Number.isInteger(n) && n > 0 ? n : fallback;
+};
+
 /**
  * Queue a build of the paper as it will stand when the worker picks it up, or of one given
  * revision. Asking while the same build is already waiting returns that one, so a burst of
  * requests becomes a single build.
+ *
+ * Beyond the paper's own limits, one person may have only `BUILDS_WAITING_PER_USER` builds
+ * waiting or running (a build stays queued until it is done) and ask for `BUILDS_PER_USER_HOUR`
+ * an hour, over all their papers: the worker is shared, and one account must not fill its queue.
+ * The count is taken under a lock for the person, so two requests at once cannot both pass.
+ * With `automatic` (the editor asking for itself, as the text changes) a build over a limit is
+ * not an error: nothing is queued and null is returned, and the person can still press the button.
  */
-export async function requestBuild(
-  db: Db,
+export function requestBuild(
+  pool: pg.Pool,
   userId: string,
   projectId: string,
-  opts: { perHour?: number; revisionId?: string } = {},
-): Promise<string> {
+  opts?: RequestOpts & { automatic?: false },
+): Promise<string>;
+export function requestBuild(
+  pool: pg.Pool,
+  userId: string,
+  projectId: string,
+  opts: RequestOpts & { automatic: true },
+): Promise<string | null>;
+export async function requestBuild(
+  pool: pg.Pool,
+  userId: string,
+  projectId: string,
+  opts: RequestOpts & { automatic?: boolean } = {},
+): Promise<string | null> {
   const perHour = opts.perHour ?? BUILDS_PER_HOUR;
-  await authorize(db, userId, id(projectId), 'build.run');
+  const waitingMax =
+    opts.waitingPerUser ?? envCount('BUILDS_WAITING_PER_USER', BUILDS_WAITING_PER_USER);
+  const hourMax = opts.perUserHour ?? envCount('BUILDS_PER_USER_HOUR', BUILDS_PER_USER_HOUR);
+  await authorize(pool, userId, id(projectId), 'build.run');
   // Building a given revision: it must be one of this paper's.
   if (opts.revisionId) {
-    const own = await db.query('select 1 from revisions where id = $1 and project_id = $2', [
+    const own = await pool.query('select 1 from revisions where id = $1 and project_id = $2', [
       id(opts.revisionId),
       projectId,
     ]);
     if (!own.rows[0]) throw new AppError('not_found', 'No such revision.');
   }
-  const waiting = await db.query(
-    "select id from builds where project_id = $1 and status = 'queued' and revision_id is not distinct from $2",
-    [projectId, opts.revisionId ?? null],
-  );
-  if (waiting.rows[0]) return waiting.rows[0].id;
-  const recent = await db.query(
-    "select count(*)::int as n from builds where project_id = $1 and created_at > now() - interval '1 hour'",
-    [projectId],
-  );
-  if (recent.rows[0].n >= perHour)
-    throw new AppError(
-      'conflict',
-      `This paper has been built ${perHour} times in the last hour. Try again in a little while.`,
+  const refused = (message: string) => {
+    if (opts.automatic) return null;
+    throw new AppError('conflict', message);
+  };
+  const client = await pool.connect();
+  let buildId: string | null;
+  try {
+    await client.query('begin');
+    // One decision at a time for this person: two requests must not both see room for one more.
+    await client.query('select pg_advisory_xact_lock(hashtext($1))', [`builds:${userId}`]);
+    const waiting = await client.query(
+      "select id from builds where project_id = $1 and status = 'queued' and revision_id is not distinct from $2",
+      [projectId, opts.revisionId ?? null],
     );
-  const made = await db.query(
-    `insert into builds (project_id, requested_by, revision_id) values ($1, $2, $3)
-     on conflict do nothing returning id`,
-    [projectId, userId, opts.revisionId ?? null],
-  );
-  // Lost a race with another request: theirs is the build.
-  const buildId =
-    made.rows[0]?.id ??
-    (
-      await db.query(
-        "select id from builds where project_id = $1 and status = 'queued' and revision_id is not distinct from $2",
-        [projectId, opts.revisionId ?? null],
-      )
-    ).rows[0].id;
-  await db.query("select pg_notify('builds', '')");
+    if (waiting.rows[0]) buildId = waiting.rows[0].id;
+    else {
+      const recent = await client.query(
+        "select count(*)::int as n from builds where project_id = $1 and created_at > now() - interval '1 hour'",
+        [projectId],
+      );
+      const mine = (
+        await client.query(
+          `select count(*) filter (where status = 'queued')::int as waiting,
+                  count(*)::int as hour
+           from builds where requested_by = $1
+             and (created_at > now() - interval '1 hour' or status = 'queued')`,
+          [userId],
+        )
+      ).rows[0];
+      if (recent.rows[0].n >= perHour)
+        buildId = refused(
+          `This paper has been built ${perHour} times in the last hour. Try again in a little while.`,
+        );
+      else if (mine.waiting >= waitingMax)
+        buildId = refused(
+          `You have ${mine.waiting} builds waiting already. Wait for one to finish.`,
+        );
+      else if (mine.hour >= hourMax)
+        buildId = refused(
+          `You have asked for ${hourMax} builds in the last hour, over all your papers. Try again in a little while.`,
+        );
+      else {
+        const made = await client.query(
+          `insert into builds (project_id, requested_by, revision_id) values ($1, $2, $3)
+           on conflict do nothing returning id`,
+          [projectId, userId, opts.revisionId ?? null],
+        );
+        // Lost a race with another person's request for the same build: theirs is the build.
+        buildId =
+          made.rows[0]?.id ??
+          (
+            await client.query(
+              "select id from builds where project_id = $1 and status = 'queued' and revision_id is not distinct from $2",
+              [projectId, opts.revisionId ?? null],
+            )
+          ).rows[0].id;
+        await client.query("select pg_notify('builds', '')");
+      }
+    }
+    await client.query('commit');
+  } catch (err) {
+    await client.query('rollback').catch(() => {});
+    throw err;
+  } finally {
+    client.release();
+  }
   return buildId;
 }
+type RequestOpts = {
+  perHour?: number;
+  revisionId?: string;
+  waitingPerUser?: number;
+  perUserHour?: number;
+};
 
 /**
  * The newest build, the newest one that produced a PDF, and two marks that move whenever

@@ -19,6 +19,7 @@ import {
   latestBuilds,
   listFiles,
   loadUpdates,
+  createProject,
   requestBuild,
   TEXT,
   writeZip,
@@ -39,7 +40,7 @@ import { parseSyncTeX } from '../../../packages/latex/src/synctex.ts';
 import { FIXTURES } from '../../../packages/latex/src/testutil.ts';
 import { pdfText } from '../../../packages/server/src/pdftext.ts';
 import { TEST_ENV, testDb } from '../../../packages/server/src/testing.ts';
-import { buildNext, imageId } from './builder.ts';
+import { buildNext, imageId, takeBuild } from './builder.ts';
 
 const store = blobStore(TEST_ENV);
 const image = imageId();
@@ -745,4 +746,35 @@ test('a paper with a long but valid file name still builds', async () => {
   );
   const done = await build(project);
   expect(done).toMatchObject({ status: 'succeeded', hasPdf: true });
+});
+
+test('the next build taken is the one whose requester has had the fewest done, not the oldest', async () => {
+  const a = await t.signIn('fair-a@example.org');
+  const b = await t.signIn('fair-b@example.org');
+  const mine = await Promise.all(
+    Array.from({ length: 5 }, (_, i) => createProject(t.pool, a.id, `A${i}`)),
+  );
+  const theirs = await createProject(t.pool, b.id, 'B');
+  // Five of A's, queued first (older), then one of B's.
+  for (const p of mine)
+    await t.pool.query('insert into builds (project_id, requested_by) values ($1, $2)', [
+      p.id,
+      a.id,
+    ]);
+  await t.pool.query('insert into builds (project_id, requested_by) values ($1, $2)', [
+    theirs.id,
+    b.id,
+  ]);
+  const first = await takeBuild(t.pool);
+  expect(first!.requested_by).toBe(a.id);
+  await t.pool.query("update builds set status = 'succeeded', finished_at = now() where id = $1", [
+    first!.id,
+  ]);
+  // A has had one built now, B none: B's build is next, ahead of A's four older ones.
+  const second = await takeBuild(t.pool);
+  expect(second!.requested_by).toBe(b.id);
+  await t.pool.query("update builds set status = 'succeeded', finished_at = now() where id = $1", [
+    second!.id,
+  ]);
+  expect((await takeBuild(t.pool))!.requested_by).toBe(a.id);
 });
