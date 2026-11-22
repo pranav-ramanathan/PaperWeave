@@ -288,6 +288,54 @@ test('a paper whose chart was put back to an older drawing of its data is not re
   });
 }, 900_000);
 
+test('a paper whose chart was put back to a drawing made with other settings is not ready', async () => {
+  const main =
+    '\\documentclass{article}\n\\usepackage{graphicx}\n\\begin{document}\n\\includegraphics{charts/latency}\n\\end{document}\n';
+  const zip = await writeZip([
+    { path: 'main.tex', bytes: Buffer.from(main) },
+    { path: 'data/latency.csv', bytes: Buffer.from(CSV) },
+  ]);
+  const [project] = await importZip(t.pool, store, users.owner.id, zip, 'Restored settings');
+  const csv = (await listFiles(t.pool, users.owner.id, project.id)).find((f) =>
+    f.path.endsWith('.csv'),
+  )!.id;
+  await approveDataset(t.pool, store, users.owner.id, project.id, csv, {
+    version: (await datasetProposal(t.pool, store, users.owner.id, project.id, csv)).version,
+    columns: COLUMNS,
+    missing: [],
+  });
+  const spec = { x: 'day', y: 'latency (ms)', name: 'latency', dataset: csv };
+  const chartId = await saveChart(t.pool, store, users.owner.id, project.id, {
+    ...spec,
+    kind: 'line',
+  });
+  expect(await drawNext(t.pool, store, image)).toBe(true);
+  const cut = await saveRevision(t.pool, store, users.owner.id, project.id, 'As a line');
+  await saveChart(t.pool, store, users.owner.id, project.id, {
+    ...spec,
+    kind: 'bar',
+    combine: 'mean',
+    id: chartId,
+  });
+  expect(await drawNext(t.pool, store, image)).toBe(true);
+  const build = async () => {
+    await requestBuild(t.pool, users.owner.id, project.id);
+    expect(await buildNext(t.pool, store, image)).toBe(true);
+    return submissionChecks(t.pool, store, users.owner.id, project.id);
+  };
+  expect(await build()).toMatchObject({ ready: true });
+  await restoreRevision(t.pool, store, users.owner.id, project.id, cut.id);
+  const after = await build();
+  expect(after.ready).toBe(false);
+  expect(after.findings).toContainEqual({
+    level: 'problem',
+    kind: 'chart',
+    message:
+      'The chart "latency" is out of date: the paper holds a drawing made with other settings. Draw it again.',
+    chartId,
+  });
+}, 900_000);
+
 test('a thebibliography paper is ready, and a key it does not have is the one problem', async () => {
   const clean = await verdict('Hand bib', {
     'main.tex': doc('', `Cite \\cite{a} and \\cite{b}.\n${THEBIB}`),
