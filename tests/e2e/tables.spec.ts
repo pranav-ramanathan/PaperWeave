@@ -178,6 +178,72 @@ test('a table cell and a caption are edited in place, byte for byte', async ({ b
   );
 });
 
+test('commented rows and wrapped captions are left as they are', async ({ browser }) => {
+  const { page, email } = await person(browser, 'table-comments');
+  const tex = [
+    '\\documentclass{article}',
+    '\\begin{document}',
+    '\\begin{table}',
+    '\\caption{Scores on the',
+    'benchmark.}',
+    '\\begin{tabular}{lr}',
+    'Name & Value \\\\ % header',
+    'a & 1 \\\\',
+    '% c & 3 \\\\',
+    'b & 2 \\\\',
+    '\\end{tabular}',
+    '\\end{table}',
+    '\\end{document}',
+    '',
+  ].join('\n');
+  const zip = join(mkdtempSync(join(tmpdir(), 'paperweave-e2e-')), `Comments ${run}.zip`);
+  writeFileSync(zip, await writeZip([{ path: 'main.tex', bytes: Buffer.from(tex) }]));
+  await page.goto('/sign-in');
+  await signIn(page, email);
+  await page.getByLabel('Or import a ZIP of a LaTeX project').setInputFiles(zip);
+  await page.getByRole('button', { name: 'Import ZIP' }).click();
+  await page.getByRole('link', { name: 'main.tex' }).click();
+  await expect(page.getByRole('region', { name: 'Editor for main.tex' })).toBeVisible();
+  const other = await page.context().newPage();
+  await other.goto(page.url());
+  await showSource(other);
+  await expect(source(other)).toContainText('Name & Value');
+  const lines = other.locator('.editor .cm-content .cm-line');
+  const sourceLines = async () => (await lines.allTextContents()).map((l) => l.trimEnd());
+
+  const table = page.locator(VISUAL).getByRole('group', { name: 'Table' });
+  // Three rows of the table, and one of buttons; the commented-out row is not there.
+  await expect(table.getByRole('row')).toHaveCount(4);
+  const cell = table.getByRole('button', { name: /^Row 3, column 1:/ });
+  await expect(cell).toHaveText('b');
+  await cell.click();
+  const field = table.getByLabel('Row 3, column 1', { exact: true });
+  await expect(field).toHaveValue('b');
+  await field.fill('bb');
+  await page.keyboard.press('Enter');
+  await expect(cell).toHaveText('bb');
+  await expect(note(page)).toHaveText('');
+  await expect.poll(sourceLines).toContain('bb & 2 \\\\');
+  expect(await sourceLines()).toContain('% c & 3 \\\\');
+
+  // A caption that wraps reads as one line, and Enter without a change leaves it wrapped.
+  const caption = table.getByRole('button', { name: /^Caption:/ });
+  await caption.click();
+  const captionField = table.getByLabel('Caption', { exact: true });
+  await expect(captionField).toHaveValue('Scores on the benchmark.');
+  await page.keyboard.press('Enter');
+  await expect(caption).toBeFocused();
+  await expect(note(page)).toHaveText('');
+  expect(await sourceLines()).toEqual(
+    expect.arrayContaining(['\\caption{Scores on the', 'benchmark.}']),
+  );
+  await caption.click();
+  await captionField.fill('Scores on the new benchmark.');
+  await page.keyboard.press('Enter');
+  await expect(caption).toHaveText('Scores on the new benchmark.');
+  await expect.poll(sourceLines).toContain('\\caption{Scores on the new benchmark.}');
+});
+
 test('a cell slow to be changed does not take the keyboard back', async ({ browser }) => {
   test.setTimeout(150_000);
   const { page, line } = await slowPaper(browser, 'table-slow');

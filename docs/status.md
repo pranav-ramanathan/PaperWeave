@@ -4610,3 +4610,52 @@ Found by a three-person walkthrough.
 - **Not done.** An already-edited text file (`head_seq > 1`) replaced by an upload that differs only
   in line endings or byte order mark still reads as up to date: the PDF is the same, but the built
   revision's ZIP keeps the old line endings.
+
+## Restoring a revision brings back whether a file is text
+
+- **What was wrong.** A restore swapped a read-only file's digest and nothing else. If a Latin-1
+  `refs.bib` had since been replaced by a UTF-8 copy, restoring an earlier revision left it
+  marked editable text: a never-opened file could not be opened, an opened one showed the UTF-8
+  text while builds and exports read the Latin-1 bytes, and an edited one was not restored at all.
+- **Now** a restore makes each file's text-ness match the revision's bytes. A file that is text
+  but whose revision bytes are not UTF-8 goes back to read-only (`eol`, `bom` cleared,
+  `not-utf8`) and its connected editors are closed with `no-access`, as for a removed file. A
+  read-only file that is text in the revision becomes text again and, if it has a log, the log is
+  edited to the revision's text. The log is never deleted. `replaceFile` also syncs the log when a
+  once-text, now read-only file gets a UTF-8 replacement.
+- **Held by** sandbox tests in `revisions` (unopened, opened and edited cases; restoring forward
+  again with a thread; replacing a read-only file that has a log) and in `sync` (editor closed).
+- **Not done.** The editor's closing notice says "no longer have access... or deleted". Old
+  read-only rows from mixed line endings are still not migrated.
+
+## Table cells ignore comments, and a wrapped caption is not rewritten by Enter
+
+- **What was wrong.** A table cut its cells from the source, comments included. A commented-out
+  row ran into the next row's first cell (shown with a `%` that could not be saved, and "Delete
+  column 1" removed the commented row too); a `% note` after `\\` moved onto a new row when one was
+  added below; a commented-out last row showed as a phantom row; a `% was 2` at the end of a cell
+  swallowed the `&` of a new column; and `\\%` was taken for an escaped percent. In the visual view
+  the field for a caption or cell was a one-line input, so a caption wrapped over lines read as
+  joined text and an unchanged Enter wrote the joined text, and `\caption{%` followed by a line
+  break was written back as `\caption{%  Text}`, commenting out the closing brace.
+- **Now** comments are left out of the cells and of the rows: a comment line above a row, or on a
+  row's own line after `\\`, stays where it is when rows and columns are added or removed. A comment
+  inside a cell makes the table not simple. The field shows a part as one line (`fieldText`), with
+  bare `%` line-enders joined, and Enter on an unchanged field writes nothing.
+- **Held by** unit tests in `floats.test.ts` and a Playwright test in `tables.spec.ts`.
+- **Not done.** A caption or cell with a worded comment or a blank line is read-only in the visual
+  view (edit it in the source). Bare `%` line-enders and line breaks inside a part are not kept when
+  the part is changed. `\verb|%|` in a cell is taken for a comment.
+
+## Inviting someone already on the paper
+
+- **What was wrong.** "Send invitation" accepted the address of someone already on the paper, the
+  owner's own included, stored it and emailed a link that promised a role it could not give: the
+  recipient was told "This invitation does not change that".
+- **Now** `invite()` refuses an address that is already a member (matched without regard to
+  case), stores nothing and sends no email. The page's alert names their current role and points
+  to the role control under People ("Change"). Someone removed can still be invited again.
+  Accepting is unchanged: an old link never changes the role of someone already in.
+- **Held by** `projects.sandbox.test.ts` and a Playwright test in `projects.spec.ts`.
+- **Not done.** The invitation page's "already on this paper" answer is now only a defence for
+  old links, and has no browser test.

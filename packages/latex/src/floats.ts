@@ -51,7 +51,7 @@ function closeOf(src: string, at: number, open = '{', close = '}') {
 /** `src` with comments blanked, so that offsets still hold and commented-out text is not found. */
 const live = (src: string) =>
   src.replace(
-    /(^|[^\\])%.*$/gm,
+    /((?:^|[^\\])(?:\\\\)*)%.*$/gm,
     (all, before: string) => before + ' '.repeat(all.length - before.length),
   );
 const span = (src: string, at: number, end: number): Span => ({
@@ -59,10 +59,10 @@ const span = (src: string, at: number, end: number): Span => ({
   at,
   end,
 });
-/** The span with the white space at both ends left out. */
-function trimmed(src: string, at: number, end: number): Span {
-  while (at < end && /\s/.test(src[at])) at++;
-  while (end > at && /\s/.test(src[end - 1])) end--;
+/** The span with the white space at both ends left out, as `by` (default `src`) sees it. */
+function trimmed(src: string, at: number, end: number, by = src): Span {
+  while (at < end && /\s/.test(by[at])) at++;
+  while (end > at && /\s/.test(by[end - 1])) end--;
   return span(src, at, end);
 }
 
@@ -93,10 +93,25 @@ function tableOf(src: string, text: string): Table | null {
   /** Where the row being read began: after the row or rule before it. */
   let rowAt = at;
   const closeCell = (to: number) => {
-    const found = trimmed(src, cell, to);
+    // Where the cell's own text may begin: after any comment lines at its start.
+    let from = cell;
+    for (let k = cell; k < to; k++) {
+      if (src[k] === '%' && text[k] === ' ') {
+        const nl = src.indexOf('\n', k);
+        if (nl < 0 || nl >= to) break;
+        from = k = nl;
+        from++;
+      } else if (!/\s/.test(text[k])) break;
+    }
+    // Comments are blanked in `text`, so trimming by it leaves them out of the ends of the cell.
+    const found = trimmed(src, from, to, text);
     // An empty cell's place is where its text would go: with a space left on either side of it
     // when there is room, so that filling the cell does not run it into the next `&`.
-    if (!found.text && to - cell >= 2) found.at = found.end = to - 1;
+    if (!found.text && to - from >= 2) found.at = found.end = to - 1;
+    // A comment inside the cell cannot be shown as the cell's text.
+    if (found.text !== text.slice(found.at, found.end)) simple = false;
+    // Comment lines above a row are not part of its line.
+    if (!row.length && from > cell) rowAt = from - 1;
     row.push(found);
   };
   const closeRow = (to: number, terminated: boolean) => {
@@ -140,6 +155,13 @@ function tableOf(src: string, text: string): Table | null {
       if (text[i] === '*') i++;
       if (text[i] === '[') i = closeOf(text, i, '[', ']');
       if (i < 0) return null;
+      // A comment on the row's own line goes with the row.
+      let j = i;
+      while (src[j] === ' ' || src[j] === '\t') j++;
+      if (src[j] === '%') {
+        const nl = src.indexOf('\n', j);
+        i = nl < 0 || nl > end ? end : nl;
+      }
       closeRow(i, true);
       cell = rowAt = i;
       i--;
@@ -200,6 +222,21 @@ export function floatParts(src: string): Float | null {
     graphics.push({ target: trimmed(src, at + 1, close - 1), alt, optionsEnd, commandEnd });
   }
   return { kind, caption, graphics, table: tableOf(src, text) };
+}
+
+/**
+ * A part's text as one line, for a field that cannot hold a line break, or null if it cannot be
+ * one without losing something: a comment with words in it, or a blank line.
+ */
+export function fieldText(latex: string): string | null {
+  // A bare comment mark at the end of a line only joins it to the next.
+  const joined = latex.replace(
+    /((?:^|[^\\])(?:\\\\)*)%[ \t]*(?:\n[ \t]*|$)/g,
+    (_, before: string) => before,
+  );
+  if (/(^|[^\\])(\\\\)*%/.test(joined)) return null;
+  if (/\n[ \t]*\n/.test(joined)) return null;
+  return joined.replace(/[ \t]*\n[ \t]*/g, ' ').trim();
 }
 
 /** Replace `length` characters at `at` with `insert`. */

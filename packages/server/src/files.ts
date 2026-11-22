@@ -181,7 +181,14 @@ export async function replaceFile(
           'invalid_input',
           `This paper is full: its files can add up to ${Math.round(limits.totalBytes / 1e6)} MB.`,
         );
-      if (file.eol && Number(file.head_seq) > 0) {
+      // The digest is what an untouched file is read from; a file with edits is read from its
+      // log, with the newline style and byte order mark set here.
+      await db.query(
+        `update files set digest = $2, size = $3, eol = $4, bom = $5, readonly_reason = $6
+         where id = $1`,
+        [file.id, digest, bytes.length, meta.eol, meta.bom, meta.readonly],
+      );
+      if (meta.eol && Number(file.head_seq) > 0) {
         const decoded = decodeFile(bytes);
         if (!decoded.editable)
           throw new AppError('invalid_input', 'The new file cannot be read as text.');
@@ -193,13 +200,6 @@ export async function replaceFile(
           }
         });
       }
-      // The digest is what an untouched file is read from; a file with edits is read from its
-      // log, with the newline style and byte order mark set here.
-      await db.query(
-        `update files set digest = $2, size = $3, eol = $4, bom = $5, readonly_reason = $6
-         where id = $1`,
-        [file.id, digest, bytes.length, meta.eol, meta.bom, meta.readonly],
-      );
       await db.query('update projects set manifest_version = manifest_version + 1 where id = $1', [
         projectId,
       ]);

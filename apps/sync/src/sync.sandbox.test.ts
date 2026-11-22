@@ -15,6 +15,7 @@ import {
   listRevisions,
   readZip,
   recordGrammarOutcome,
+  replaceFile,
   removeMember,
   requestBuild,
   restoreRevision,
@@ -1092,4 +1093,26 @@ test('killing the server mid-save loses nothing it acknowledged, and nothing at 
   expect(final).toBe(writer.text.toString().replaceAll('\n', '\r\n'));
   expect(checked).toBeGreaterThan(ROUNDS * 5);
   child!.kill('SIGKILL');
+});
+
+test('an editor of a file that goes back to Latin-1 in a restore is closed', async () => {
+  const { project, file: main } = await paper();
+  const latin = Buffer.from('@book{a, author = {Jos\xe9}}\n', 'latin1');
+  const bib = await createFile(t.pool, store, users.owner.id, project, 'refs.bib', latin);
+  expect(bib).not.toBe(main);
+  const r1 = await saveRevision(t.pool, store, users.owner.id, project, 'Latin-1');
+  await replaceFile(
+    t.pool,
+    store,
+    users.owner.id,
+    project,
+    'refs.bib',
+    Buffer.from('@book{a, author = {Jos\u00e9}}\n'),
+  );
+  const editor = client(users.editor, bib);
+  await saved(editor);
+  const closedBefore = editor.state.closed;
+  await restoreRevision(t.pool, store, users.owner.id, project, r1.id);
+  await until('the editor to be closed', () => editor.state.closed > closedBefore);
+  expect(editor.state.reasons.at(-1)).toMatch(/no-access/);
 });

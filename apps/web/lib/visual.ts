@@ -15,6 +15,7 @@ import {
   DEFAULT_TRANSPARENT,
   cellText,
   escape,
+  fieldText,
   floatParts,
   type Span,
   tableEdit,
@@ -417,19 +418,23 @@ export function createVisual(opts: {
     },
   ) => {
     const empty = absent?.prompt ?? '\u00a0';
-    if (!opts.editable) return el('span', 'pw-part', shown(span.text) || (absent ? 'None.' : ''));
-    const button = el('button', 'pw-part', shown(span.text) || empty);
+    // The field holds one line: a part that cannot be one without losing something (a comment
+    // with words in it, a blank line) is only shown, and is edited in the source.
+    const initial = fieldText(span.text);
+    if (!opts.editable || initial === null)
+      return el('span', 'pw-part', shown(span.text) || (absent ? 'None.' : ''));
+    const button = el('button', 'pw-part', shown(initial) || empty);
     button.type = 'button';
-    button.classList.toggle('pw-missing', !!absent && !span.text);
+    button.classList.toggle('pw-missing', !!absent && !initial);
     // The name holds the words that are shown, so that voice control can say them.
-    button.setAttribute('aria-label', `${name}: ${shown(span.text) || empty}. Edit`);
+    button.setAttribute('aria-label', `${name}: ${shown(initial) || empty}. Edit`);
     button.onclick = () => {
       const pos = getPos() ?? 0;
       const input = el('input', 'pw-part');
-      input.value = input.defaultValue = span.text;
+      input.value = input.defaultValue = initial;
       input.spellcheck = false;
       input.setAttribute('aria-label', name);
-      input.size = Math.max(4, span.text.length + 2);
+      input.size = Math.max(4, initial.length + 2);
       let over = false;
       const leave = () => {
         over = true;
@@ -438,7 +443,7 @@ export function createVisual(opts: {
       };
       const apply = async () => {
         const text = input.value.trim();
-        if (text === span.text) {
+        if (text === initial) {
           leave();
           button.focus();
           return;
