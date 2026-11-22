@@ -182,7 +182,9 @@ test(`${N} interleavings of visual and source edits converge with nothing lost`,
   const base = fixtures['article-basic/main.tex'];
   const para = base.indexOf('Collaborative editors');
   const paraEnd = base.indexOf('Our contributions');
-  for (let seed = 0; seed < N; seed++) {
+  // SEED=n replays just that seed.
+  const only = process.env.SEED === undefined ? undefined : Number(process.env.SEED);
+  for (let seed = only ?? 0; seed < (only === undefined ? N : only + 1); seed++) {
     const r = rng(seed);
     const a = replica(base);
     const b = replica('', a.ydoc);
@@ -252,6 +254,32 @@ test(`${N} interleavings of visual and source edits converge with nothing lost`,
       throw new Error(`seed ${seed}: ${(err as Error).message}`, { cause: err });
     }
   }
+});
+
+test('a command never splits an emoji, so both replicas keep the same text', () => {
+  const a = replica('ab\u{1F600}cd\n');
+  const b = replica('', a.ydoc);
+  const start = textblocks(a)[0].start;
+  // A selection that ends between the two halves of the emoji (the editor counts UTF-16 units).
+  for (const [from, to] of [
+    [0, 3],
+    [3, 5],
+    [3, 3],
+  ]) {
+    a.select(start + from, start + to);
+    const c = a.bridge.emphCommand(a.state);
+    if (c) expect(a.bridge.applyCommand(c)).toBe('applied');
+    a.check();
+    Y.applyUpdate(b.ydoc, Y.encodeStateAsUpdate(a.ydoc), 'net');
+    expect(b.src, `${from}-${to}`).toBe(a.src);
+    expect(a.src).not.toMatch(
+      /[\ud800-\udbff](?![\udc00-\udfff])|(?<![\ud800-\udbff])[\udc00-\udfff]/,
+    );
+  }
+  // The caret between the halves: an insertion there is refused as well.
+  a.select(start + 3);
+  expect(a.bridge.insertCommand(a.state, '\\x')).toBeNull();
+  expect(a.bridge.headingCommand(a.state, 'section', 'T')).toBeNull();
 });
 
 test('broken LaTeX freezes only its region and recovers when repaired', () => {
