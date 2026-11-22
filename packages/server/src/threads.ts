@@ -296,6 +296,12 @@ export async function setThreadStatus(
 /**
  * Attach a detached thread to the same words where they stand now. Only when there is no doubt
  * which words are meant: they are in the file exactly once.
+ *
+ * Or, with `places` (encoded relative positions, as for a new thread), to the stretch the
+ * caller says holds them. Yjs undo writes deleted characters again as new ones, so only the tab
+ * that undid knows where the words stand. The server checks what it is told: both places are
+ * known to the saved text, the thread is detached, and the stretch hashes to the thread's
+ * fingerprint. Then there is no doubt, however many times the words occur.
  */
 export async function reattachThread(
   pool: pg.Pool,
@@ -303,6 +309,7 @@ export async function reattachThread(
   userId: string,
   projectId: string,
   threadId: string,
+  places?: { from: unknown; to: unknown },
 ): Promise<void> {
   await authorize(pool, userId, id(projectId), 'comment.write');
   const thread = (
@@ -315,11 +322,40 @@ export async function reattachThread(
   if (!thread) throw new AppError('not_found', 'No such thread.');
   const { doc, text } = await textOf(pool, store, thread.file_id);
   const [was, end] = [locate(doc, text, thread.anchor_from), locate(doc, text, thread.anchor_to)];
+  const all = text.toString();
+  const place = (index: number, side: number) =>
+    Buffer.from(Y.encodeRelativePosition(Y.createRelativePositionFromTypeIndex(text, index, side)));
+  if (places) {
+    const known = (v: unknown) => {
+      if (!(v instanceof Uint8Array) || !v.length || v.length > 100)
+        throw bad('That place in the text cannot be used.');
+      return v;
+    };
+    const [a, b] = [known(places.from), known(places.to)];
+    const [from, to] = [locate(doc, text, a), locate(doc, text, b)];
+    if (from < 0 || to < 0)
+      throw new AppError('conflict', 'That text has not been saved yet. Try again in a moment.');
+    if (was >= 0 && end > was) throw bad('That thread is still attached to its text.');
+    if (to <= from) throw bad('Select the text the comment is about.');
+    if (sha256(Buffer.from(all.slice(from, to))) !== thread.fingerprint)
+      throw new AppError('conflict', 'Those are not the words the thread was about.');
+    await pool.query(
+      `update threads set anchor_from = $2, anchor_to = $3, context_before = $4, context_after = $5
+       where id = $1`,
+      [
+        threadId,
+        Buffer.from(a),
+        Buffer.from(b),
+        all.slice(Math.max(0, from - CONTEXT), from),
+        all.slice(to, to + CONTEXT),
+      ],
+    );
+    return;
+  }
   if (was >= 0 && end > was) throw bad('That thread is still attached to its text.');
   // Only the first part of a long stretch was kept, which is not enough to find it by.
   if (sha256(Buffer.from(thread.excerpt)) !== thread.fingerprint)
     throw bad('That stretch was too long to find again. Start a new thread on the text.');
-  const all = text.toString();
   const at = all.indexOf(thread.excerpt);
   if (at < 0) throw new AppError('conflict', 'Those words are not in the file now.');
   if (all.indexOf(thread.excerpt, at + 1) >= 0)
@@ -328,8 +364,6 @@ export async function reattachThread(
       'Those words are in the file more than once. Start a new thread on the ones you mean.',
     );
   const to = at + thread.excerpt.length;
-  const place = (index: number, side: number) =>
-    Buffer.from(Y.encodeRelativePosition(Y.createRelativePositionFromTypeIndex(text, index, side)));
   await pool.query(
     `update threads set anchor_from = $2, anchor_to = $3, context_before = $4, context_after = $5
      where id = $1`,

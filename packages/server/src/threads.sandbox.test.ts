@@ -201,6 +201,70 @@ test('a detached thread is attached again to the same words, when there is no do
   expect((await threads(p))[0]).toMatchObject({ state: 'attached', now: 'below 40 ms' });
 });
 
+/** A paper with a thread on "below 40 ms", the words also standing in a second sentence. */
+async function twice() {
+  const p = await paper();
+  await change(p.file, 'Nothing else', 'It is below 40 ms. Nothing else');
+  const { id } = await startThread(t.pool, store, users.reviewer.id, p.id, p.file, {
+    ...(await ends(p.file, 'below 40 ms')),
+    body: 'Check this number.',
+  });
+  return { p, id };
+}
+const SENTENCE = 'Latency stays below 40 ms for most edits.\n';
+
+test('after an undo, the person who undid tells where the words stand, and the thread attaches', async () => {
+  const { p, id } = await twice();
+  const attach = (who: keyof typeof users, places?: { from: Uint8Array; to: Uint8Array }) =>
+    reattachThread(t.pool, store, users[who].id, p.id, id, places);
+  await change(p.file, SENTENCE, '');
+  expect((await threads(p))[0].state).toBe('detached');
+  // Undo writes the sentence again as new characters, where it stood.
+  await editFile(t.pool, store, p.file, users.owner.id, (text) => {
+    const at = text.toString().indexOf('\\begin{document}\n') + '\\begin{document}\n'.length;
+    text.insert(at, SENTENCE);
+  });
+  expect((await threads(p))[0].state).toBe('detached');
+  // Without places, the words are in the file twice.
+  expect(await code(attach('reviewer'))).toBe('conflict');
+  const stand = await ends(p.file, 'below 40 ms');
+  expect(await code(attach('viewer', stand))).toBe('permission_denied');
+  expect(await code(attach('outsider', stand))).toBe('not_found');
+  // A place the saved text does not know yet.
+  const unsent = new Y.Doc();
+  unsent.getText(TEXT).insert(0, 'typed a moment ago');
+  const unknown = Y.encodeRelativePosition(
+    Y.createRelativePositionFromTypeIndex(unsent.getText(TEXT), 3, 0),
+  );
+  expect(await code(attach('reviewer', { from: unknown, to: stand.to }))).toBe('conflict');
+  expect((await threads(p))[0].state).toBe('detached');
+  await attach('reviewer', stand);
+  expect((await threads(p))[0]).toMatchObject({
+    state: 'attached',
+    now: 'below 40 ms',
+    before: '\\documentclass{article}\n\\begin{document}\nLatency stays ',
+    comments: [{ body: 'Check this number.' }],
+  });
+});
+
+test('places on other words than the thread was about are refused', async () => {
+  const { p, id } = await twice();
+  await change(p.file, SENTENCE, '');
+  const other = await ends(p.file, 'Nothing else');
+  expect(await code(reattachThread(t.pool, store, users.reviewer.id, p.id, id, other))).toBe(
+    'conflict',
+  );
+  expect((await threads(p))[0].state).toBe('detached');
+});
+
+test('places on a thread that is still attached are refused', async () => {
+  const { p, id } = await twice();
+  const stand = await ends(p.file, 'below 40 ms');
+  expect(await code(reattachThread(t.pool, store, users.reviewer.id, p.id, id, stand))).toBe(
+    'invalid_input',
+  );
+});
+
 test('threads keep to their paper and to the people who may comment', async () => {
   const p = await paper();
   const other = await paper();

@@ -104,6 +104,8 @@ export default function Proposals(props: {
   /** The stretch selected in the editor now; with nothing selected, the place of the caret. */
   selection(): Stretch | null;
   show(from: string, to: string): boolean;
+  /** Where a stretch stands in the editor's text now, or null if nothing is there. */
+  standing(from: string, to: string): Stretch | null;
   /** Told the proposals each time they are read, so that the editor can mark them in the text. */
   onProposals(proposals: Proposal[]): void;
 }) {
@@ -117,14 +119,45 @@ export default function Proposals(props: {
   const told = useRef(props.onProposals);
   told.current = props.onProposals;
 
+  const standingNow = useRef(props.standing);
+  standingNow.current = props.standing;
   const read = useCallback(async () => {
-    const res = await fetch(`${url}?file=${fileId}`).catch(() => null);
-    if (!res?.ok) return false;
-    const found: Proposal[] = await res.json();
+    const get = async () => {
+      const res = await fetch(`${url}?file=${fileId}`).catch(() => null);
+      return res?.ok ? ((await res.json()) as Proposal[]) : null;
+    };
+    let found = await get();
+    if (!found) return false;
+    // After an undo, the words of an out-of-date proposal are written again as new characters.
+    // This tab knows where they stand, and tells the server, which checks them. A refusal is
+    // silent, and nothing is tried again until the next reading. An insertion has no words to
+    // find, so it is left alone.
+    if (canPropose) {
+      const tried = await Promise.all(
+        found
+          .filter((p) => p.status === 'open' && p.stale && !p.placeLost && p.expected !== '')
+          .flatMap((p) => {
+            const now = standingNow.current(p.from, p.to);
+            return now && now.words === p.expected
+              ? [{ id: p.id, from: now.from, to: now.to }]
+              : [];
+          })
+          .map(({ id, from, to }) =>
+            fetch(`${url}/${id}`, {
+              method: 'POST',
+              headers: { 'content-type': 'application/json' },
+              body: JSON.stringify({ action: 'attach', from, to }),
+            })
+              .then((r) => r.ok)
+              .catch(() => false),
+          ),
+      );
+      if (tried.some(Boolean)) found = (await get()) ?? found;
+    }
     setProposals(found);
     told.current(found);
     return true;
-  }, [url, fileId]);
+  }, [url, fileId, canPropose]);
   // Read when first shown, and then only when the build pane's poll says the paper's text or its
   // comments and proposals are not what they were, or after this person's own doing. A tab
   // that shows nothing new asks for nothing.

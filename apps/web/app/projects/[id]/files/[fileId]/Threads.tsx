@@ -112,6 +112,8 @@ export default function Threads(props: {
   selection(): Stretch | null;
   /** Select a stretch in the editor. False if it is no longer there. */
   show(from: string, to: string): boolean;
+  /** Where a stretch stands in the editor's text now, or null if nothing is there. */
+  standing(from: string, to: string): Stretch | null;
   /** Told the threads each time they are read, so that the editor can mark them in the text. */
   onThreads(threads: Thread[]): void;
 }) {
@@ -167,14 +169,42 @@ export default function Threads(props: {
   const told = useRef(props.onThreads);
   told.current = props.onThreads;
 
+  const standingNow = useRef(props.standing);
+  standingNow.current = props.standing;
   const read = useCallback(async () => {
-    const res = await fetch(`${url}?file=${fileId}`).catch(() => null);
-    if (!res?.ok) return false;
-    const found: Thread[] = await res.json();
+    const get = async () => {
+      const res = await fetch(`${url}?file=${fileId}`).catch(() => null);
+      return res?.ok ? ((await res.json()) as Thread[]) : null;
+    };
+    let found = await get();
+    if (!found) return false;
+    // After an undo, the words of a detached thread are written again as new characters. This
+    // tab knows where they stand, and tells the server, which checks them. A refusal (not saved
+    // yet, or not the same words) is silent: it is tried again at the next read.
+    if (canComment) {
+      const tried = await Promise.all(
+        found
+          .filter((t) => t.state === 'detached')
+          .flatMap((t) => {
+            const now = standingNow.current(t.from, t.to);
+            return now ? [{ id: t.id, from: now.from, to: now.to }] : [];
+          })
+          .map(({ id, from, to }) =>
+            fetch(`${url}/${id}`, {
+              method: 'POST',
+              headers: { 'content-type': 'application/json' },
+              body: JSON.stringify({ attach: true, from, to }),
+            })
+              .then((r) => r.ok)
+              .catch(() => false),
+          ),
+      );
+      if (tried.some(Boolean)) found = (await get()) ?? found;
+    }
     setThreads(found);
     told.current(found);
     return true;
-  }, [url, fileId]);
+  }, [url, fileId, canComment]);
   // Read when first shown, and then only when the build pane's poll says the paper's text or its
   // comments and proposals are not what they were, or after this person's own doing. A tab
   // that shows nothing new asks for nothing.

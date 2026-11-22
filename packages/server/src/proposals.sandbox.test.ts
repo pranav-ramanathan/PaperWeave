@@ -383,6 +383,96 @@ test('a proposal that lost its place finds its words again, when they are there 
   expect(await code(reattachProposal(t.pool, store, users.owner.id, p.id, twice))).toBe('conflict');
 });
 
+/** A paper with a proposal on "below 40 ms", the words also standing in a second sentence. */
+async function twice() {
+  const p = await paper();
+  await change(p.file, 'Nothing else', 'It is below 40 ms. Nothing else');
+  const id = await propose(t.pool, store, users.reviewer.id, p.id, p.file, {
+    ...(await ends(p.file, 'below 40 ms')),
+    replacement: 'under 40 ms',
+  });
+  return { p, id };
+}
+const SENTENCE = `${LINE}\n`;
+/** Delete the sentence, then write it again as new characters, as an undo does. */
+async function deleteAndUndo(file: string) {
+  await change(file, SENTENCE, '');
+  await editFile(t.pool, store, file, users.owner.id, (text) => {
+    const at = text.toString().indexOf('\\begin{document}\n') + '\\begin{document}\n'.length;
+    text.insert(at, SENTENCE);
+  });
+}
+
+test('after an undo, the person who undid tells where the words stand, and the proposal is fresh', async () => {
+  const { p, id } = await twice();
+  const attach = (who: keyof typeof users, places?: { from: Uint8Array; to: Uint8Array }) =>
+    reattachProposal(t.pool, store, users[who].id, p.id, id, places);
+  await deleteAndUndo(p.file);
+  expect((await proposals(p))[0]).toMatchObject({ stale: true, now: '' });
+  expect(await code(acceptProposal(t.pool, store, users.owner.id, p.id, id))).toBe('conflict');
+  // Without places, the words are in the file twice.
+  expect(await code(attach('reviewer'))).toBe('conflict');
+  const stand = await ends(p.file, 'below 40 ms');
+  expect(await code(attach('viewer', stand))).toBe('permission_denied');
+  expect(await code(attach('outsider', stand))).toBe('not_found');
+  // A place the saved text does not know yet.
+  const unsent = new Y.Doc();
+  unsent.getText(TEXT).insert(0, 'typed a moment ago');
+  const unknown = Y.encodeRelativePosition(
+    Y.createRelativePositionFromTypeIndex(unsent.getText(TEXT), 3, 0),
+  );
+  expect(await code(attach('reviewer', { from: unknown, to: stand.to }))).toBe('conflict');
+  expect((await proposals(p))[0].stale).toBe(true);
+  await attach('reviewer', stand);
+  expect((await proposals(p))[0]).toMatchObject({ stale: false, now: 'below 40 ms' });
+  await acceptProposal(t.pool, store, users.owner.id, p.id, id);
+  // Applied at the place the undoing tab named: the first sentence, not the second.
+  expect(await saved(p)).toBe(
+    MAIN.replace('below 40 ms', 'under 40 ms').replace(
+      'Nothing else',
+      'It is below 40 ms. Nothing else',
+    ),
+  );
+});
+
+test('places on other words than the proposal was about are refused', async () => {
+  // The words stand once, so that a search alone would attach it.
+  const p = await paper();
+  const id = await propose(t.pool, store, users.reviewer.id, p.id, p.file, {
+    ...(await ends(p.file, 'below 40 ms')),
+    replacement: 'under 40 ms',
+  });
+  await deleteAndUndo(p.file);
+  const other = await ends(p.file, 'Nothing else');
+  expect(await code(reattachProposal(t.pool, store, users.reviewer.id, p.id, id, other))).toBe(
+    'conflict',
+  );
+  expect((await proposals(p))[0].stale).toBe(true);
+});
+
+test('places on a proposal that is not stale are refused', async () => {
+  const { p, id } = await twice();
+  const stand = await ends(p.file, 'below 40 ms');
+  expect(await code(reattachProposal(t.pool, store, users.reviewer.id, p.id, id, stand))).toBe(
+    'invalid_input',
+  );
+});
+
+test('places are not used for an insertion, which has no words to check', async () => {
+  const p = await paper();
+  const id = await propose(t.pool, store, users.reviewer.id, p.id, p.file, {
+    ...(await ends(p.file, 'below', 0)),
+    replacement: 'well ',
+  });
+  await deleteAndUndo(p.file);
+  expect((await proposals(p))[0]).toMatchObject({ stale: true });
+  const stand = await ends(p.file, 'below', 0);
+  expect(await code(reattachProposal(t.pool, store, users.reviewer.id, p.id, id, stand))).toBe(
+    'conflict',
+  );
+  expect((await proposals(p))[0].stale).toBe(true);
+});
+
 test('a place cannot be found again, and only its author or an editor may try', async () => {
   const p = await paper();
   const add = await propose(t.pool, store, users.owner.id, p.id, p.file, {

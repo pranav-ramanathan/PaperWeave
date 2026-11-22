@@ -313,3 +313,60 @@ test('text added at the caret is out of date once the owner retypes the sentence
   ).toHaveCount(0);
   await expect(owner.page.locator(SOURCE)).not.toContainText('whole');
 });
+
+test('a proposal survives a deletion that is undone, for the owner and after a reload', async ({
+  browser,
+}) => {
+  test.setTimeout(150_000);
+  const owner = await person(browser, 'undo-owner');
+  const reviewer = await person(browser, 'undo-reviewer');
+  const zip = join(mkdtempSync(join(tmpdir(), 'paperweave-e2e-')), `Undo ${run}.zip`);
+  writeFileSync(zip, await writeZip([{ path: 'main.tex', bytes: Buffer.from(MAIN) }]));
+  await owner.page.goto('/sign-in');
+  await signIn(owner.page, owner.email);
+  await owner.page.getByLabel('Or import a ZIP of a LaTeX project').setInputFiles(zip);
+  await owner.page.getByRole('button', { name: 'Import ZIP' }).click();
+  await owner.page.getByLabel('Their email address').fill(reviewer.email);
+  await owner.page.getByLabel('Their role').selectOption('reviewer');
+  await owner.page.getByRole('button', { name: 'Send invitation' }).click();
+  await expect(owner.page.getByRole('status')).toContainText(reviewer.email);
+  await reviewer.page.goto(await emailedLink(reviewer.email, '/invitations/'));
+  await signIn(reviewer.page, reviewer.email);
+  await reviewer.page.getByRole('button', { name: 'Join this paper' }).click();
+  await expect(reviewer.page.getByText('You are a reviewer')).toBeVisible();
+  await reviewer.page.getByRole('link', { name: 'main.tex' }).first().click();
+  await selectWord(reviewer.page, VISUAL, 'forty');
+  await panel(reviewer.page).getByRole('button', { name: 'Propose a change here' }).click();
+  await panel(reviewer.page).getByLabel('Replace it with').fill('thirty');
+  await panel(reviewer.page).getByRole('button', { name: 'Propose', exact: true }).click();
+  const proposal = (page: Page) =>
+    page.getByRole('article', { name: 'Proposal to change “forty”' });
+  await expect(proposal(reviewer.page)).toContainText('Proposed: thirty');
+
+  await owner.page.goto(reviewer.page.url());
+  await expect(proposal(owner.page)).toContainText('Proposed: thirty');
+  await showSource(owner.page);
+  await expect(proposal(owner.page).getByRole('button', { name: 'Accept' })).toBeEnabled();
+
+  // The owner deletes the line the proposal is about by mistake, and it is saved.
+  await selectWord(owner.page, SOURCE, 'Latency');
+  await owner.page.keyboard.press('Home');
+  await owner.page.keyboard.press('Shift+End');
+  await owner.page.keyboard.press('Backspace');
+  await typingSaved(owner.page);
+  await expect(proposal(owner.page)).toContainText('Out of date.', { timeout: 15_000 });
+  // Then undoes it, and that is saved too.
+  await owner.page.keyboard.press('ControlOrMeta+z');
+  await typingSaved(owner.page);
+  await expect(owner.page.locator(SOURCE)).toContainText('below forty milliseconds');
+  await expect(proposal(owner.page)).not.toContainText('Out of date.', { timeout: 15_000 });
+  await expect(proposal(owner.page).getByRole('button', { name: 'Accept' })).toBeEnabled();
+
+  // The same after a reload.
+  await owner.page.reload();
+  await showSource(owner.page);
+  await expect(proposal(owner.page)).toContainText('Proposed: thirty');
+  await expect(proposal(owner.page)).not.toContainText('Out of date.');
+  await expect(proposal(owner.page).getByRole('button', { name: 'Accept' })).toBeEnabled();
+  await expect(owner.page.locator(`${SOURCE} .proposal-mark`)).toHaveText('forty');
+});
