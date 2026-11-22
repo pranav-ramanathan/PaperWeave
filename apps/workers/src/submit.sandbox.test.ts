@@ -673,3 +673,19 @@ test('with cleveref, a label TeX defines twice is one problem, not two', async (
   expect(found.ready).toBe(false);
   expect(labelsOf(found, 'problem')).toHaveLength(1);
 }, 240_000);
+
+test('a paper built with an EPS picture in it is not ready, and the problem is in the file', async () => {
+  const v = await verdict('Eps paper', {
+    'main.tex': doc('\\usepackage{graphicx}', '\\includegraphics{figs/a.eps}'),
+    'figs/a.eps':
+      '%!PS-Adobe-3.0 EPSF-3.0\n%%BoundingBox: 0 0 10 10\n0 0 10 10 rectfill\nshowpage\n',
+  });
+  expect(v.ready).toBe(false);
+  expect(v.problems).toContainEqual(
+    expect.objectContaining({
+      kind: 'file',
+      path: 'figs/a.eps',
+      message: expect.stringMatching(/^Picture not shown: figs\/a\.eps is an EPS file/),
+    }),
+  );
+}, 300_000);

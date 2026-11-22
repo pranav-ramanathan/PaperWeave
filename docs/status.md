@@ -866,6 +866,28 @@ Built after the security review, which had it as its second open item.
 - Builds cached before this hold garbled diagnostics and labels, so the cache key carries a
   `TEX_TEXT` salt (`builder.ts`): each paper rebuilds once. Earlier build records are not rewritten.
 
+## An EPS picture that built as an empty box
+
+- **Before:** with `\includegraphics{fig.eps}`, pdfLaTeX and LuaLaTeX built "successfully" and drew
+  a frame with the file's name where the figure should be; nothing in the log said so, so the ZIP
+  and PDF shipped with boxes and the paper was ready. XeLaTeX failed (exit 12, no PDF) with only
+  "failed without saying where". Cause: the build runs with `-no-shell-escape` (the spec), so
+  `epstopdf` is not loaded; `graphics.sty` then switches that picture to draft mode quietly. The
+  image has no Ghostscript, so XeLaTeX cannot convert either.
+- **Now (detected, not converted):** `epsPictures()` (`apps/workers/src/compile.ts`) reads the
+  `INPUT` lines of latexmk's `.fls` and gives the project path of each EPS the build opened
+  (macros, `\graphicspath` and names with spaces included). A successful pdfLaTeX or LuaLaTeX
+  build gets a warning `Picture not shown: <path> is an EPS file ...` for each. A paper that
+  ships `fig-eps-converted-to.pdf` and loads `epstopdf` is not warned: the `.fls` shows the PDF
+  was read. XeLaTeX's `xdvipdfmx` "Image format conversion ... failed" line becomes an error that
+  names the file. The paper is not ready (`file` problem, with the file's id) while a build says
+  so; the build pane lists them under "Built, but these pictures are not in the PDF". Importing a
+  paper that includes an EPS adds a note naming the engine's behaviour.
+- Cached builds are redone (`TEX_TEXT` is now `utf8-biber-eps`).
+- **Not done, owner decisions:** Ghostscript in the TeX image (also makes XeLaTeX work and
+  `epstopdf` possible with shell escape on), converting EPS to PDF on import, or a restricted
+  shell escape that allows only `epstopdf`/`gs`. Until then an author converts the file.
+
 ## How long a large import takes
 
 - An import still runs inside its request. Measured at the most files a paper may hold

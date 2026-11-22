@@ -1,5 +1,5 @@
 import { expect, test } from 'vitest';
-import { diagnostics } from './compile.ts';
+import { diagnostics, epsPictures } from './compile.ts';
 
 test('errors are read from a log with their place, and fatal ones without', () => {
   const log = [
@@ -561,4 +561,60 @@ test('another Biber error is said without a file', () => {
   expect(diagnostics('', 'ERROR - Cannot open bcf file')).toEqual([
     { severity: 'error', message: 'Biber: Cannot open bcf file.' },
   ]);
+});
+
+// Lines as latexmk wrote them in a real build of the image (a root in the project's top folder,
+// \graphicspath{{figs/}}, and \includegraphics{\fig.eps}, {my fig.eps}, {./figs//c.eps}).
+const FLS = [
+  'PWD /work',
+  'INPUT /usr/share/texlive/texmf-dist/web2c/texmf.cnf',
+  'INPUT ./main.tex',
+  'INPUT /usr/share/texlive/texmf-dist/tex/latex/graphics/graphicx.sty',
+  'INPUT ./figs//a.eps',
+  'INPUT figs//a.eps',
+  'INPUT ./figs//my fig.eps',
+  'INPUT figs//my fig.eps',
+  'INPUT ./figs//c.eps',
+  'OUTPUT main.pdf',
+].join('\n');
+
+test('EPS pictures are read from the .fls, as project paths, once each, spaces kept', () => {
+  expect(epsPictures(FLS, '')).toEqual(['figs/a.eps', 'figs/my fig.eps', 'figs/c.eps']);
+  // The build runs in the root file's folder.
+  expect(epsPictures(FLS, 'paper/')).toEqual([
+    'paper/figs/a.eps',
+    'paper/figs/my fig.eps',
+    'paper/figs/c.eps',
+  ]);
+  expect(epsPictures('INPUT ./main.tex\nINPUT ./fig.PDF\nINPUT ./Up.EPS')).toEqual(['Up.EPS']);
+  // Out of the project, or the installation's own.
+  expect(epsPictures('INPUT ../../x.eps\nINPUT /usr/share/x.eps', 'a/')).toEqual([]);
+});
+
+test('an EPS picture whose epstopdf conversion was read is not reported', () => {
+  const fls = [
+    'INPUT ./figs//a-eps-converted-to.pdf',
+    'INPUT ./figs//a.eps',
+    'INPUT ./figs//my fig-eps-converted-to.pdf',
+    'INPUT ./figs//my fig.eps',
+    'INPUT ./figs//c.eps',
+  ].join('\n');
+  expect(epsPictures(fls)).toEqual(['figs/c.eps']);
+});
+
+test('XeLaTeX failing to convert an EPS picture is an error naming the file', () => {
+  const output = [
+    'xdvipdfmx:warning: Filtering file via command -->gs -q -dSAFER ./figs//a.eps -c quit<-- failed.',
+    'xdvipdfmx:warning: Image format conversion for "./figs//a.eps" failed...',
+    'Latexmk: Errors, so I did not complete making targets',
+  ].join('\n');
+  const expected = {
+    severity: 'error',
+    file: 'paper/figs/a.eps',
+    message:
+      'paper/figs/a.eps is an EPS file, which XeLaTeX cannot convert here. Convert it to PDF.',
+  };
+  expect(diagnostics('', output, 'paper/')).toEqual([expected]);
+  // Said again by the log or a second pass: once.
+  expect(diagnostics(output, output, 'paper/')).toEqual([expected]);
 });

@@ -119,6 +119,24 @@ function place(dir: string, file: string): string | undefined {
 }
 
 /**
+ * The EPS pictures a build read, as project paths, from latexmk's .fls ("INPUT ./figs//a.eps",
+ * one line per file opened, a name with spaces as it is). `dir` is the root file's folder. A
+ * picture is left out when the build also read its "-eps-converted-to.pdf", the PDF that
+ * epstopdf makes (here, or a paper ships it ready-made): that one is placed, not a box.
+ */
+export function epsPictures(fls: string, dir = ''): string[] {
+  const opened = new Set<string>();
+  for (const line of fls.split(/\r?\n/))
+    if (line.startsWith('INPUT ') && !line.startsWith('INPUT /')) {
+      const path = place(dir, line.slice(6));
+      if (path) opened.add(path);
+    }
+  return [...opened].filter(
+    (p) => /\.eps$/i.test(p) && !opened.has(p.replace(/\.eps$/i, '') + '-eps-converted-to.pdf'),
+  );
+}
+
+/**
  * `dir` is the root file's folder with its trailing slash, or '': the build runs there (-cd),
  * so that is what the paths in the log are relative to.
  */
@@ -259,6 +277,20 @@ export function diagnostics(log: string, output = '', dir = ''): Diagnostic[] {
       severity: 'error',
       message: 'The glossary could not be made. The build log has the details.',
     });
+  // XeLaTeX has no way to read EPS without Ghostscript, which the image does not have: the
+  // driver says so on latexmk's output only, and the build fails with nothing else to point to.
+  for (const m of (output + '\n' + log).matchAll(
+    /^xdvipdfmx:warning: Image format conversion for "(.+?\.eps)" failed/gim,
+  )) {
+    const path = place(dir, m[1]);
+    const d: Diagnostic = {
+      severity: 'error',
+      // As the driver wrote it: placed in the project with the rest, below.
+      ...(path ? { file: m[1] } : {}),
+      message: `${path ?? m[1]} is an EPS file, which XeLaTeX cannot convert here. Convert it to PDF.`,
+    };
+    if (!out.some((e) => e.message === d.message)) out.push(d);
+  }
   // An error in a file that is not the author's is not placed in it.
   for (let i = 0; i < out.length; i++) {
     const { file, message } = out[i];
@@ -421,11 +453,23 @@ export async function compile(
           aux += texText(readFileSync(join(dir, e.name))) + '\n';
     };
     if (pdf) gather(work);
+    const found = diagnostics(log, run.output, rootDir(root));
+    // pdfTeX and LuaTeX place EPS through epstopdf, which needs shell escape; without it the
+    // picture is silently drawn as a box with its name, and the log says nothing. XeLaTeX
+    // fails instead, and diagnostics() has said so.
+    const fls = join(work, base + '.fls');
+    if (pdf && compiler !== 'xelatex' && existsSync(fls))
+      for (const f of epsPictures(texText(readFileSync(fls)), rootDir(root)))
+        found.push({
+          severity: 'warning',
+          file: f,
+          message: `Picture not shown: ${f} is an EPS file, which ${compiler === 'lualatex' ? 'LuaLaTeX' : 'pdfLaTeX'} cannot place here; the PDF has a box with its name. Convert it to PDF.`,
+        });
     return {
       ok: !!pdf,
       // `timeout -s KILL` reports 137.
       timedOut: run.code === 137,
-      diagnostics: diagnostics(log, run.output, rootDir(root)),
+      diagnostics: found,
       log,
       pdf,
       synctex: pdf && keep('.synctex.gz'),

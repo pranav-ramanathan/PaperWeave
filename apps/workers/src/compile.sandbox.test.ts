@@ -521,3 +521,47 @@ test('\\import then \\subimport, \\input and a picture resolve from the import f
   expect(g.missing).toEqual([]);
   expect(g.order).toContain('sections/figs/plot.tex');
 });
+
+// A tiny valid EPS: a filled box.
+const EPS = '%!PS-Adobe-3.0 EPSF-3.0\n%%BoundingBox: 0 0 100 50\n0 0 100 50 rectfill\nshowpage\n';
+const epsPaper = () => {
+  const project = tmp();
+  mkdirSync(join(project, 'paper/figs'), { recursive: true });
+  writeFileSync(join(project, 'paper/figs/a.eps'), EPS);
+  writeFileSync(join(project, 'paper/figs/my fig.eps'), EPS);
+  writeFileSync(
+    join(project, 'paper/main.tex'),
+    '\\documentclass{article}\n\\usepackage{graphicx}\n\\graphicspath{{figs/}}\n' +
+      '\\begin{document}\n\\includegraphics{a.eps}\n\\includegraphics{my fig.eps}\n\\end{document}\n',
+  );
+  return project;
+};
+
+test.each([
+  ['pdflatex', 'pdfLaTeX'],
+  ['lualatex', 'LuaLaTeX'],
+] as const)(
+  '%s builds an EPS paper and says the pictures are not in the PDF',
+  async (engine, name) => {
+    const r = await compile(epsPaper(), 'paper/main.tex', tmp(), 60, engine);
+    expect(r.ok).toBe(true);
+    for (const f of ['paper/figs/a.eps', 'paper/figs/my fig.eps'])
+      expect(r.diagnostics).toContainEqual({
+        severity: 'warning',
+        file: f,
+        message: `Picture not shown: ${f} is an EPS file, which ${name} cannot place here; the PDF has a box with its name. Convert it to PDF.`,
+      });
+  },
+  120_000,
+);
+
+test('xelatex fails on an EPS paper and names the file', async () => {
+  const r = await compile(epsPaper(), 'paper/main.tex', tmp(), 60, 'xelatex');
+  expect(r.ok).toBe(false);
+  expect(r.diagnostics).toContainEqual({
+    severity: 'error',
+    file: 'paper/figs/a.eps',
+    message:
+      'paper/figs/a.eps is an EPS file, which XeLaTeX cannot convert here. Convert it to PDF.',
+  });
+}, 120_000);

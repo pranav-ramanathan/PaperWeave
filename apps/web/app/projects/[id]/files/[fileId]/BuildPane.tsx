@@ -203,6 +203,13 @@ export default function BuildPane({
             ),
         )
       : [];
+  // A build that worked but drew a box with a name where an EPS picture should be.
+  const pictures =
+    latest && latest.status !== 'failed' && latest.status !== 'queued'
+      ? latest.diagnostics.filter(
+          (d) => d.severity === 'warning' && /^Picture not shown: /.test(d.message),
+        )
+      : [];
   const place = (d: { file?: string; line?: number }) => (
     <code>
       {d.file}
@@ -260,6 +267,19 @@ export default function BuildPane({
             ))}
           </ul>
           {loose.length > 10 && <p>and {loose.length - 10} more: see the paper&apos;s page.</p>}
+        </>
+      )}
+      {pictures.length > 0 && (
+        <>
+          <p>Built, but these pictures are not in the PDF:</p>
+          <ul className="diagnostics" aria-label="Pictures not in the PDF">
+            {pictures.slice(0, 10).map((d, i) => (
+              <li key={i}>{d.message.replace(/^Picture not shown: /, '')}</li>
+            ))}
+          </ul>
+          {pictures.length > 10 && (
+            <p>and {pictures.length - 10} more: see the paper&apos;s page.</p>
+          )}
         </>
       )}
       {latest && latest.status !== 'queued' && (
