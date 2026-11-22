@@ -436,11 +436,19 @@ test('charts keep to their paper, their name and the people who may change them'
   while (await drawNext(t.pool, store, image));
 }, 120_000);
 
-test('a chart whose files would share a name with a file of the paper fails, and adds nothing', async () => {
+test('a chart whose files would share a name with a folder of the paper fails, and adds nothing', async () => {
   const p = await paper();
   await approve(p);
-  // A name with no extension is allowed, and `charts/` would then be a folder under it.
-  await createFile(t.pool, store, users.owner.id, p.id, 'charts', Buffer.from('x'));
+  // `checkPath` refuses a file named just `charts` (no known extension), so the clash is made the
+  // other way round: a file inside a folder named like the chart's PDF.
+  await createFile(
+    t.pool,
+    store,
+    users.owner.id,
+    p.id,
+    'charts/latency.pdf/notes.txt',
+    Buffer.from('x'),
+  );
   await saveChart(t.pool, store, users.owner.id, p.id, {
     ...LINE,
     name: 'latency',
@@ -448,9 +456,13 @@ test('a chart whose files would share a name with a file of the paper fails, and
   });
   expect(await drawNext(t.pool, store, image)).toBe(true);
   expect(await charts(p)).toMatchObject([
-    { status: 'failed', problem: 'A file and a folder cannot share the name "charts".' },
+    {
+      status: 'failed',
+      problem: 'A file and a folder cannot share the name "charts/latency.pdf".',
+    },
   ]);
   const paths = (await listFiles(t.pool, users.owner.id, p.id)).map((f) => f.path);
-  expect(paths.filter((x) => x.startsWith('charts/'))).toEqual([]);
-  expect(paths).toContain('charts');
+  expect(
+    paths.filter((x) => x.startsWith('charts/') && x !== 'charts/latency.pdf/notes.txt'),
+  ).toEqual([]);
 }, 120_000);
