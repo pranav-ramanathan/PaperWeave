@@ -7,6 +7,7 @@ import { authorize, can } from './authz.ts';
 import { type BlobStore, sha256 } from './blobs.ts';
 import type { Db } from './db.ts';
 import { AppError } from './errors.ts';
+import { mayWrite } from './limits.ts';
 import { id } from './projects.ts';
 import { docsOf, loadUpdates, TEXT } from './sync.ts';
 
@@ -113,6 +114,7 @@ export async function startThread(
   perHour = MENTION_EMAILS_PER_HOUR,
 ): Promise<{ id: string; mentioned: string[]; limited?: true }> {
   await authorize(pool, userId, id(projectId), 'comment.write');
+  await mayWrite(pool, userId, projectId);
   const file = (
     await pool.query('select 1 from files where id = $1 and project_id = $2 and eol is not null', [
       id(fileId),
@@ -198,6 +200,7 @@ export async function reply(
   perHour = MENTION_EMAILS_PER_HOUR,
 ): Promise<{ fileId: string; mentioned: string[]; limited?: true }> {
   await authorize(db, userId, id(projectId), 'comment.write');
+  await mayWrite(db, userId, projectId);
   const thread = (
     await db.query('select file_id from threads where id = $1 and project_id = $2', [
       id(threadId),

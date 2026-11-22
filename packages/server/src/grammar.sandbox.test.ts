@@ -248,3 +248,48 @@ test('a finding is counted by those who may do what it counts, and on their own 
   expect(await count('reviewer', other, 'proposed')).toBe('ok');
   expect(await sum(other)).toBe(1);
 });
+
+test('fifty checks of one unchanged file at once make one request to the checker', async () => {
+  const p = await paper(MAIN + '% concurrent\n');
+  let calls = 0;
+  const fetcher: typeof fetch = async (...args) => {
+    calls++;
+    await new Promise((r) => setTimeout(r, 200));
+    return fetch(...args);
+  };
+  const all = await Promise.all(
+    Array.from({ length: 50 }, () =>
+      checkGrammar(t.pool, store, users.owner.id, p.id, p.file, {
+        url,
+        fetcher,
+      }),
+    ),
+  );
+  expect(calls).toBe(1);
+  expect(all.every((f) => f.length === all[0].length && f.length > 0)).toBe(true);
+});
+
+test('checks answered from what is kept are not counted, and the limit applies to requests to the checker', async () => {
+  await t.pool.query('delete from grammar_requests');
+  let calls = 0;
+  const fetcher: typeof fetch = (...args) => (calls++, fetch(...args));
+  const ask = (who: keyof typeof users, perMinute: number, file: { id: string; file: string }) =>
+    code(
+      checkGrammar(t.pool, store, users[who].id, file.id, file.file, { url, fetcher, perMinute }),
+    );
+  const p = await paper(MAIN + '% limited\n');
+  // Repeated checks of an unchanged file: one request, the rest kept, none refused.
+  for (let i = 0; i < 10; i++) expect(await ask('viewer', 2, p)).toBe('ok');
+  expect(calls).toBe(1);
+  // New texts are requests: two are allowed, the third is refused, and nothing was sent for it.
+  const q = await paper(MAIN + '% second\n');
+  const r = await paper(MAIN + '% third\n');
+  expect(await ask('viewer', 2, q)).toBe('ok');
+  expect(await ask('viewer', 2, r)).toBe('conflict');
+  expect(calls).toBe(2);
+  // Another person is not held back by it, and an unchanged file is still answered to the viewer.
+  expect(await ask('reviewer', 2, r)).toBe('ok');
+  expect(await ask('viewer', 2, p)).toBe('ok');
+  await t.pool.query("update grammar_requests set created_at = now() - interval '2 minutes'");
+  expect(await ask('viewer', 2, r)).toBe('ok');
+});

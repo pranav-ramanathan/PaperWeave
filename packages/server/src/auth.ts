@@ -63,6 +63,20 @@ export const cookiesToSet = (headers: Headers) => {
   return [...last.values()];
 };
 
+/**
+ * A display name with no control characters (line breaks, tabs, escapes, and the Unicode line
+ * and paragraph separators) and no more than 100 characters. A name is shown to other people and
+ * could one day be put in an email header, where a line break would be an injection.
+ */
+export const cleanName = (name: unknown): string =>
+  typeof name === 'string'
+    ? name
+        .replace(/[\p{Cc}\p{Cf}\p{Zl}\p{Zp}]+/gu, ' ')
+        .replace(/\s+/g, ' ')
+        .trim()
+        .slice(0, 100)
+    : '';
+
 export const authOptions = (pool: pg.Pool, sendLink: SendLink, env: Env = process.env) =>
   ({
     database: pool,
@@ -90,6 +104,16 @@ export const authOptions = (pool: pg.Pool, sendLink: SendLink, env: Env = proces
         // library would put every such request in one bucket shared by everyone.
         '/**': (req: Request, rule: { window: number; max: number }) =>
           isIP(req.headers.get(trustedHeader(env) ?? '')?.trim() ?? '') ? rule : false,
+      },
+    },
+    databaseHooks: {
+      user: {
+        create: { before: async (user) => ({ data: { ...user, name: cleanName(user.name) } }) },
+        update: {
+          before: async (user) => ({
+            data: 'name' in user ? { ...user, name: cleanName(user.name) } : user,
+          }),
+        },
       },
     },
     session: {

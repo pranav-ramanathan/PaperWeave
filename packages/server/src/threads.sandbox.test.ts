@@ -1,5 +1,5 @@
 // Needs the services in infra/compose.yaml. Run: pnpm test:sandbox
-import { afterAll, beforeAll, expect, test } from 'vitest';
+import { afterAll, beforeAll, expect, onTestFinished, test } from 'vitest';
 import * as Y from 'yjs';
 import { writeZip } from './archive.ts';
 import { blobStore } from './blobs.ts';
@@ -8,6 +8,8 @@ import { importZip, listFiles } from './import.ts';
 import { acceptInvitation, invite } from './projects.ts';
 import { editFile, loadUpdates, TEXT } from './sync.ts';
 import { TEST_ENV, testDb } from './testing.ts';
+import { mayWrite } from './limits.ts';
+import { propose } from './proposals.ts';
 import { submissionChecks } from './submit.ts';
 import {
   deleteComment,
@@ -313,6 +315,10 @@ test('threads keep to their paper and to the people who may comment', async () =
 });
 
 test('mention emails are limited to sixty an hour, and a comment past that is saved all the same', async () => {
+  // This test writes more comments in ten minutes than one person may by default (the limit has
+  // its own test below), so it is given room: it is about the emails, not the comments.
+  process.env.COMMENTS_PER_USER = '1000';
+  onTestFinished(() => void delete process.env.COMMENTS_PER_USER);
   // The count is of one person's comments in the last hour: the tests above are theirs too.
   await t.pool.query('delete from thread_comments');
   const p = await paper();
@@ -569,4 +575,65 @@ test('deleting comments does not reset the limit on mention emails', async () =>
     2,
   );
   expect(again).toMatchObject({ mentioned: [], limited: true });
+});
+
+test('one person cannot write more than sixty comments in ten minutes on a paper, nor a paper take more than its day', async () => {
+  // The owner's invitations in the tests above would count against this one's papers.
+  await t.pool.query("update invitations set created_at = now() - interval '2 hours'");
+  const p = await paper();
+  const first = await startThread(t.pool, store, users.reviewer.id, p.id, p.file, {
+    ...(await ends(p.file, 'below 40 ms')),
+    body: 'Start.',
+  });
+  // 59 more replies make sixty, with the first.
+  for (let i = 1; i < 60; i++)
+    await reply(t.pool, users.reviewer.id, p.id, first.id, { body: `Reply ${i}.` });
+  const refused = await reply(t.pool, users.reviewer.id, p.id, first.id, {
+    body: 'The sixty-first.',
+  }).catch((e) => e);
+  expect(refused.code).toBe('conflict');
+  expect(refused.message).toMatch(/sixty|60 comments/);
+  // A new thread, a proposal, and a reply to a different thread are all the same flood.
+  expect(
+    await code(
+      startThread(t.pool, store, users.reviewer.id, p.id, p.file, {
+        ...(await ends(p.file, 'below 40 ms')),
+        body: 'Again.',
+      }),
+    ),
+  ).toBe('conflict');
+  expect(
+    await code(
+      propose(t.pool, store, users.reviewer.id, p.id, p.file, {
+        ...(await ends(p.file, 'below 40 ms')),
+        replacement: 'under 40 ms',
+      }),
+    ),
+  ).toBe('conflict');
+  // Deleting comments does not buy room: the rows stay.
+  const [thread] = await threads(p);
+  await deleteComment(t.pool, users.reviewer.id, p.id, thread.id, thread.comments[0].id);
+  expect(await code(reply(t.pool, users.reviewer.id, p.id, first.id, { body: 'x' }))).toBe(
+    'conflict',
+  );
+  // Another person on the same paper is not held back by it, and the viewer is not a writer.
+  expect(await code(reply(t.pool, users.owner.id, p.id, first.id, { body: 'Fine.' }))).toBe('ok');
+  // Ten minutes later the count has run down.
+  await t.pool.query("update thread_comments set created_at = now() - interval '11 minutes'");
+  expect(await code(reply(t.pool, users.reviewer.id, p.id, first.id, { body: 'Later.' }))).toBe(
+    'ok',
+  );
+  // The paper's own cap over a day, from everyone.
+  expect(await code(mayWrite(t.pool, users.owner.id, p.id, { perPaper: 5 }))).toBe('conflict');
+  expect(await code(mayWrite(t.pool, users.owner.id, p.id, { perPaper: 5000 }))).toBe('ok');
+  // Another paper is its own.
+  const other = await paper();
+  expect(
+    await code(
+      startThread(t.pool, store, users.reviewer.id, other.id, other.file, {
+        ...(await ends(other.file, 'below 40 ms')),
+        body: 'Elsewhere.',
+      }),
+    ),
+  ).toBe('ok');
 });

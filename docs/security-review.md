@@ -26,6 +26,25 @@ What it found is fixed in the same change, or listed under "Open" with what to d
 
 ## Found and fixed
 
+- **Comments, invitations and grammar checks had no limit.** Shown with `testDb` and the real
+  functions. (1) A reviewer posted 2,000 replies of 5,000 characters in 1.1 s and the owner's
+  thread listing became 10.4 MB. Now one person may write 60 comments, replies and proposals on
+  a paper in ten minutes (`COMMENTS_PER_USER`) and a paper takes 2,000 a day
+  (`COMMENTS_PER_PAPER`), counted from the rows (a deleted comment stays a row); 5,000
+  characters a comment was already the cap. Mention emails were already held to 60 an hour for a
+  person (the comment is saved). (2) One account sent 30 invitations an hour to one stranger and
+  six accounts sent 180. Now one address gets a burst of three and then one an hour, whoever
+  sends (`INVITATIONS_PER_ADDRESS_BURST`), and the service sends 200 an hour
+  (`INVITATIONS_PER_HOUR`); the per-person 30 stays. (3) 50 simultaneous checks of one
+  unchanged file made 50 requests to the checker. Concurrent identical checks now share one
+  request, and one person may cause 60 requests to the checker a minute (`GRAMMAR_CHECKS_PER_USER`, migration
+  0032); viewers may still check, since they can read all of it. (4) A sign-in `name` could hold
+  CR and LF; it is now cleaned of control characters on create and update (nothing sends it in
+  a header today). Held by the new sandbox tests; the mention-email test and the test
+  fixtures that invite the same addresses over and over were given room on purpose
+  (`vitest.config.ts`). **Not covered:** the counts are read then written, so a burst of
+  parallel requests can pass a limit by a few.
+
 - **Sign-in limits could be turned against people and walked around.** Four faults, shown with
   the real handler in production mode. (1) Ten sign-in requests for an address, from any
   clients, refused the owner's own request for most of the hour, because ten per hour were
@@ -217,9 +236,9 @@ In rough order of how much they matter.
 1. **Limits on requests in general.** What costs most is limited: sign-in links (five a
    minute for a client, ten an hour to an address), builds (120 an hour for a paper), chart
    drawings (120 an hour for a paper), model reviews (30 an hour for a paper), invitations
-   (30 an hour for a person), and papers started (100 an hour for a person, which with 300
+   (30 an hour for a person, a burst of three then one an hour to an address, 200 an hour in all), and papers started (100 an hour for a person, which with 300
    MB a paper is what bounds how fast one account can fill the store). Reading pages,
-   checking grammar, uploading within a paper's limit and typing are not, beyond needing to
+   uploading within a paper's limit and typing are not, beyond needing to
    be signed in. A proxy in front should limit requests per person. There is no limit on
    what one person's papers add up to over time: that is a decision about accounts, not made
    here.

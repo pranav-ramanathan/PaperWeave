@@ -4375,3 +4375,22 @@ http-equiv="refresh" content="2">`: a reload every 2 seconds that restarts a scr
   now "three arrive, nine are told a link was sent" (changed on purpose for the new rule).
 - **Not done:** the by-client limit is off in a deployment that sets no header; the owner picks
   hosting and proxy (`docs/settings.md`).
+
+## Abuse limits on comments, invitations and grammar checks
+
+- **Found by** the planner with `testDb`: 2,000 replies in 1.1 s (10.4 MB listing); 180
+  invitations from six accounts, 30 an hour to one stranger; 50 concurrent identical grammar
+  checks made 50 outbound requests; a sign-in `name` kept CR/LF.
+- **Now** `mayWrite` (`packages/server/src/limits.ts`) before every comment, reply, new thread
+  and proposal: 60 per person per paper in ten minutes, 2,000 per paper a day
+  (`COMMENTS_PER_USER`, `COMMENTS_PER_PAPER`), counted from `thread_comments` and `proposals`.
+  `invite` also holds an address to a burst of three then one an hour, and the service to 200 an
+  hour (`INVITATIONS_PER_HOUR`). `checkGrammar` shares one request among identical concurrent
+  checks and allows 60 requests to the checker a minute per person (kept or shared answers are not counted) (`GRAMMAR_CHECKS_PER_USER`, table `grammar_requests`,
+  migration 0032, which also adds three indexes). `cleanName` in `auth.ts` runs on user create
+  and update. Mention emails were already capped at 60 an hour per person.
+- **Tests:** one per fault in the sandbox files; the mention-email test sets
+  `COMMENTS_PER_USER` high for itself, and `vitest.config.ts` sets
+  `INVITATIONS_PER_ADDRESS_BURST=1000` for the others, which invite the same addresses to
+  paper after paper (adapted to the new rule, not weakened).
+- **Not done:** no UI change; counts are not locked, so parallel requests can pass by a few.

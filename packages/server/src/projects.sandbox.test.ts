@@ -219,6 +219,53 @@ test('one person can send only so many invitations in an hour', async () => {
   await invite(t.pool, sender.id, first.id, 'c@example.org', 'viewer', 3);
 });
 
+test('one address is not written to more than a burst, then one an hour, whoever sends; and the service has an hourly cap', async () => {
+  // Six accounts, one stranger.
+  const senders = await Promise.all(
+    [1, 2, 3, 4, 5, 6].map((n) => t.signIn(`bulk${n}@example.org`)),
+  );
+  const papers = await Promise.all(senders.map((s) => createProject(t.pool, s.id, 'Bulk')));
+  const send = (n: number, to: string) =>
+    code(invite(t.pool, senders[n].id, papers[n].id, to, 'viewer', 30, { burst: 3 }));
+  expect(await send(0, 'Stranger@Example.org')).toBe('ok');
+  expect(await send(1, 'stranger@example.org')).toBe('ok');
+  expect(await send(2, 'stranger@example.org')).toBe('ok');
+  // The fourth, from a fourth account, and one person sending it again, are refused.
+  expect(await send(3, 'stranger@example.org')).toBe('conflict');
+  expect(await send(0, 'stranger@example.org')).toBe('conflict');
+  // Another address is its own.
+  expect(await send(3, 'someone-else@example.org')).toBe('ok');
+  // An hour after the last, one more is allowed, and then not another.
+  await t.pool.query(
+    "update invitations set created_at = now() - interval '61 minutes' where email = 'stranger@example.org'",
+  );
+  expect(await send(3, 'stranger@example.org')).toBe('ok');
+  expect(await send(4, 'stranger@example.org')).toBe('conflict');
+  // A cancelled or replaced invitation still counts: the email was sent.
+  // The whole service, in an hour, whoever and whoever to.
+  const total = (
+    await t.pool.query(
+      "select count(*)::int as n from invitations where created_at > now() - interval '1 hour'",
+    )
+  ).rows[0].n;
+  expect(
+    await code(
+      invite(t.pool, senders[5].id, papers[5].id, 'fresh@example.org', 'viewer', 30, {
+        burst: 3,
+        service: total,
+      }),
+    ),
+  ).toBe('conflict');
+  expect(
+    await code(
+      invite(t.pool, senders[5].id, papers[5].id, 'fresh@example.org', 'viewer', 30, {
+        burst: 3,
+        service: total + 1,
+      }),
+    ),
+  ).toBe('ok');
+});
+
 test('only the owner manages people, and the owner cannot be displaced', async () => {
   for (const role of ['editor', 'reviewer', 'viewer'] as const) {
     expect(

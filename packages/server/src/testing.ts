@@ -36,13 +36,13 @@ export async function testDb() {
     /** Every sign-in link "sent" so far. */
     links,
     /** Sign in as the confirm page does, with the emailed link's token. Returns the user's ID and session cookie. */
-    async signIn(email: string) {
+    async signIn(email: string, name?: string) {
       const base = TEST_ENV.BETTER_AUTH_URL + '/api/auth';
       const asked = await auth.handler(
         new Request(base + '/sign-in/magic-link', {
           method: 'POST',
           headers: { 'content-type': 'application/json' },
-          body: JSON.stringify({ email }),
+          body: JSON.stringify({ email, ...(name !== undefined && { name }) }),
         }),
       );
       if (!asked.ok) throw new Error(`sign-in request failed: ${asked.status}`);

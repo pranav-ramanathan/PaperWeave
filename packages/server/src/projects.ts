@@ -5,6 +5,7 @@ import { LIMITS } from './archive.ts';
 import { authorize, type Role, ROLES } from './authz.ts';
 import { type Db, transaction } from './db.ts';
 import { AppError } from './errors.ts';
+import { envCount } from './limits.ts';
 
 const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 /** Reject anything that is not an ID before it reaches a query that expects one. */
@@ -133,7 +134,12 @@ export async function listMembers(db: Db, userId: string, projectId: string): Pr
 }
 
 /** How many invitations one person can send in an hour, over all their papers. */
-export const INVITATIONS_PER_HOUR = 30;
+export const INVITATIONS_PER_PERSON_HOUR = 30;
+/** How many invitations the whole service sends in an hour (`INVITATIONS_PER_HOUR` changes it). */
+export const INVITATIONS_PER_HOUR = 200;
+/** Invitations to one address, from anyone: a burst of this many, then one more each hour. */
+export const INVITATION_BURST = 3;
+export const INVITATION_SPACING_MINUTES = 60;
 
 /** Invite someone by email. Returns the token to put in their link; it is not stored. */
 export async function invite(
@@ -142,7 +148,8 @@ export async function invite(
   projectId: string,
   email: unknown,
   role: unknown,
-  perHour = INVITATIONS_PER_HOUR,
+  perHour = INVITATIONS_PER_PERSON_HOUR,
+  opts: { burst?: number; service?: number } = {},
 ) {
   await authorize(db, userId, id(projectId), 'members.manage');
   if (typeof email !== 'string' || !/^[^@\s]+@[^@\s]+\.[^@\s]+$/.test(email) || email.length > 254)
@@ -160,18 +167,51 @@ export async function invite(
       'conflict',
       `One person can send ${perHour} invitations in an hour, and you have sent that many. Try again in a little while.`,
     );
+  // And an address is not written to more than a burst, then one an hour, whoever sends: nobody
+  // can use the service to fill a stranger's inbox, even with many accounts. Counted from the
+  // invitations, which stay as rows when cancelled or replaced. Then the service as a whole.
+  const address = email.toLowerCase();
+  const earlier = (
+    await db.query(
+      `select extract(epoch from created_at)::float8 as at, extract(epoch from now())::float8 as now
+       from invitations where email = $1 and created_at > now() - interval '1 day' order by created_at`,
+      [address],
+    )
+  ).rows as { at: number; now: number }[];
+  const spacing = INVITATION_SPACING_MINUTES * 60;
+  const burst = opts.burst ?? envCount('INVITATIONS_PER_ADDRESS_BURST', INVITATION_BURST);
+  let tokens = burst;
+  let last = earlier[0]?.at ?? 0;
+  for (const { at } of earlier) {
+    tokens = Math.min(burst, tokens + (at - last) / spacing) - 1;
+    last = at;
+  }
+  if (earlier.length && Math.min(burst, tokens + (earlier[0].now - last) / spacing) < 1)
+    throw new AppError(
+      'conflict',
+      'This address has been invited a few times lately. Try again in an hour.',
+    );
+  const service = opts.service ?? envCount('INVITATIONS_PER_HOUR', INVITATIONS_PER_HOUR);
+  const all = await db.query(
+    "select count(*)::int as n from invitations where created_at > now() - interval '1 hour'",
+  );
+  if (all.rows[0].n >= service)
+    throw new AppError(
+      'conflict',
+      'Invitations are being sent at the most this service allows for the hour. Try again in a little while.',
+    );
   // One live link per address: an earlier, unused one is ended, so the newest role stands. It
   // is ended rather than deleted so that it still counts against the hourly limit above.
   await db.query(
     `update invitations set expires_at = now()
      where project_id = $1 and email = $2 and accepted_at is null and expires_at > now()`,
-    [projectId, email.toLowerCase()],
+    [projectId, address],
   );
   const token = randomBytes(32).toString('base64url');
   await db.query(
     `insert into invitations (project_id, email, role, token_hash, invited_by, expires_at)
      values ($1, $2, $3, $4, $5, now() + make_interval(days => $6))`,
-    [projectId, email.toLowerCase(), role, hash(token), userId, INVITE_DAYS],
+    [projectId, address, role, hash(token), userId, INVITE_DAYS],
   );
   return { token, email: email.toLowerCase(), role };
 }
