@@ -469,7 +469,7 @@ test('a .tar.gz, a .tar and a .gz are refused with a sentence that says what to 
 
 test('an archive with no root says what a root is; a Latin-1 root says what is wrong with it', async () => {
   const noRoot =
-    'invalid_input: No file here has both \\documentclass and \\begin{document}. If the class is loaded from another file, put \\documentclass in the main file.';
+    'invalid_input: No file here has \\begin{document} with a \\documentclass before it, in that file or in a file it \\inputs.';
   expect(
     await refused(
       await writeZip([file('main.tex', '\\documentclass{article}\n'), file('b.tex', 'text')]),
@@ -627,4 +627,40 @@ test('source files that are not UTF-8 text, or hold NUL bytes, are kept but read
   expect(by.get('latin.py')).toEqual({ path: 'latin.py', readonly: 'not-utf8' });
   expect(by.get('nul.c')).toEqual({ path: 'nul.c', readonly: 'not-utf8' });
   expect(by.get('ok.py')).toEqual({ path: 'ok.py' });
+});
+
+test('a \\documentclass that lives in an \\input-ed file still makes the paper importable', async () => {
+  const body = '\\begin{document}\nHello.\n\\end{document}\n';
+  const plain = await reportOf(owner.id, [
+    file('main.tex', `\\input{setup}\n${body}`),
+    file('setup.tex', '\\documentclass{article}\n'),
+  ]);
+  expect(plain.report.root).toBe('main.tex');
+  expect(plain.report.files.find((f) => f.path === 'setup.tex')).toMatchObject({
+    sourceOnly: true,
+  });
+  expect(plain.report.compiler).toBe('pdflatex');
+  expect(plain.report.missing).toEqual([]);
+  // The engine comes from what the preamble file loads.
+  const xe = await reportOf(owner.id, [
+    file('main.tex', `\\input{setup}\n${body}`),
+    file('setup.tex', '\\documentclass{article}\n\\usepackage{fontspec}\n'),
+  ]);
+  expect(xe.report.compiler).toBe('xelatex');
+  // In a wrapping folder, and in a subfolder.
+  const wrapped = await reportOf(owner.id, [
+    file('paper/main.tex', `\\input{tex/setup}\n${body}`),
+    file('paper/tex/setup.tex', '\\documentclass{article}\n'),
+  ]);
+  expect(wrapped.report.root).toBe('main.tex');
+  expect(wrapped.paths).toEqual(['main.tex', 'tex/setup.tex']);
+  expect(wrapped.report.files.find((f) => f.path === 'tex/setup.tex')).toMatchObject({
+    sourceOnly: true,
+  });
+  // No \documentclass anywhere is still refused.
+  expect(
+    await refused(
+      await writeZip([file('main.tex', `\\input{setup}\n${body}`), file('setup.tex', 'x')]),
+    ),
+  ).toContain('with a \\documentclass before it');
 });

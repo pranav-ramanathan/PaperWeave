@@ -10,6 +10,7 @@ import {
   includeGraph,
   parse,
   proseEnvs,
+  reachesClass,
   uncomment,
 } from '@paperweave/latex';
 import type pg from 'pg';
@@ -122,7 +123,7 @@ function compilerFor(texts: Record<string, string>, root: string, graph: Graph):
 }
 
 const NO_ROOT =
-  'No file here has both \\documentclass and \\begin{document}. If the class is loaded from another file, put \\documentclass in the main file.';
+  'No file here has \\begin{document} with a \\documentclass before it, in that file or in a file it \\inputs.';
 
 /**
  * Split an archive into the papers it holds. One wrapping folder is removed. If root files sit in
@@ -139,9 +140,13 @@ export function papers(entries: Entry[], skipped: Skipped[]) {
     if (d.editable) text.set(e.path, d.text);
     else if (d.reason === 'not-utf8' && /\.(tex|ltx)$/i.test(e.path)) unreadable.push(e.path);
   }
-  const roots = [...text]
-    .filter(([path, t]) => /\.(tex|ltx)$/i.test(path) && isRoot(t))
-    .map(([p]) => p);
+  const texFiles = [...text].filter(([path]) => /\.(tex|ltx)$/i.test(path));
+  const direct = texFiles.filter(([, t]) => isRoot(t)).map(([p]) => p);
+  const asObject = Object.fromEntries(text);
+  const everything = new Set(entries.map((e) => e.path));
+  const roots = direct.length
+    ? direct
+    : texFiles.map(([p]) => p).filter((p) => reachesClass(asObject, p, everything));
   if (!roots.length) {
     // A main file saved as Latin-1 is not text the editors can open. Look at it as Latin-1 for
     // this one question, so that the refusal can say what is wrong with it.
@@ -211,7 +216,9 @@ export function describeImport(
     if (d.editable) texts[e.path] = d.text;
   }
   const paths = entries.map((e) => e.path);
-  const found = Object.keys(texts).filter((p) => /\.(tex|ltx)$/i.test(p) && isRoot(texts[p]));
+  const tex = Object.keys(texts).filter((p) => /\.(tex|ltx)$/i.test(p));
+  const direct = tex.filter((p) => isRoot(texts[p]));
+  const found = direct.length ? direct : tex.filter((p) => reachesClass(texts, p, new Set(paths)));
   // Of two files that could be the paper, the one that brings in more of the others is it.
   const reach = new Map(found.map((p) => [p, includeGraph(texts, p, paths).edges.length]));
   const candidates = found.sort(

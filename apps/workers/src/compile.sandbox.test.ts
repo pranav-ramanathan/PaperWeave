@@ -721,3 +721,41 @@ test.each(['pdflatex', 'xelatex', 'lualatex'] as const)(
     expect(r.log).toContain('TODAY=November 14, 2023=');
   },
 );
+
+// \documentclass in a file the root \inputs: every engine builds it, and an error in that file
+// is reported against it.
+const splitProject = (setup: string) => {
+  const project = tmp();
+  writeFileSync(
+    join(project, 'main.tex'),
+    '\\input{setup}\n\\begin{document}\nSplit layout.\n\\end{document}\n',
+  );
+  writeFileSync(join(project, 'setup.tex'), setup);
+  return project;
+};
+test.each(['pdflatex', 'xelatex', 'lualatex'] as const)(
+  'a \\documentclass in an \\input-ed file builds with %s',
+  async (engine) => {
+    const out = tmp();
+    const r = await compile(
+      splitProject('\\documentclass{article}\n'),
+      'main.tex',
+      out,
+      120,
+      engine,
+    );
+    expect(r.diagnostics.filter((d) => d.severity === 'error')).toEqual([]);
+    expect(r.ok).toBe(true);
+    expect(readFileSync(join(out, r.pdf!)).subarray(0, 5).toString()).toBe('%PDF-');
+  },
+);
+test('an error in the file that holds the \\documentclass is reported against that file', async () => {
+  const r = await compile(
+    splitProject('\\documentclass{article}\n\\nosuchcommandxyz\n'),
+    'main.tex',
+    tmp(),
+    120,
+  );
+  expect(r.ok).toBe(false);
+  expect(r.diagnostics.some((d) => d.severity === 'error' && d.file === 'setup.tex')).toBe(true);
+});

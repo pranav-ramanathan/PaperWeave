@@ -88,7 +88,7 @@ test('a ZIP that is not a LaTeX project is refused and creates nothing', async (
   await visitor.page.goto('/sign-in');
   await signIn(visitor.page, visitor.email);
   for (const [file, why] of [
-    ['empty.zip', 'No file here has both'],
+    ['empty.zip', 'No file here has \\begin{document}'],
     ['fake.zip', 'not a readable ZIP file'],
   ]) {
     await visitor.page
@@ -284,4 +284,34 @@ test('an Elsevier paper imports with its abstract editable, shows the edit to a 
       expect(got.toString()).toBe(f.bytes.toString().replace('recover', 'recover zqword'));
     else expect(got.equals(f.bytes), f.path).toBe(true);
   }
+});
+
+test('a paper whose \\documentclass is in an \\input-ed file imports and builds', async ({
+  browser,
+}) => {
+  test.setTimeout(180_000);
+  const owner = await person(browser, 'split-class');
+  const name = `Split ${run}`;
+  const zip = join(mkdtempSync(join(tmpdir(), 'paperweave-e2e-')), `${name}.zip`);
+  writeFileSync(
+    zip,
+    await writeZip([
+      {
+        path: 'main.tex',
+        bytes: Buffer.from('\\input{setup}\n\\begin{document}\nSplit class.\n\\end{document}\n'),
+      },
+      { path: 'setup.tex', bytes: Buffer.from('\\documentclass{article}\n') },
+    ]),
+  );
+  await owner.page.goto('/sign-in');
+  await signIn(owner.page, owner.email);
+  await owner.page.getByLabel('Or import a ZIP of a LaTeX project').setInputFiles(zip);
+  await owner.page.getByRole('button', { name: 'Import ZIP' }).click();
+  await expect(owner.page.getByRole('heading', { name })).toBeVisible();
+  await expect(owner.page.getByText('Root file: main.tex. Compiler: pdflatex.')).toBeVisible();
+  await owner.page.getByRole('link', { name: 'main.tex' }).click();
+  await expect(owner.page.locator('.build').getByRole('status')).toHaveText(
+    'The PDF is up to date.',
+    { timeout: 90_000 },
+  );
 });

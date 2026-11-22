@@ -66,6 +66,7 @@ to their source. Measured on the `real-*` fixtures and on small samples:
   `\newmdtheoremenv`) in its preamble or in its own `.sty`: edited as prose like `lemma`, and
   counted as editable above. The names are read when the page loads.
 - `\subfile`, `\import`, `\include` and `\input` lines, and a subfile's own preamble.
+- A `\documentclass` kept in a file the root `\input`s or `\include`s before `\begin{document}` (up to eight files deep): that file is read before the body, so it is source-only, and its packages choose the compiler. A paper whose root has its own `\documentclass` is found as before.
 - A citation or a reference is shown in place with its source as its title; it is changed as
   LaTeX in the same box (a double click or Enter opens it, as it does a formula).
 - A `.tex` file that is a root of its own (`standalone`, a subfile) is listed as another file that
