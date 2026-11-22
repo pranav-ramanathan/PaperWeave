@@ -253,9 +253,9 @@ test('a data file uploaded again with the box ticked keeps its chart, which is o
   const listed = page.getByRole('listitem').filter({ hasText: 'Line chart of latency' });
   await expect(listed).toContainText('Out of date: its data has changed since it was drawn.');
   await expect(data).toContainText('Look at it again');
-  await audit(page, 'a paper whose data file was replaced');
   await page.goto(chart);
   await expect(page.getByRole('status')).toContainText('Out of date.');
+  await audit(page, 'a chart whose data file was replaced');
   await page.getByRole('link', { name: 'Look at the data again' }).click();
   await page.getByRole('button', { name: 'Approve this description' }).click();
   await expect(page.getByRole('status')).toHaveText('Description approved.');
