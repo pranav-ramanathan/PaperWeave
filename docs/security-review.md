@@ -37,7 +37,7 @@ What it found is fixed in the same change, or listed under "Open" with what to d
   sends (`INVITATIONS_PER_ADDRESS_BURST`), and the service sends 200 an hour
   (`INVITATIONS_PER_HOUR`); the per-person 30 stays. (3) 50 simultaneous checks of one
   unchanged file made 50 requests to the checker. Concurrent identical checks now share one
-  request, and one person may ask for 30 checks a minute (`GRAMMAR_CHECKS_PER_USER`, migration
+  request, and one person may cause 60 requests to the checker a minute (`GRAMMAR_CHECKS_PER_USER`, migration
   0032); viewers may still check, since they can read all of it. (4) A sign-in `name` could hold
   CR and LF; it is now cleaned of control characters on create and update (nothing sends it in
   a header today). Held by the new sandbox tests; the mention-email test and the test

@@ -105,8 +105,8 @@ type Match = {
 const answers = new Map<string, Match[]>();
 /** Questions being asked of the checker now: the same one asked again waits for that answer. */
 const asking = new Map<string, Promise<Match[]>>();
-/** Checks one person may ask for in a minute. */
-export const GRAMMAR_CHECKS_PER_USER = 30;
+/** Requests to the checker one person may cause in a minute (a kept or shared answer is not one). */
+export const GRAMMAR_CHECKS_PER_USER = 60;
 
 /**
  * The spelling and grammar findings in a file's saved text. `unavailable` when no checker is
@@ -131,23 +131,6 @@ export async function checkGrammar(
   if (!file) throw new AppError('not_found', 'No such file to check.');
   const url = opts.url ?? process.env.GRAMMAR_URL;
   if (!url) throw new AppError('unavailable', 'Spelling and grammar checking is not set up.');
-  // Counted before the check, so that a check that fails still counts. Viewers may check (they
-  // can read everything the check reads), but nobody may make the service do it without bound.
-  const perMinute = opts.perMinute ?? envCount('GRAMMAR_CHECKS_PER_USER', GRAMMAR_CHECKS_PER_USER);
-  await pool.query(
-    "delete from grammar_requests where user_id = $1 and created_at < now() - interval '1 hour'",
-    [userId],
-  );
-  const recent = (
-    await pool.query(
-      "select count(*)::int as n from grammar_requests where user_id = $1 and created_at > now() - interval '1 minute'",
-      [userId],
-    )
-  ).rows[0].n as number;
-  if (recent >= perMinute)
-    throw new AppError('conflict', 'Too many checks just now. Try again in a minute.');
-  await pool.query('insert into grammar_requests (user_id) values ($1)', [userId]);
-
   const doc = new Y.Doc();
   for (const update of await loadUpdates(pool, store, fileId)) Y.applyUpdate(doc, update);
   const text = doc.getText(TEXT);
@@ -163,6 +146,25 @@ export async function checkGrammar(
     let pending = asking.get(key);
     if (!pending) {
       pending = (async () => {
+        // Only a request that goes to the checker is counted, before it is made so that one that
+        // fails still counts. An answer already kept, or one being waited for, costs the checker
+        // nothing. Viewers may check (they can read everything the check reads); nobody may make
+        // the checker work without bound.
+        const perMinute =
+          opts.perMinute ?? envCount('GRAMMAR_CHECKS_PER_USER', GRAMMAR_CHECKS_PER_USER);
+        await pool.query(
+          "delete from grammar_requests where user_id = $1 and created_at < now() - interval '1 hour'",
+          [userId],
+        );
+        const recent = (
+          await pool.query(
+            "select count(*)::int as n from grammar_requests where user_id = $1 and created_at > now() - interval '1 minute'",
+            [userId],
+          )
+        ).rows[0].n as number;
+        if (recent >= perMinute)
+          throw new AppError('conflict', 'Checking is paused for a moment. Try again shortly.');
+        await pool.query('insert into grammar_requests (user_id) values ($1)', [userId]);
         const res = await (opts.fetcher ?? fetch)(`${url.replace(/\/$/, '')}/v2/check`, {
           method: 'POST',
           body: new URLSearchParams({

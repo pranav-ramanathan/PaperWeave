@@ -4386,7 +4386,7 @@ http-equiv="refresh" content="2">`: a reload every 2 seconds that restarts a scr
   (`COMMENTS_PER_USER`, `COMMENTS_PER_PAPER`), counted from `thread_comments` and `proposals`.
   `invite` also holds an address to a burst of three then one an hour, and the service to 200 an
   hour (`INVITATIONS_PER_HOUR`). `checkGrammar` shares one request among identical concurrent
-  checks and allows 30 a minute per person (`GRAMMAR_CHECKS_PER_USER`, table `grammar_requests`,
+  checks and allows 60 requests to the checker a minute per person (kept or shared answers are not counted) (`GRAMMAR_CHECKS_PER_USER`, table `grammar_requests`,
   migration 0032, which also adds three indexes). `cleanName` in `auth.ts` runs on user create
   and update. Mention emails were already capped at 60 an hour per person.
 - **Tests:** one per fault in the sandbox files; the mention-email test sets
