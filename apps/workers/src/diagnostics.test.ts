@@ -708,6 +708,67 @@ test('a single character, several fonts and more than twelve characters are kept
   );
 });
 
+const STRAY1 =
+  'Stray character in a picture: ; is typed where TikZ draws no text (outside a node), so the PDF does not show it. Delete it, or put it in a node.';
+const nullfont = (c: string) => `Missing character: There is no ${c} in font nullfont!`;
+
+test('a character thrown away in nullfont is a stray character in a picture, not a missing glyph', () => {
+  const log = ['(./main.tex', nullfont(';'), nullfont(';'), ')'].join('\n');
+  expect(diagnostics(log)).toEqual([{ severity: 'warning', file: 'main.tex', message: STRAY1 }]);
+  // The same lines on a second pass are one warning.
+  expect(diagnostics(log + '\n' + log)).toEqual(diagnostics(log));
+});
+
+test('a nullfont character and a real font missing one in a file are two warnings', () => {
+  const log = [
+    '(./main.tex',
+    nullfont(';'),
+    'Missing character: There is no ^^e9 in font cmr10!',
+    ')',
+  ].join('\n');
+  expect(diagnostics(log)).toEqual([
+    {
+      severity: 'warning',
+      file: 'main.tex',
+      message: 'Characters not shown: é is not in the font (cmr10); the PDF leaves it out.',
+    },
+    { severity: 'warning', file: 'main.tex', message: STRAY1 },
+  ]);
+});
+
+test('XeTeX writes the code as ("3B) and it is read', () => {
+  expect(
+    diagnostics(
+      ['(./main.tex', 'Missing character: There is no ; ("3B) in font nullfont!', ')'].join('\n'),
+    ),
+  ).toEqual([{ severity: 'warning', file: 'main.tex', message: STRAY1 }]);
+  expect(
+    diagnostics(
+      ['(./main.tex', 'Missing character: There is no é ("E9) in font cmr10!', ')'].join('\n'),
+    ),
+  ).toEqual([
+    {
+      severity: 'warning',
+      file: 'main.tex',
+      message: 'Characters not shown: é is not in the font (cmr10); the PDF leaves it out.',
+    },
+  ]);
+});
+
+test('under LuaTeX a stray character names no file', () => {
+  const log = ['This is LuaHBTeX, Version 1.15.0', '(./main.tex', nullfont('; (U+003B)'), ')'].join(
+    '\n',
+  );
+  expect(diagnostics(log)).toEqual([{ severity: 'warning', message: STRAY1 }]);
+});
+
+test('many stray characters are kept short', () => {
+  const log = ['(./a.tex', ...[...'abcdefghijklmn'].map(nullfont), ')'].join('\n');
+  expect(diagnostics(log)[0].message).toBe(
+    'Stray characters in a picture: a b c d e f g h i j k l and 2 more are typed where TikZ draws no text (outside a node), so the PDF does not show them. Delete them, or put them in a node.',
+  );
+});
+
 test('a log without such lines gains no warning', () => {
   expect(diagnostics('(./main.tex\n[1] )')).toEqual([]);
 });

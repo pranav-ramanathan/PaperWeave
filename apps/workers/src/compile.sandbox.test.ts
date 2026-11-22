@@ -217,6 +217,22 @@ test.each(['pdflatex', 'xelatex', 'lualatex'] as const)(
   },
 );
 
+test.each(['pdflatex', 'xelatex', 'lualatex'] as const)(
+  'a stray ; in a TikZ picture is a stray character, not a missing glyph, under %s',
+  async (engine) => {
+    const project = tmp();
+    writeFileSync(
+      join(project, 'main.tex'),
+      '\\documentclass{article}\\usepackage{tikz}\\begin{document}\\begin{tikzpicture}\\draw (0,0) -- (1,1);;\\end{tikzpicture}\\end{document}\n',
+    );
+    const r = await compile(project, 'main.tex', tmp(), 60, engine);
+    expect(r.ok).toBe(true);
+    const messages = r.diagnostics.map((d) => d.message);
+    expect(messages.filter((m) => /^Characters not shown: /.test(m))).toEqual([]);
+    expect(messages.filter((m) => /^Stray character in a picture: ; /.test(m))).toHaveLength(1);
+  },
+);
+
 test('a raw zero-width character in the source fails pdflatex with a plain message', async () => {
   const { r } = await buildSource(
     '\\documentclass{article}\n\\begin{document}\nfine\nab\u200bcd\n\\end{document}\n',

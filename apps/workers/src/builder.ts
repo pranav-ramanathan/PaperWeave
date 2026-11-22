@@ -18,11 +18,16 @@ import { compile, type Compiler, IMAGE } from './compile.ts';
  * that left some out of the PDF said nothing.
  * 'utf8-biber-eps-glyphs-strings': an undefined @string abbreviation is reported now; a cached
  * good build that printed a reference without its journal said nothing.
- * 'utf8-biber-eps-glyphs-strings-forcedate-unicode': builds run with FORCE_SOURCE_DATE=1 now, so \today is
+ * 'utf8-biber-eps-glyphs-strings-forcedate': builds run with FORCE_SOURCE_DATE=1 now, so \today is
  * the revision's date. A PDF built before has the clock's date in it, and the manifest now
  * says FORCE_SOURCE_DATE=1, so it must not be reused as the result of that command.
+ * '...-forcedate-unicode': a Unicode build error is in plain words now; a cached failed build
+ * kept the raw-character message.
+ * '...-forcedate-unicode-nullfont': a stray character in a picture is no longer "Characters not
+ * shown"; a cached good build would keep the paper not ready to submit. Both of the last two
+ * were applied together, in the change that made the constant say so.
  */
-const TEX_TEXT = 'utf8-biber-eps-glyphs-strings-forcedate';
+const TEX_TEXT = 'utf8-biber-eps-glyphs-strings-forcedate-unicode-nullfont';
 
 /** The toolchain image's content ID: part of every cache key, so a new image rebuilds everything. */
 export const imageId = () =>

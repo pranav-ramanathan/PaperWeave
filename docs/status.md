@@ -4561,7 +4561,7 @@ Found by a three-person walkthrough.
 - **Build error:** "Unicode character X (U+XXXX)" now reads "An invisible character (U+200B) is in
   the text here, and pdfLaTeX stops at it. Delete it: the source view shows it as a red dot." or,
   for a visible one, "pdfLaTeX has no character set up for ≤ (U+2264)." File and line are kept.
-  Cached builds are redone (`TEX_TEXT` gains `-unicode`).
+  Cached builds were meant to be redone (`TEX_TEXT` gaining `-unicode`), but only the comment changed; the constant did not until the nullfont change below.
 - **Not fixed:** characters already in a source or an imported file are never rewritten; the
   source view now shows them and the error names the line.
 
@@ -4695,3 +4695,21 @@ Found by a three-person walkthrough.
   back to the quote (a guard that also passed on the old code).
 - **Not done.** A long thread whose text beyond the first 500 differs on arrival is placed on
   its first 500 without a report line. The comment panel still shows only the first 500.
+
+## A stray character in a TikZ picture no longer stops a submit
+
+- **What was wrong.** One harmless stray character in a `tikzpicture` (`;;`, `\end{scope};`)
+  built fine, but TeX logs it as "Missing character ... in font nullfont", which was reported as
+  "Characters not shown". The submit page then refused the paper and offered no ZIP or PDF, and
+  the build pane said some things were not in the PDF on every build. XeTeX's `("3B)` form of the
+  code was not read at all. The earlier `TEX_TEXT` bump to `-unicode` was only in the comment.
+- **Now** characters lost in `nullfont` get their own warning, "Stray character in a picture: ;
+  is typed where TikZ draws no text (outside a node) ...", one per file, so the submit page lists
+  it under "Worth a look" and the paper is ready. XeTeX's `("3B)` form is read (a real missing
+  glyph under XeLaTeX is now reported too). `TEX_TEXT` is now
+  `utf8-biber-eps-glyphs-strings-forcedate-unicode-nullfont` (this applies the `-unicode` bump
+  too) and its comment block is repaired.
+- **Held by** unit tests in `diagnostics.test.ts` and sandbox tests for pdfLaTeX, XeLaTeX and
+  LuaLaTeX in `compile.sandbox.test.ts` and a submit test in `submit.sandbox.test.ts`.
+- **Not done.** No line number (TeX gives none). Text meant to be shown but typed outside a node
+  is only a warning.

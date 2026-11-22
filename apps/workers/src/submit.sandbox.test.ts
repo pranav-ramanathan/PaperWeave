@@ -706,6 +706,26 @@ test('a paper whose font lacks characters is not ready, and the problem is in th
   );
 }, 300_000);
 
+test('a stray character in a TikZ picture is worth a look, and the paper is ready', async () => {
+  const v = await verdict('Tikz paper', {
+    'main.tex': doc(
+      '\\usepackage{tikz}',
+      '\\begin{tikzpicture}\\draw (0,0) -- (1,1);;\\end{tikzpicture}',
+    ),
+  });
+  expect(v.problems).toEqual([]);
+  expect(v.ready).toBe(true);
+  expect(v.revisionId).not.toBeNull();
+  expect(v.findings).toContainEqual(
+    expect.objectContaining({
+      level: 'warning',
+      kind: 'compiler',
+      path: 'main.tex',
+      message: expect.stringMatching(/^Stray character in a picture: ;/),
+    }),
+  );
+}, 300_000);
+
 test('the XeLaTeX paper of the fixtures is still ready', async () => {
   const dir = join(FIXTURES, 'real-xelatex');
   const v = await verdict(
