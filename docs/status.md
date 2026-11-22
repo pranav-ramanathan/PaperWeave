@@ -4481,3 +4481,22 @@ Found by a three-person walkthrough.
   "Imported N files: root main.tex, compiler pdflatex, M% of body prose editable visually, K
   source-only files." from what `describeImport` already computes (K counts preamble files shown in
   source only). Held by `compiler.test` and `tests/e2e/atoms.spec.ts`.
+
+## `.git` and `__MACOSX` no longer count against the import limits
+
+- **What was wrong.** A ZIP of a paper's working folder was refused because `.git`, `__MACOSX`,
+  `.svn`, `.DS_Store` and `Thumbs.db` entries were counted and checked (symbolic link, name length,
+  duplicates, 2000 files, sizes) before they were skipped, although they are never opened. A git
+  clone with over 2000 loose objects, or a Finder ZIP with many `__MACOSX/._*` twins, said "it has
+  too many files"; the `__MACOSX` twin of a long name said "a file name in it is not usable"; a
+  symbolic link inside `.git` refused the whole archive.
+- **Now** `readZip` (`packages/server/src/archive.ts`) skips system entries right after the folder
+  check: neither counted nor checked, and still not listed in `skipped`. A new `entries` limit
+  (50,000, every entry in the archive) is checked once from the ZIP's own entry count before any
+  entry is read, so the skip cannot be used to make the reader walk an endless archive.
+- **Held by** `archive.test` (`.git`, `__MACOSX` twins, long-name twin, paper files still counted,
+  entry bound) and two sandbox tests in `import.sandbox.test` (a zipped working folder with `.git`
+  imports as the paper alone; a symlink inside `.git` imports). The hostile-archive test's
+  symbolic link row (`link.tex`) is still refused.
+- **Not done.** Other unwanted folders such as `node_modules` or `.venv` still count and can
+  refuse.

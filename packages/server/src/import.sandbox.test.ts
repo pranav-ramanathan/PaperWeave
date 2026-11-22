@@ -274,6 +274,33 @@ test('hostile and broken archives are refused whole', async () => {
   expect(await listProjects(t.pool, fresh.id)).toEqual([]);
 });
 
+test('a zipped working folder with .git imports as the paper alone', async () => {
+  const paper = fixture('article-basic', 'My Paper/');
+  const git = [
+    ...Array.from({ length: 30 }, (_, i) => file(`My Paper/.git/objects/ab/${i}`, `o${i}`)),
+    file('My Paper/.git/HEAD', 'ref: refs/heads/main\n'),
+  ];
+  const zip = await writeZip([...paper, ...git]);
+  const limits = { ...LIMITS, files: paper.length + 1 };
+  const made = await importZip(t.pool, store, owner.id, zip, 'x', limits);
+  expect(made).toHaveLength(1);
+  const paths = (await listFiles(t.pool, owner.id, made[0].id)).map((f) => f.path).sort();
+  expect(paths).toEqual(
+    fixture('article-basic')
+      .map((e) => e.path)
+      .sort(),
+  );
+  expect((await importReport(t.pool, owner.id, made[0].id))!.skipped).toEqual([]);
+});
+
+test('a symbolic link inside .git does not refuse the archive', async () => {
+  const zip = rawZip([
+    main,
+    { name: '.git/link', data: Buffer.from('/etc/passwd'), attr: (0o120777 << 16) >>> 0 },
+  ]);
+  expect(await code(importZip(t.pool, store, owner.id, zip, 'x'))).toBe('ok');
+});
+
 test('files and exports are only for people on the paper', async () => {
   const [project] = await importZip(
     t.pool,
