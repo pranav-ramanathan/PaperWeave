@@ -3,6 +3,8 @@ import {
   contained,
   containedNear,
   DEFAULT_TRANSPARENT,
+  HALF,
+  inPair,
   parse,
   reparse,
   sourceOnly,
@@ -27,15 +29,6 @@ export type Command = {
   contained?: boolean;
 };
 export type CommandResult = 'applied' | 'duplicate' | 'conflict';
-
-/** Half of a surrogate pair: one UTF-16 unit of a character that was cut in two. */
-const HALF = /[\ud800-\udbff](?![\udc00-\udfff])|(?<![\ud800-\udbff])[\udc00-\udfff]/;
-/** Whether source offset `at` falls between the two halves of a surrogate pair. */
-const inPair = (src: string, at: number) => {
-  const a = src.charCodeAt(at - 1);
-  const b = src.charCodeAt(at);
-  return a >= 0xd800 && a < 0xdc00 && b >= 0xdc00 && b < 0xe000;
-};
 
 export class Bridge {
   model: Model;
@@ -389,6 +382,9 @@ export class Bridge {
     const to = Y.createAbsolutePositionFromRelativePosition(c.to, doc)?.index;
     if (from == null || to == null || this.ytext.toString().slice(from, to) !== c.expected)
       return 'conflict';
+    // Never cut an emoji in two: the shared text would turn the half into U+FFFD for others.
+    const now = this.ytext.toString();
+    if (inPair(now, from) || inPair(now, to) || HALF.test(c.replacement)) return 'conflict';
     // shortcut: a local copy of placeLost (packages/server/src/commands.ts), which this package
     // cannot import without a circular dependency. Same rule: an insertion is refused if the
     // character either anchor holds on to is deleted. No anchor item (file start or end) is never lost.
