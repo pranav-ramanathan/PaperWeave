@@ -249,9 +249,15 @@ async function checksOf(
   for (const c of charts) {
     if (!used.has(chartPath(c.name, 'pdf')) && !used.has(chartPath(c.name, 'png'))) continue;
     if (c.stale)
-      problem('chart', `The chart "${c.name}" is out of date: its data has changed.`, {
-        chartId: c.id,
-      });
+      problem(
+        'chart',
+        `The chart "${c.name}" is out of date: ${
+          c.changed === 'settings'
+            ? 'the paper holds a drawing made with other settings. Draw it again.'
+            : 'its data has changed.'
+        }`,
+        { chartId: c.id },
+      );
     else if (c.status !== 'drawn')
       problem(
         'chart',

@@ -826,7 +826,11 @@ async function Project({
                       (c.missing ? (
                         <strong>Its files are no longer in the paper: draw it again.</strong>
                       ) : c.stale ? (
-                        <strong>Out of date: its data has changed since it was drawn.</strong>
+                        <strong>
+                          {c.changed === 'settings'
+                            ? 'Out of date: the paper holds a drawing made with other settings. Draw it again.'
+                            : 'Out of date: its data has changed since it was drawn.'}
+                        </strong>
                       ) : (
                         `Drawn ${c.drawnAt!.slice(0, 10)}.`
                       ))}

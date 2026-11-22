@@ -113,8 +113,14 @@ export default async function ChartPage({
       )}
       {chart?.stale && (
         <p role="status">
-          <strong>Out of date.</strong> The data file has changed since this was drawn. {describe},
-          then draw the chart again.
+          <strong>Out of date.</strong>{' '}
+          {chart.changed === 'settings' ? (
+            'The paper holds a drawing made with other settings. Draw it again.'
+          ) : (
+            <>
+              The data file has changed since this was drawn. {describe}, then draw the chart again.
+            </>
+          )}
         </p>
       )}
       {dataset && (

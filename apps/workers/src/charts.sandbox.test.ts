@@ -259,7 +259,9 @@ test('a chart is out of date when a restore brings back a drawing of older data 
   const { id, atV2 } = await drawnTwice(p, true);
   expect(await charts(p)).toMatchObject([{ status: 'drawn', stale: false }]);
   await restoreRevision(t.pool, store, users.owner.id, p.id, atV2!.id);
-  expect(await charts(p)).toMatchObject([{ status: 'drawn', stale: true, missing: false }]);
+  expect(await charts(p)).toMatchObject([
+    { status: 'drawn', stale: true, changed: 'data', missing: false },
+  ]);
   await saveChart(t.pool, store, users.owner.id, p.id, { ...LINE, id });
   expect(await drawNext(t.pool, store, image)).toBe(true);
   expect(await charts(p)).toMatchObject([{ status: 'drawn', stale: false, missing: false }]);
@@ -269,7 +271,37 @@ test('a chart is not out of date when a restore brings back the drawing of the d
   const p = await paper();
   const { atV1 } = await drawnTwice(p, false);
   await restoreRevision(t.pool, store, users.owner.id, p.id, atV1!.id);
-  expect(await charts(p)).toMatchObject([{ status: 'drawn', stale: false, missing: false }]);
+  expect(await charts(p)).toMatchObject([
+    { status: 'drawn', stale: false, changed: null, missing: false },
+  ]);
+}, 120_000);
+
+test('a chart is out of date, for its settings, when a restore brings back a drawing made with other ones', async () => {
+  const p = await paper();
+  await approve(p);
+  const id = await saveChart(t.pool, store, users.owner.id, p.id, {
+    ...LINE,
+    name: 'latency',
+    dataset: p.csv,
+  });
+  expect(await drawNext(t.pool, store, image)).toBe(true);
+  const asLine = await saveRevision(t.pool, store, users.owner.id, p.id, 'Drawn as a line');
+  const BAR = { kind: 'bar', x: 'day', y: 'latency (ms)', combine: 'mean' };
+  await saveChart(t.pool, store, users.owner.id, p.id, { ...BAR, id });
+  expect(await drawNext(t.pool, store, image)).toBe(true);
+  expect(await charts(p)).toMatchObject([{ stale: false, changed: null }]);
+  await restoreRevision(t.pool, store, users.owner.id, p.id, asLine.id);
+  expect(await charts(p)).toMatchObject([
+    { status: 'drawn', stale: true, changed: 'settings', missing: false },
+  ]);
+  await saveChart(t.pool, store, users.owner.id, p.id, { ...BAR, id });
+  expect(await drawNext(t.pool, store, image)).toBe(true);
+  expect(await charts(p)).toMatchObject([{ status: 'drawn', stale: false, changed: null }]);
+  // Back to the line settings and drawn again: the same bytes, so fresh.
+  await restoreRevision(t.pool, store, users.owner.id, p.id, asLine.id);
+  await saveChart(t.pool, store, users.owner.id, p.id, { ...LINE, id });
+  expect(await drawNext(t.pool, store, image)).toBe(true);
+  expect(await charts(p)).toMatchObject([{ stale: false, changed: null }]);
 }, 120_000);
 
 test('a chart carries its caption, its description and the record of how it was made', async () => {
