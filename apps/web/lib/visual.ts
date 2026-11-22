@@ -879,7 +879,10 @@ export function createVisual(opts: {
       );
       return true;
     }
-    void put(paragraphs.map(escape).join('\n\n')).then(
+    // A paragraph of nothing but invisible characters is nothing once escaped.
+    const clean = paragraphs.map((p) => escape(p).trim()).filter(Boolean);
+    if (!clean.length) return true;
+    void put(clean.join('\n\n')).then(
       (result) =>
         result === 'conflict' && say('That text changed before the edit arrived. Try again.'),
       () => say('That edit could not be made. Check the connection and try again.'),

@@ -142,6 +142,24 @@ export function epsPictures(fls: string, dir = ''): string[] {
 }
 
 /**
+ * "LaTeX Error: Unicode character <char> (U+200B)" said in plain words, without the raw
+ * character: an invisible one cannot be seen, and a direction mark can reverse the line it is in.
+ */
+function plainError(message: string): string {
+  const m =
+    /^(?:LaTeX|Package inputenc) Error: Unicode char(?:acter)? (.+?) \(U\+([0-9A-Fa-f]{4,6})\)$/.exec(
+      message,
+    );
+  if (!m) return message;
+  const code = parseInt(m[2], 16);
+  const name = `U+${code.toString(16).toUpperCase().padStart(4, '0')}`;
+  const char = String.fromCodePoint(code);
+  return /^[\p{C}\p{Z}\p{M}]$/u.test(char) || code === 0xfffd
+    ? `An invisible character (${name}) is in the text here, and pdfLaTeX stops at it. Delete it: the source view shows it as a red dot.`
+    : `pdfLaTeX has no character set up for ${char} (${name}).`;
+}
+
+/**
  * `dir` is the root file's folder with its trailing slash, or '': the build runs there (-cd),
  * so that is what the paths in the log are relative to.
  */
@@ -151,7 +169,7 @@ export function diagnostics(log: string, output = '', dir = ''): Diagnostic[] {
   for (const m of log.matchAll(ERROR))
     found.push({
       at: m.index,
-      d: { severity: 'error', file: m[1], line: Number(m[2]), message: m[3] },
+      d: { severity: 'error', file: m[1], line: Number(m[2]), message: plainError(m[3]) },
     });
   // An error that stops the engine outright (a picture it cannot read, say) has no file and
   // line in front of it, only an exclamation mark.

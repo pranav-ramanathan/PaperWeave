@@ -74,6 +74,8 @@ function replaceText(
   marks: string,
   before = '',
 ): Edit[] | null {
+  // Invisible characters escape to nothing: typing one must change nothing in the source.
+  const esc = escape(ins);
   const del: [number, number][] = [];
   const gone = pieces.map(() => false);
   let fixed = false;
@@ -95,14 +97,14 @@ function replaceText(
 
   let at = -1;
   let gap = -1;
-  if (ins) {
+  if (esc) {
     const g = gapFor(pieces, off, marks);
     if (!g) return null;
     ({ at, gap } = g);
     // A space typed just after a line break would vanish into the next line's indentation, so
     // it goes before the break instead. Both places show the same thing.
     const prev = pieces[gap - 1];
-    if (prev?.k === 'ws' && /^ +$/.test(ins)) at = prev.s;
+    if (prev?.k === 'ws' && /^ +$/.test(esc)) at = prev.s;
   }
 
   // A style group left with nothing in it goes too: \emph{} is noise.
@@ -127,10 +129,10 @@ function replaceText(
     if (prev && from <= prev.to) prev.to = Math.max(prev.to, to);
     else edits.push({ from, to, insert: '' });
   }
-  if (ins) {
+  if (esc) {
     const host = edits.find((e) => e.from <= at && at <= e.to);
-    if (host) host.insert = escape(ins);
-    else edits.push({ from: at, to: at, insert: escape(ins) });
+    if (host) host.insert = esc;
+    else edits.push({ from: at, to: at, insert: esc });
     edits.sort((x, y) => x.from - y.from);
   }
   for (const e of edits) {
@@ -531,10 +533,10 @@ export function translate(
   const spot = locate(m, before, a)!;
   if (spot.block < 0) {
     if (marks) return null;
-    if (!ins.trim()) return { edits: [], phantom: m.phantom };
+    const esc = escape(ins);
+    if (!esc.trim()) return { edits: [], phantom: m.phantom };
     const at = spot.base;
-    const insert =
-      (breakBefore(src, at) ? '' : '\n\n') + escape(ins) + (breakAfter(src, at) ? '' : '\n\n');
+    const insert = (breakBefore(src, at) ? '' : '\n\n') + esc + (breakAfter(src, at) ? '' : '\n\n');
     return { edits: [{ from: at, to: at, insert }], phantom: null };
   }
   const edits = replaceText(

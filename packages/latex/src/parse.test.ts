@@ -410,6 +410,17 @@ test('escape writes " as \\symbol{34}, which babel shorthands cannot change', as
   expect(escape('say "hi"')).toBe('say \\symbol{34}hi\\symbol{34}');
 });
 
+test('escape maps unusual spaces and invisible characters, and leaves the safe ones', async () => {
+  const { escape } = await import('./escape.ts');
+  // thin and narrow spaces -> \,; wide spaces -> one space; zero-width and direction marks -> gone
+  expect(escape('10\u2009km\u202f!\u2002a\u200bb\u200e\u2060\ufeff\u2003c\u2028d\u2029e')).toBe(
+    '10\\,km\\,! ab c d e',
+  );
+  // These build in every engine, or mean something in other scripts: untouched.
+  expect(escape('a\u00adb\u200cc\u200dd\u3000e')).toBe('a\u00adb\u200cc\u200dd\u3000e');
+  expect(escape('\u00a0')).toBe('~');
+});
+
 test('\\symbol{34} is one shown character; other \\symbol{N} stay raw', () => {
   const pieces = (s: string) =>
     parse(s).blocks.flatMap((b) => (b.body.kind === 'para' ? b.body.pieces : []));

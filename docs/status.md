@@ -4534,3 +4534,28 @@ Found by a three-person walkthrough.
   between items, or the preamble (the comment check still works there). A paragraph over 40 KB
   is not parsed. `$5 to $3` written wholly inside the replacement is a valid formula and is not
   flagged. Critique and grammar replacements are not checked.
+
+## Invisible and unusual spaces broke pdfLaTeX builds
+
+- **Before:** a zero-width space (U+200B), a thin or narrow space (U+2009, U+202F), an en or em
+  space, a direction mark and similar, typed or pasted into the visual view, went into the source
+  as they were. pdfLaTeX stopped at them with "Unicode character (U+200B) not set up for use with
+  LaTeX", the message carried the raw character (invisible, and a direction mark can reverse the
+  line it is in), and the source view showed nothing at the line it named. XeLaTeX and LuaLaTeX
+  built, but dropped the space, so two words joined.
+- **Now:** `escape()` writes thin and narrow spaces (U+2006, U+2008, U+2009, U+200A, U+202F) as
+  `\,`; the other fixed-width spaces and line and paragraph separators (U+2000 to U+2005, U+2007,
+  U+205F, U+2028, U+2029) as one plain space; and drops zero-width and direction characters
+  (U+200B, U+200E, U+200F, U+202A to U+202E, U+2060, U+2066 to U+2069, U+FEFF). Typing one that is
+  dropped changes nothing in the source (no empty edit, no `{}` after a macro), and a pasted
+  paragraph of nothing else is not kept. U+00AD, U+200C, U+200D and U+3000 are left alone: they
+  build everywhere or mean something in other scripts. `\,` shows in the visual view as a raw
+  chip, which is accepted.
+- **Source view:** these characters, and the ones CodeMirror already marks, show as a red dot
+  titled "Invisible character U+XXXX". U+00A0, U+200C, U+200D and U+3000 are not marked.
+- **Build error:** "Unicode character X (U+XXXX)" now reads "An invisible character (U+200B) is in
+  the text here, and pdfLaTeX stops at it. Delete it: the source view shows it as a red dot." or,
+  for a visible one, "pdfLaTeX has no character set up for ≤ (U+2264)." File and line are kept.
+  Cached builds are redone (`TEX_TEXT` gains `-unicode`).
+- **Not fixed:** characters already in a source or an imported file are never rewritten; the
+  source view now shows them and the error names the line.

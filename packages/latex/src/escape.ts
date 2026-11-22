@@ -1,4 +1,8 @@
 // Plain text into LaTeX source: what a person typed or a checker suggested, made safe to insert.
+// Unusual space and invisible characters are handled in three classes, because pdfLaTeX stops at
+// them and xelatex/lualatex silently join the words: thin and narrow spaces become \, , the other
+// fixed-width spaces and line/paragraph separators become one plain space, and zero-width and
+// direction marks are dropped. U+00AD, U+200C, U+200D and U+3000 build everywhere and stay.
 import { NBSP } from './parse.ts';
 
 const ESCAPE: Record<string, string> = {
@@ -17,7 +21,15 @@ const ESCAPE: Record<string, string> = {
   '\t': ' ',
 };
 for (const c of '%&$#_{}') ESCAPE[c] = '\\' + c;
-export const escape = (s: string) => s.replace(/[\\~^<>|"\xa0\n\r\t%&$#_{}]/g, (c) => ESCAPE[c]);
+for (const c of '\u2006\u2008\u2009\u200a\u202f') ESCAPE[c] = '\\,';
+for (const c of '\u2000\u2001\u2002\u2003\u2004\u2005\u2007\u205f\u2028\u2029') ESCAPE[c] = ' ';
+for (const c of '\u200b\u200e\u200f\u202a\u202b\u202c\u202d\u202e\u2060\u2066\u2067\u2068\u2069\ufeff')
+  ESCAPE[c] = '';
+export const escape = (s: string) =>
+  s.replace(
+    /[\\~^<>|"\xa0\n\r\t%&$#_{}\u2000-\u200b\u200e\u200f\u2028-\u202f\u205f\u2060\u2066-\u2069\ufeff]/g,
+    (c) => ESCAPE[c],
+  );
 
 /**
  * Whether a comment is open at the end of `line`: a % that is not escaped and is not written
