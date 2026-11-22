@@ -297,9 +297,10 @@ test('a chart is out of date, for its settings, when a restore brings back a dra
   await saveChart(t.pool, store, users.owner.id, p.id, { ...BAR, id });
   expect(await drawNext(t.pool, store, image)).toBe(true);
   expect(await charts(p)).toMatchObject([{ status: 'drawn', stale: false, changed: null }]);
-  // Back to the line settings: the drawing of those is on record and in the paper again.
+  // Back to the line settings and drawn again: the same bytes, so fresh.
   await restoreRevision(t.pool, store, users.owner.id, p.id, asLine.id);
   await saveChart(t.pool, store, users.owner.id, p.id, { ...LINE, id });
+  expect(await drawNext(t.pool, store, image)).toBe(true);
   expect(await charts(p)).toMatchObject([{ stale: false, changed: null }]);
 }, 120_000);
 
