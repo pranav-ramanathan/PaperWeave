@@ -7,7 +7,7 @@ import { fixtures, replica, shown, textblocks, visualOp } from './harness.ts';
 import { contained, DEFAULT_TRANSPARENT, parse } from '@paperweave/latex';
 import type { Command } from './bridge.ts';
 import { fromSrc, toSrc } from './project.ts';
-import { pasteable } from './clipboard.ts';
+import { needs, pasteable } from './clipboard.ts';
 import { schema } from './schema.ts';
 import { getTextBetween, getTextSerializersFromSchema } from '@tiptap/core';
 
@@ -2205,5 +2205,88 @@ describe('text put in by a command is guarded as typed text is', () => {
     expect(put('Figure x\n', (r) => textblocks(r)[0].start + 7, '~\\ref{a}')).toBe(
       'Figure ~\\ref{a}x\n',
     );
+  });
+});
+
+describe('block-level text only goes where LaTeX can take it', () => {
+  const LIST =
+    'Before.\n\n\\begin{itemize}\n\\item alpha \\textbf{bold}\n\\item two\n\\end{itemize}\n\n';
+  const caretIn = (r: ReturnType<typeof replica>, tb: number, at: number) =>
+    r.select(textblocks(r)[tb].start + at);
+
+  test('blockPlace names the block the caret is at the top level of', () => {
+    const r = replica(`\\section{Head}\n\n${LIST}Text \\emph{inside} here.\n`);
+    // heading, list items, paragraph
+    const tbs = textblocks(r);
+    r.select(tbs[0].start + 2);
+    expect(r.bridge.blockPlace(r.state)).toBeNull();
+    r.select(tbs[1].start + 2);
+    expect(r.bridge.blockPlace(r.state)).toBe('para');
+    r.select(tbs[2].start + 2);
+    expect(r.bridge.blockPlace(r.state)).toBe('item');
+    r.select(tbs[2].start + 'alpha '.length + 2); // inside \textbf
+    expect(r.bridge.blockPlace(r.state)).toBeNull();
+    r.select(tbs[4].start + 'Text '.length + 2); // inside \emph
+    expect(r.bridge.blockPlace(r.state)).toBeNull();
+    r.select(tbs[4].start + 2);
+    expect(r.bridge.blockPlace(r.state)).toBe('para');
+  });
+
+  test('a heading or a list is refused inside a group', () => {
+    const r = replica('a \\emph{bcd} e.\n');
+    caretIn(r, 0, 4);
+    expect(r.bridge.headingCommand(r.state, 'section', 'T')).toBeNull();
+    expect(r.bridge.listCommand(r.state, false)).toBeNull();
+    caretIn(r, 0, 1);
+    expect(r.bridge.headingCommand(r.state, 'section', 'T')).not.toBeNull();
+    expect(r.bridge.listCommand(r.state, false)).not.toBeNull();
+  });
+
+  test('needs', () => {
+    expect(needs('alpha\n\\item two')).toBe('item');
+    expect(needs('\\begin{itemize}\n\\item a\n\\end{itemize}')).toBe('block');
+    expect(needs('a $x$ b')).toBe('inline');
+    expect(needs('a\n\nb')).toBe('block');
+    expect(needs('a \\[x\\] b')).toBe('block');
+    expect(needs('a \\section{T} b')).toBe('block');
+    expect(needs('a\n\\item b\n\n')).toBe('item');
+  });
+
+  test('none of the failing pastes and inserts writes a source LaTeX cannot take', () => {
+    // Copy across two items.
+    const l = replica(LIST + 'Para text.\n');
+    const tbs = textblocks(l);
+    l.select(tbs[1].start + 2, tbs[2].start + 2);
+    const slice = l.bridge.sourceOf(l.state);
+    expect(slice).not.toBeNull();
+    {
+      expect(needs(slice!)).toBe('item');
+      l.select(tbs[3].start + 2);
+      expect(l.bridge.accepts(l.state, slice!)).toBe(false);
+      // At an item's top level it is accepted, and splits the item correctly.
+      l.select(tbs[2].start + 2);
+      expect(l.bridge.accepts(l.state, slice!)).toBe(true);
+      const c = l.bridge.insertCommand(l.state, slice!)!;
+      expect(l.bridge.applyCommand(c)).toBe('applied');
+      l.check();
+      expect(parse(l.src).blocks.length).toBeGreaterThan(0);
+      expect(l.src).toContain('\\item twpha \\textbf{bold}\n\\item two\n\\end{itemize}');
+    }
+    // Two paragraphs, caret in a heading or inside \emph.
+    for (const [src, at] of [
+      ['\\section{Intro}\n\nx\n', 3],
+      ['a \\emph{bcd} e.\n', 4],
+    ] as const) {
+      const r = replica(src);
+      r.select(textblocks(r)[0].start + at);
+      expect(r.bridge.blockPlace(r.state)).toBeNull();
+      expect(r.bridge.accepts(r.state, 'P one.\n\nP two.')).toBe(false);
+      expect(r.bridge.headingCommand(r.state, 'section', 'T')).toBeNull();
+      expect(r.bridge.listCommand(r.state, true)).toBeNull();
+    }
+    // Plain words stay fine anywhere.
+    const h = replica('\\section{Intro}\n');
+    h.select(textblocks(h)[0].start + 3);
+    expect(h.bridge.accepts(h.state, 'a $x$ b')).toBe(true);
   });
 });

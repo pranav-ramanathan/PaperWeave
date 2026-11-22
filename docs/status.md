@@ -997,6 +997,20 @@ Figure~, ...`, with no warning and `check()` passing.
   run on or take a `[`/`*`, and a line break after a comment. It is built in the queue, against
   the text the earlier commands left. Not covered: the source-view paste (the source is
   raw LaTeX there), and proposal and grammar replacements.
+- **Block-level text only goes where LaTeX can take it.** A copy from mid-item to mid-item
+  pasted in a paragraph wrote `Before text.alpha\n\item two` (`Lonely \item`), and two
+  paragraphs pasted or a heading or list inserted with the caret in a heading or inside
+  `\emph{...}` wrote a blank line there (`Paragraph ended before \@sect was complete`): no PDF.
+  `Bridge.blockPlace` says whether the caret is at the top level of a paragraph (`'para'`), of a
+  list item (`'item'`) or neither (null: in a group, heading, caption or raw block). The
+  heading and list inserts need `'para'`; `needs()` sorts pasted LaTeX into `'item'` (an `\item`
+  outside any environment), `'block'` (blank line, `\begin`, `\[`, `$$`, sectioning) and
+  `'inline'`, and `Bridge.accepts` lets an `'item'` paste into an item only and a `'block'` paste
+  into a paragraph or item only. Otherwise the paste falls back to the plain words (a copy
+  across items arrives as words), and several pasted paragraphs where the place is null say
+  "Several paragraphs cannot be pasted here" and change nothing. Copy across items pasted into
+  another item still goes in as LaTeX and splits that item. Not covered: a heading inserted in an
+  item is still refused; the source-view paste is raw LaTeX as before.
 
 ## How long a large import takes
 

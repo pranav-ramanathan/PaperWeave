@@ -836,7 +836,8 @@ export function createVisual(opts: {
       say(`Put the caret where the paragraphs should go, with nothing selected, then ${act}.`);
       return true;
     }
-    const put = insertion();
+    catchUp();
+    const put = bridge.blockPlace(view.state) ? insertion() : null;
     if (!put) {
       say(
         `Several paragraphs cannot be ${verb} here. ${act[0]!.toUpperCase() + act.slice(1)} them one at a time, or in the source.`,
@@ -863,6 +864,7 @@ export function createVisual(opts: {
       // Refused (it spans structure the visual view cannot express): nothing was changed.
       if (!view.state.selection.empty) return false;
     }
+    if (!bridge.accepts(view.state, latex)) return false;
     const put = insertion();
     if (!put) return false;
     void put(latex).then(

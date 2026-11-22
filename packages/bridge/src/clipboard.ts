@@ -48,3 +48,24 @@ export function pasteable(latex: string): boolean {
   }
   return braces === 0 && dollars % 2 === 0 && display === 0 && envs.length === 0;
 }
+
+const SECTIONING =
+  /\\(?:part|chapter|section|subsection|subsubsection|paragraph|subparagraph)\*?(?![a-zA-Z])/;
+
+/**
+ * What a stretch of LaTeX needs of the place it goes: 'item' if an `\item` sits outside any
+ * environment of its own (it needs a list item around it), 'block' if it holds a paragraph break,
+ * a display, an environment or a sectioning command (it needs a paragraph or item at its top
+ * level, not a heading or a group), else 'inline'.
+ */
+export function needs(latex: string): 'item' | 'block' | 'inline' {
+  let depth = 0;
+  const re = /\\(begin|end)\s*\{[^{}]*\}|\\item(?![a-zA-Z])/g;
+  for (let m = re.exec(latex); m; m = re.exec(latex)) {
+    if (m[1] === 'begin') depth++;
+    else if (m[1] === 'end') depth--;
+    else if (depth <= 0) return 'item';
+  }
+  const block = /\n[ \t]*\n|\\begin\s*\{|\\\[|\$\$/;
+  return block.test(latex) || SECTIONING.test(latex) ? 'block' : 'inline';
+}

@@ -1046,3 +1046,72 @@ test('a [ pasted at the start of a list item does not become its label', async (
   await showSource(page);
   await expect.poll(() => sourceText(page)).toContain('\\item {}[Optional] Run it.Stop.');
 });
+
+test('a copy across list items is not pasted as a lonely \\item, and paragraphs are not pasted into a heading', async ({
+  browser,
+}) => {
+  const { page, email } = await person(browser, 'vis-clip-place');
+  await page.context().grantPermissions(['clipboard-read', 'clipboard-write'], {
+    origin: 'http://localhost:3100',
+  });
+  const main = [
+    '\\documentclass{article}',
+    '\\begin{document}',
+    '\\section{Intro}',
+    '',
+    'Before text.',
+    '',
+    '\\begin{itemize}',
+    '\\item alpha',
+    '\\item beta two',
+    '\\end{itemize}',
+    '\\end{document}',
+    '',
+  ].join('\n');
+  const zip = join(mkdtempSync(join(tmpdir(), 'paperweave-e2e-')), `Place ${run}.zip`);
+  writeFileSync(zip, await writeZip([{ path: 'main.tex', bytes: Buffer.from(main) }]));
+  await page.goto('/sign-in');
+  await signIn(page, email);
+  await page.getByLabel('Or import a ZIP of a LaTeX project').setInputFiles(zip);
+  await page.getByRole('button', { name: 'Import ZIP' }).click();
+  await page.getByRole('link', { name: 'main.tex' }).first().click();
+  await expect(status(page)).toHaveText('All edits saved.');
+  await expect(page.locator(VISUAL)).toContainText('beta two');
+  const note = page.locator('.editor .toolbar .note');
+
+  // From inside the first bullet to inside the second, pasted in a paragraph: words, no \item.
+  await page.evaluate((sel) => {
+    const host = document.querySelector<HTMLElement>(sel)!;
+    const [a, b] = [...host.querySelectorAll('li')];
+    host.focus();
+    const range = document.createRange();
+    range.setStart(a.firstChild!.firstChild ?? a.firstChild!, 2);
+    range.setEnd(b.firstChild!.firstChild ?? b.firstChild!, 4);
+    getSelection()!.removeAllRanges();
+    getSelection()!.addRange(range);
+  }, VISUAL);
+  await page.keyboard.press('ControlOrMeta+c');
+  await clickAfter(page, VISUAL, 'Before text.');
+  await page.keyboard.press('ControlOrMeta+v');
+  await expect(status(page)).toHaveText('All edits saved.');
+  await expect(page.locator(VISUAL)).toContainText('Before text.pha');
+  await showSource(page);
+  const src = await sourceText(page);
+  expect(src).toContain('Before text.');
+  expect(src.slice(0, src.indexOf('\\begin{itemize}'))).not.toContain('\\item');
+  expect(src.match(/\\item/g)).toHaveLength(2);
+  await view(page, 'Visual').click();
+
+  // Two paragraphs with the caret in a heading: said, and the source is as it was.
+  await clickAfter(page, VISUAL, 'Intro');
+  await page.locator(VISUAL).evaluate((el) => {
+    const data = new DataTransfer();
+    data.setData('text/plain', 'P one.\n\nP two.');
+    el.dispatchEvent(
+      new ClipboardEvent('paste', { clipboardData: data, bubbles: true, cancelable: true }),
+    );
+  });
+  await expect(note).toContainText('Several paragraphs cannot be pasted here.');
+  await showSource(page);
+  expect(await sourceText(page)).toBe(src);
+});
