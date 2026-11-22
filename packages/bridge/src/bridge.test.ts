@@ -957,3 +957,131 @@ test('a backslash and an emoji is one atom, and typing beside it leaves no half 
   expect(r.src).not.toMatch(HALVES);
   expect(typed(src, 0, 'q')).toBe('qx \\\u{1F600} y\n');
 });
+
+/** Insert a heading at display offset `off` of paragraph `n`; the new source, or null if refused. */
+function headed(
+  src: string,
+  n: number,
+  off: number,
+  level: 'section' | 'subsection' = 'subsection',
+) {
+  const r = replica(src);
+  r.select(textblocks(r).filter((t) => t.para)[n].start + off);
+  const c = r.bridge.headingCommand(r.state, level, 'Method');
+  if (!c) return null;
+  expect(r.bridge.applyCommand(c)).toBe('applied');
+  r.check();
+  return r.src;
+}
+
+test('a heading in the middle of a paragraph splits it and changes nothing else', () => {
+  expect(headed('One.\n\nTwo here.\n\nThree.\n', 1, 3)).toBe(
+    'One.\n\nTwo\n\n\\subsection{Method}\n\n here.\n\nThree.\n',
+  );
+  // Mid-line break inside a paragraph: the line's own break is used, not added to.
+  expect(headed('One.\n\nTwo\nhere.\n', 1, 3)).toBe(
+    'One.\n\nTwo\n\n\\subsection{Method}\n\nhere.\n',
+  );
+  const r = replica('One.\n\nTwo here.\n\nThree.\n');
+  r.select(textblocks(r).filter((t) => t.para)[1].start + 3);
+  r.bridge.applyCommand(r.bridge.headingCommand(r.state, 'subsection', 'Method')!);
+  const kinds = r.state.doc.children.map((n) => n.type.name);
+  expect(kinds).toEqual(['paragraph', 'paragraph', 'heading', 'paragraph', 'paragraph']);
+  expect(r.state.doc.child(2).attrs.level).toBe(2);
+  expect(r.state.doc.child(2).textContent).toBe('Method');
+});
+
+test('a heading at either end of a paragraph leaves no run of three line breaks', () => {
+  const src = 'One.\n\nTwo here.\n\nThree.\n';
+  expect(headed(src, 1, 0, 'section')).toBe('One.\n\n\\section{Method}\n\nTwo here.\n\nThree.\n');
+  expect(headed(src, 1, 9)).toBe('One.\n\nTwo here.\n\n\\subsection{Method}\n\nThree.\n');
+  for (const [n, off] of [
+    [0, 0],
+    [0, 4],
+    [1, 0],
+    [1, 9],
+    [2, 0],
+    [2, 6],
+  ]) {
+    const out = headed(src, n, off)!;
+    expect(out).not.toMatch(/\n{3}/);
+    expect(out).toContain('\\subsection{Method}');
+  }
+  // The first and last paragraph of a file, with and without a final line break.
+  expect(headed('Only.', 0, 0)).toBe('\\subsection{Method}\n\nOnly.');
+  expect(headed('Only.', 0, 5)).toBe('Only.\n\n\\subsection{Method}\n\n');
+  expect(headed('Only.\n', 0, 5)).toBe('Only.\n\n\\subsection{Method}\n\n');
+  // After a heading line with no blank line between.
+  expect(headed('\\section{A}\nBody.\n', 0, 0)).toBe(
+    '\\section{A}\n\n\\subsection{Method}\n\nBody.\n',
+  );
+});
+
+test('a heading is refused in a list item, a heading, a raw block and a paragraph not yet written', () => {
+  const src =
+    '\\section{Head}\n\n\\begin{itemize}\n\\item One\n\\end{itemize}\n\nText.\n\n\\begin{figure}\n\\caption{Cap}\n\\end{figure}\n';
+  const r = replica(src);
+  const blocks: { start: number; type: string }[] = [];
+  r.state.doc.descendants((n, pos) => {
+    if (n.isTextblock) blocks.push({ start: pos + 1, type: n.type.name });
+  });
+  const types = blocks.map((b) => b.type);
+  expect(types).toEqual(['heading', 'list_item', 'paragraph']);
+  for (const b of blocks.slice(0, 2)) {
+    r.select(b.start + 1);
+    expect(r.bridge.headingCommand(r.state, 'section', 'X')).toBeNull();
+  }
+  r.select(blocks[2].start + 1);
+  expect(r.bridge.headingCommand(r.state, 'section', 'X')).not.toBeNull();
+  // A caption and the preamble are raw blocks: no caret can be put in them.
+  const pre = replica('\\documentclass{article}\n\\begin{document}\nText.\n\\end{document}\n');
+  const tb = textblocks(pre).filter((t) => t.para)[0];
+  pre.select(tb.start + 1);
+  expect(pre.bridge.headingCommand(pre.state, 'section', 'X')).not.toBeNull();
+  pre.select(1);
+  expect(pre.bridge.headingCommand(pre.state, 'section', 'X')).toBeNull();
+
+  // The paragraph opened with Enter, not yet in the source.
+  const p = replica('One.\n');
+  const first = textblocks(p)[0];
+  const tr = p.state.tr.split(first.start + first.size);
+  p.dispatch(tr.setSelection(TextSelection.near(tr.doc.resolve(first.start + first.size + 2))));
+  expect(p.bridge.model.phantom).not.toBeNull();
+  expect(p.bridge.headingCommand(p.state, 'section', 'X')).toBeNull();
+});
+
+test('a heading ends a % comment that is open on the caret line', () => {
+  const src = 'Before % a note\nafter the note.\n\nNext.\n';
+  const r = replica(src);
+  // The caret is at the end of the first line's visible text.
+  r.select(textblocks(r)[0].start + 'Before '.length);
+  const c = r.bridge.headingCommand(r.state, 'section', 'Method')!;
+  expect(r.bridge.applyCommand(c)).toBe('applied');
+  r.check();
+  const out = r.src;
+  expect(out).toBe('Before \n\n\\section{Method}\n\n% a note\nafter the note.\n\nNext.\n');
+  expect(out).toContain('\\section{Method}');
+  // The heading is on a line of its own and no comment text swallowed it.
+  const line = out.split('\n').find((l) => l.includes('\\section{Method}'))!;
+  expect(line).toBe('\\section{Method}');
+  expect(out).not.toMatch(/%[^\n]*\\section/);
+  expect(r.state.doc.children.some((n) => n.type.name === 'heading')).toBe(true);
+  // Every block of text that was there still is.
+  expect(out).toContain('% a note');
+  expect(out).toContain('after the note.');
+});
+
+test('a heading put at the end of a paragraph whose last line ends in a comment is not commented out', () => {
+  for (const tail of ['', '\n']) {
+    const r = replica(`Before text % a note${tail}`);
+    const tb = textblocks(r)[0];
+    r.select(tb.start + tb.size);
+    const c = r.bridge.headingCommand(r.state, 'section', 'Method')!;
+    expect(r.bridge.applyCommand(c)).toBe('applied');
+    r.check();
+    const line = r.src.split('\n').find((l) => l.includes('\\section'))!;
+    expect(line).toBe('\\section{Method}');
+    expect(r.src).not.toMatch(/\n{3}/);
+    expect(r.state.doc.children.map((n) => n.type.name)).toEqual(['paragraph', 'heading']);
+  }
+});

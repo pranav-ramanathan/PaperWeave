@@ -227,6 +227,34 @@ export class Bridge {
   }
 
   /**
+   * Build the command that inserts a sectioning command, with `title` as its argument, where the
+   * caret is, or null if the caret is not in an ordinary paragraph (a list item, a heading, a
+   * caption or other raw LaTeX, the preamble and a paragraph not yet in the source are all
+   * refused). The paragraph is split there. Only as many line breaks are added as are needed to
+   * give the heading blank lines on both sides, so no run of three is ever made. `title` must be
+   * valid as the argument of a command: the caller checks it.
+   */
+  headingCommand(
+    state: EditorState,
+    level: 'section' | 'subsection' | 'subsubsection',
+    title: string,
+  ): Command | null {
+    const spot = locate(this.model, state.doc, state.selection.to);
+    if (!spot || spot.block < 0 || this.model.blocks[spot.block].body.kind !== 'para') return null;
+    const src = this.model.parsed.src;
+    const i = toSrc(this.model, state.doc, state.selection.to, -1);
+    // Blank lines already there count: at the start or the end of a paragraph they usually are.
+    let before = 0;
+    while (before < 2 && src[i - 1 - before] === '\n') before++;
+    let after = 0;
+    while (after < 2 && src[i + after] === '\n') after++;
+    // The start of the file needs no blank line before it.
+    if (i === 0) before = 2;
+    const latex = '\n'.repeat(2 - before) + `\\${level}{${title}}` + '\n'.repeat(2 - after);
+    return this.insertCommand(state, latex);
+  }
+
+  /**
    * Build the command that replaces the source of the atom at `pos` (a formula, a reference, a
    * block of raw LaTeX), or null if there is no atom there. With `part`, only that stretch of
    * the atom's source is replaced (one cell of a table, say), and only that stretch has to be
