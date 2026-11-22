@@ -1,7 +1,7 @@
 // Spelling and grammar. The prose of a file is sent to a LanguageTool server we run ourselves
 // (GRAMMAR_URL); nothing goes to anyone else. Formulas, references, citations, commands and
 // code are sent as markup the checker skips, and a finding that touches any of them is dropped.
-import { escape, inProse, prose } from '@paperweave/latex';
+import { DEFAULT_TRANSPARENT, escape, inProse, prose } from '@paperweave/latex';
 import type pg from 'pg';
 import * as Y from 'yjs';
 import { authorize } from './authz.ts';
@@ -9,6 +9,7 @@ import { type BlobStore, sha256 } from './blobs.ts';
 import type { Db } from './db.ts';
 import { AppError } from './errors.ts';
 import { id } from './projects.ts';
+import { proseOf } from './labels.ts';
 import { loadUpdates, TEXT } from './sync.ts';
 
 export const LANGUAGES = ['en-GB', 'en-US'] as const;
@@ -129,10 +130,12 @@ export async function checkGrammar(
   for (const update of await loadUpdates(pool, store, fileId)) Y.applyUpdate(doc, update);
   const text = doc.getText(TEXT);
   const src = text.toString();
-  const { annotation, segments } = prose(src);
+  // The paper's own theorem environments are prose here as in the editor. At most 64 names.
+  const own = await proseOf(pool, store, projectId);
+  const { annotation, segments } = prose(src, new Set([...DEFAULT_TRANSPARENT, ...own]));
   const disabled = [...NEVER, ...settings.off].join(',');
   // The same text, language and rules give the same answer.
-  const key = `${sha256(Buffer.from(src))}:${settings.language}:${disabled}`;
+  const key = `${sha256(Buffer.from(src))}:${settings.language}:${disabled}:${own.join(',')}`;
   let matches = answers.get(key);
   if (!matches) {
     const res = await (opts.fetcher ?? fetch)(`${url.replace(/\/$/, '')}/v2/check`, {

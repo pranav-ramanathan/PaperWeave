@@ -592,9 +592,20 @@ Read this first. Update it in every pull request.
   56% to 65%, in `docs/import-matrix.md`; both build in `compile.sandbox.test.ts`).
   - The editor, the bridge's containment check and the server's check all read this one default
     (`parse` and `containedNear` default to it), so they agree.
-  - The import report no longer adds a paper's own `\newtheorem` environments to that set. The
-    live editor is never given a per-paper set, so those bodies show as raw there and the report
-    was claiming more than could be typed into. Giving the editor the per-paper set is not done.
+  - A paper's own theorem environments (`\newtheorem`, `\spnewtheorem`, `\declaretheorem`,
+    `\newmdtheoremenv`) are prose too, in the editor, the bridge, the server's containment check,
+    the import report and the grammar check. `proseEnvs` (`packages/latex/src/envs.ts`) reads the
+    names from the root's preamble, the files it reads and the project's own `.sty`/`.cls` it
+    loads; `paperProse` loads them with the page, beside `paperMacros`. Names must be plain
+    letters (at most 32, at most 64 of them) and not a maths, verbatim, list, float or table
+    environment.
+  - A contained command carries the set it was built with (`Command.prose`, the names beyond the
+    default). The server checks them (`invalid_input` for a malformed list) and uses them for its
+    containment check, so both sides agree by construction. That check is a correctness guard, not
+    a permission: a writer can already type any bytes through Yjs.
+  - Staleness: the set is read when the page loads, like the macros. A `\newtheorem` added since
+    shows raw in the visual view until a reload. The grammar check reads it on each check.
+  - Proposals never set `contained`, so they run on the default set and are unchanged.
 
 ## Next
 
