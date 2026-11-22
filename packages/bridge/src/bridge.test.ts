@@ -1085,3 +1085,111 @@ test('a heading put at the end of a paragraph whose last line ends in a comment 
     expect(r.state.doc.children.map((n) => n.type.name)).toEqual(['paragraph', 'heading']);
   }
 });
+
+// Enter and Backspace in a list item.
+const LIST =
+  'Intro.\n\n\\begin{itemize}\n  \\item item uno\n  \\item item dos\n\\end{itemize}\n\nOutro.\n';
+const items = (r: ReturnType<typeof replica>) =>
+  textblocks(r)
+    .filter((t) => !t.para)
+    .slice(0);
+const enterAt = (r: ReturnType<typeof replica>, at: number) => {
+  const tr = r.state.tr.split(at);
+  return r.dispatch(tr.setSelection(TextSelection.near(tr.doc.resolve(at + 2))));
+};
+
+test('Enter in a list item opens a new \\item with the same indentation', () => {
+  // At the end of an item.
+  let r = replica(LIST);
+  let li = items(r);
+  expect(enterAt(r, li[0].start + li[0].size)).toBe(true);
+  expect(r.src).toBe(
+    LIST.replace('item uno\n', 'item uno\n  \\item \n').replace(
+      '  \\item item dos',
+      '  \\item item dos',
+    ),
+  );
+  r.check();
+  expect(items(r).length).toBe(3);
+  // In the middle of an item, and in the last item.
+  r = replica(LIST);
+  li = items(r);
+  expect(enterAt(r, li[0].start + 4)).toBe(true);
+  expect(r.src).toBe(LIST.replace('item uno', 'item\n  \\item  uno'));
+  r.check();
+  r = replica(LIST);
+  li = items(r);
+  expect(enterAt(r, li[1].start + li[1].size)).toBe(true);
+  expect(r.src).toBe(LIST.replace('item dos\n', 'item dos\n  \\item \n'));
+  r.check();
+  // Tabs are copied; an \item on the \begin line gives no indentation.
+  r = replica('\\begin{itemize}\n\t\\item a\n\t\\item b\n\\end{itemize}\n');
+  li = items(r);
+  expect(enterAt(r, li[1].start + 1)).toBe(true);
+  expect(r.src).toBe('\\begin{itemize}\n\t\\item a\n\t\\item b\n\t\\item \n\\end{itemize}\n');
+  r.check();
+  r = replica('\\begin{itemize}\\item a\n\\item b\n\\end{itemize}\n');
+  li = items(r);
+  expect(enterAt(r, li[0].start + 1)).toBe(true);
+  expect(r.src).toBe('\\begin{itemize}\\item a\n\\item \n\\item b\n\\end{itemize}\n');
+  r.check();
+});
+
+test('text typed in the item Enter opened goes after \\item, and Backspace undoes the Enter', () => {
+  const r = replica(LIST);
+  const li = items(r);
+  expect(enterAt(r, li[0].start + li[0].size)).toBe(true);
+  const fresh = items(r)[1];
+  expect(r.dispatch(r.state.tr.insertText('New', fresh.start))).toBe(true);
+  expect(r.src).toBe(LIST.replace('item uno\n', 'item uno\n  \\item New\n'));
+  r.check();
+  // Enter then Backspace gives back the original bytes, at the end of an item and mid-word.
+  for (const where of ['end', 'mid']) {
+    const q = replica(LIST);
+    const a = items(q)[0];
+    expect(enterAt(q, a.start + (where === 'end' ? a.size : 2))).toBe(true);
+    expect(q.src).not.toBe(LIST);
+    const b = items(q)[1];
+    expect(q.dispatch(q.state.tr.join(b.start - 1))).toBe(true);
+    expect(q.src).toBe(LIST);
+    q.check();
+  }
+});
+
+test('Enter inside \\emph{} or in an empty item changes nothing', () => {
+  const emph = '\\begin{itemize}\n  \\item a \\emph{bc} d\n\\end{itemize}\n';
+  const r = replica(emph);
+  const li = items(r)[0];
+  expect(enterAt(r, li.start + 3)).toBe(false);
+  expect(r.src).toBe(emph);
+  r.check();
+  const empty = '\\begin{itemize}\n  \\item \n  \\item two\n\\end{itemize}\n';
+  const e = replica(empty);
+  enterAt(e, items(e)[0].start);
+  expect(e.src).toBe(empty);
+  e.check();
+  expect(items(e).length).toBe(2);
+});
+
+test('one replica splits an item while another types in it, and both converge', () => {
+  const r = replica(LIST);
+  const { b, merge } = peer(r);
+  const li = items(r)[0];
+  expect(enterAt(r, li.start + li.size)).toBe(true);
+  const lb = items(b)[0];
+  expect(b.dispatch(b.state.tr.insertText('!', lb.start + lb.size))).toBe(true);
+  merge();
+  Y.applyUpdate(b.ydoc, Y.encodeStateAsUpdate(r.ydoc));
+  expect(b.src).toBe(r.src);
+  r.check();
+  b.check();
+  expect(items(r).length).toBe(3);
+});
+
+test('typing into an empty list item puts the text right after its \\item', () => {
+  const src = '\\begin{itemize}\n  \\item \n  \\item Three\n\\end{itemize}\n';
+  const r = replica(src);
+  expect(r.dispatch(r.state.tr.insertText('X', items(r)[0].start))).toBe(true);
+  expect(r.src).toBe('\\begin{itemize}\n  \\item X\n  \\item Three\n\\end{itemize}\n');
+  r.check();
+});

@@ -327,3 +327,26 @@ test('a backslash before an emoji takes the whole character', () => {
     ).toBe(s);
   }
 });
+
+test('an empty list item keeps only the spaces on its line in pre; the rest is post', () => {
+  const src =
+    '\\begin{itemize}\n  \\item One\n  \\item \n  \\item Three\n  \\item \n\\end{itemize}\n';
+  const body = parse(src).blocks[0].body;
+  if (body.kind !== 'list') throw new Error('not a list');
+  const shape = body.items.map((it) =>
+    it.pieces.map((p) => `${p.k}:${JSON.stringify(body.text.slice(p.s, p.e))}`),
+  );
+  expect(shape[1]).toEqual(['pre:"\\\\item "', 'post:"\\n  "']);
+  expect(shape[3]).toEqual(['pre:"\\\\item "', 'post:"\\n"', 'post:"\\\\end{itemize}"']);
+  expect(body.items.length).toBe(4);
+  assertLossless(parse(src));
+  // Incremental reparse after typing into the empty items equals a full parse.
+  const typed = src.replace('\\item \n  \\item Three', '\\item X\n  \\item Three');
+  expect(JSON.stringify(reparse(parse(src), typed).blocks)).toBe(
+    JSON.stringify(parse(typed).blocks),
+  );
+  const tail = typed.replace('\\item \n\\end', '\\item Y\n\\end');
+  expect(JSON.stringify(reparse(parse(typed), tail).blocks)).toBe(
+    JSON.stringify(parse(tail).blocks),
+  );
+});

@@ -535,6 +535,73 @@ test('the ordinary keys', async ({ browser }) => {
   expect(await text()).toMatch(/deltaend\.\s*\n\s*\nNEW/);
 });
 
+test('Enter in a list item opens a new item; undo takes it back; another person sees it', async ({
+  browser,
+}) => {
+  test.setTimeout(180_000);
+  const { page, email } = await person(browser, 'vis-list');
+  const other = await person(browser, 'vis-list-2');
+  const main = [
+    '\\documentclass{article}',
+    '\\begin{document}',
+    'Alpha one two alphaend.',
+    '',
+    '\\begin{itemize}',
+    '  \\item item uno',
+    '  \\item item dos',
+    '\\end{itemize}',
+    '\\end{document}',
+    '',
+  ].join('\n');
+  const zip = join(mkdtempSync(join(tmpdir(), 'paperweave-e2e-')), `List ${run}.zip`);
+  writeFileSync(zip, await writeZip([{ path: 'main.tex', bytes: Buffer.from(main) }]));
+  await page.goto('/sign-in');
+  await signIn(page, email);
+  await page.getByLabel('Or import a ZIP of a LaTeX project').setInputFiles(zip);
+  await page.getByRole('button', { name: 'Import ZIP' }).click();
+  await page.getByLabel('Their email address').fill(other.email);
+  await page.getByLabel('Their role').selectOption('editor');
+  await page.getByRole('button', { name: 'Send invitation' }).click();
+  await expect(page.getByRole('status')).toContainText(other.email);
+  await other.page.goto(await emailedLink(other.email, '/invitations/'));
+  await signIn(other.page, other.email);
+  await other.page.getByRole('button', { name: 'Join this paper' }).click();
+  await expect(other.page.getByText('You are an editor')).toBeVisible();
+  await page.getByRole('link', { name: 'main.tex' }).first().click();
+  await expect(status(page)).toHaveText('All edits saved.');
+  await other.page.goto(page.url());
+  await expect(other.page.locator(VISUAL)).toContainText('item dos');
+  await expect(other.page.locator(`${VISUAL} li`)).toHaveCount(2);
+  const note = page.locator('.editor .toolbar .note');
+  const text = async () => {
+    await expect(status(page)).toHaveText('All edits saved.');
+    await showSource(page);
+    await page.waitForTimeout(800);
+    const t = (await page.locator(SOURCE).innerText()).replace(/⁠/g, '');
+    await view(page, 'Visual').click();
+    await expect(page.locator(VISUAL)).toBeVisible();
+    return t;
+  };
+
+  await clickAfter(page, VISUAL, 'item uno');
+  await page.keyboard.press('End');
+  await page.keyboard.press('Enter');
+  await page.keyboard.type('tres');
+  await expect(page.locator(`${VISUAL} li`)).toHaveCount(3);
+  expect(await text()).toMatch(/\\item item uno\n {2}\\item tres\n {2}\\item item dos/);
+  await expect(note).toHaveText('');
+  await expect(other.page.locator(`${VISUAL} li`)).toHaveCount(3);
+  await expect(other.page.locator(VISUAL)).toContainText('tres');
+
+  // Undo takes back the new item, typing included (the two may go together).
+  await page.keyboard.press('ControlOrMeta+z');
+  if ((await page.locator(`${VISUAL} li`).count()) === 3)
+    await page.keyboard.press('ControlOrMeta+z');
+  await expect(page.locator(`${VISUAL} li`)).toHaveCount(2);
+  expect(await text()).toMatch(/\\item item uno\n {2}\\item item dos/);
+  await expect(other.page.locator(`${VISUAL} li`)).toHaveCount(2);
+});
+
 /** The text of the caret's paragraph up to where another person's caret is drawn. */
 const textBeforeCaret = (page: Page, name: string) =>
   page.evaluate((n) => {

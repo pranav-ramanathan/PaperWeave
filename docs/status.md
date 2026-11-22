@@ -2217,8 +2217,7 @@ update` held the paper's file rows for **189.6 s** (until the proxy was cut; it 
   keys. Each failed on the old code. One older bridge test deleted across two paragraphs to show
   a refusal; it now starts inside emphasised text, which is still refused.
 - **Not changed:**
-  - Enter at the end of a list item, inside emphasised text or in the middle of a heading,
-    and Ctrl+A, are still sent to the source. Ctrl+X across paragraphs, refused before, was
+  - Enter inside emphasised text or in the middle of a heading, and Ctrl+A, are still sent to the source. Ctrl+X across paragraphs, refused before, was
     not tried again.
   - Enter at the start of a paragraph does nothing: an extra blank line means nothing in LaTeX.
   - Tab leaves the editor, so that the keyboard is never caught in it.
@@ -3912,6 +3911,30 @@ Coming back online, the editor said "This paper was restored to an earlier revis
 - **Tests.** `bridge.test.ts` (exact bytes mid-paragraph, both ends, refusals, the projected
   heading node, comments) and `insert.spec.ts` (toolbar, Alt+H, menu, undo, a second person,
   refusals, axe).
+
+## Enter in a list item
+
+- **What was missing.** Enter in a list item in the visual view was refused ("That edit spans
+  LaTeX structure"), because only paragraph Enter was a local splice.
+- **What happens now.** Enter in a flat `itemize` or `enumerate` item inserts `\n`, the indentation
+  of the item's own `\item`, and `\item ` at the caret (`translate.ts`). It is a splice like
+  paragraph Enter: no server command, and undo and collaboration come with the shared text.
+  - The indentation is copied (spaces or tabs); an `\item` on the `\begin` line gives none.
+  - Backspace at the start of an item after the first joins it to the item before: it deletes
+    from the end of the earlier item's text to the end of this item's `\item`. At the end of an
+    item, Enter then Backspace gives back the original bytes. Split in the middle of text that
+    has a space at the split, the space stays at the front of the new item and Backspace removes
+    it too (paragraph Enter does the same).
+  - Enter in an empty item does nothing and says nothing. Enter inside `\emph{...}` is refused as
+    in paragraphs. Backspace at the start of the first item is unchanged.
+  - `parse.ts`: an empty item's `pre` now ends after the spaces on its own line and the rest is
+    `post`, so text typed into it goes right after `\item `, not after the next line's indent.
+- **Not built.** `\item[label]`, description lists, nested lists and items of several paragraphs
+  are still raw blocks. Enter at the very start of the first item is refused. A selection
+  replaced by Enter in a list is still refused.
+- **Tests.** `bridge.test.ts` (exact bytes, indentation, typing, Backspace as inverse, refusals,
+  two replicas), `parse.test.ts` (pieces of an empty item, incremental equals full), and
+  `visual.spec.ts` (Enter, typing, undo, a second person).
 
 ## Decisions waiting on the owner
 

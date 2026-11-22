@@ -88,8 +88,9 @@ is never read and shell escape is off.
 
 ## Limits, as built
 
-- An edit that spans two blocks, deletes a whole block or splits a heading or list item is refused
-  with a pointer to the source editor.
+- An edit that spans two blocks, deletes a whole block or splits a heading is refused with a pointer to the
+  source editor. Enter in a flat list item opens a new `\item`; Backspace at the start of an item
+  joins it to the one before.
 - Lists with nested lists, several paragraphs per item or `\item[...]` are shown raw. Tables,
   figures, `\title` and `\author` are shown raw.
 - `--`, quotes and the space TeX drops after a command name are shown as typed, not as typeset.
