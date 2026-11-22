@@ -30,27 +30,33 @@ const PNG =
   'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mP8z8BQDwAEhQGAhKmMIQAAAABJRU5ErkJggg==';
 const selected = (page: Page) => page.evaluate(() => getSelection()!.toString());
 
-/** Double-click a word in an editor, as a person would to select it. */
+/**
+ * Select a word in an editor. The selection is made on the word's own text, not by clicking
+ * where it was last drawn: the page lays itself out again as status lines and previews arrive,
+ * and a click aimed at old coordinates can land on something else.
+ */
 async function pick(page: Page, within: string, word: string) {
-  const at = await page.evaluate(
+  const found = await page.evaluate(
     ([sel, w]) => {
-      const walker = document.createTreeWalker(document.querySelector(sel)!, NodeFilter.SHOW_TEXT);
+      const host = document.querySelector<HTMLElement>(sel)!;
+      const walker = document.createTreeWalker(host, NodeFilter.SHOW_TEXT);
       for (let n = walker.nextNode(); n; n = walker.nextNode()) {
         const i = n.textContent!.indexOf(w);
         if (i < 0) continue;
-        n.parentElement!.scrollIntoView({ block: 'center' });
+        host.focus();
         const range = document.createRange();
         range.setStart(n, i);
         range.setEnd(n, i + w.length);
-        const r = range.getBoundingClientRect();
-        return { x: r.x + r.width / 2, y: r.y + r.height / 2 };
+        getSelection()!.removeAllRanges();
+        getSelection()!.addRange(range);
+        return true;
       }
-      return null;
+      return false;
     },
     [within, word] as const,
   );
-  if (!at) throw new Error(`"${word}" is not shown in ${within}`);
-  await page.mouse.dblclick(at.x, at.y);
+  if (!found) throw new Error(`"${word}" is not shown in ${within}`);
+  await expect(page.locator(within)).toBeFocused();
   await expect.poll(() => selected(page)).toBe(word);
 }
 /** Type just after a word. */
@@ -138,28 +144,50 @@ test('visual edits reach the source through the server, byte for byte', async ({
 
   // Bold is the same kind of edit: the button and Ctrl+B, undone, and taken off again. The
   // other person sees each change in their source.
-  await owner.page.waitForTimeout(700); // a second double click too soon would count as a triple
   await pick(owner.page, VISUAL, 'Reviewers');
   await owner.page.getByRole('button', { name: 'Bold' }).click();
   await expect.poll(() => sourceText(editor.page)).toContain('\\textbf{Reviewers} then see');
   await expect(owner.page.locator(`${VISUAL} strong`, { hasText: 'Reviewers' })).toBeVisible();
   await owner.page.getByRole('button', { name: 'Undo' }).click();
   await expect.poll(() => sourceText(editor.page)).not.toContain('\\textbf{Reviewers} then see');
-  await owner.page.waitForTimeout(700); // a second double click too soon would count as a triple
   await pick(owner.page, VISUAL, 'Reviewers');
+  // Each shortcut acts on the text as the person sees it, so the next waits until the visual
+  // view shows the last one done: pressed sooner, it would act on text the server has changed.
+  const marked = (page: Page, tag: 'strong' | 'em') =>
+    page.locator(`${VISUAL} ${tag}`, { hasText: 'Reviewers' });
   await owner.page.keyboard.press('ControlOrMeta+b');
   await expect.poll(() => sourceText(editor.page)).toContain('\\textbf{Reviewers}');
+  await expect(marked(owner.page, 'strong')).toBeVisible();
   await owner.page.keyboard.press('ControlOrMeta+i');
   await expect
     .poll(() => sourceText(editor.page))
     .toContain('\\textbf{\\emph{Reviewers}} then see');
+  await expect(marked(owner.page, 'em')).toBeVisible();
   // Bold off leaves the emphasis; emphasis off then leaves the plain word.
   await owner.page.keyboard.press('ControlOrMeta+b');
-  await expect.poll(() => sourceText(editor.page)).toContain('\\emph{Reviewers}');
+  await expect.poll(() => sourceText(editor.page)).toContain('\\emph{Reviewers} then see');
+  await expect.poll(() => sourceText(editor.page)).not.toContain('\\textbf{');
+  await expect(marked(owner.page, 'strong')).toHaveCount(0);
+  await expect(marked(owner.page, 'em')).toBeVisible();
   await owner.page.keyboard.press('ControlOrMeta+i');
   await expect.poll(() => sourceText(editor.page)).toContain(both);
   await expect.poll(() => sourceText(editor.page)).not.toContain('\\textbf{Reviewers}');
   await expect.poll(() => sourceText(editor.page)).not.toContain('\\emph{Reviewers}');
+
+  // A fast typist presses the next shortcut before the server has answered the last. Each acts
+  // on what the one before made, and none is refused as stale.
+  await pick(owner.page, VISUAL, 'Reviewers');
+  await owner.page.keyboard.press('ControlOrMeta+b');
+  await owner.page.keyboard.press('ControlOrMeta+i');
+  await expect
+    .poll(() => sourceText(editor.page))
+    .toContain('\\textbf{\\emph{Reviewers}} then see');
+  await owner.page.keyboard.press('ControlOrMeta+b');
+  await owner.page.keyboard.press('ControlOrMeta+i');
+  await expect.poll(() => sourceText(editor.page)).toContain(both);
+  await expect.poll(() => sourceText(editor.page)).not.toContain('\\textbf{');
+  await expect.poll(() => sourceText(editor.page)).not.toContain('\\emph{Reviewers}');
+  await expect(owner.page.getByText('changed before the edit arrived')).toHaveCount(0);
 
   // Switching views carries the selection across, both ways.
   await pick(owner.page, VISUAL, 'organised');
