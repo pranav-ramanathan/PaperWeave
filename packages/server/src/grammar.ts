@@ -8,6 +8,7 @@ import { authorize } from './authz.ts';
 import { type BlobStore, sha256 } from './blobs.ts';
 import type { Db } from './db.ts';
 import { AppError } from './errors.ts';
+import { envCount } from './limits.ts';
 import { boundedJson } from './outbound.ts';
 import { id } from './projects.ts';
 import { proseOf } from './labels.ts';
@@ -102,6 +103,10 @@ type Match = {
 };
 /** Answers kept for a while: several people with a file open ask about the same text. */
 const answers = new Map<string, Match[]>();
+/** Questions being asked of the checker now: the same one asked again waits for that answer. */
+const asking = new Map<string, Promise<Match[]>>();
+/** Checks one person may ask for in a minute. */
+export const GRAMMAR_CHECKS_PER_USER = 30;
 
 /**
  * The spelling and grammar findings in a file's saved text. `unavailable` when no checker is
@@ -113,7 +118,7 @@ export async function checkGrammar(
   userId: string,
   projectId: string,
   fileId: string,
-  opts: { url?: string; fetcher?: typeof fetch } = {},
+  opts: { url?: string; fetcher?: typeof fetch; perMinute?: number } = {},
 ): Promise<LanguageFinding[]> {
   const settings = await languageSettings(pool, userId, projectId);
   const file = (
@@ -126,6 +131,22 @@ export async function checkGrammar(
   if (!file) throw new AppError('not_found', 'No such file to check.');
   const url = opts.url ?? process.env.GRAMMAR_URL;
   if (!url) throw new AppError('unavailable', 'Spelling and grammar checking is not set up.');
+  // Counted before the check, so that a check that fails still counts. Viewers may check (they
+  // can read everything the check reads), but nobody may make the service do it without bound.
+  const perMinute = opts.perMinute ?? envCount('GRAMMAR_CHECKS_PER_USER', GRAMMAR_CHECKS_PER_USER);
+  await pool.query(
+    "delete from grammar_requests where user_id = $1 and created_at < now() - interval '1 hour'",
+    [userId],
+  );
+  const recent = (
+    await pool.query(
+      "select count(*)::int as n from grammar_requests where user_id = $1 and created_at > now() - interval '1 minute'",
+      [userId],
+    )
+  ).rows[0].n as number;
+  if (recent >= perMinute)
+    throw new AppError('conflict', 'Too many checks just now. Try again in a minute.');
+  await pool.query('insert into grammar_requests (user_id) values ($1)', [userId]);
 
   const doc = new Y.Doc();
   for (const update of await loadUpdates(pool, store, fileId)) Y.applyUpdate(doc, update);
@@ -139,26 +160,33 @@ export async function checkGrammar(
   const key = `${sha256(Buffer.from(src))}:${settings.language}:${disabled}:${own.join(',')}`;
   let matches = answers.get(key);
   if (!matches) {
-    const res = await (opts.fetcher ?? fetch)(`${url.replace(/\/$/, '')}/v2/check`, {
-      method: 'POST',
-      body: new URLSearchParams({
-        data: JSON.stringify({ annotation }),
-        language: settings.language,
-        disabledRules: disabled,
-      }),
-      redirect: 'manual',
-      signal: AbortSignal.timeout(20_000),
-    }).catch(() => null);
-    if (!res?.ok)
-      throw new AppError('unavailable', 'The spelling and grammar checker did not answer.');
-    const body = (await boundedJson(res, 8_000_000)) as { matches?: Match[] } | null;
-    if (!Array.isArray(body?.matches))
-      throw new AppError('unavailable', 'The spelling and grammar checker did not answer.');
-    matches = body.matches;
-    // shortcut: a few answers kept per process, the oldest dropped. Share them between
-    // processes if checking ever shows up in timings.
-    if (answers.size >= 32) answers.delete(answers.keys().next().value!);
-    answers.set(key, matches);
+    let pending = asking.get(key);
+    if (!pending) {
+      pending = (async () => {
+        const res = await (opts.fetcher ?? fetch)(`${url.replace(/\/$/, '')}/v2/check`, {
+          method: 'POST',
+          body: new URLSearchParams({
+            data: JSON.stringify({ annotation }),
+            language: settings.language,
+            disabledRules: disabled,
+          }),
+          redirect: 'manual',
+          signal: AbortSignal.timeout(20_000),
+        }).catch(() => null);
+        if (!res?.ok)
+          throw new AppError('unavailable', 'The spelling and grammar checker did not answer.');
+        const body = (await boundedJson(res, 8_000_000)) as { matches?: Match[] } | null;
+        if (!Array.isArray(body?.matches))
+          throw new AppError('unavailable', 'The spelling and grammar checker did not answer.');
+        // shortcut: a few answers kept per process, the oldest dropped. Share them between
+        // processes if checking ever shows up in timings.
+        if (answers.size >= 32) answers.delete(answers.keys().next().value!);
+        answers.set(key, body.matches);
+        return body.matches;
+      })().finally(() => asking.delete(key));
+      asking.set(key, pending);
+    }
+    matches = await pending;
   }
 
   const known = new Set(settings.glossary.map((w) => w.toLowerCase()));

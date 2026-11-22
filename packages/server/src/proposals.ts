@@ -9,6 +9,7 @@ import { type ClaimChange, claimChanges, describeClaimChange, sentenceAround } f
 import { type DeleteSet, placeLost, runCommand } from './commands.ts';
 import type { Db } from './db.ts';
 import { AppError } from './errors.ts';
+import { mayWrite } from './limits.ts';
 import { id } from './projects.ts';
 import { docsOf, loadUpdates, TEXT } from './sync.ts';
 
@@ -120,6 +121,7 @@ export async function propose(
   input: { from: unknown; to: unknown; replacement: unknown; reason?: unknown },
 ): Promise<string> {
   await authorize(pool, userId, id(projectId), 'proposal.create');
+  await mayWrite(pool, userId, projectId);
   const file = (
     await pool.query('select 1 from files where id = $1 and project_id = $2 and eol is not null', [
       id(fileId),

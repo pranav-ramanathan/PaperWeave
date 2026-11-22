@@ -296,3 +296,16 @@ test('the confirm page can say whose link it is without using it up', async () =
   expect(await sessionRows()).toBe(before + 1);
   expect(await signInLinkAddress(auth, token)).toBeNull();
 });
+
+test('a name with line breaks or other control characters is cleaned before it is stored', async () => {
+  const me = await t.signIn('crlf@example.org', 'Eve\r\nBcc: victim@example.org\u0000\u2028 Smith');
+  const { rows } = await t.pool.query('select name from "user" where id = $1', [me.id]);
+  expect(rows[0].name).toBe('Eve Bcc: victim@example.org Smith');
+  expect(rows[0].name).not.toMatch(/[\p{Cc}\p{Zl}\p{Zp}]/u);
+  // Updating it is cleaned the same way.
+  const context = await t.auth.$context;
+  await context.internalAdapter.updateUser(me.id, { name: 'Line\nBreak' });
+  expect((await t.pool.query('select name from "user" where id = $1', [me.id])).rows[0].name).toBe(
+    'Line Break',
+  );
+});

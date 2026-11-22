@@ -248,3 +248,37 @@ test('a finding is counted by those who may do what it counts, and on their own 
   expect(await count('reviewer', other, 'proposed')).toBe('ok');
   expect(await sum(other)).toBe(1);
 });
+
+test('fifty checks of one unchanged file at once make one request to the checker', async () => {
+  const p = await paper(MAIN + '% concurrent\n');
+  let calls = 0;
+  const fetcher: typeof fetch = async (...args) => {
+    calls++;
+    await new Promise((r) => setTimeout(r, 200));
+    return fetch(...args);
+  };
+  const all = await Promise.all(
+    Array.from({ length: 50 }, () =>
+      checkGrammar(t.pool, store, users.owner.id, p.id, p.file, {
+        url,
+        fetcher,
+        perMinute: 1000,
+      }),
+    ),
+  );
+  expect(calls).toBe(1);
+  expect(all.every((f) => f.length === all[0].length && f.length > 0)).toBe(true);
+});
+
+test('one person may ask for only so many checks in a minute, and another is not held back', async () => {
+  // The checks the tests above made are these people's too.
+  await t.pool.query('delete from grammar_requests');
+  const p = await paper(MAIN + '% limited\n');
+  const ask = (who: keyof typeof users, perMinute: number) =>
+    code(checkGrammar(t.pool, store, users[who].id, p.id, p.file, { url, perMinute }));
+  for (let i = 0; i < 3; i++) expect(await ask('viewer', 3)).toBe('ok');
+  expect(await ask('viewer', 3)).toBe('conflict');
+  expect(await ask('reviewer', 3)).toBe('ok');
+  await t.pool.query("update grammar_requests set created_at = now() - interval '2 minutes'");
+  expect(await ask('viewer', 3)).toBe('ok');
+});
