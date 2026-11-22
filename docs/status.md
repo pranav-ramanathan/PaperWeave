@@ -3851,8 +3851,14 @@ Coming back online, the editor said "This paper was restored to an earlier revis
   `?removed=<email>`; People says "Removed <email> from this paper." in a `Result`, which takes
   the keyboard. The name comes from the server, not the form. Tests: `keys.spec.ts` and
   `projects.sandbox.test.ts` (both fail on the old code).
-- **Follow-ups, not fixed.** `removeEvidenceAction` and `removeChartAction` also return no
-  result. Leaving a paper is not announced on `/projects`.
+- **Follow-ups, done.** `removeChartAction`, `removeEvidenceAction` and leaving a paper
+  returned no result either. Each now goes to an address that says what happened, in a `Result`
+  that takes the keyboard, with the name taken from the server: `removeChart` returns the chart's
+  name (`?chartRemoved=`), `removeEvidence` the citation's key (`?unchecked=`), and `removeMember`
+  also the paper's name, so leaving lands on `/projects?left=` with "You left <paper>.". Two
+  checks of one key give the same words, which `Result` would not take the keyboard for twice, so
+  that address carries a changing `n` and the `Result` is keyed on it. Tests: `keys.spec.ts` and
+  the sandbox tests of the three server functions (all fail on the old code).
 
 ## Decisions waiting on the owner
 

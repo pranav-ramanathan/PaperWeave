@@ -255,7 +255,10 @@ test('a changed role and a removal take effect at once', async () => {
   expect(await code(authorize(t.pool, who.id, project, 'file.write'))).toBe('permission_denied');
   expect(await code(authorize(t.pool, who.id, project, 'proposal.create'))).toBe('ok');
   // Anyone but the owner may leave.
-  expect(await removeMember(t.pool, who.id, project, who.id)).toEqual({ email: who.email });
+  expect(await removeMember(t.pool, who.id, project, who.id)).toEqual({
+    email: who.email,
+    name: 'Merge latency',
+  });
   expect(await code(authorize(t.pool, who.id, project, 'project.read'))).toBe('not_found');
   expect(
     (await listMembers(t.pool, users.owner.id, project)).some((m) => m.userId === who.id),

@@ -96,9 +96,11 @@ export async function removeAction(projectId: string, memberId: string) {
   const back = `/projects/${projectId}`;
   const user = await requireUser(back);
   await act(back, async () => {
-    const { email } = await removeMember(db(), user.id, projectId, memberId);
-    // Someone who just left has nothing more to see here.
-    return memberId === user.id ? '/projects' : `${back}?removed=${encodeURIComponent(email)}`;
+    const { email, name } = await removeMember(db(), user.id, projectId, memberId);
+    // Someone who just left has nothing more to see here, but is told they left.
+    return memberId === user.id
+      ? `/projects?left=${encodeURIComponent(name)}`
+      : `${back}?removed=${encodeURIComponent(email)}`;
   });
 }
 
@@ -240,8 +242,9 @@ export async function removeEvidenceAction(projectId: string, checkId: string) {
   const back = `/projects/${projectId}`;
   const user = await requireUser(back);
   await act(back, async () => {
-    await removeEvidence(db(), user.id, projectId, checkId);
-    return `${back}#bibliography`;
+    const { key } = await removeEvidence(db(), user.id, projectId, checkId);
+    // The same words twice would not take the keyboard again, so each removal has its own n.
+    return `${back}?unchecked=${encodeURIComponent(key)}&n=${Date.now().toString(36)}#bibliography`;
   });
 }
 
@@ -295,8 +298,8 @@ export async function removeChartAction(projectId: string, chartId: string) {
   const back = `/projects/${projectId}/charts/${chartId}`;
   const user = await requireUser(back);
   await act(back, async () => {
-    await removeChart(db(), user.id, projectId, chartId);
-    return `/projects/${projectId}#data`;
+    const { name } = await removeChart(db(), user.id, projectId, chartId);
+    return `/projects/${projectId}?chartRemoved=${encodeURIComponent(name)}#data`;
   });
 }
 

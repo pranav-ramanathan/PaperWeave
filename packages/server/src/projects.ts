@@ -334,15 +334,16 @@ export async function removeMember(db: Db, userId: string, projectId: string, me
        where u.id = gone.user_id and i.project_id = $1 and lower(i.email) = lower(u.email)
          and i.accepted_at is null and i.expires_at > now()
      )
-     select u.email from gone join "user" u on u.id = gone.user_id`,
+     select u.email, (select name from projects where id = $1) as name
+     from gone join "user" u on u.id = gone.user_id`,
     [projectId, id(memberId)],
   );
   if (!rows[0])
     throw new AppError('invalid_input', 'That person is the owner or is not in the project.');
   // Live connections are re-checked at once rather than at their next edit.
   await db.query("select pg_notify('acl', $1)", [projectId]);
-  // Said back so a page can name who was removed, not whoever a form claimed.
-  return { email: rows[0].email as string };
+  // Said back so a page can name who was removed, and from what paper, not whoever a form claimed.
+  return { email: rows[0].email as string, name: rows[0].name as string };
 }
 
 /** Whether this paper's text may be sent to a model provider. */

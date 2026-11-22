@@ -439,11 +439,13 @@ export async function chartDraws(
 /** Take a chart off the paper's list. Its files stay in the paper until someone deletes them. */
 export async function removeChart(db: Db, userId: string, projectId: string, chartId: string) {
   await authorize(db, userId, id(projectId), 'file.write');
-  const gone = await db.query('delete from charts where id = $1 and project_id = $2', [
-    id(chartId),
-    projectId,
-  ]);
-  if (!gone.rowCount) throw new AppError('not_found', 'No such chart.');
+  const gone = await db.query(
+    'delete from charts where id = $1 and project_id = $2 returning name',
+    [id(chartId), projectId],
+  );
+  if (!gone.rows[0]) throw new AppError('not_found', 'No such chart.');
+  // Said back so a page can name the chart, not whatever a form claimed.
+  return { name: gone.rows[0].name as string };
 }
 
 /** The digest of a drawn chart's PNG, once the person is known to be allowed to read the paper. */

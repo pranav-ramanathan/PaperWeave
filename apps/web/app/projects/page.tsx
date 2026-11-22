@@ -13,11 +13,11 @@ export const metadata = { title: 'Papers' };
 export default async function Projects({
   searchParams,
 }: {
-  searchParams: Promise<{ error?: string; imported?: string }>;
+  searchParams: Promise<{ error?: string; imported?: string; left?: string }>;
 }) {
   const user = await requireUser('/projects');
   const projects = await listProjects(db(), user.id);
-  const { error, imported } = await searchParams;
+  const { error, imported, left } = await searchParams;
   return (
     <main className="page">
       <header className="bar">
@@ -27,6 +27,7 @@ export default async function Projects({
       </header>
       {error && <Result alert>{error}</Result>}
       {imported && <Result>Imported {imported} papers from the archive.</Result>}
+      {left && <Result>You left {left}.</Result>}
       {projects.length ? (
         <ul className="list">
           {projects.map((p) => (

@@ -687,3 +687,83 @@ test('removing someone says so and keeps the keyboard', async ({ browser }) => {
   expect((await focused(page)).name).toBe(`Removed ${guest.email} from this paper.`);
   await expect(page.getByRole('rowheader', { name: guest.email })).toHaveCount(0);
 });
+
+test('leaving a paper says so on the list of papers and keeps the keyboard', async ({
+  browser,
+}) => {
+  test.setTimeout(180_000);
+  const page = await paper(browser, 'keys-leave');
+  const guest = await person(browser, 'keys-leave-guest');
+  await page.getByLabel('Their email address').fill(guest.email);
+  await page.getByLabel('Their email address').press('Enter');
+  await expect(page.getByRole('status')).toHaveText(`Invitation sent to ${guest.email}.`);
+  await guest.page.goto(await emailedLink(guest.email, '/invitations/'));
+  await signIn(guest.page, guest.email);
+  await guest.page.getByRole('button', { name: 'Join this paper' }).click();
+  await expect(guest.page.getByText('You are a')).toBeVisible();
+  const name = (await guest.page.getByRole('heading', { level: 1 }).first().innerText()).trim();
+
+  await tabTo(guest.page, 'Leave this paper');
+  await guest.page.keyboard.press('Enter');
+  await expect(guest.page).toHaveURL(/\/projects\?/);
+  await expect(guest.page.getByRole('status')).toHaveText(`You left ${name}.`);
+  expect((await focused(guest.page)).name).toBe(`You left ${name}.`);
+});
+
+test('removing a chart says so and keeps the keyboard', async ({ browser }) => {
+  test.setTimeout(180_000);
+  const csv = 'day,latency (ms)\n2024-03-01,9\n2024-03-03,38\n2024-03-04,41\n';
+  const page = await paper(browser, 'keys-chart', false, MAIN, [
+    { path: 'data/latency.csv', bytes: Buffer.from(csv) },
+  ]);
+  const data = page.getByRole('listitem').filter({ hasText: 'data/latency.csv:' });
+  await data.getByRole('link', { name: 'Describe it' }).click();
+  await page.getByRole('button', { name: 'Approve this description' }).click();
+  await data.getByRole('link', { name: 'New chart from data/latency.csv' }).click();
+  await page.getByLabel('Name', { exact: true }).fill('latency');
+  await page.getByRole('combobox', { name: 'Kind', exact: true }).selectOption('line');
+  await page.getByRole('combobox', { name: 'Along the bottom', exact: true }).selectOption('day');
+  await page.getByRole('button', { name: 'Draw the chart' }).click();
+  await expect(
+    page.getByRole('img', { name: 'Line chart of latency (ms) against day.' }),
+  ).toBeVisible({ timeout: 30_000 });
+
+  await tabTo(page, 'Remove this chart');
+  await page.keyboard.press('Enter');
+  await expect(page.getByRole('status')).toHaveText('Removed the chart latency.');
+  expect((await focused(page)).name).toBe('Removed the chart latency.');
+  await expect(page.getByRole('link', { name: 'latency', exact: true })).toHaveCount(0);
+});
+
+test('removing two checks of one citation says so each time and keeps the keyboard', async ({
+  browser,
+}) => {
+  test.setTimeout(180_000);
+  const main = MAIN.replace('Latency stays', 'Latency~\\cite{knuth1984} stays').replace(
+    '\\end{document}',
+    '\\bibliography{refs}\n\\end{document}',
+  );
+  const bib = '@misc{knuth1984, title = {Literate Programming}, year = {1984}}\n';
+  const page = await paper(browser, 'keys-evidence', false, main, [
+    { path: 'refs.bib', bytes: Buffer.from(bib) },
+  ]);
+  const row = page.getByRole('row', { name: /^knuth1984/ });
+  for (const claim of ['A first claim', 'A second claim']) {
+    await row.getByText('Record a check').click();
+    await row.getByLabel('The claim that cites knuth1984').fill(claim);
+    await row.getByRole('button', { name: 'Record' }).click();
+    await expect(page.getByRole('status')).toContainText('Recorded an evidence check');
+    await expect(row).toContainText(claim);
+  }
+
+  const line = 'Removed a check of knuth1984.';
+  for (const left of [1, 0]) {
+    await tabTo(page, 'Remove this check of knuth1984');
+    await page.keyboard.press('Enter');
+    await expect(row.getByRole('button', { name: 'Remove this check of knuth1984' })).toHaveCount(
+      left,
+    );
+    await expect(page.getByRole('status')).toHaveText(line);
+    expect((await focused(page)).name).toBe(line);
+  }
+});
