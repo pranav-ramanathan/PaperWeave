@@ -24,10 +24,11 @@ export async function POST(request: Request, { params }: Params) {
   const user = await currentUser();
   if (!user) return Response.json({ error: 'Sign in first.' }, { status: 401 });
   try {
-    // `x-auto-build`: the editor asking for itself. Over a limit that is not an error, only no build.
+    // `x-auto-build`: the editor asking for itself. Over a limit that is not an error: there is
+    // no build, and `paused` says why.
     if (request.headers.get('x-auto-build') === '1') {
-      const id = await requestBuild(db(), user.id, (await params).id, { automatic: true });
-      return Response.json({ id });
+      const made = await requestBuild(db(), user.id, (await params).id, { automatic: true });
+      return Response.json(typeof made === 'string' ? { id: made } : { id: null, ...made });
     }
     return Response.json({ id: await requestBuild(db(), user.id, (await params).id) });
   } catch (err) {

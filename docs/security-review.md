@@ -53,6 +53,8 @@ What it found is fixed in the same change, or listed under "Open" with what to d
   and ask for 120 an hour over all papers (`BUILDS_WAITING_PER_USER`, `BUILDS_PER_USER_HOUR`),
   counted under a lock so simultaneous requests cannot pass together; the worker takes the
   build of whoever has had the fewest done in the last hour, and builds and charts take turns.
+  The editor's own automatic builds stop 20 short of each hourly limit (`BUILDS_RESERVED_FOR_PRESSED`)
+  and are spaced once half the hour is used, so they cannot use up what people press for.
   Service tests hold each and failed on the old code. Still true: accounts share one worker in
   proportion, and a build may run 60 s; more workers are a deployment decision.
 - **Sign-in limits could be turned against people and walked around.** Four faults, shown with

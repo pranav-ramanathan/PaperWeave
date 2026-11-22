@@ -19,6 +19,13 @@ import {
 } from '@paperweave/latex';
 
 export const BUILDS_PER_HOUR = 120;
+/** Of each hourly limit, this many are kept for builds a person asks for: the editor's own
+ * automatic builds are refused this far short of it, so they cannot use up the hour. */
+export const BUILDS_RESERVED_FOR_PRESSED = 20;
+/** Once half the paper's hour is used, its automatic builds are at least this far apart. */
+const AUTOMATIC_SPACING_SECONDS = 30;
+/** An automatic build refused: nothing was queued, and this is why. */
+export type Paused = { paused: string };
 
 export type Diagnostic = {
   severity: 'error' | 'warning';
@@ -90,7 +97,9 @@ const envCount = (name: string, fallback: number) => {
  * an hour, over all their papers: the worker is shared, and one account must not fill its queue.
  * The count is taken under a lock for the person, so two requests at once cannot both pass.
  * With `automatic` (the editor asking for itself, as the text changes) a build over a limit is
- * not an error: nothing is queued and null is returned, and the person can still press the button.
+ * not an error: nothing is queued and `{ paused: reason }` is returned. Automatic builds stop
+ * `BUILDS_RESERVED_FOR_PRESSED` short of each hourly limit, so a person can still press the
+ * button; and once half the paper's hour is used they are spaced 30 seconds apart.
  */
 export function requestBuild(
   pool: pg.Pool,
@@ -103,14 +112,16 @@ export function requestBuild(
   userId: string,
   projectId: string,
   opts: RequestOpts & { automatic: true },
-): Promise<string | null>;
+): Promise<string | Paused>;
 export async function requestBuild(
   pool: pg.Pool,
   userId: string,
   projectId: string,
   opts: RequestOpts & { automatic?: boolean } = {},
-): Promise<string | null> {
-  const perHour = opts.perHour ?? BUILDS_PER_HOUR;
+): Promise<string | Paused> {
+  const perHour = opts.perHour ?? envCount('BUILDS_PER_PAPER_HOUR', BUILDS_PER_HOUR);
+  const reserve =
+    opts.reserve ?? envCount('BUILDS_RESERVED_FOR_PRESSED', BUILDS_RESERVED_FOR_PRESSED);
   const waitingMax =
     opts.waitingPerUser ?? envCount('BUILDS_WAITING_PER_USER', BUILDS_WAITING_PER_USER);
   const hourMax = opts.perUserHour ?? envCount('BUILDS_PER_USER_HOUR', BUILDS_PER_USER_HOUR);
@@ -123,12 +134,14 @@ export async function requestBuild(
     ]);
     if (!own.rows[0]) throw new AppError('not_found', 'No such revision.');
   }
-  const refused = (message: string) => {
-    if (opts.automatic) return null;
+  // Automatic builds stop short of a limit by the reserve; the rest is for people.
+  const autoCap = (limit: number) => (opts.automatic ? Math.max(0, limit - reserve) : limit);
+  const refused = (message: string, paused = message): Paused => {
+    if (opts.automatic) return { paused };
     throw new AppError('conflict', message);
   };
   const client = await pool.connect();
-  let buildId: string | null;
+  let buildId: string | Paused;
   try {
     await client.query('begin');
     // One decision at a time for this person: two requests must not both see room for one more.
@@ -140,7 +153,9 @@ export async function requestBuild(
     if (waiting.rows[0]) buildId = waiting.rows[0].id;
     else {
       const recent = await client.query(
-        "select count(*)::int as n from builds where project_id = $1 and created_at > now() - interval '1 hour'",
+        `select count(*)::int as n,
+                extract(epoch from now() - max(created_at))::float as "sinceLast"
+         from builds where project_id = $1 and created_at > now() - interval '1 hour'`,
         [projectId],
       );
       const mine = (
@@ -152,17 +167,36 @@ export async function requestBuild(
           [userId],
         )
       ).rows[0];
-      if (recent.rows[0].n >= perHour)
+      const { n, sinceLast } = recent.rows[0];
+      if (n >= perHour)
         buildId = refused(
           `This paper has been built ${perHour} times in the last hour. Try again in a little while.`,
+          `this paper has built ${n} times this hour. Compile now is refused too until an hour has passed.`,
+        );
+      else if (n >= autoCap(perHour))
+        buildId = refused(
+          '',
+          `this paper has built ${n} times this hour. The rest are kept for Compile now, which still works.`,
         );
       else if (mine.waiting >= waitingMax)
         buildId = refused(
           `You have ${mine.waiting} builds waiting already. Wait for one to finish.`,
+          `you have ${mine.waiting} builds waiting already. It will go on when one is done.`,
         );
       else if (mine.hour >= hourMax)
         buildId = refused(
           `You have asked for ${hourMax} builds in the last hour, over all your papers. Try again in a little while.`,
+          `you have asked for ${mine.hour} builds this hour, over all your papers. Compile now is refused too until an hour has passed.`,
+        );
+      else if (mine.hour >= autoCap(hourMax))
+        buildId = refused(
+          '',
+          `you have asked for ${mine.hour} builds this hour, over all your papers. The rest are kept for Compile now, which still works.`,
+        );
+      else if (opts.automatic && n >= perHour / 2 && sinceLast < AUTOMATIC_SPACING_SECONDS)
+        buildId = refused(
+          '',
+          `this paper has built ${n} times this hour, so automatic builds are now ${AUTOMATIC_SPACING_SECONDS} seconds apart. Compile now still works.`,
         );
       else {
         const made = await client.query(
@@ -196,6 +230,8 @@ type RequestOpts = {
   revisionId?: string;
   waitingPerUser?: number;
   perUserHour?: number;
+  /** Builds kept for people, out of each hourly limit; automatic builds stop short by this. */
+  reserve?: number;
 };
 
 /**

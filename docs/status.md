@@ -654,8 +654,15 @@ Read this first. Update it in every pull request.
   or running over all papers and 120 asked for per hour (`BUILDS_WAITING_PER_USER`,
   `BUILDS_PER_USER_HOUR`), with a message that says why. Every build is queued there (the
   editor, the submit page's "build and check", a revision's build). The editor's own automatic
-  build (header `x-auto-build`) over a limit is skipped quietly: no error is shown, nothing is queued, and
-  it asks again when the paper next changes; the button still says why. The worker takes the
+  build (header `x-auto-build`) is refused earlier, `BUILDS_RESERVED_FOR_PRESSED` (20) short of
+  each hourly limit (per paper, `BUILDS_PER_PAPER_HOUR`, and per person), so pressed, submit and
+  revision builds can still get in; once half the paper's hour is used, automatic builds are
+  also 30 s apart. The route
+  answers `{ id: null, paused: reason }`; the pane says "Automatic compiling is paused: ..." in
+  its status and asks again every 30 s while the PDF is behind the text. Measured before this
+  (typing in the editor, a sentence then a 3 to 5 s pause, 2 minutes): 16 automatic builds, one
+  every 7 s, 17 rows and none answered from an earlier result, about 480 an hour of writing:
+  the paper's 120 would have been gone in 15 minutes, and then every press refused. The worker takes the
   queued build whose requester has had the fewest builds done in the last hour, then the oldest
   (`takeBuild`; index `builds_requester`, migration 0031), and alternates builds and chart
   drawings (`takeTurns`) so neither starves the other.
