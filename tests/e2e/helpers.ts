@@ -54,6 +54,8 @@ export async function signIn(page: Page, email: string) {
 export async function confirmSignIn(page: Page, link: string) {
   await page.goto(link);
   await page.getByRole('button', { name: 'Sign in', exact: true }).click();
+  // Until the action has answered: a page opened before then cuts it short.
+  await page.waitForURL((url) => url.pathname !== '/sign-in/confirm');
 }
 
 /**
