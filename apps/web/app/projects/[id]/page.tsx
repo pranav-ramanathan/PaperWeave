@@ -28,6 +28,7 @@ import {
   REVISIONS_SHOWN,
   listThreads,
   modelProcessing,
+  summarizeImport,
 } from '@paperweave/server';
 import Link from '../../Go';
 import Result from '../../Result';
@@ -450,6 +451,7 @@ async function Project({
         <>
           <h2>Import report</h2>
           <ul className="report">
+            <li>{summarizeImport(report)}</li>
             {report.notes.map((n) => (
               <li key={n}>{n}</li>
             ))}

@@ -30,6 +30,9 @@ test('a citation, a reference and a footnote are opened and edited as LaTeX', as
   await page.getByRole('button', { name: 'Import ZIP' }).click();
   await page.waitForURL(/\/projects\/[^/]+$/);
   const project = page.url();
+  await expect(page.locator('.report:not(.first-steps) li').first()).toHaveText(
+    'Imported 1 file: root main.tex, compiler pdflatex, 51% of body prose editable visually, 0 source-only files.',
+  );
   await page.getByRole('link', { name: 'main.tex' }).first().click();
   await expect(page.locator(`${VISUAL}[contenteditable=true]`)).toBeVisible();
 
@@ -54,6 +57,12 @@ test('a citation, a reference and a footnote are opened and edited as LaTeX', as
   await page.keyboard.press('Escape');
   await expect(reference).toBeHidden();
 
+  // A footnote reads as its words, not as LaTeX, and says what it is to a screen reader.
+  const chip = page.locator(`${VISUAL} .pw-raw_inline`);
+  await expect(chip).toHaveText('Footnote: Old note.');
+  await expect(chip).toHaveAttribute('aria-label', 'footnote: Old note.');
+  await expect(chip).toHaveAttribute('title', '\\footnote{Old note.}');
+
   // The menu on a footnote offers to edit it, and an edit that would change its surroundings
   // is refused with the box kept open.
   await page.locator(`${VISUAL} .pw-raw_inline`).click({ button: 'right' });
@@ -69,6 +78,7 @@ test('a citation, a reference and a footnote are opened and edited as LaTeX', as
   await note.getByLabel('LaTeX').fill('\\footnote{New \\emph{note}.}');
   await note.getByRole('button', { name: 'Apply' }).click();
   await expect(note).toBeHidden();
+  await expect(chip).toHaveText('Footnote: New note.');
   await expect(page.locator(`${VISUAL} .pw-frozen`)).toHaveCount(0);
 
   await showSource(page);

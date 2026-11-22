@@ -4471,3 +4471,13 @@ Found by a three-person walkthrough.
   `tests/e2e/import.spec.ts` follow).
 - **Held by** `graph.test` (seven layouts, four refusals), import and worker sandbox tests and a
   browser test that imports the split ZIP and builds it.
+
+- **Footnote chip reads as words.** In the visual editor a `\footnote{...}` chip now shows
+  `Footnote: See appendix.` (note body through `plainText`, cut at 40 characters with an ellipsis),
+  with the full LaTeX still in the title and "footnote: ..." as its accessible name. Editing is
+  untouched. `plainText` no longer mistook `\textbf`, `\cite` and the like for the `\t` accent.
+  Held by `footnote.test`, `bib.test` and `tests/e2e/atoms.spec.ts`.
+- **Import report opens with a summary line.** `summarizeImport` (`packages/server/src/import.ts`):
+  "Imported N files: root main.tex, compiler pdflatex, M% of body prose editable visually, K
+  source-only files." from what `describeImport` already computes (K counts preamble files shown in
+  source only). Held by `compiler.test` and `tests/e2e/atoms.spec.ts`.

@@ -202,6 +202,20 @@ export function papers(entries: Entry[], skipped: Skipped[]) {
   }));
 }
 
+/** The one line that opens the import report, from facts the report already holds. */
+export function summarizeImport(r: ImportReport): string {
+  let editable = 0;
+  let raw = 0;
+  for (const f of r.files)
+    if (f.visual) {
+      editable += f.visual.editable;
+      raw += f.visual.raw;
+    }
+  const share = editable + raw ? Math.round((100 * editable) / (editable + raw)) : 0;
+  const sourceOnly = r.files.filter((f) => f.sourceOnly).length;
+  return `Imported ${r.files.length} ${r.files.length === 1 ? 'file' : 'files'}: root ${r.root}, compiler ${r.compiler}, ${share}% of body prose editable visually, ${sourceOnly} source-only ${sourceOnly === 1 ? 'file' : 'files'}.`;
+}
+
 /** What an archive's files amount to as a paper: its root, compiler, and what can be edited how. */
 export function describeImport(
   entries: Entry[],

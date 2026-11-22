@@ -1,5 +1,5 @@
 import { expect, test } from 'vitest';
-import { describeImport } from './import.ts';
+import { describeImport, summarizeImport } from './import.ts';
 
 const doc = (pre: string, body = 'Hi.') =>
   `\\documentclass{article}\n${pre}\n\\begin{document}\n${body}\n\\end{document}\n`;
@@ -91,4 +91,15 @@ test('no EPS note without an EPS picture, or when its PDF conversion ships with 
       '\n',
     ),
   ).not.toMatch(/EPS/);
+});
+
+test('the report opens with one line of what was found', () => {
+  const { report } = describeImport([
+    { path: 'main.tex', bytes: Buffer.from(doc('\\input{defs}', 'Some prose here.')) },
+    { path: 'defs.tex', bytes: Buffer.from('\\newcommand{\\x}{y}\n') },
+    { path: 'fig.png', bytes: Buffer.from([0, 1, 2]) },
+  ]);
+  expect(summarizeImport(report)).toBe(
+    'Imported 3 files: root main.tex, compiler pdflatex, 100% of body prose editable visually, 1 source-only file.',
+  );
 });
