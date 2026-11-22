@@ -4260,3 +4260,22 @@ One more, found since:
 - A `[` or `*` typed in the visual view where LaTeX looks past a space or one line break for an
   argument (start of an `\item`, of a body after `\begin{...}`, after `\\`) is written as `{}[`.
   Not covered: a comment line between the command and the `[`.
+
+## File names LaTeX cannot spell
+
+- **What was wrong.** A file could be created or renamed to a name with `%`, `#`, `"`, `{` or
+  `}` in it (`50%.png`). A rename then wrote `\includegraphics{50%.png}` into the source, and
+  the Figure tool inserted such names too. Every engine fails on them (`File ended while
+scanning`, `Illegal parameter number`), and they cannot be quoted, so the name is refused.
+- **Now** `texName` in `packages/server/src/archive.ts` refuses them, in any folder part of the
+  path too (`dir%x/a` breaks `\input` the same way), from `createFile` (so uploads), the file
+  rename and its proposal. Only the new name is checked: renaming away from such a name, an
+  import, a restore and `replaceFile` of an existing file still take the names they have. The
+  Figure tool says "LaTeX cannot use this picture's name. Rename it first." and inserts
+  nothing.
+- **Held by** `files.sandbox.test` ("a name LaTeX cannot spell"), the add-file step in
+  `files.spec` and a figure test in `figures.spec`.
+- **Not done:** the import report does not flag such names; an imported paper can keep a
+  picture it cannot build with until it is renamed (the Figure tool and the rename form now
+  tell the person). `CMD` in `packages/latex/src/graph.ts` still uses `[^{}]*`, which is right
+  now that such names are not made here.

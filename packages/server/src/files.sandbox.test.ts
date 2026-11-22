@@ -996,3 +996,48 @@ test('text with other line endings replaces text, and connected editors see it',
   await replaceFile(t.pool, store, owner.id, p.id, 'rows.csv', text('z\n'));
   expect((await content(p.id))['rows.csv']).toBe('z\n');
 });
+
+test('a name LaTeX cannot spell is refused for a new or renamed file, but existing ones still work', async () => {
+  const zip = await writeZip([
+    { path: 'main.tex', bytes: Buffer.from(MAIN + '\\includegraphics{fig.png}\n') },
+    { path: 'fig.png', bytes: PNG },
+    { path: '50%.png', bytes: PNG },
+  ]);
+  const [project] = await importZip(t.pool, store, owner.id, zip, 'Hostile');
+  const ids = Object.fromEntries(
+    (await listFiles(t.pool, owner.id, project.id)).map((f) => [f.path, f.id]),
+  );
+  // An imported paper keeps the name it came with, and a replace of it still works.
+  expect(Object.keys(ids)).toContain('50%.png');
+  expect(await code(replaceFile(t.pool, store, owner.id, project.id, '50%.png', PNG))).toBe('ok');
+  const before = (await content(project.id))['main.tex'];
+  for (const ch of ['%', '#', '"', '{', '}']) {
+    const to = `a${ch}b.png`;
+    expect(await code(createFile(t.pool, store, owner.id, project.id, to)), to).toBe(
+      'invalid_input',
+    );
+    expect(await code(createFile(t.pool, store, owner.id, project.id, `d${ch}x/a.png`)), to).toBe(
+      'invalid_input',
+    );
+    expect(await code(replaceFile(t.pool, store, owner.id, project.id, to, PNG)), to).toBe(
+      'invalid_input',
+    );
+    expect(
+      await code(proposeFileRename(t.pool, store, owner.id, project.id, ids['fig.png'], to)),
+      to,
+    ).toBe('invalid_input');
+    expect(
+      await code(renameFileAndReferences(t.pool, store, owner.id, project.id, ids['fig.png'], to)),
+      to,
+    ).toBe('invalid_input');
+    expect(await code(renameFile(t.pool, owner.id, project.id, ids['fig.png'], to)), to).toBe(
+      'invalid_input',
+    );
+  }
+  expect((await content(project.id))['main.tex']).toBe(before);
+  expect(await paths(project.id)).toContain('fig.png');
+  // Renaming away from such a name is fine.
+  expect(await code(renameFile(t.pool, owner.id, project.id, ids['50%.png'], 'fifty.png'))).toBe(
+    'ok',
+  );
+});

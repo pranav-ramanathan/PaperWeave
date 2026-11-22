@@ -92,6 +92,13 @@ test('a paper is started from nothing, and a deleted file comes back by restorin
   await page.getByLabel('Name, with folders if you like').fill('../outside.tex');
   await page.getByRole('button', { name: 'Add file' }).click();
   await expect(page.locator('p[role=alert]')).toContainText('That name cannot be used');
+  // A name LaTeX cannot spell is refused with the reason.
+  await page.getByLabel('Name, with folders if you like').fill('50%.png');
+  await page.getByLabel(/^A file to upload/).setInputFiles(join(dir, 'intro.tex'));
+  await page.getByRole('button', { name: 'Add file' }).click();
+  await expect(page.locator('p[role=alert]')).toContainText(
+    'LaTeX cannot use a file name with % # " { or } in it. Choose another name.',
+  );
   await page.getByLabel('Name, with folders if you like').fill('paper.tex');
   await page.getByRole('button', { name: 'Add file' }).click();
   await expect(page.locator('p[role=alert]')).toHaveText(

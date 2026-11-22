@@ -243,6 +243,8 @@ export function FloatBox(props: {
       );
     if (!cellText(cap))
       return setProblem('A caption cannot hold an unescaped & or %, and its braces must match.');
+    if (figure && /[%#"{}]/.test(target))
+      return setProblem("LaTeX cannot use this picture's name. Rename it first.");
     const label = `  \\label{${labelFor(figure ? 'fig' : 'tab', cap, labels)}}`;
     const lines = figure
       ? [

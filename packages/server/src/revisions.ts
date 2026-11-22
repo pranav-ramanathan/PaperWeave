@@ -2,7 +2,15 @@
 import { createHash } from 'node:crypto';
 import { LATEXMK_RULES, decodeFile } from '@paperweave/latex';
 import type pg from 'pg';
-import { checkPath, clashMessage, type Entry, pathClash, writeZip, zipStream } from './archive.ts';
+import {
+  checkPath,
+  clashMessage,
+  type Entry,
+  pathClash,
+  texName,
+  writeZip,
+  zipStream,
+} from './archive.ts';
 import { mapLimit, READS, readAhead } from './batch.ts';
 import { authorize } from './authz.ts';
 import type { BlobStore } from './blobs.ts';
@@ -619,6 +627,8 @@ export async function renameFile(
   await authorize(db, userId, id(projectId), 'file.write');
   const problem = checkPath(path);
   if (problem) throw new AppError('invalid_input', `That name cannot be used: ${problem}.`);
+  const tex = texName(path as string);
+  if (tex) throw new AppError('invalid_input', tex);
   const taken = await db.query(
     'select 1 from files where project_id = $1 and path = $2 and id <> $3',
     [projectId, path, id(fileId)],
