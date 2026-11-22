@@ -23,6 +23,8 @@ import {
   CitationPicker,
   EditorMenu,
   FloatBox,
+  HeadingBox,
+  type HeadingRequest,
   type FloatRequest,
   FormulaBox,
   type FormulaRequest,
@@ -189,6 +191,7 @@ export default function FileEditor(props: {
   const [picker, setPicker] = useState<{ apply: FormulaRequest['apply'] } | null>(null);
   const [citing, setCiting] = useState<{ apply: FormulaRequest['apply'] } | null>(null);
   const [float, setFloat] = useState<FloatRequest | null>(null);
+  const [heading, setHeading] = useState<HeadingRequest | null>(null);
   const [menu, setMenu] = useState<{
     x: number;
     y: number;
@@ -205,6 +208,11 @@ export default function FileEditor(props: {
   const askCitation = () => insertHere((apply) => setCiting({ apply }));
   const askFigure = () => insertHere((apply) => setFloat({ kind: 'figure', apply }));
   const askTable = () => insertHere((apply) => setFloat({ kind: 'table', apply }));
+  const askHeading = () => {
+    const apply = live.current?.visual?.heading();
+    if (apply) setHeading({ apply });
+    else setNote('Put the caret in a paragraph to add a heading.');
+  };
   // The editors are made once; what they call must be what this render means.
   const all = {
     equation: askEquation,
@@ -212,12 +220,13 @@ export default function FileEditor(props: {
     citation: askCitation,
     figure: askFigure,
     table: askTable,
+    heading: askHeading,
   };
   const asks = useRef(all);
   asks.current = all;
   // When a window closes, the keyboard goes back to the text. This runs after the window's own
   // effect has closed it, which is when the browser has handed focus back.
-  const windowOpen = !!formula || !!picker || !!citing || !!float;
+  const windowOpen = !!formula || !!picker || !!citing || !!float || !!heading;
   const hadWindow = useRef(false);
   useEffect(() => {
     if (hadWindow.current && !windowOpen && mode === 'visual') live.current?.visual?.focus();
@@ -873,6 +882,9 @@ export default function FileEditor(props: {
               <button type="button" onClick={askTable} aria-keyshortcuts="Alt+T" title="Alt+T">
                 Table
               </button>
+              <button type="button" onClick={askHeading} aria-keyshortcuts="Alt+H" title="Alt+H">
+                Heading
+              </button>
             </span>
           )}
           <span role="group" aria-label="Go to">
@@ -900,6 +912,7 @@ export default function FileEditor(props: {
         <ReferencePicker request={picker} projectId={projectId} onDone={() => setPicker(null)} />
         <CitationPicker request={citing} projectId={projectId} onDone={() => setCiting(null)} />
         <FloatBox request={float} projectId={projectId} onDone={() => setFloat(null)} />
+        <HeadingBox request={heading} onDone={() => setHeading(null)} />
         <EditorMenu
           at={menu}
           onClose={() => {
@@ -911,6 +924,7 @@ export default function FileEditor(props: {
           onEquation={askEquation}
           onFigure={askFigure}
           onTable={askTable}
+          onHeading={askHeading}
         />
         <div className="source" ref={host} hidden={mode !== 'source'} />
       </div>

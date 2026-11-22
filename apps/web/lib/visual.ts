@@ -134,7 +134,7 @@ export function createVisual(opts: {
     apply: (replacement: string) => Promise<CommandResult | 'spills'>,
   ): void;
   /** The person asked, from the keyboard, to insert a reference, a citation or an equation. */
-  ask?(what: 'reference' | 'citation' | 'equation' | 'figure' | 'table'): void;
+  ask?(what: 'reference' | 'citation' | 'equation' | 'figure' | 'table' | 'heading'): void;
   /**
    * The person asked for the menu of things to do here: a right click, or the menu key. `x`
    * and `y` are where on the page; `edit` is set when it was asked for on a formula or an
@@ -675,6 +675,22 @@ export function createVisual(opts: {
     };
   };
   /**
+   * Get ready to insert a section heading where the caret is, which splits its paragraph. Returns
+   * the function that inserts it, by way of the server, or null if the caret is not in a paragraph.
+   */
+  const heading = ():
+    | ((level: 'section' | 'subsection' | 'subsubsection', title: string) => Promise<CommandResult>)
+    | null => {
+    catchUp();
+    // The line breaks it needs around it depend on the text where the caret is, which is settled
+    // now, with the place; the level and the title are only known when the person is done.
+    const probe = bridge.headingCommand(editor.state, 'section', 'x');
+    const around = probe?.replacement.match(/^(\n*)\\section\{x\}(\n*)$/);
+    const put = around && insertion();
+    if (!around || !put) return null;
+    return (level, title) => put(`${around[1]}\\${level}{${title}}${around[2]}`);
+  };
+  /**
    * Put text that was pasted or dropped where the caret is, as its words, as if typed: a
    * clipboard's formatting is not LaTeX. False if there was nothing to take.
    */
@@ -876,6 +892,7 @@ export function createVisual(opts: {
           'Alt-c': () => (opts.ask && opts.editable ? (opts.ask('citation'), true) : false),
           'Alt-g': () => (opts.ask && opts.editable ? (opts.ask('figure'), true) : false),
           'Alt-t': () => (opts.ask && opts.editable ? (opts.ask('table'), true) : false),
+          'Alt-h': () => (opts.ask && opts.editable ? (opts.ask('heading'), true) : false),
           // Enter on a selected formula, or inline atom, opens it for editing.
           Enter: ({ editor: e }) => {
             const { selection } = e.state;
@@ -994,6 +1011,7 @@ export function createVisual(opts: {
     bridge,
     emph,
     insertion,
+    heading,
     /** Put the keyboard back in the visual view, with the caret where it should be. */
     focus() {
       const kept = resume;

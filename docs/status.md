@@ -97,8 +97,9 @@ Read this first. Update it in every pull request.
     took back the wrong thing), so it was removed.
   - Found and fixed on the way: after a file's text first arrived, the visual editor's selection
     was the whole document, and keys pressed before the first click registered were refused.
-  - Not built: structural edits other than emphasis, and remembering which view a person last
-    used.
+  - Not built: structural edits other than emphasis and headings (see "A heading from the visual
+    view"): lists, moving or deleting a block, and changing an existing heading's level; and
+    remembering which view a person last used.
   - Whether a file is "definitions, source only" comes from the import report, so a file added
     later is never marked that way.
 - **C8, first part: edits made offline across a restore.** Someone who comes back online to a
@@ -3886,6 +3887,31 @@ Coming back online, the editor said "This paper was restored to an earlier revis
   same `AppError` as `createFile`; `drawNext` shows that text as the chart's problem and adds
   no files.
 - **Test.** `charts.sandbox.test.ts` (fails on the old code).
+
+## A heading from the visual view
+
+- **What was missing.** The visual view showed headings but could not make one.
+- **What happens now.** "Heading" on the toolbar, Alt+H, and "Insert a heading…" in the menu at the
+  caret open a window with a level (Section, Subsection, Subsubsection) and a title. It goes in by
+  the same road as a figure: `Bridge.headingCommand` builds an insertion at the caret and the
+  server's command (`exactPlace`) applies it, so there is no server or schema change.
+  - Only in an ordinary paragraph. A list item, a heading, a figure or table (so a caption), the
+    preamble, other raw LaTeX, a frozen block and a paragraph just opened with Enter are refused
+    with "Put the caret in a paragraph to add a heading."
+  - A caret in the middle of a paragraph splits it; the rest becomes the next paragraph. The
+    line breaks added are only those needed to leave a blank line each side, counting the ones
+    already there, so there is never a run of three. A `%` comment on the caret's line cannot
+    swallow the heading, since the heading starts after a blank line.
+  - The title is one line (whitespace collapsed), not empty, with balanced braces and no bare
+    `&` or `%` (`cellText`, as captions), and not ending in a lone backslash.
+  - A text that moves before Apply is handled by the existing `conflict` / `placeLost` result.
+    Undo takes the heading back in one step.
+- **Left as it is.** Alt+H is Firefox's Help menu key on Windows and Linux if the page does not
+  take it; Alt+T is Tools there and was already in use. There is no way yet to change a heading's
+  level or to turn a paragraph into a heading.
+- **Tests.** `bridge.test.ts` (exact bytes mid-paragraph, both ends, refusals, the projected
+  heading node, comments) and `insert.spec.ts` (toolbar, Alt+H, menu, undo, a second person,
+  refusals, axe).
 
 ## Decisions waiting on the owner
 

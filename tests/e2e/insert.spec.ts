@@ -5,7 +5,16 @@ import { mkdtempSync, readdirSync, readFileSync, statSync, writeFileSync } from 
 import { tmpdir } from 'node:os';
 import { join, relative } from 'node:path';
 import { readZip, writeZip } from '../../packages/server/src/archive';
-import { clickAfter, person, run, showSource, signIn, slowPaper } from './helpers';
+import {
+  audit,
+  clickAfter,
+  emailedLink,
+  person,
+  run,
+  showSource,
+  signIn,
+  slowPaper,
+} from './helpers';
 
 const FIXTURE = join(import.meta.dirname, '../../fixtures/ieee-multifile');
 const VISUAL = '.editor .visual .ProseMirror';
@@ -126,6 +135,7 @@ test('references and equations are inserted from the toolbar, the keyboard and t
     'Insert an equation…',
     'Insert a figure…',
     'Insert a table…',
+    'Insert a heading…',
   ]);
   // It can be worked from the keyboard, and put away with Escape.
   await expect(menu.getByRole('menuitem').first()).toBeFocused();
@@ -308,4 +318,150 @@ test('an insertion slow to arrive leaves the caret where its person put it', asy
   const text = await page.locator('.editor .cm-content').innerText();
   expect(text).toContain('charlieendabcd');
   expect(text).toMatch(/alphaend\\cite\{knuth1984\}\./);
+});
+
+test('a heading is inserted from the toolbar, the keyboard and the menu, and taken back by undo', async ({
+  browser,
+}) => {
+  test.setTimeout(180_000);
+  const { page, email } = await person(browser, 'insert-heading');
+  const other = await person(browser, 'insert-heading-2');
+  const main =
+    '\\documentclass{article}\n\\begin{document}\nHello world here.\n\nSecond paragraph.\n\\end{document}\n';
+  const zip = join(mkdtempSync(join(tmpdir(), 'paperweave-e2e-')), `Heading ${run}.zip`);
+  writeFileSync(zip, await writeZip([{ path: 'main.tex', bytes: Buffer.from(main) }]));
+  await page.goto('/sign-in');
+  await signIn(page, email);
+  await page.getByLabel('Or import a ZIP of a LaTeX project').setInputFiles(zip);
+  await page.getByRole('button', { name: 'Import ZIP' }).click();
+  // A second person, an editor, who has the file open from the start.
+  await page.getByLabel('Their email address').fill(other.email);
+  await page.getByLabel('Their role').selectOption('editor');
+  await page.getByRole('button', { name: 'Send invitation' }).click();
+  await expect(page.getByRole('status')).toContainText(other.email);
+  await other.page.goto(await emailedLink(other.email, '/invitations/'));
+  await signIn(other.page, other.email);
+  await other.page.getByRole('button', { name: 'Join this paper' }).click();
+  await expect(other.page.getByText('You are an editor')).toBeVisible();
+  await page.getByRole('link', { name: 'main.tex' }).first().click();
+  await other.page.goto(page.url());
+  const status = page.getByRole('region', { name: /^Editor for/ }).getByRole('status');
+  await expect(status).toHaveText('All edits saved.');
+  await expect(other.page.locator(VISUAL)).toContainText('Hello world here.');
+
+  /** The lines of the source that have something on them. */
+  const lines = async () => {
+    await showSource(page);
+    const all = (await page.locator('.editor .cm-line').allTextContents()).filter((l) => l.trim());
+    await page.getByRole('group', { name: 'View' }).getByRole('button', { name: 'Visual' }).click();
+    return all;
+  };
+  const edit = page.getByRole('group', { name: 'Edit' });
+  const box = page.getByRole('dialog', { name: 'Insert a heading' });
+  const original = [
+    '\\documentclass{article}',
+    '\\begin{document}',
+    'Hello world here.',
+    'Second paragraph.',
+    '\\end{document}',
+  ];
+  expect(await lines()).toEqual(original);
+
+  // The toolbar button, in the middle of a paragraph: it is split there. The window opens on the
+  // title, and Enter inserts. The caret is then at the start of what was split off.
+  await clickAfter(page, VISUAL, 'Hello');
+  await edit.getByRole('button', { name: 'Heading' }).click();
+  await expect(box).toBeVisible();
+  await expect(box.getByLabel('Title')).toBeFocused();
+  await box.getByLabel('Level').selectOption('subsection');
+  await page.keyboard.type('Method');
+  await page.keyboard.press('Enter');
+  await expect(box).toBeHidden();
+  await expect(page.locator(`${VISUAL} h2`)).toHaveText('Method');
+  await expect(page.locator(VISUAL)).toBeFocused();
+  await page.keyboard.type('NEXT');
+  await expect(status).toHaveText('All edits saved.');
+  expect(await lines()).toEqual([
+    original[0],
+    original[1],
+    'Hello',
+    '\\subsection{Method}',
+    'NEXTworld here.',
+    original[3],
+    original[4],
+  ]);
+  // A second person sees it.
+  await expect(other.page.locator(`${VISUAL} h2`)).toHaveText('Method');
+
+  // Undo takes it back in one step: the typed text first, then the heading.
+  await page.keyboard.press('ControlOrMeta+z');
+  await page.keyboard.press('ControlOrMeta+z');
+  await expect(page.locator(`${VISUAL} h2`)).toHaveCount(0);
+  await expect(status).toHaveText('All edits saved.');
+  expect(await lines()).toEqual(original);
+  await expect(other.page.locator(`${VISUAL} h2`)).toHaveCount(0);
+
+  // The keyboard: Alt+H, at the end of a paragraph; Escape puts it away and gives the caret back.
+  await clickAfter(page, VISUAL, 'here.');
+  await page.keyboard.press('End');
+  await page.keyboard.press('Alt+h');
+  await expect(box).toBeVisible();
+  await page.keyboard.press('Escape');
+  await expect(box).toBeHidden();
+  await expect(page.locator(VISUAL)).toBeFocused();
+  // Refused, in the window, with the reason; nothing is inserted until it is right.
+  await page.keyboard.press('Alt+h');
+  await box.getByRole('button', { name: 'Insert' }).click();
+  await expect(box.getByRole('alert')).toHaveText('A heading needs a title.');
+  await box.getByLabel('Title').fill('Bad { title');
+  await box.getByRole('button', { name: 'Insert' }).click();
+  await expect(box.getByRole('alert')).toHaveText(
+    'A title cannot hold an unescaped & or %, and its braces must match.',
+  );
+  await box.getByLabel('Title').fill('50% done');
+  await box.getByRole('button', { name: 'Insert' }).click();
+  await expect(box.getByRole('alert')).toContainText('unescaped & or %');
+  await expect(box).toBeVisible();
+  await audit(page, 'heading window, with a refusal');
+  await box.getByLabel('Title').fill('  Related \n  work  ');
+  await page.keyboard.press('Enter');
+  await expect(box).toBeHidden();
+  await expect(page.locator(`${VISUAL} h1`)).toHaveText('Related work');
+  await expect(status).toHaveText('All edits saved.');
+  expect(await lines()).toEqual([
+    original[0],
+    original[1],
+    'Hello world here.',
+    '\\section{Related work}',
+    original[3],
+    original[4],
+  ]);
+
+  // The menu at a place in the text.
+  await clickAfter(page, VISUAL, 'Second');
+  await page.keyboard.press('Shift+F10');
+  const menu = page.getByRole('menu', { name: 'At this place' });
+  await menu.getByRole('menuitem', { name: 'Insert a heading…' }).click();
+  await box.getByLabel('Level').selectOption('subsubsection');
+  await box.getByLabel('Title').fill('Setup');
+  await box.getByRole('button', { name: 'Insert' }).click();
+  await expect(box).toBeHidden();
+  await expect(page.locator(`${VISUAL} h3`)).toHaveText('Setup');
+  await expect(status).toHaveText('All edits saved.');
+  expect(await lines()).toEqual([
+    original[0],
+    original[1],
+    'Hello world here.',
+    '\\section{Related work}',
+    'Second',
+    '\\subsubsection{Setup}',
+    'paragraph.',
+    original[4],
+  ]);
+
+  // Not in a paragraph (here, in a heading): said so, and no window.
+  await page.locator(`${VISUAL} h1`).click();
+  await edit.getByRole('button', { name: 'Heading' }).click();
+  await expect(page.getByText('Put the caret in a paragraph to add a heading.')).toBeVisible();
+  await expect(box).toBeHidden();
 });

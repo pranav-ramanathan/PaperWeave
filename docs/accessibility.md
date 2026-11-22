@@ -24,6 +24,13 @@ Where this stands, what holds it there, and what nobody has checked yet.
   there: the differences between two revisions, the lines a file rename or a label rename
   would change, an invitation and one that is no longer valid, a chart whose files have gone,
   and the first page a new person sees. No failures.
+- **The keys that insert in the visual view**: Alt+R (reference), Alt+C (citation), Alt+= (equation),
+  Alt+G (figure), Alt+T (table) and Alt+H (heading), Ctrl+I (emphasis) and Shift+F10 (the menu at
+  the caret). Each toolbar button names its key in `aria-keyshortcuts`. The heading window opens
+  on its Title, Enter inserts, Escape closes it and gives the caret back, a refusal is read from
+  its alert, and axe passes with the window open and a refusal showing (`insert.spec`).
+  Alt+H is Firefox's Help menu key on Windows and Linux when the page does not take it, as Alt+T
+  is Tools; the editor takes both while it has the keyboard.
 - **The same audit of the editor when it has stopped** (`recover.spec`): its person signed out,
   their role lowered, an edit too large to save, edits held after a restore, and both views
   for someone who can only read, on a file long enough to scroll.

@@ -352,6 +352,90 @@ export function FloatBox(props: {
   );
 }
 
+/** A section heading to insert where the caret is. `apply` takes its level and its title. */
+export type Level = 'section' | 'subsection' | 'subsubsection';
+export type HeadingRequest = {
+  apply: (level: Level, title: string) => Promise<CommandResult | 'spills'>;
+};
+
+/** The window that asks for a heading's level and title, and inserts it. */
+export function HeadingBox(props: { request: HeadingRequest | null; onDone(): void }) {
+  const { request, onDone } = props;
+  const box = useDialog(!!request);
+  const field = useRef<HTMLInputElement>(null);
+  const [level, setLevel] = useState<Level>('section');
+  const [title, setTitle] = useState('');
+  const [problem, setProblem] = useState('');
+  const [busy, setBusy] = useState(false);
+  useEffect(() => {
+    setLevel('section');
+    setTitle('');
+    setProblem('');
+  }, [request]);
+  // The title is what is typed first: the keyboard starts there (the window's own effect has opened it).
+  useEffect(() => {
+    if (request) field.current?.focus();
+  }, [request]);
+  const insert = async () => {
+    if (!request || busy) return;
+    // One line: a line break in a title would end the paragraph the heading is in.
+    const text = title.replace(/\s+/g, ' ').trim();
+    if (!text) return setProblem('A heading needs a title.');
+    // A backslash at the end would take the closing brace with it.
+    if (!cellText(text) || /(^|[^\\])(\\\\)*\\$/.test(text))
+      return setProblem('A title cannot hold an unescaped & or %, and its braces must match.');
+    setProblem('');
+    setBusy(true);
+    try {
+      await request.apply(level, text);
+      onDone();
+    } catch (err) {
+      console.warn('edit not made:', (err as Error).message);
+      setProblem('That edit could not be made. Check the connection and try again.');
+    } finally {
+      setBusy(false);
+    }
+  };
+  return (
+    <dialog ref={box} className="tool" aria-labelledby="heading-title" onClose={onDone}>
+      <form
+        onSubmit={(e) => {
+          e.preventDefault();
+          void insert();
+        }}
+      >
+        <h2 id="heading-title">Insert a heading</h2>
+        <label>
+          Level
+          <select value={level} onChange={(e) => setLevel(e.target.value as Level)}>
+            <option value="section">Section</option>
+            <option value="subsection">Subsection</option>
+            <option value="subsubsection">Subsubsection</option>
+          </select>
+        </label>
+        <label>
+          Title
+          <input
+            ref={field}
+            value={title}
+            onChange={(e) => setTitle(e.target.value)}
+            aria-invalid={!!problem}
+          />
+        </label>
+        {problem && <p role="alert">{problem}</p>}
+        <p>
+          <button type="submit" disabled={busy}>
+            Insert
+          </button>{' '}
+          <button type="button" onClick={onDone}>
+            Cancel
+          </button>
+        </p>
+      </form>
+    </dialog>
+  );
+}
+
 /** One thing that can be chosen: what the list shows, what typing matches, and what it inserts. */
 type Choice = { key: string; text: string; match: string; latex: string };
 
@@ -542,6 +626,7 @@ export function EditorMenu(props: {
   onEquation(): void;
   onFigure(): void;
   onTable(): void;
+  onHeading(): void;
 }) {
   const { at, onClose } = props;
   const menu = useRef<HTMLUListElement>(null);
@@ -567,6 +652,7 @@ export function EditorMenu(props: {
     ['Insert an equation…', props.onEquation],
     ['Insert a figure…', props.onFigure],
     ['Insert a table…', props.onTable],
+    ['Insert a heading…', props.onHeading],
   ];
   const move = (by: number) => {
     const buttons = [...(menu.current?.querySelectorAll('button') ?? [])];
