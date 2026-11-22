@@ -13,3 +13,4 @@ export * from './latexmk.ts';
 export * from './contained.ts';
 export * from './surrogate.ts';
 export * from './envs.ts';
+export * from './hazards.ts';

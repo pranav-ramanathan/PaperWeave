@@ -2290,3 +2290,83 @@ describe('block-level text only goes where LaTeX can take it', () => {
     expect(h.bridge.accepts(h.state, 'a $x$ b')).toBe(true);
   });
 });
+
+// A float (figure, table) goes after the paragraph the caret is in, not at the caret.
+const FLOAT = '\\begin{figure}[t]\n  \\caption{A.}\n\\end{figure}';
+/** Insert FLOAT (as the dialog hands it over, in line breaks) for the caret at offset `off` of paragraph `n`. */
+function floated(src: string, n: number, off: number) {
+  const r = replica(src);
+  r.select(textblocks(r).filter((t) => t.para)[n].start + off);
+  const c = r.bridge.floatCommand(r.state, `\n${FLOAT}\n`);
+  if (!c) return null;
+  expect(r.bridge.applyCommand(c)).toBe('applied');
+  r.check();
+  return r.src;
+}
+
+test('a float with the caret mid-sentence keeps the paragraph whole and goes after it', () => {
+  const src = 'One.\n\nAs shown before \\cite{a} and more.\nSecond line.\n\nThree.\n';
+  const out = floated(src, 1, 'As shown before'.length)!;
+  expect(out).toBe(
+    `One.\n\nAs shown before \\cite{a} and more.\nSecond line.\n\n${FLOAT}\n\nThree.\n`,
+  );
+  expect(out).not.toMatch(/\n{3}/);
+  expect(out).toContain('before \\cite{a} and more.');
+});
+
+test('a float at the end of a paragraph, and at the start, go after it with no run of three line breaks', () => {
+  const src = 'One.\n\nTwo here.\n\nThree.\n';
+  for (const off of [0, 4, 9]) {
+    const out = floated(src, 1, off)!;
+    expect(out).toBe(`One.\n\nTwo here.\n\n${FLOAT}\n\nThree.\n`);
+    expect(out).not.toMatch(/\n{3}/);
+  }
+});
+
+test('a float in the last paragraph of a file goes after it, with or without a final line break', () => {
+  expect(floated('One.\n\nLast bit.', 1, 4)).toBe(`One.\n\nLast bit.\n\n${FLOAT}\n\n`);
+  expect(floated('One.\n\nLast bit.\n', 1, 4)).toBe(`One.\n\nLast bit.\n\n${FLOAT}\n\n`);
+  expect(floated('Only.', 0, 0)).toBe(`Only.\n\n${FLOAT}\n\n`);
+  expect(floated('Only.\n', 0, 5)).not.toMatch(/\n{3}/);
+});
+
+test('a float whose paragraph ends in a comment is not commented out', () => {
+  const out = floated('One.\n\nText here % a note\n\nNext.\n', 1, 4)!;
+  expect(out.split('\n')).toContain('\\begin{figure}[t]');
+  expect(out).toBe(`One.\n\nText here % a note\n\n${FLOAT}\n\nNext.\n`);
+});
+
+test('a float where the caret is not in a paragraph is put at the caret, as before', () => {
+  const r = replica(LIST);
+  const li = items(r);
+  r.select(li[0].start + 4);
+  const c = r.bridge.floatCommand(r.state, '\nX\n')!;
+  expect(c.replacement).toBe('\nX\n');
+  expect(r.bridge.applyCommand(c)).toBe('applied');
+  r.check();
+});
+
+test('a float after a paragraph is refused if the text around its place was deleted, and replicas converge', () => {
+  const r = replica(FLOW);
+  r.select(textblocks(r).filter((t) => t.para)[1].start + 3);
+  const c = r.bridge.floatCommand(r.state, `\n${FLOAT}\n`)!;
+  const { b, merge } = peer(r);
+  // Someone else types in the next paragraph meanwhile.
+  b.ytext.insert(b.src.indexOf('Three.') + 6, ' More.');
+  merge();
+  expect(r.bridge.applyCommand(c)).toBe('applied');
+  Y.applyUpdate(b.ydoc, Y.encodeStateAsUpdate(r.ydoc));
+  expect(b.src).toBe(r.src);
+  expect(r.src).toBe(`One.\n\nTwo here.\n\n${FLOAT}\n\nThree. More.\n`);
+  r.check();
+  b.check();
+  // And with the paragraph deleted by another replica, it is refused rather than moved.
+  const r2 = replica(FLOW);
+  r2.select(textblocks(r2).filter((t) => t.para)[1].start + 3);
+  const c2 = r2.bridge.floatCommand(r2.state, `\n${FLOAT}\n`)!;
+  const p = peer(r2);
+  p.b.ytext.delete(p.b.src.indexOf('Two here.'), 'Two here.\n\n'.length);
+  p.merge();
+  expect(r2.bridge.applyCommand(c2)).toBe('conflict');
+  expect(r2.src).toBe('One.\n\nThree.\n');
+});

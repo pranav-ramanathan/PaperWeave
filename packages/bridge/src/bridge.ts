@@ -299,11 +299,11 @@ export class Bridge {
    * there is one), or null if the caret is not in running text. The place is fixed now: text
    * typed elsewhere before the command runs does not move it.
    */
-  insertCommand(state: EditorState, replacement: string): Command | null {
+  insertCommand(state: EditorState, replacement: string, at?: number): Command | null {
     const spot = locate(this.model, state.doc, state.selection.to);
     // A paragraph just opened with Enter is not in the source yet: there is no place to name.
     if (!spot || spot.block < 0) return null;
-    const i = toSrc(this.model, state.doc, state.selection.to, -1);
+    const i = at ?? toSrc(this.model, state.doc, state.selection.to, -1);
     if (inPair(this.model.parsed.src, i)) return null;
     // One anchor on each side of the caret, so that if the text around it is deleted the
     // command can tell (see placeLost in packages/server). `to` is also where the caret goes
@@ -344,6 +344,52 @@ export class Bridge {
     while (after < 2 && src[i + after] === '\n') after++;
     if (i === 0) before = 2;
     return [2 - before, 2 - after];
+  }
+
+  /**
+   * Where the paragraph the caret is in ends in the source (after its last character, not the
+   * blank space that follows), or null if the caret is not in an ordinary paragraph.
+   */
+  private paragraphEnd(state: EditorState): number | null {
+    if (this.blockPlace(state) !== 'para') return null;
+    const spot = locate(this.model, state.doc, state.selection.to);
+    const body = spot && this.model.blocks[spot.block].body;
+    if (!spot || !body || body.kind !== 'para') return null;
+    const src = this.model.parsed.src;
+    let end = spot.base + body.text.length;
+    while (end > spot.base && /\s/.test(src[end - 1])) end--;
+    return end >= toSrc(this.model, state.doc, state.selection.to, -1) ? end : null;
+  }
+
+  /** Whether a float (a figure, a table) is put after the caret's paragraph (see floatCommand). */
+  floatsAfter(state: EditorState): boolean {
+    return this.paragraphEnd(state) !== null;
+  }
+
+  /**
+   * The text of a float as `fillCommand` takes it for a command from `floatCommand`: put in
+   * blank lines on both sides, with only the line breaks the text at the command's place does
+   * not already give.
+   */
+  paddedFloat(c: Command, latex: string): string {
+    const at = Y.createAbsolutePositionFromRelativePosition(c.to, this.ytext.doc!)?.index;
+    const bare = latex.replace(/^\n+|\n+$/g, '');
+    if (at == null) return bare;
+    const [before, after] = this.padding(this.ytext.toString(), at);
+    return '\n'.repeat(before) + bare + '\n'.repeat(after);
+  }
+
+  /**
+   * Build the command that inserts a float (a figure or a table) for the caret at `state`. In an
+   * ordinary paragraph it goes after the paragraph's last character, in blank lines on both sides
+   * (as a heading is), so that it does not split the sentence from what follows it. Anywhere
+   * else it is put where the caret is, as insertCommand does.
+   */
+  floatCommand(state: EditorState, latex: string): Command | null {
+    const end = this.paragraphEnd(state);
+    if (end === null) return this.insertCommand(state, latex);
+    const c = this.insertCommand(state, '', end);
+    return c && { ...c, replacement: this.paddedFloat(c, latex) };
   }
 
   /**

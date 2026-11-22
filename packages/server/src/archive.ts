@@ -9,6 +9,8 @@ import { AppError } from './errors.ts';
 export const LIMITS = {
   archiveBytes: 100_000_000,
   files: 2_000,
+  /** Every entry in the archive, system folders included: system entries are never read, only counted here. */
+  entries: 50_000,
   fileBytes: 50_000_000,
   totalBytes: 300_000_000,
   pathLength: 255,
@@ -150,6 +152,7 @@ export function readZip(
         file.close();
         reject(bad(message));
       };
+      if (file.entryCount > limits.entries) return fail('it has too many files');
       file.on('error', () => reject(bad('it is damaged or not what it claims to be')));
       file.on('end', () => {
         // The .bbl files wait here, where every entry is known.
@@ -173,6 +176,8 @@ export function readZip(
       file.on('entry', (entry: yauzl.Entry) => {
         const path = entry.fileName;
         if (path.endsWith('/')) return file.readEntry();
+        // Never read, so neither counted nor checked: .git and __MACOSX can be huge or odd.
+        if (SYSTEM.test(path)) return file.readEntry();
         // The Unix file type lives in the top bits; 0o120000 is a symbolic link.
         if (((entry.externalFileAttributes >>> 16) & 0o170000) === 0o120000)
           return fail('it contains a symbolic link');
@@ -187,7 +192,6 @@ export function readZip(
         total += entry.uncompressedSize;
         if (total > limits.totalBytes) return fail('it unpacks to too much data');
 
-        if (SYSTEM.test(path)) return file.readEntry();
         if (path.split('/').some(tooLong)) {
           skipped.push({ path, reason: `a name in it is over ${NAME_BYTES} bytes in UTF-8` });
           return file.readEntry();

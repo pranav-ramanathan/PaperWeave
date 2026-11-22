@@ -1,6 +1,7 @@
 // Proposed edits: "replace this stretch with that". Anyone who may comment can propose one;
 // only someone who may edit can accept it, and only then does it touch the paper. Accepting
 // goes through the command path, so it lands exactly as proposed or not at all.
+import { replacementHazards } from '@paperweave/latex';
 import type pg from 'pg';
 import * as Y from 'yjs';
 import { authorize, can } from './authz.ts';
@@ -42,6 +43,8 @@ export type Proposal = {
    * number, a negation, a cause, a citation. In words, for whoever decides.
    */
   flags: string[];
+  /** What accepting it would break as LaTeX; open proposals whose words still stand only. */
+  latex: string[];
   /** A person wrote it, or a model review did at a person's request. */
   origin: 'person' | 'critique';
   /** For a model review: the model and the version of the claim rules. */
@@ -455,6 +458,7 @@ export async function listProposals(
     // A change is judged in the sentence it stands in, not as the words alone: "high" for "low"
     // says nothing until it is seen in what it is high or low about. Only the open ones show flags.
     let flags: ClaimChange[] = [];
+    let latex: string[] = [];
     if (r.status === 'open') {
       if (known && now === r.expected) {
         const [start, end] = sentenceAround(whole, from, to);
@@ -462,6 +466,7 @@ export async function listProposals(
           whole.slice(start, end),
           whole.slice(start, from) + r.replacement + whole.slice(to, end),
         );
+        latex = replacementHazards(whole, from, to, r.replacement);
       } else flags = claimChanges(r.expected, r.replacement);
     }
     const lost =
@@ -485,6 +490,7 @@ export async function listProposals(
       placeLost: lost,
       now,
       flags: flags.map(describeClaimChange),
+      latex,
       origin: r.origin,
       madeBy: r.made_by,
       evidence: r.evidence,

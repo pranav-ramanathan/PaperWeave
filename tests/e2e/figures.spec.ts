@@ -1,11 +1,11 @@
 // A figure in the visual view shows its picture, and its description for people who cannot see
 // it is added and edited in place. Needs Docker, the TeX image, the services and the workers.
-import { expect, type Page, test } from '@playwright/test';
+import { type Browser, expect, type Page, test } from '@playwright/test';
 import { mkdtempSync, readFileSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { readZip, writeZip } from '../../packages/server/src/archive';
-import { audit, clickAfter, person, run, showSource, signIn } from './helpers';
+import { audit, clickAfter, person, run, showSource, signIn, sourceText } from './helpers';
 
 // A small valid PNG: a black square on white.
 const PNG = Buffer.from(
@@ -102,7 +102,7 @@ test('a figure shows its picture, and is given a description in place', async ({
   const box = page.getByRole('dialog', { name: 'Insert a figure' });
   await expect(box.getByLabel('Picture').getByRole('option')).toHaveText([
     'figures/dot.png',
-    'None yet',
+    'No picture yet',
   ]);
   await box.getByLabel(/^Description/).fill('Another square');
   await box.getByLabel('Caption').fill('A second dot & more');
@@ -153,12 +153,15 @@ test('a figure shows its picture, and is given a description in place', async ({
   ]);
   const back = await readZip(readFileSync(await download.path()));
   const bytes = (path: string) => Buffer.from(back.entries.find((e) => e.path === path)!.bytes);
+  // A float goes after the paragraph the caret was in (the figure's caret was mid-sentence), in
+  // blank lines, so that it does not split the paragraph.
   expect(bytes('main.tex').toString()).toBe(
     MAIN.replace('[width=2cm]', '[width=2cm,alt={A black square}]')
       .replace(
-        'Text after',
+        'Text after the figure.\n',
         [
-          'Text after',
+          'Text after the figure.',
+          '',
           '\\begin{figure}[t]',
           '  \\centering',
           '  \\includegraphics[width=\\linewidth,alt={Another square}]{figures/dot.png}',
@@ -166,12 +169,14 @@ test('a figure shows its picture, and is given a description in place', async ({
           '  \\label{fig:a-second-dot}',
           '\\end{figure}',
           '',
+          '',
         ].join('\n'),
       )
       .replace(
-        'Text before',
+        'Text before the figure.\n',
         [
-          'Text before',
+          'Text before the figure.',
+          '',
           '\\begin{table}[t]',
           '  \\centering',
           '  \\caption{Sizes}',
@@ -223,4 +228,133 @@ test('a picture whose name LaTeX cannot spell is not put in a figure', async ({ 
   );
   await expect(source(other)).not.toContainText('50%.png');
   await expect(page.locator(VISUAL).getByRole('group', { name: 'Figure' })).toHaveCount(1);
+});
+
+/** A paper with MAIN and these pictures, open in the editor, and a second page on its source. */
+async function paperWith(browser: Browser, who: string, pictures: string[]) {
+  const { page, email } = await person(browser, who);
+  const zip = join(mkdtempSync(join(tmpdir(), 'paperweave-e2e-')), `Pictures ${run}.zip`);
+  writeFileSync(
+    zip,
+    await writeZip([
+      { path: 'main.tex', bytes: Buffer.from(MAIN) },
+      ...pictures.map((path) => ({ path, bytes: PNG })),
+    ]),
+  );
+  await page.goto('/sign-in');
+  await signIn(page, email);
+  await page.getByLabel('Or import a ZIP of a LaTeX project').setInputFiles(zip);
+  await page.getByRole('button', { name: 'Import ZIP' }).click();
+  await page.getByRole('link', { name: 'main.tex' }).click();
+  await expect(page.getByRole('region', { name: 'Editor for main.tex' })).toBeVisible();
+  const other = await page.context().newPage();
+  await other.goto(page.url());
+  await showSource(other);
+  await expect(source(other)).toContainText('Text after the figure.');
+  return { page, other };
+}
+const openFigure = async (page: Page) => {
+  await clickAfter(page, VISUAL, 'Text before');
+  await page.getByRole('group', { name: 'Edit' }).getByRole('button', { name: 'Figure' }).click();
+  return page.getByRole('dialog', { name: 'Insert a figure' });
+};
+const figuresIn = async (other: Page) =>
+  (await sourceText(other)).split('\\begin{figure}').length - 1;
+
+test('the figure window does not say there are no pictures while they load or if they fail', async ({
+  browser,
+}) => {
+  test.setTimeout(120_000);
+  const { page, other } = await paperWith(browser, 'figure-loading', ['figures/dot.png']);
+  // Held until the test lets the answer go.
+  let release = () => {};
+  const held = new Promise<void>((resolve) => (release = resolve));
+  await page.route('**/pictures', async (route) => {
+    await held;
+    await route.continue();
+  });
+  const box = await openFigure(page);
+  const insert = box.getByRole('button', { name: 'Insert' });
+  await expect(box.getByRole('combobox', { name: /^Picture/ }).getByRole('option')).toHaveText([
+    'Loading pictures…',
+  ]);
+  await expect(box.getByText('no pictures yet')).toHaveCount(0);
+  await expect(insert).toBeDisabled();
+  // A press does nothing but say why, and nothing is written.
+  await box.getByLabel('Caption').fill('Early');
+  // aria-disabled keeps it pressable, so that the press is answered.
+  await insert.click({ force: true });
+  await expect(box.getByRole('alert')).toContainText('still loading');
+  release();
+  await expect(box.getByRole('combobox', { name: /^Picture/ }).getByRole('option')).toHaveText([
+    'figures/dot.png',
+    'No picture yet',
+  ]);
+  await expect(insert).toBeEnabled();
+  await page.unroute('**/pictures');
+  expect(await figuresIn(other)).toBe(1);
+  await box.getByRole('button', { name: 'Cancel' }).click();
+
+  // A failure is said, and is not "no pictures yet".
+  await page.route('**/pictures', (route) => route.fulfill({ status: 500, body: 'no' }));
+  const failed = await openFigure(page);
+  await expect(failed.getByText('Could not load the pictures.')).toBeVisible();
+  await expect(failed.getByText('no pictures yet')).toHaveCount(0);
+  await expect(failed.getByRole('button', { name: 'Insert' })).toBeDisabled();
+  // Retry asks again, and this time the answer comes.
+  await page.unroute('**/pictures');
+  await failed.getByRole('button', { name: 'Retry' }).click();
+  await expect(failed.getByRole('combobox', { name: /^Picture/ }).getByRole('option')).toHaveText([
+    'figures/dot.png',
+    'No picture yet',
+  ]);
+  await expect(failed.getByText('Could not load the pictures.')).toHaveCount(0);
+  await expect(failed.getByRole('button', { name: 'Insert' })).toBeEnabled();
+  expect(await figuresIn(other)).toBe(1);
+});
+
+test('with two pictures none is chosen for the person, and a float goes after its paragraph', async ({
+  browser,
+}) => {
+  test.setTimeout(150_000);
+  const { page, other } = await paperWith(browser, 'figure-choose', [
+    'figures/dot.png',
+    'figures/dot2.png',
+  ]);
+  const box = await openFigure(page);
+  const picture = box.getByRole('combobox', { name: /^Picture/ });
+  await expect(picture.getByRole('option')).toHaveText([
+    'Choose a picture…',
+    'figures/dot.png',
+    'figures/dot2.png',
+    'No picture yet',
+  ]);
+  await box.getByLabel('Caption').fill('Chosen late');
+  await box.getByRole('button', { name: 'Insert' }).click();
+  await expect(box.getByRole('alert')).toContainText('Choose a picture first');
+  expect(await figuresIn(other)).toBe(1);
+  // The choice is the person's, and a window opened again starts from nothing.
+  await picture.selectOption('figures/dot2.png');
+  await box.getByRole('button', { name: 'Cancel' }).click();
+  const again = await openFigure(page);
+  await expect(again.getByRole('combobox', { name: /^Picture/ })).toHaveValue('?');
+  await expect(again.getByLabel('Caption')).toHaveValue('');
+  await again.getByRole('combobox', { name: /^Picture/ }).selectOption('figures/dot2.png');
+  await again.getByLabel('Caption').fill('Chosen late');
+  await again.getByRole('button', { name: 'Insert' }).click();
+  await expect(again).toBeHidden({ timeout: 15_000 });
+  // The caret was in the middle of "Text before the figure.": the paragraph is whole and the
+  // new figure follows it, in blank lines.
+  await expect.poll(() => figuresIn(other)).toBe(2);
+  const text = await sourceText(other);
+  expect(text).toContain('Text before the figure.');
+  expect(text).toMatch(
+    /Text before the figure\.\\begin\{figure\}\[t\]\s*\\centering\s*\\includegraphics\[width=\\linewidth\]\{figures\/dot2\.png\}/,
+  );
+  // Blank lines on both sides: the source view shows each as a line of its own.
+  const lines = await source(other).locator('.cm-line').allTextContents();
+  const at = lines.indexOf('Text before the figure.');
+  expect(lines.slice(at, at + 3)).toEqual(['Text before the figure.', '', '\\begin{figure}[t]']);
+  const end = lines.indexOf('\\end{figure}', at);
+  expect(lines.slice(end, end + 3)).toEqual(['\\end{figure}', '', '\\begin{figure}[t]']);
 });

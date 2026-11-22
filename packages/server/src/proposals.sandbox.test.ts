@@ -645,3 +645,42 @@ test('an insertion stays fresh when the file is edited elsewhere, and at either 
     `% top\n${MAIN.replace(' for most', ' not for most').replace('Nothing else is claimed.', 'Something else.')}% bottom\n`,
   );
 });
+
+test('a proposal that would break as LaTeX says so, and can still be accepted', async () => {
+  const p = await paper();
+  const latexOf = async (id: string) => (await proposals(p)).find((x) => x.id === id)!.latex;
+  const make = async (words: string, replacement: string) =>
+    propose(t.pool, store, users.reviewer.id, p.id, p.file, {
+      ...(await ends(p.file, words)),
+      replacement,
+    });
+
+  const percent = await make('40 ms', '40% less');
+  expect(await latexOf(percent)).toEqual([
+    'It has a % that is not written \\%: LaTeX reads the rest of the line as a comment, so “for most edits.” would be left out of the PDF.',
+  ]);
+  const escaped = await make('40 ms', '40\\% less');
+  expect(await latexOf(escaped)).toEqual([]);
+  const amp = await make('40 ms', 'R&D');
+  expect(await latexOf(amp)).toEqual([
+    'It has a bare &: LaTeX stops with an error there. Write \\&.',
+  ]);
+  const dollar = await make('40 ms', '$5');
+  const [unfinished] = await latexOf(dollar);
+  expect(unfinished).toMatch(/^It leaves LaTeX unfinished \(.+\)/);
+
+  // Rejected: nothing to warn about.
+  await closeProposal(t.pool, users.owner.id, p.id, amp, 'rejected');
+  expect(await latexOf(amp)).toEqual([]);
+
+  // Advisory: the owner can accept it, and the saved text has it.
+  await acceptProposal(t.pool, store, users.owner.id, p.id, percent);
+  expect(await saved(p)).toContain('below 40% less for most edits.');
+  expect(await latexOf(percent)).toEqual([]);
+
+  // Stale: the words changed under it.
+  await change(p.file, 'Nothing else', 'Nothing more');
+  const word = await make('Nothing more', 'Zero 5%');
+  await change(p.file, 'Nothing more', 'Nothing at all');
+  expect(await latexOf(word)).toEqual([]);
+});

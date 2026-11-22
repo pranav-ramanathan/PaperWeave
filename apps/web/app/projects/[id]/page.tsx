@@ -28,6 +28,7 @@ import {
   REVISIONS_SHOWN,
   listThreads,
   modelProcessing,
+  summarizeImport,
 } from '@paperweave/server';
 import Link from '../../Go';
 import Result from '../../Result';
@@ -450,6 +451,7 @@ async function Project({
         <>
           <h2>Import report</h2>
           <ul className="report">
+            <li>{summarizeImport(report)}</li>
             {report.notes.map((n) => (
               <li key={n}>{n}</li>
             ))}
@@ -491,6 +493,14 @@ async function Project({
                 These files include each other in a loop: <code>{c.join(' → ')}</code>
               </li>
             ))}
+            {report.unnamable && report.unnamable.length > 0 && (
+              <li>
+                LaTeX cannot use these file names (they have % # &quot; {'{'} or {'}'}):{' '}
+                <code>{report.unnamable.slice(0, 10).join(', ')}</code>
+                {report.unnamable.length > 10 && ` and ${report.unnamable.length - 10} more`}.
+                Rename them before using them.
+              </li>
+            )}
             {report.skipped.map((k) => (
               <li key={k.path}>
                 Left out: <code>{k.path}</code> ({k.reason}).

@@ -260,6 +260,15 @@ Read this first. Update it in every pull request.
     the caret is: a figure with a picture chosen from the paper's files, its description and
     caption; a table of a chosen size with a caption. Each gets a label made from its caption
     that the paper does not already use.
+  - The Figure window tells loading, loaded and failed apart: while the pictures load it says so
+    and Insert waits (`aria-disabled`, with a guard); if they cannot be loaded it says so and
+    offers Retry, rather than "no pictures yet". Each time it opens it starts clean. With two or
+    more pictures none is chosen for the person ("Choose a picture…"); Insert refuses until one
+    is, or "No picture yet" is. One picture is chosen on its own.
+  - A figure or table goes after the end of the paragraph the caret is in, in blank lines, not
+    at the caret, so it does not split a sentence from its citations (`Bridge.floatCommand`,
+    `insertion({ block: true })`). In a list item, a caption or elsewhere it goes at the caret
+    as before.
   - A build that fails outright (a picture the engine cannot read) now reports why. Such errors
     have no file and line and were dropped before.
   - The editor reads the selection in the text before acting even when a toolbar button has
@@ -1054,7 +1063,8 @@ Figure~, ...`, with no warning and `check()` passing.
   now adds what typing adds (`guard()`): `{}` before or after where a command name would
   run on or take a `[`/`*`, and a line break after a comment. It is built in the queue, against
   the text the earlier commands left. Not covered: the source-view paste (the source is
-  raw LaTeX there), and proposal and grammar replacements.
+  raw LaTeX there), and grammar replacements. Proposal replacements are warned about, not
+  guarded: see "A proposal that would break as LaTeX says so".
 - **Block-level text only goes where LaTeX can take it.** A copy from mid-item to mid-item
   pasted in a paragraph wrote `Before text.alpha\n\item two` (`Lonely \item`), and two
   paragraphs pasted or a heading or list inserted with the caret in a heading or inside
@@ -4462,3 +4472,65 @@ Found by a three-person walkthrough.
   `tests/e2e/import.spec.ts` follow).
 - **Held by** `graph.test` (seven layouts, four refusals), import and worker sandbox tests and a
   browser test that imports the split ZIP and builds it.
+
+- **Footnote chip reads as words.** In the visual editor a `\footnote{...}` chip now shows
+  `Footnote: See appendix.` (note body through `plainText`, cut at 40 characters with an ellipsis),
+  with the full LaTeX still in the title and "footnote: ..." as its accessible name. Editing is
+  untouched. `plainText` no longer mistook `\textbf`, `\cite` and the like for the `\t` accent.
+  Held by `footnote.test`, `bib.test` and `tests/e2e/atoms.spec.ts`.
+- **Import report opens with a summary line.** `summarizeImport` (`packages/server/src/import.ts`):
+  "Imported N files: root main.tex, compiler pdflatex, M% of body prose editable visually, K
+  source-only files." from what `describeImport` already computes (K counts preamble files shown in
+  source only). Held by `compiler.test` and `tests/e2e/atoms.spec.ts`.
+
+## `.git` and `__MACOSX` no longer count against the import limits
+
+- **What was wrong.** A ZIP of a paper's working folder was refused because `.git`, `__MACOSX`,
+  `.svn`, `.DS_Store` and `Thumbs.db` entries were counted and checked (symbolic link, name length,
+  duplicates, 2000 files, sizes) before they were skipped, although they are never opened. A git
+  clone with over 2000 loose objects, or a Finder ZIP with many `__MACOSX/._*` twins, said "it has
+  too many files"; the `__MACOSX` twin of a long name said "a file name in it is not usable"; a
+  symbolic link inside `.git` refused the whole archive.
+- **Now** `readZip` (`packages/server/src/archive.ts`) skips system entries right after the folder
+  check: neither counted nor checked, and still not listed in `skipped`. A new `entries` limit
+  (50,000, every entry in the archive) is checked once from the ZIP's own entry count before any
+  entry is read, so the skip cannot be used to make the reader walk an endless archive.
+- **Held by** `archive.test` (`.git`, `__MACOSX` twins, long-name twin, paper files still counted,
+  entry bound) and two sandbox tests in `import.sandbox.test` (a zipped working folder with `.git`
+  imports as the paper alone; a symlink inside `.git` imports). The hostile-archive test's
+  symbolic link row (`link.tex`) is still refused.
+- **Not done.** Other unwanted folders such as `node_modules` or `.venv` still count and can
+  refuse.
+
+## The import report names files LaTeX cannot use
+
+- **What was wrong.** A paper imported with `figs/result#1.png` (or `%`, `"`, `{`, `}` anywhere in a
+  path) was accepted with no word in the report that LaTeX cannot name it; the team found out when a
+  build failed or a rename was refused.
+- **Now** `describeImport` (`packages/server/src/import.ts`) lists the paths that fail `texName` in
+  `report.unnamable` (sorted), and the web import report shows one item naming the first 10 and "and
+  N more", with "Rename them before using them." Nothing shows when there are none. Import still
+  succeeds. Reports stored earlier have no field and render as before.
+- **Held by** `compiler.test`, `import.sandbox.test` and `tests/e2e/atoms.spec.ts`.
+- **Not done.** The files are not renamed for the user, and the file list does not mark them.
+
+## A proposal that would break as LaTeX says so
+
+- **What was wrong.** A proposal's replacement is stored and applied as LaTeX source, and only
+  its type, length and `\r` were checked. A reviewer typing `12% faster` silently dropped the rest
+  of the source line from the PDF (latexmk exits 0, no warning); `Smith & Jones`, `item_1` and `#2`
+  broke the build; `$5` or `\emph{much` left a group open. The owner saw a card with nothing wrong.
+- **Now** `replacementHazards` (`packages/latex/src/hazards.ts`, pure) is run by `listProposals` for
+  open proposals whose words still stand, and its messages come back as `Proposal.latex`. The card
+  shows them under "Written as LaTeX, this would not come out as it reads". It is advisory: Accept
+  stays allowed. A `%` that opens a comment is found anywhere in the file (`commentOpen`, moved from
+  the bridge into `@paperweave/latex`). An unfinished group or a bare `& # _ ^` is found by parsing
+  only the paragraph around the edit before and after, and reporting what the change adds. The
+  change form says "This is LaTeX: write \% for %, \& for &, \_ for _."
+- **Held by** `hazards.test` (table of cases), `proposals.sandbox.test` and `tests/e2e/proposals.spec.ts`
+  (warning shown, Accept enabled, gone after the change is written with `\%`, axe audit).
+- **Not done.** `%` inside `verbatim` or `lstlisting` is flagged. Unfinished groups and bare
+  characters are not found in raw blocks (captions, tables, nested lists), lists with blank lines
+  between items, or the preamble (the comment check still works there). A paragraph over 40 KB
+  is not parsed. `$5 to $3` written wholly inside the replacement is a valid formula and is not
+  flagged. Critique and grammar replacements are not checked.

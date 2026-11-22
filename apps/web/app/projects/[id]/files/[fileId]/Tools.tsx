@@ -205,7 +205,10 @@ export function FloatBox(props: {
   const box = useDialog(!!request);
   const [pictures, setPictures] = useState<Picture[]>([]);
   const [labels, setLabels] = useState<Set<string>>(new Set());
-  const [target, setTarget] = useState('');
+  /** The picture's name in the source: '' for none, null until one has been chosen. */
+  const [target, setTarget] = useState<string | null>(null);
+  const [load, setLoad] = useState<'loading' | 'ready' | 'failed'>('loading');
+  const [attempt, setAttempt] = useState(0);
   const [alt, setAlt] = useState('');
   const [caption, setCaption] = useState('');
   const [rows, setRows] = useState(3);
@@ -222,27 +225,48 @@ export function FloatBox(props: {
   useEffect(() => {
     if (!request) return;
     let stop = false;
+    // Nothing is carried over from the last time the window was open.
     setAlt('');
     setCaption('');
     setProblem('');
-    const read = <T,>(url: string, then: (found: T) => void) =>
+    setPictures([]);
+    setTarget(null);
+    setLoad('loading');
+    const read = <T,>(url: string, then: (found: T) => void, fail?: () => void) =>
       void fetch(url)
-        .then((res) => (res.ok ? res.json() : []))
+        .then((res) => {
+          if (!res.ok) throw new Error(`status ${res.status}`);
+          return res.json();
+        })
         .then((found: T) => !stop && then(found))
-        .catch(() => {});
-    read<Picture[]>(`/projects/${projectId}/pictures`, (found) => {
-      setPictures(found);
-      choose(found[0]);
-    });
+        .catch(() => !stop && fail?.());
+    read<Picture[]>(
+      `/projects/${projectId}/pictures`,
+      (found) => {
+        setPictures(found);
+        // No guess among several: one picture, or none, leaves nothing to choose.
+        if (found.length <= 1) choose(found[0]);
+        setLoad('ready');
+      },
+      () => setLoad('failed'),
+    );
     // So that the new label is not one the paper already has.
     read<{ key: string }[]>(`/projects/${projectId}/labels`, (found) =>
       setLabels(new Set(found.map((l) => l.key))),
     );
     return () => void (stop = true);
-  }, [request, projectId]);
+  }, [request, projectId, attempt]);
   const figure = request?.kind === 'figure';
   const insert = async () => {
     if (!request || busy) return;
+    if (figure && load !== 'ready')
+      return setProblem(
+        load === 'loading'
+          ? 'The pictures are still loading. Try again in a moment.'
+          : 'The pictures could not be loaded. Use Retry first.',
+      );
+    if (figure && target === null)
+      return setProblem('Choose a picture first, or choose No picture yet.');
     const said = alt.replace(/\s+/g, ' ').trim();
     const cap = caption.replace(/\s+/g, ' ').trim();
     if (/[{}%#\\\]]/.test(said))
@@ -251,14 +275,14 @@ export function FloatBox(props: {
       );
     if (!cellText(cap))
       return setProblem('A caption cannot hold an unescaped & or %, and its braces must match.');
-    if (figure && /[%#"{}]/.test(target))
+    if (figure && target && /[%#"{}]/.test(target))
       return setProblem("LaTeX cannot use this picture's name. Rename it first.");
     const label = `  \\label{${labelFor(figure ? 'fig' : 'tab', cap, labels)}}`;
     const lines = figure
       ? [
           '\\begin{figure}[t]',
           '  \\centering',
-          ...(target
+          ...(figure && target
             ? [`  \\includegraphics[width=\\linewidth${said ? `,alt={${said}}` : ''}]{${target}}`]
             : []),
           `  \\caption{${cap}}`,
@@ -317,18 +341,41 @@ export function FloatBox(props: {
             <label>
               Picture
               <select
-                value={target}
+                value={target ?? '?'}
                 onChange={(e) => choose(pictures.find((p) => p.target === e.target.value))}
               >
+                {load === 'loading' && (
+                  <option value="?" disabled>
+                    Loading pictures…
+                  </option>
+                )}
+                {load === 'failed' && (
+                  <option value="?" disabled>
+                    Pictures not loaded
+                  </option>
+                )}
+                {load === 'ready' && target === null && (
+                  <option value="?" disabled>
+                    Choose a picture…
+                  </option>
+                )}
                 {pictures.map((p) => (
                   <option key={p.path} value={p.target}>
                     {p.path}
                   </option>
                 ))}
-                <option value="">None yet</option>
+                {load === 'ready' && <option value="">No picture yet</option>}
               </select>
             </label>
-            {pictures.length === 0 && (
+            {load === 'failed' && (
+              <p className="note">
+                Could not load the pictures.{' '}
+                <button type="button" onClick={() => setAttempt((n) => n + 1)}>
+                  Retry
+                </button>
+              </p>
+            )}
+            {load === 'ready' && pictures.length === 0 && (
               <p className="note">
                 This paper has no pictures yet. Add them on the paper&apos;s page, under Files.
               </p>
@@ -350,7 +397,11 @@ export function FloatBox(props: {
         </label>
         {problem && <p role="alert">{problem}</p>}
         <p>
-          <button type="submit" disabled={busy}>
+          <button
+            type="submit"
+            // aria-disabled, not disabled, so the button keeps the keyboard while it waits.
+            aria-disabled={busy || (figure && load !== 'ready') || undefined}
+          >
             Insert
           </button>{' '}
           <button type="button" onClick={onDone}>
