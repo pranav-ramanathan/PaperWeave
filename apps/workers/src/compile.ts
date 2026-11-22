@@ -15,7 +15,7 @@ import {
 } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { LATEXMK_RULES, auxLabels, norm, rootDir } from '@paperweave/latex';
+import { LATEXMK_RULES, auxLabels, norm, rootDir, texText } from '@paperweave/latex';
 
 export const IMAGE = process.env.PAPERWEAVE_TEX_IMAGE ?? 'paperweave-tex';
 /** The image's unprivileged user. */
@@ -194,6 +194,54 @@ export function diagnostics(log: string, output = '', dir = ''): Diagnostic[] {
     /^(I found no \\bibstyle command)/gm,
     () => 'The paper has no \\bibliographystyle{\u2026}.',
   );
+  // Biber writes to latexmk's output (and to main.blg, with a "[222] Utils.pm:399>" in front of
+  // each line, which latexmk echoes as "Biber error: [222] ..." too): lines that start with
+  // "ERROR - " are the real ones. It names a data source when it starts on it, "INFO - Found
+  // BibTeX data source 'refs.bib'", and an error in that file comes after. The line is the .bib's
+  // own (biber's copy of it, which the message names, has the same lines), counted from 1.
+  let source: string | undefined;
+  const biber = (d: Diagnostic) => {
+    if (!out.some((e) => JSON.stringify(e) === JSON.stringify(d))) out.push(d);
+  };
+  for (const m of output.matchAll(
+    /^(?:INFO - Found BibTeX data source '(.+)'|ERROR - (.+?))\r?$/gm,
+  )) {
+    if (m[1] !== undefined) {
+      source = m[1].replace(/^\.\//, '');
+      continue;
+    }
+    const syntax =
+      /^BibTeX subsystem: \S+, line (\d+), (?:syntax error: )?(.+?)(?: \(skipping to next "@"\))?$/.exec(
+        m[2],
+      );
+    const missing = /^Cannot find '(.+?)'!?$/.exec(m[2]);
+    if (syntax)
+      biber({
+        severity: 'error',
+        ...(source ? { file: source, line: Number(syntax[1]) } : {}),
+        message: `Biber: ${syntax[2]}.`,
+      });
+    else if (missing)
+      biber({
+        severity: 'error',
+        file: missing[1],
+        message: `Biber could not find the bibliography file ${missing[1]}.`,
+      });
+    else biber({ severity: 'error', message: `Biber: ${m[2].replace(/[.!]$/, '')}.` });
+  }
+  // latexmk does not start biber at all on a .bib file that is not there, and says so.
+  for (const m of output.matchAll(
+    /^Latexmk: Bibliography file\(s\) form \.bcf file:\n(?:[ \t]+.*\n)*?Bib file\(s\) not found in search path:\n((?:[ \t]+.*(?:\n|$))+)/gm,
+  ))
+    for (const f of m[1]
+      .split('\n')
+      .map((t) => t.trim())
+      .filter(Boolean))
+      biber({
+        severity: 'error',
+        file: f.replace(/^\.\//, ''),
+        message: `Biber could not find the bibliography file ${f}.`,
+      });
   // Nothing above matched, but latexmk says a bibliography run failed: say so, not nothing.
   if (
     out.length === beforeBibtex &&
@@ -356,7 +404,7 @@ export async function compile(
     );
     const base = root.replace(/\.tex$/i, '');
     const logPath = join(work, base + '.log');
-    const log = existsSync(logPath) ? readFileSync(logPath, 'latin1') : run.output;
+    const log = existsSync(logPath) ? texText(readFileSync(logPath)) : run.output;
     mkdirSync(out, { recursive: true });
     const keep = (ext: string) => {
       if (!existsSync(join(work, base + ext))) return undefined;
@@ -370,7 +418,7 @@ export async function compile(
       for (const e of readdirSync(dir, { withFileTypes: true }))
         if (e.isDirectory()) gather(join(dir, e.name));
         else if (e.name.endsWith('.aux') && aux.length < 4_000_000)
-          aux += readFileSync(join(dir, e.name), 'latin1') + '\n';
+          aux += texText(readFileSync(join(dir, e.name))) + '\n';
     };
     if (pdf) gather(work);
     return {

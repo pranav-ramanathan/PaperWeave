@@ -853,6 +853,19 @@ Built after the security review, which had it as its second open item.
   ends on: before, a package's two-line warning lost its line, and font warnings were not
   reported at all. The same warning written once per pass over the paper is shown once.
 
+## What TeX writes is UTF-8, not Latin-1
+
+- **Before:** the log, `.aux` and SyncTeX were read as Latin-1, so a file, label or citation key
+  with an accent or CJK came out garbled: its diagnostic found no file, `\ref` showed `??` in the
+  visual view, a defined reference got a false "LaTeX resolved it" warning, and source and PDF
+  jumps failed for that file.
+- **Now:** all three are read with `texText` (`packages/latex/src/encoding.ts`): UTF-8, and a
+  byte that is not part of a valid sequence is its own Latin-1 character. pdflatex, xelatex and
+  lualatex all echo the sources' bytes as they are (no `^^` escapes, no `\IeC` in labels or
+  keys), checked against the real image. The log is stored as it is and served as UTF-8.
+- Builds cached before this hold garbled diagnostics and labels, so the cache key carries a
+  `TEX_TEXT` salt (`builder.ts`): each paper rebuilds once. Earlier build records are not rewritten.
+
 ## How long a large import takes
 
 - An import still runs inside its request. Measured at the most files a paper may hold
@@ -1865,7 +1878,8 @@ update` held the paper's file rows for **189.6 s** (until the proxy was cut; it 
 - **Not changed:** a list left open is reported at the end of the paper, with the line but not
   the file it was opened in. A mistake inside a command is placed where the command is used. A
   missing package or file is given its file but not its line. A package of TeX's own is named
-  without the line that loads it. Biber's errors are not read. The lists are not links to the
+  without the line that loads it. Biber's errors are read from latexmk's output, with the .bib and its line (a .bib that
+  is not there has no line); biber's own log, main.blg, is still not the build log shown. The lists are not links to the
   lines. BibTeX's own words are not in the build log a person can open.
 - **How it was made.** Planned by one agent, probed and written by others, checked here.
 

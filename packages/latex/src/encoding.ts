@@ -33,3 +33,36 @@ export function encodeFile(text: string, meta: FileMeta): Uint8Array {
   const body = meta.eol === 'crlf' ? text.replaceAll('\n', '\r\n') : text;
   return new TextEncoder().encode((meta.bom ? '\uFEFF' : '') + body);
 }
+
+/**
+ * What TeX wrote (log, .aux, SyncTeX): the bytes of the sources it echoes, so UTF-8 for names and
+ * keys from editable files. A byte that does not belong to a valid UTF-8 sequence, such as one
+ * from a Latin-1 package or a line cut mid-character, becomes the Latin-1 character with that
+ * value, so it garbles nothing around it.
+ */
+export function texText(bytes: Uint8Array): string {
+  try {
+    return new TextDecoder('utf-8', { fatal: true, ignoreBOM: true }).decode(bytes);
+  } catch {
+    // fall through to the byte by byte reading
+  }
+  const dec = new TextDecoder('utf-8', { fatal: true, ignoreBOM: true });
+  const parts: string[] = [];
+  let i = 0;
+  while (i < bytes.length) {
+    const b = bytes[i]!;
+    const n = b < 0x80 ? 1 : b >= 0xf0 ? 4 : b >= 0xe0 ? 3 : b >= 0xc2 ? 2 : 0;
+    if (n > 0) {
+      try {
+        parts.push(dec.decode(bytes.subarray(i, i + n)));
+        i += n;
+        continue;
+      } catch {
+        // not a valid sequence: this byte alone, below
+      }
+    }
+    parts.push(String.fromCharCode(b));
+    i++;
+  }
+  return parts.join('');
+}

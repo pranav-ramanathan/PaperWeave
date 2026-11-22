@@ -8,6 +8,13 @@ import { type BlobStore, cutRevision, type Db, transaction } from '@paperweave/s
 import type pg from 'pg';
 import { compile, type Compiler, IMAGE } from './compile.ts';
 
+/**
+ * Part of every cache key. Builds cached before diagnostics and labels were read as UTF-8 hold
+ * garbled file names and keys; bump this when what is read from TeX's output changes.
+ * 'utf8-biber': Biber's errors are read now, so a cached failed build lacks its .bib and line.
+ */
+const TEX_TEXT = 'utf8-biber';
+
 /** The toolchain image's content ID: part of every cache key, so a new image rebuilds everything. */
 export const imageId = () =>
   execFileSync('docker', ['image', 'inspect', IMAGE, '--format', '{{.Id}}'], {
@@ -56,7 +63,9 @@ export function buildNext(
       await db.query('select path, digest from revision_files where revision_id = $1', [revisionId])
     ).rows;
     // Everything that can change the output: the revision's content and the toolchain.
-    const key = createHash('sha256').update(`${revision.content_key}:${image}`).digest('hex');
+    const key = createHash('sha256')
+      .update(`${revision.content_key}:${image}:${TEX_TEXT}`)
+      .digest('hex');
     const common = { revision_id: revisionId, cache_key: key, compiler: revision.compiler, image };
 
     if (!revision.root) {
@@ -120,7 +129,7 @@ export function buildNext(
         timed_out: result.timedOut,
         pdf_digest: await put(result.pdf),
         synctex_digest: await put(result.synctex),
-        log_digest: await store.put(Buffer.from(result.log, 'latin1')),
+        log_digest: await store.put(Buffer.from(result.log, 'utf8')),
         labels: result.labels && JSON.stringify(result.labels),
       });
     } catch (err) {

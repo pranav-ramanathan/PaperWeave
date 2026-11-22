@@ -442,6 +442,19 @@ test('a citation or reference TeX cannot resolve stops a paper, however it is ma
   expect(wrapper.problems[0].message).toContain('nolabel');
 }, 240_000);
 
+test('an undefined reference with an accent in its key is one problem, in its own file', async () => {
+  const r = await verdict('Accent ref', {
+    'main.tex': doc('', '\\input{sections/méthode}'),
+    'sections/méthode.tex': 'See \\ref{fig:résumé}.',
+  });
+  expect(r.ready).toBe(false);
+  expect(r.problems).toHaveLength(1);
+  expect(r.problems[0]).toMatchObject({ kind: 'label', path: 'sections/méthode.tex' });
+  expect(r.problems[0].fileId).toBeTruthy();
+  expect(r.problems[0].message).toContain('fig:résumé');
+  expect(r.findings.some((f) => /LaTeX resolved it/.test(f.message))).toBe(false);
+}, 240_000);
+
 test('an overfull box or a font warning alone leaves a paper ready', async () => {
   const warned = await verdict('Warned', {
     'main.tex': doc(
