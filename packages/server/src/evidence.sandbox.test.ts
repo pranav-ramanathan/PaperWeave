@@ -242,7 +242,9 @@ test('an evidence check is about one quoted claim, and is kept apart from the en
     'permission_denied',
   );
   expect(await code(removeEvidence(t.pool, users.reviewer.id, p.id, owners.id))).toBe('not_found');
-  await removeEvidence(t.pool, users.reviewer.id, p.id, mine.id);
+  expect(await removeEvidence(t.pool, users.reviewer.id, p.id, mine.id)).toEqual({
+    key: 'knuth1984',
+  });
   await removeEvidence(t.pool, users.owner.id, p.id, owners.id);
   expect((await citationChecks(t.pool, store, users.owner.id, p.id)).evidence).toEqual({});
 });

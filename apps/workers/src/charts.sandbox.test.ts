@@ -398,7 +398,7 @@ test('charts keep to their paper, their name and the people who may change them'
   expect(await code(chartPng(t.pool, store, users.outsider.id, p.id, id))).toBe('not_found');
   expect(await code(removeChart(t.pool, users.viewer.id, p.id, id))).toBe('permission_denied');
   expect(await code(removeChart(t.pool, users.owner.id, other.id, id))).toBe('not_found');
-  await removeChart(t.pool, users.owner.id, p.id, id);
+  expect(await removeChart(t.pool, users.owner.id, p.id, id)).toEqual({ name: 'latency' });
   expect(await charts(p)).toEqual([]);
   // Nothing of another paper's was left queued for the next test.
   while (await drawNext(t.pool, store, image));
