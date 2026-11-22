@@ -98,7 +98,7 @@ test('an entry is checked against the registry, and a claim against its source, 
   await expect(row(page, 'knuth1984')).toContainText('Not looked up.');
   await expect(row(page, 'nodoi')).toContainText('No DOI to look up.');
   await expect(row(page, 'nodoi').getByRole('button', { name: /Look up/ })).toHaveCount(0);
-  await page.getByRole('button', { name: 'Look up the DOI of knuth1984' }).click();
+  await page.getByRole('button', { name: 'Look up DOI for knuth1984' }).click();
   await expect(page.getByRole('status')).toContainText('Looked up knuth1984.');
   await expect(row(page, 'knuth1984')).toContainText(
     `Matches the registry. Looked up in Crossref on ${today} by ${owner.email}.`,
@@ -106,7 +106,7 @@ test('an entry is checked against the registry, and a claim against its source, 
   // Only the DOI was sent.
   expect(asked).toEqual(['GET /works/10.1093%2Fcomjnl%2F27.2.97']);
   // A difference is shown with both sides, and nothing in the paper is changed.
-  await page.getByRole('button', { name: 'Look up the DOI of lamport1994' }).click();
+  await page.getByRole('button', { name: 'Look up DOI for lamport1994' }).click();
   await expect(row(page, 'lamport1994')).toContainText('Differs from the registry:');
   await expect(row(page, 'lamport1994')).toContainText(
     'year: the entry says “1993”, the registry “1994”',
@@ -115,10 +115,10 @@ test('an entry is checked against the registry, and a claim against its source, 
 
   // A DOI written as BibTeX wants it (\_) is asked for as the DOI it is. A 404 is not proof the
   // DOI is wrong: it may be registered with another agency.
-  await page.getByRole('button', { name: 'Look up the DOI of escaped' }).click();
+  await page.getByRole('button', { name: 'Look up DOI for escaped' }).click();
   await expect(row(page, 'escaped')).toContainText('Matches the registry.');
   expect(asked).toContain('GET /works/10.1007%2F978-3-540-74958-5_1');
-  await page.getByRole('button', { name: 'Look up the DOI of datacite' }).click();
+  await page.getByRole('button', { name: 'Look up DOI for datacite' }).click();
   await expect(row(page, 'datacite')).toContainText(
     'Crossref has no record of this DOI. It may be wrong, or registered elsewhere: arXiv and Zenodo DOIs, for example, are registered with DataCite.',
   );
@@ -167,7 +167,7 @@ test('an entry is checked against the registry, and a claim against its source, 
 
   // The registry stops answering: the person is told, and nothing is recorded.
   await new Promise((done) => registry.close(done));
-  await page.getByRole('button', { name: 'Look up the DOI of knuth1984' }).click();
+  await page.getByRole('button', { name: 'Look up again for knuth1984' }).click();
   await expect(page.locator('main [role=alert]')).toHaveText(
     'The DOI registry did not answer. Nothing was recorded; try again later.',
   );

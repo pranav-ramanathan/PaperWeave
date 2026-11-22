@@ -9,7 +9,15 @@ import {
   rootDir,
 } from '@paperweave/latex';
 import type pg from 'pg';
-import { checkPath, clashMessage, type Limits, LIMITS, pathClash, SOURCE } from './archive.ts';
+import {
+  checkPath,
+  clashMessage,
+  type Limits,
+  LIMITS,
+  pathClash,
+  SOURCE,
+  texName,
+} from './archive.ts';
 import { authorize } from './authz.ts';
 import type { BlobStore } from './blobs.ts';
 import { type Db, transaction } from './db.ts';
@@ -57,6 +65,8 @@ export async function createFile(
   await authorize(db, userId, id(projectId), 'file.write');
   const problem = checkPath(path);
   if (problem) throw new AppError('invalid_input', `That name cannot be used: ${problem}.`);
+  const tex = texName(path as string);
+  if (tex) throw new AppError('invalid_input', tex);
   if (bytes.length > limits.fileBytes)
     throw new AppError('invalid_input', 'That file is too large.');
   const clash = pathClash(
@@ -438,6 +448,8 @@ export async function proposeFileRename(
   await authorize(pool, userId, id(projectId), 'file.write');
   const problem = checkPath(to);
   if (problem) throw new AppError('invalid_input', `That name cannot be used: ${problem}.`);
+  const tex = texName(to as string);
+  if (tex) throw new AppError('invalid_input', tex);
   const plan = await renamePlan(pool, store, projectId, id(fileId), to as string);
   const taken = await pool.query(
     'select 1 from files where project_id = $1 and path = $2 and id <> $3',

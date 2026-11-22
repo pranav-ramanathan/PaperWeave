@@ -116,6 +116,17 @@ export function checkPath(path: unknown, limits: Limits = LIMITS): string {
   return '';
 }
 
+/**
+ * Why a path cannot be named in LaTeX source, or null if it can. % # " { and } in any name of the
+ * path break \includegraphics and \input in every engine, and cannot be quoted. Kept apart from
+ * `checkPath` so that a paper which already has such a name can still be imported and restored.
+ */
+export function texName(path: string): string | null {
+  return /[%#"{}]/.test(path)
+    ? 'LaTeX cannot use a file name with % # " { or } in it. Choose another name.'
+    : null;
+}
+
 /** Unpack an archive, or refuse it. Refusal is all-or-nothing: a hostile archive imports nothing. */
 export function readZip(
   zip: Uint8Array,

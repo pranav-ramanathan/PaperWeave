@@ -185,3 +185,37 @@ test('a figure shows its picture, and is given a description in place', async ({
   );
   expect(bytes('figures/dot.png').equals(PNG)).toBe(true);
 });
+
+test('a picture whose name LaTeX cannot spell is not put in a figure', async ({ browser }) => {
+  test.setTimeout(120_000);
+  const { page, email } = await person(browser, 'figure-hostile');
+  const zip = join(mkdtempSync(join(tmpdir(), 'paperweave-e2e-')), `Hostile ${run}.zip`);
+  writeFileSync(
+    zip,
+    await writeZip([
+      { path: 'main.tex', bytes: Buffer.from(MAIN) },
+      { path: '50%.png', bytes: PNG },
+    ]),
+  );
+  await page.goto('/sign-in');
+  await signIn(page, email);
+  await page.getByLabel('Or import a ZIP of a LaTeX project').setInputFiles(zip);
+  await page.getByRole('button', { name: 'Import ZIP' }).click();
+  await page.getByRole('link', { name: 'main.tex' }).click();
+  await expect(page.getByRole('region', { name: 'Editor for main.tex' })).toBeVisible();
+  const other = await page.context().newPage();
+  await other.goto(page.url());
+  await showSource(other);
+  await expect(source(other)).toContainText('Text after the figure.');
+  await clickAfter(page, VISUAL, 'after');
+  await page.getByRole('group', { name: 'Edit' }).getByRole('button', { name: 'Figure' }).click();
+  const box = page.getByRole('dialog', { name: 'Insert a figure' });
+  await box.getByRole('combobox', { name: /^Picture/ }).selectOption('50%.png');
+  await box.getByLabel('Caption').fill('Half');
+  await box.getByRole('button', { name: 'Insert' }).click();
+  await expect(box.getByRole('alert')).toHaveText(
+    "LaTeX cannot use this picture's name. Rename it first.",
+  );
+  await expect(source(other)).not.toContainText('50%.png');
+  await expect(page.locator(VISUAL).getByRole('group', { name: 'Figure' })).toHaveCount(1);
+});

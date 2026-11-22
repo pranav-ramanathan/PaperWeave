@@ -99,6 +99,26 @@ test('the main pages have no accessibility failures a machine can find', async (
   await audit(page, 'editor, source view');
 });
 
+test('a paper with a revision that has no PDF has no accessibility failures', async ({
+  browser,
+}) => {
+  test.setTimeout(120_000);
+  const { page, email } = await person(browser, 'a11y-revision');
+  await page.goto('/sign-in');
+  await signIn(page, email);
+  const zip = join(mkdtempSync(join(tmpdir(), 'paperweave-e2e-')), `Unbuilt ${run}.zip`);
+  writeFileSync(zip, await writeZip([{ path: 'main.tex', bytes: Buffer.from(MAIN) }]));
+  await page.getByLabel('Or import a ZIP of a LaTeX project').setInputFiles(zip);
+  await page.getByRole('button', { name: 'Import ZIP' }).click();
+  await expect(page.getByRole('heading', { name: 'Language' })).toBeVisible();
+  await page.getByLabel('Name for the paper as it is now').fill('Not built');
+  await page.getByRole('button', { name: 'Save revision' }).click();
+  await expect(page.getByRole('status')).toHaveText('Saved as revision 1.');
+  // The button's visible text, "Build PDF", is what the audit compares its accessible name to.
+  await expect(page.getByText('Build PDF', { exact: true })).toBeVisible();
+  await audit(page, 'paper with a revision that has no PDF');
+});
+
 test('a thread is started and a line is shown in the PDF with the keyboard alone', async ({
   browser,
 }) => {
