@@ -720,3 +720,25 @@ test('the XeLaTeX paper of the fixtures is still ready', async () => {
   expect(v.problems.map((p) => p.message)).toEqual([]);
   expect(v.ready).toBe(true);
 }, 300_000);
+
+test('a paper with an abbreviation no @string defines is not ready, until one does', async () => {
+  const main = doc('', 'Cite \\cite{he16}.\n\\bibliographystyle{plain}\n\\bibliography{refs}');
+  const bib =
+    '@article{he16,\n  author = {He, K.},\n  title = {Deep},\n  journal = cvpr,\n  year = {2016}\n}\n';
+  const v = await verdict('Abbreviation paper', { 'main.tex': main, 'refs.bib': bib });
+  expect(v.ready).toBe(false);
+  expect(v.problems).toContainEqual(
+    expect.objectContaining({
+      kind: 'file',
+      path: 'refs.bib',
+      line: 4,
+      message: expect.stringMatching(/^Abbreviation not defined: "cvpr" is used in refs\.bib/),
+    }),
+  );
+  const fixed = await verdict('Abbreviation defined', {
+    'main.tex': main,
+    'refs.bib': `@string{cvpr = "CVPR"}\n${bib}`,
+  });
+  expect(fixed.text).toEqual([]);
+  expect(fixed.ready).toBe(true);
+}, 300_000);

@@ -41,6 +41,7 @@ const MULTIPLY = /^Label [`'](.+?)' multiply defined/;
 const PICTURE = /^Picture not shown: /;
 /** The worker's warning for characters the font lacks: the PDF leaves them out. */
 const MISSING = /^Characters not shown: /;
+const ABBREVIATION = /^Abbreviation not defined: /;
 const NOT_FOUND = /[`'](.+?)' not found/;
 /** Whether a file TeX could not find ("nosuchfile.tex") is the one a command named ("nosuchfile"). */
 const namesTarget = (found: string, target: string) => {
@@ -320,9 +321,12 @@ async function checksOf(
         if (!reported.has(`${kind}:${key}`)) problem(kind, d.message, where);
         continue;
       }
-      // The PDF has a box where the picture should be, or lacks characters, though the build
+      // The PDF has a box where the picture should be, or lacks characters, or a reference lacks a field its .bib names by an undefined abbreviation, though the build
       // said nothing is wrong.
-      if (fresh && (PICTURE.test(d.message) || MISSING.test(d.message))) {
+      if (
+        fresh &&
+        (PICTURE.test(d.message) || MISSING.test(d.message) || ABBREVIATION.test(d.message))
+      ) {
         problem('file', d.message, where);
         continue;
       }

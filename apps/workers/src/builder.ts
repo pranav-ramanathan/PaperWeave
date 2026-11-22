@@ -16,8 +16,10 @@ import { compile, type Compiler, IMAGE } from './compile.ts';
  * should be said nothing, and a failed XeLaTeX build did not name the file.
  * 'utf8-biber-eps-glyphs': characters the font lacks are reported now; a cached good build
  * that left some out of the PDF said nothing.
+ * 'utf8-biber-eps-glyphs-strings': an undefined @string abbreviation is reported now; a cached
+ * good build that printed a reference without its journal said nothing.
  */
-const TEX_TEXT = 'utf8-biber-eps-glyphs';
+const TEX_TEXT = 'utf8-biber-eps-glyphs-strings';
 
 /** The toolchain image's content ID: part of every cache key, so a new image rebuilds everything. */
 export const imageId = () =>

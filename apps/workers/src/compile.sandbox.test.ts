@@ -47,6 +47,7 @@ test.each(['article-basic', 'ieee-multifile', 'ams-multifile'])(
     expect(r.diagnostics.filter((d) => d.severity === 'error')).toEqual([]);
     expect(r.ok).toBe(true);
     expect(r.diagnostics.filter((d) => /^Characters not shown: /.test(d.message))).toEqual([]);
+    expect(r.diagnostics.filter((d) => /^Abbreviation not defined: /.test(d.message))).toEqual([]);
     expect(readFileSync(join(out, r.pdf!)).subarray(0, 5).toString()).toBe('%PDF-');
     expect(existsSync(join(out, r.synctex!))).toBe(true);
     // Whatever was warned about is placed where it can be: in a file there is, on a line it has.
@@ -79,6 +80,7 @@ test.each([
   expect(r.diagnostics.filter((d) => d.severity === 'error')).toEqual([]);
   expect(r.ok).toBe(true);
   expect(r.diagnostics.filter((d) => /^Characters not shown: /.test(d.message))).toEqual([]);
+  expect(r.diagnostics.filter((d) => /^Abbreviation not defined: /.test(d.message))).toEqual([]);
   expect(readFileSync(join(out, r.pdf!)).subarray(0, 5).toString()).toBe('%PDF-');
   expect(
     r.diagnostics.filter((d) => /(?:Citation|Reference) .* undefined/.test(d.message)),
@@ -610,4 +612,50 @@ test.each(['xelatex', 'lualatex'] as const)(
     }
   },
   120_000,
+);
+
+// `journal = cvpr` with no @string for it: BibTeX and Biber go on, exit 0, and print the
+// reference without its journal.
+// Biber reads the .bib files in the order given, so the one with the @string comes first.
+const abbrPaper = (engine: 'bibtex' | 'biber', strings?: 'second') => {
+  const project = tmp();
+  writeFileSync(
+    join(project, 'main.tex'),
+    engine === 'bibtex'
+      ? `\\documentclass{article}\n\\begin{document}\nCite \\cite{he16}.\n\\bibliographystyle{plain}\n\\bibliography{${strings === 'second' ? 'strings,refs' : 'refs'}}\n\\end{document}\n`
+      : `\\documentclass{article}\n\\usepackage[backend=biber]{biblatex}\n${strings === 'second' ? '\\addbibresource{strings.bib}\n' : ''}\\addbibresource{refs.bib}\n\\begin{document}\nCite \\cite{he16}.\n\\printbibliography\n\\end{document}\n`,
+  );
+  const entry =
+    '@article{he16,\n  author = {He, K.},\n  title = {Deep},\n  journal = cvpr,\n  year = {2016}\n}\n';
+  writeFileSync(join(project, 'refs.bib'), entry);
+  if (strings === 'second') writeFileSync(join(project, 'strings.bib'), '@string{cvpr = "CVPR"}\n');
+  return project;
+};
+
+test.each(['bibtex', 'biber'] as const)(
+  'a %s paper with an abbreviation nothing defines builds, and says so once',
+  async (engine) => {
+    const r = await compile(abbrPaper(engine), 'main.tex', tmp(), 120);
+    expect(r.ok).toBe(true);
+    expect(r.diagnostics.filter((d) => /^Abbreviation not defined: /.test(d.message))).toEqual([
+      {
+        severity: 'warning',
+        file: 'refs.bib',
+        line: 4,
+        message:
+          'Abbreviation not defined: "cvpr" is used in refs.bib but no @string defines it; the reference is printed without that field.',
+      },
+    ]);
+  },
+  180_000,
+);
+
+test.each(['bibtex', 'biber'] as const)(
+  'a %s paper whose abbreviation is defined in a second .bib has no such warning',
+  async (engine) => {
+    const r = await compile(abbrPaper(engine, 'second'), 'main.tex', tmp(), 120);
+    expect(r.ok).toBe(true);
+    expect(r.diagnostics.filter((d) => /^Abbreviation not defined: /.test(d.message))).toEqual([]);
+  },
+  180_000,
 );
