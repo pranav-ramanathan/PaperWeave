@@ -130,6 +130,19 @@ test.each([
   expect(r.log).not.toMatch(/mktexpk/);
 });
 
+test('a [ typed at the start of an item or a theorem body prints as text', async () => {
+  const body =
+    '\\begin{itemize}\n\\item {}[1] x\n\\end{itemize}\n\\begin{theorem}\n{}[0,1] or more.\n\\end{theorem}\n';
+  const { r, out } = await buildSource(
+    `\\documentclass{article}\n\\usepackage{amsthm}\n\\newtheorem{theorem}{Theorem}\n\\begin{document}\n${body}\\end{document}\n`,
+  );
+  expect(r.diagnostics.filter((d) => d.severity === 'error')).toEqual([]);
+  expect(r.ok).toBe(true);
+  const text = execFileSync('pdftotext', [join(out, r.pdf!), '-'], { encoding: 'utf8' });
+  expect(text).toContain('[1] x');
+  expect(text).toContain('[0,1] or more.');
+});
+
 test('a " typed in the visual view stays a quote under German babel', async () => {
   const rep = replica('Er sagte x und y.\n');
   const tb = textblocks(rep)[0];

@@ -51,6 +51,60 @@ test('typing becomes the smallest splice', () => {
   expect(typed('one\ntwo\n', 4, ' ')).toBe('one \ntwo\n');
 });
 
+/** Type `text` at display offset `off` of text block `k` (deleting `del`); returns the source. */
+function typedIn(src: string, k: number, off: number, text: string, del = 0) {
+  const r = replica(src);
+  const start = textblocks(r)[k].start + off;
+  expect(r.dispatch(r.state.tr.insertText(text, start, start + del)), src).toBe(true);
+  r.check();
+  return r;
+}
+
+test('a [ or * typed where LaTeX looks past spaces for an argument is kept as text', () => {
+  const LIST1 = '\\begin{itemize}\n\\item One\n\\item See [1] here\n\\end{itemize}\n';
+  // Start of an item.
+  let r = typedIn(LIST1, 0, 0, '[1] ');
+  expect(r.src).toContain('\\item {}[1] One');
+  expect(shown(r)).toContain('[1] One');
+  // Deleting what stood before it.
+  r = typedIn(LIST1, 1, 0, '', 4);
+  expect(r.src).toContain('\\item {}[1] here');
+  expect(shown(r)).toContain('[1] here');
+  // Enter just before it.
+  r = replica(LIST1);
+  const at = textblocks(r)[1].start + 4;
+  const tr = r.state.tr.split(at);
+  expect(r.dispatch(tr.setSelection(TextSelection.near(tr.doc.resolve(at + 2))))).toBe(true);
+  r.check();
+  expect(r.src).toContain('\\item See \n\\item {}[1] here');
+  // The first paragraph of a theorem or a proof.
+  for (const env of ['theorem', 'proof']) {
+    const T = `\\begin{${env}}\nLet $K$ be compact.\n\\end{${env}}\n`;
+    r = typedIn(T, 0, 0, '[0,1] or ');
+    expect(r.src).toContain(`\\begin{${env}}\n{}[0,1] or Let`);
+    expect(shown(r)).toContain('[0,1] or Let');
+  }
+  // After a line break, with a space or a newline between.
+  for (const src of ['a\\\\ b\n', 'a\\\\\nb\n']) {
+    r = typedIn(src, 0, 2, '[x]');
+    expect(r.src, src).toMatch(/\\\\\s*\{\}\[x\]/);
+    expect(shown(r)).toContain('[x]');
+    r = typedIn(src, 0, 2, '*');
+    expect(r.src, src).toMatch(/\\\\\s*\{\}\*/);
+    expect(shown(r)).toContain('*');
+  }
+});
+
+test('a [ typed where LaTeX takes no argument stays unguarded', () => {
+  // After a blank line, after a style command's group, in the middle of a sentence.
+  expect(typedIn('\\begin{theorem}\n\nSome.\n\\end{theorem}\n', 0, 0, '[1] ').src).not.toContain(
+    '{}',
+  );
+  expect(typed('See \\textbf{x} here.\n', 6, '[1] ')).toBe('See \\textbf{x} [1] here.\n');
+  expect(typed('One two.\n', 4, '[1] ')).toBe('One [1] two.\n');
+  expect(typed('a\n\nb\n', 3, '[1] ')).toBe('a\n\n[1] b\n');
+});
+
 test('a % inside code or an address is not a comment, so typing after it adds no line break', () => {
   // Typed just after the atom; the text that follows must stay on the same line.
   expect(typed('Call \\lstinline|push(q, x % 8)| keeps on.\n', 6, ' z')).toBe(

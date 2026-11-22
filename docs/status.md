@@ -4188,3 +4188,6 @@ One more, found since:
 - The web app reads its settings from `apps/web/.env.local` (copy `.env.example`). Email goes to
   the local mail catcher at http://localhost:8025; browser tests read sign-in links from it.
 - The ponytail skill in `.claude/skills/` applies to all work here: the smallest complete change.
+- A `[` or `*` typed in the visual view where LaTeX looks past a space or one line break for an
+  argument (start of an `\item`, of a body after `\begin{...}`, after `\\`) is written as `{}[`.
+  Not covered: a comment line between the command and the `[`.

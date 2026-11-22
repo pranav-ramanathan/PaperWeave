@@ -72,6 +72,7 @@ function replaceText(
   offEnd: number,
   ins: string,
   marks: string,
+  before = '',
 ): Edit[] | null {
   const del: [number, number][] = [];
   const gone = pieces.map(() => false);
@@ -139,7 +140,7 @@ function replaceText(
       e.to += eol[0].length;
   }
   for (const e of edits)
-    e.insert = guard(text.slice(0, e.from), e.insert || text[e.to] || '') + e.insert;
+    e.insert = guard(before + text.slice(0, e.from), e.insert || text[e.to] || '') + e.insert;
   return edits;
 }
 
@@ -195,6 +196,11 @@ function guard(tail: string, next: string) {
   if (c && c !== '\n' && commentOpen(line)) return '\n';
   // A letter after a command name would extend the name; * or [ would become its argument.
   tail = tail.slice(-64);
+  // LaTeX looks past spaces and one line break (not a blank line) for a [ or a star.
+  if (c === '[' || c === '*') {
+    tail = tail.replace(/[ \t]*(\n[ \t]*)?$/, '');
+    if (c === '[' && /\\begin\{[^{}]*\}$/.test(tail)) return '{}';
+  }
   const word = AFTER_WORD.test(tail);
   if (word && /[A-Za-z]/.test(c)) return '{}';
   if ((word || AFTER_BREAK.test(tail)) && (c === '*' || c === '[')) return '{}';
@@ -398,7 +404,13 @@ export function translate(
       const lead = spot.text.slice(spot.text.lastIndexOf('\n', at - 1) + 1, at);
       const indent = /^[ \t]*$/.test(lead) ? lead : '';
       return {
-        edits: abs(spot.base, [{ from: g.at, to: g.at, insert: `\n${indent}\\item ` }]),
+        edits: abs(spot.base, [
+          {
+            from: g.at,
+            to: g.at,
+            insert: `\n${indent}\\item ${guard(`${spot.text.slice(0, g.at)}\n${indent}\\item `, spot.text[g.at] ?? '')}`,
+          },
+        ]),
         phantom: m.phantom,
       };
     }
@@ -576,6 +588,7 @@ export function translate(
     spot.off + endA - a,
     ins,
     marks ?? '',
+    src.slice(Math.max(0, spot.base - 64), spot.base),
   );
   return edits && { edits: abs(spot.base, edits), phantom: m.phantom };
 }
