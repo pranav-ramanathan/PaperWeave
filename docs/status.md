@@ -4329,6 +4329,10 @@ One more, found since:
 - A `[` or `*` typed in the visual view where LaTeX looks past a space or one line break for an
   argument (start of an `\item`, of a body after `\begin{...}`, after `\\`) is written as `{}[`.
   Not covered: a comment line between the command and the `[`.
+- A space or tab that lands right after a command name (typed, left by a deletion, or pasted) is
+  written as `{}` plus the space, because LaTeX drops a space after a command name; so is the
+  bare text left when bold or emphasis is taken off right after a command name
+  (`\noindent\textbf{Setup.}` becomes `\noindent{}Setup.`).
 
 ## File names LaTeX cannot spell
 
@@ -4659,3 +4663,17 @@ Found by a three-person walkthrough.
 - **Held by** `projects.sandbox.test.ts` and a Playwright test in `projects.spec.ts`.
 - **Not done.** The invitation page's "already on this paper" answer is now only a defence for
   old links, and has no browser test.
+
+## Visual edits no longer glue words onto a command name
+
+- **What was wrong.** Taking bold or emphasis off wrote the words straight onto the command before
+  them (`\noindent\textbf{Setup.}` became `\noindentSetup.`, which does not build; `\item\textbf{Speed}`
+  broke the list). A space typed, pasted or exposed by a deletion right after a command name
+  (`\sys. It` with " today" typed) was shown in the visual view but dropped by LaTeX (`Systoday.`).
+- **Now** `guard()` puts `{}` between a command name and a following space or tab, and
+  `markCommand` guards both sides of the replacement as pasted text is. A wrap's bytes do not change.
+- **Held by** unit tests in `bridge.test.ts` and a build test in `compile.sandbox.test.ts`.
+- **Not done.** Source that already reads `\sys is` or `\sys` followed by a line break is still
+  shown with a space LaTeX drops; a line break exposed after a command by a deletion gets no `{}`;
+  putting bold back on leaves the `{}` (`\noindent{}\textbf{Setup.}`); source-view paste and
+  grammar replacements are unguarded as before.

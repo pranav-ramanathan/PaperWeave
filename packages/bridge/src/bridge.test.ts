@@ -1454,6 +1454,49 @@ test('bold wraps the selection in \\textbf and a second press removes exactly th
   expect(marked(src, 6, 10, 'emph')!.src).toBe('Alpha \\emph{beta} gamma.\n\nDelta.\n');
 });
 
+test('taking bold or emphasis off beside a command name keeps the words out of it', () => {
+  expect(marked('Para.\n\n\\noindent\\textbf{Setup.} We run it.\n', 1, 7, 'textbf', 1)!.src).toBe(
+    'Para.\n\n\\noindent{}Setup. We run it.\n',
+  );
+  const itemOff = (inner: string, len: number) => {
+    const r = replica(`\\begin{itemize}\n\\item\\textbf{${inner}} x\n\\end{itemize}\n`);
+    const t = textblocks(r)[0];
+    r.select(t.start, t.start + len);
+    expect(r.bridge.applyCommand(r.bridge.markCommand(r.state, 'textbf')!)).toBe('applied');
+    expect(r.state.doc.child(0).type.name).toBe('list');
+    r.check();
+    return r.src;
+  };
+  expect(itemOff('Speed', 5)).toBe('\\begin{itemize}\n\\item{}Speed x\n\\end{itemize}\n');
+  expect(itemOff('[a]', 3)).toBe('\\begin{itemize}\n\\item{}[a] x\n\\end{itemize}\n');
+  expect(marked('We call it \\sys\\emph{lite} here.\n', 12, 16, 'emph')!.src).toBe(
+    'We call it \\sys{}lite here.\n',
+  );
+  expect(marked('A \\textbf{\\sys}s B.\n', 2, 3, 'textbf')!.src).toBe('A \\sys{}s B.\n');
+  expect(marked('\\textbf{\\sys} is\n', 0, 1, 'textbf')!.src).toBe('\\sys{} is\n');
+  expect(marked('Alpha \\textbf{beta} gamma\n', 6, 10, 'textbf')!.src).toBe('Alpha beta gamma\n');
+});
+
+test('a space after a command name is kept', () => {
+  expect(typed('We use \\sys. It is fast.\n', 8, ' today')).toBe(
+    'We use \\sys{} today. It is fast.\n',
+  );
+  expect(typed('We use \\sys, which is fast.\n', 8, '', 1)).toBe('We use \\sys{} which is fast.\n');
+  expect(typed('We use \\sys{} now.\n', 8, ' x')).toBe('We use \\sys{} x now.\n');
+  expect(typed('one two\n', 3, ' and')).toBe('one and two\n');
+  const paste = (src: string, off: number, latex: string) => {
+    const r = replica(src);
+    const at = textblocks(r)[0].start + off;
+    r.select(at);
+    const c = r.bridge.fillCommand(r.bridge.insertCommand(r.state, 'x')!, latex);
+    expect(r.bridge.applyCommand(c)).toBe('applied');
+    r.check();
+    return r.src;
+  };
+  expect(paste('so on then.\n', 5, '\\ldots')).toBe('so on\\ldots{} then.\n');
+  expect(paste('We use \\sys. It\n', 8, ' and more')).toBe('We use \\sys{} and more. It\n');
+});
+
 test('bold inside and around emphasis leaves the other mark alone', () => {
   const nested = 'A \\emph{\\textbf{xy}} B.\n';
   // Bold off, with emphasis outside it; emphasis off, with bold inside it.

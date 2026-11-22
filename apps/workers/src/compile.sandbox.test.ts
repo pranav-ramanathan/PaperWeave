@@ -163,6 +163,24 @@ test('a list and a sentence pasted through the command path build and print as w
   expect(text).toContain('so on');
 });
 
+test('bold taken off after \noindent and a space typed after a macro build and print as shown', async () => {
+  const rep = replica('\\noindent\\textbf{Setup.} We use \\sys. Done.\n');
+  let t = textblocks(rep)[0];
+  rep.select(t.start + 1, t.start + 7);
+  expect(rep.bridge.applyCommand(rep.bridge.markCommand(rep.state, 'textbf')!)).toBe('applied');
+  t = textblocks(rep)[0];
+  expect(rep.dispatch(rep.state.tr.insertText(' today', t.start + 16))).toBe(true);
+  rep.check();
+  const { r, out } = await buildSource(
+    `\\documentclass{article}\n\\newcommand{\\sys}{Sys}\n\\begin{document}\n${rep.src}\\end{document}\n`,
+  );
+  expect(r.diagnostics.filter((d) => d.severity === 'error')).toEqual([]);
+  expect(r.ok).toBe(true);
+  const text = execFileSync('pdftotext', [join(out, r.pdf!), '-'], { encoding: 'utf8' });
+  expect(text).toContain('Setup.');
+  expect(text).toContain('Sys today.');
+});
+
 test('a " typed in the visual view stays a quote under German babel', async () => {
   const rep = replica('Er sagte x und y.\n');
   const tb = textblocks(rep)[0];
