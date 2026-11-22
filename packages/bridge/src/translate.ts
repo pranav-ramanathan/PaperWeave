@@ -446,6 +446,42 @@ export function translate(
     return { edits: [{ from, to: y.base, insert }], phantom: m.phantom };
   }
 
+  // Delete or type across items of one list: the first item's tail, the items between and the
+  // last item's \item and head go, and the typed text joins the two ends.
+  if (
+    $a.depth === 2 &&
+    $endA.depth === 2 &&
+    item($a.parent) &&
+    item($endA.parent) &&
+    $a.index(0) === $endA.index(0) &&
+    $a.index(1) !== $endA.index(1)
+  ) {
+    let text = '';
+    let plain = true;
+    after.slice(a, endB).content.forEach((n) => {
+      if (!n.isText || n.marks.length) plain = false;
+      text += n.text ?? '';
+    });
+    if (!plain) return null;
+    const x = locate(m, before, a)!;
+    const y = locate(m, before, endA)!;
+    const gx = gapFor(x.pieces, x.off, '');
+    const gy = gapFor(y.pieces, y.off, '');
+    if (x.block < 0 || !gx || !gy) return null;
+    const hasDef = (pieces: Piece[], lo: number, hi: number) =>
+      pieces.some((p) => p.type === 'def' && p.e > lo && p.s < hi);
+    if (hasDef(x.pieces, gx.at, Infinity) || hasDef(y.pieces, 0, gy.at)) return null;
+    const body = m.blocks[x.block].body;
+    if (body.kind !== 'list') return null;
+    for (let k = $a.index(1) + 1; k < $endA.index(1); k++)
+      if (hasDef(body.items[k].pieces, 0, Infinity)) return null;
+    const from = x.base + gx.at;
+    const to = y.base + gy.at;
+    const insert = text ? escape(text) : '';
+    const lead = guard(src.slice(0, from), insert || src[to] || '');
+    return { edits: [{ from, to, insert: lead + insert }], phantom: m.phantom };
+  }
+
   // Delete or type across paragraphs: one splice from the first end to the second, joining them.
   if ($a.depth === 1 && $endA.depth === 1 && !$a.sameParent($endA)) {
     const i = $a.index(0);

@@ -656,6 +656,85 @@ test('Enter in a list item opens a new item; undo takes it back; another person 
   await expect(other.page.locator(`${VISUAL} li`)).toHaveCount(2);
 });
 
+test('a selection across list items is deleted or typed over; undo restores it; another person sees it', async ({
+  browser,
+}) => {
+  test.setTimeout(180_000);
+  const { page, email } = await person(browser, 'vis-xitem');
+  const other = await person(browser, 'vis-xitem-2');
+  const main = [
+    '\\documentclass{article}',
+    '\\begin{document}',
+    '\\begin{itemize}',
+    '  \\item kilo lima',
+    '  \\item mike november',
+    '  \\item oscar papa',
+    '\\end{itemize}',
+    '\\end{document}',
+    '',
+  ].join('\n');
+  const zip = join(mkdtempSync(join(tmpdir(), 'paperweave-e2e-')), `Items ${run}.zip`);
+  writeFileSync(zip, await writeZip([{ path: 'main.tex', bytes: Buffer.from(main) }]));
+  await page.goto('/sign-in');
+  await signIn(page, email);
+  await page.getByLabel('Or import a ZIP of a LaTeX project').setInputFiles(zip);
+  await page.getByRole('button', { name: 'Import ZIP' }).click();
+  await page.getByLabel('Their email address').fill(other.email);
+  await page.getByLabel('Their role').selectOption('editor');
+  await page.getByRole('button', { name: 'Send invitation' }).click();
+  await expect(page.getByRole('status')).toContainText(other.email);
+  await other.page.goto(await emailedLink(other.email, '/invitations/'));
+  await signIn(other.page, other.email);
+  await other.page.getByRole('button', { name: 'Join this paper' }).click();
+  await expect(other.page.getByText('You are an editor')).toBeVisible();
+  await page.getByRole('link', { name: 'main.tex' }).first().click();
+  await expect(status(page)).toHaveText('All edits saved.');
+  await other.page.goto(page.url());
+  await expect(other.page.locator(`${VISUAL} li`)).toHaveCount(3);
+  const note = page.locator('.editor .toolbar .note');
+  const text = async () => {
+    await expect(status(page)).toHaveText('All edits saved.');
+    await showSource(page);
+    await page.waitForTimeout(800);
+    const t = (await page.locator(SOURCE).innerText()).replace(/⁠/g, '');
+    await view(page, 'Visual').click();
+    await expect(page.locator(VISUAL)).toBeVisible();
+    return t;
+  };
+
+  // Shift-select from inside the first item into the second, and delete: the two join.
+  await clickAfter(page, VISUAL, 'kilo');
+  await page.keyboard.down('Shift');
+  await clickAfter(page, VISUAL, 'mike');
+  await page.keyboard.up('Shift');
+  await page.keyboard.press('Delete');
+  await expect(page.locator(`${VISUAL} li`)).toHaveCount(2);
+  expect(await text()).toMatch(/\\item kilo november\n {2}\\item oscar papa\n\\end\{itemize\}/);
+  await expect(note).toHaveText('');
+  await expect(other.page.locator(`${VISUAL} li`)).toHaveCount(2);
+  await expect(other.page.locator(VISUAL)).toContainText('kilo november');
+
+  // Undo brings back every byte.
+  await page.keyboard.press('ControlOrMeta+z');
+  await expect(page.locator(`${VISUAL} li`)).toHaveCount(3);
+  expect(await text()).toMatch(
+    /\\item kilo lima\n {2}\\item mike november\n {2}\\item oscar papa\n\\end\{itemize\}/,
+  );
+  await expect(other.page.locator(`${VISUAL} li`)).toHaveCount(3);
+
+  // Typing over a selection from the first item into the third replaces it all.
+  await clickAfter(page, VISUAL, 'kilo');
+  await page.keyboard.down('Shift');
+  await clickAfter(page, VISUAL, 'oscar');
+  await page.keyboard.up('Shift');
+  await page.keyboard.type('Z');
+  await expect(page.locator(`${VISUAL} li`)).toHaveCount(1);
+  expect(await text()).toMatch(/\\item kiloZ papa\n\\end\{itemize\}/);
+  await expect(note).toHaveText('');
+  await expect(other.page.locator(`${VISUAL} li`)).toHaveCount(1);
+  await expect(other.page.locator(VISUAL)).toContainText('kiloZ papa');
+});
+
 /** The text of the caret's paragraph up to where another person's caret is drawn. */
 const textBeforeCaret = (page: Page, name: string) =>
   page.evaluate((n) => {
