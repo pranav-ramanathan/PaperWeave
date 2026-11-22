@@ -7,7 +7,7 @@ import type { BlobStore } from './blobs.ts';
 import { latestBuilds } from './builds.ts';
 import { chartPath, listCharts } from './charts.ts';
 import { citationReport } from './citations.ts';
-import { labelReport, texFiles } from './labels.ts';
+import { graphicsFolders, labelReport, texFiles } from './labels.ts';
 import { id } from './projects.ts';
 import { inScope } from './scope.ts';
 
@@ -164,7 +164,8 @@ async function checksOf(
   if (!root) problem('root', 'The paper has no root file to build.');
   else {
     const texts = Object.fromEntries(files.map((f) => [f.path, f.text]));
-    const graph = includeGraph(texts, root.path, paths);
+    const via = await graphicsFolders(pool, store, projectId, root.path, paths);
+    const graph = includeGraph(texts, root.path, paths, via);
     for (const edge of graph.edges) used.add(edge.to);
     const place = (from: string, at?: number) => {
       const file = files.find((f) => f.path === from)!;

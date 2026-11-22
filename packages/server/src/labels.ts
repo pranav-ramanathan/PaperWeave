@@ -1,6 +1,13 @@
 // A paper's labels and the references to them, read from the text as it stands now.
 import { createHash } from 'node:crypto';
-import { decodeFile, includeGraph, labelIndex, macroDefs, proseEnvs } from '@paperweave/latex';
+import {
+  decodeFile,
+  includeGraph,
+  labelIndex,
+  macroDefs,
+  projectGraphicsPaths,
+  proseEnvs,
+} from '@paperweave/latex';
 import type pg from 'pg';
 import * as Y from 'yjs';
 import { authorize } from './authz.ts';
@@ -183,6 +190,26 @@ export async function proseOf(pool: Db, store: BlobStore, projectId: string): Pr
   const root = files.find((f) => f.root);
   if (!root) return [];
   return proseEnvs(Object.fromEntries(files.map((f) => [f.path, f.text])), root.path);
+}
+
+/**
+ * The `\\graphicspath` folders the paper sets, in its root's preamble, the files that read and
+ * its own packages and classes (`projectGraphicsPaths`). `paths` is every path of the project.
+ */
+export async function graphicsFolders(
+  pool: Db,
+  store: BlobStore,
+  projectId: string,
+  root: string,
+  paths: Iterable<string>,
+  lock = false,
+): Promise<string[]> {
+  const files = await texFiles(pool, store, projectId, lock, '\\.(tex|ltx|sty|cls)$');
+  return projectGraphicsPaths(
+    Object.fromEntries(files.map((f) => [f.path, f.text])),
+    root,
+    new Set(paths),
+  );
 }
 
 /** One line that a rename would change, before and after. */
