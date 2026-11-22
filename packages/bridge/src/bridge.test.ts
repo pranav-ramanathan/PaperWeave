@@ -1193,3 +1193,149 @@ test('typing into an empty list item puts the text right after its \\item', () =
   expect(r.src).toBe('\\begin{itemize}\n  \\item X\n  \\item Three\n\\end{itemize}\n');
   r.check();
 });
+
+// Starting a list from the visual view, and leaving it with Enter in its empty last item.
+/** Put the caret at display offset `off` of paragraph `n` and insert a list; the replica, or null. */
+function listed(src: string, n: number, off: number, ordered = false) {
+  const r = replica(src);
+  r.select(textblocks(r).filter((t) => t.para)[n].start + off);
+  const c = r.bridge.listCommand(r.state, ordered);
+  if (!c) return null;
+  expect(r.bridge.applyCommand(c)).toBe('applied');
+  r.check();
+  return r;
+}
+const EMPTY = '\\begin{itemize}\n\\item \n\\end{itemize}';
+
+test('a list put in the middle of a paragraph splits it', () => {
+  expect(listed('One.\n\nTwo here.\n\nThree.\n', 1, 3)!.src).toBe(
+    `One.\n\nTwo\n\n${EMPTY}\n\n here.\n\nThree.\n`,
+  );
+  expect(listed('One.\n\nTwo\nhere.\n', 1, 3)!.src).toBe(`One.\n\nTwo\n\n${EMPTY}\n\nhere.\n`);
+});
+
+test('a list at either end of a paragraph leaves no run of three line breaks', () => {
+  const src = 'One.\n\nTwo here.\n\nThree.\n';
+  expect(listed(src, 1, 0)!.src).toBe(`One.\n\n${EMPTY}\n\nTwo here.\n\nThree.\n`);
+  expect(listed(src, 1, 9)!.src).toBe(`One.\n\nTwo here.\n\n${EMPTY}\n\nThree.\n`);
+  for (const [n, off] of [
+    [0, 0],
+    [0, 4],
+    [1, 0],
+    [1, 9],
+    [2, 0],
+    [2, 6],
+  ])
+    expect(listed(src, n, off)!.src).not.toMatch(/\n{3}/);
+  expect(listed('Only.', 0, 0)!.src).toBe(`${EMPTY}\n\nOnly.`);
+  expect(listed('Only.', 0, 5)!.src).toBe(`Only.\n\n${EMPTY}\n\n`);
+  expect(listed('Only.\n', 0, 5)!.src).toBe(`Only.\n\n${EMPTY}\n\n`);
+});
+
+test('a numbered list is an enumerate', () => {
+  expect(listed('One.\n\nTwo.\n', 1, 4, true)!.src).toBe(
+    'One.\n\nTwo.\n\n\\begin{enumerate}\n\\item \n\\end{enumerate}\n\n',
+  );
+});
+
+test('the new list is one empty item, the caret resolves in it, and typing fills it', () => {
+  const r = listed('One.\n\nTwo here.\n', 1, 3)!;
+  const kinds = r.state.doc.children.map((n) => n.type.name);
+  expect(kinds).toEqual(['paragraph', 'paragraph', 'list', 'paragraph']);
+  const list = r.state.doc.child(2);
+  expect(list.childCount).toBe(1);
+  expect(list.child(0).type.name).toBe('list_item');
+  expect(list.child(0).content.size).toBe(0);
+  const caret = fromSrc(r.bridge.model, r.state.doc, r.src.indexOf('\\item ') + '\\item '.length);
+  expect(r.state.doc.resolve(caret).parent.type.name).toBe('list_item');
+  r.select(caret);
+  expect(r.dispatch(r.state.tr.insertText('x', caret))).toBe(true);
+  expect(r.src).toContain('\\item x\n\\end{itemize}');
+  r.check();
+});
+
+test('a list is refused in an item, a heading, a caption and a paragraph not yet written', () => {
+  const src =
+    '\\section{Head}\n\n\\begin{itemize}\n\\item One\n\\end{itemize}\n\nText.\n\n\\begin{figure}\n\\caption{Cap}\n\\end{figure}\n';
+  const r = replica(src);
+  const blocks: { start: number; type: string }[] = [];
+  r.state.doc.descendants((n, pos) => {
+    if (n.isTextblock) blocks.push({ start: pos + 1, type: n.type.name });
+  });
+  expect(blocks.map((b) => b.type)).toEqual(['heading', 'list_item', 'paragraph']);
+  for (const b of blocks.slice(0, 2)) {
+    r.select(b.start + 1);
+    expect(r.bridge.listCommand(r.state, false)).toBeNull();
+  }
+  r.select(blocks[2].start + 1);
+  expect(r.bridge.listCommand(r.state, false)).not.toBeNull();
+  // The caption is inside a raw block: it has no text block, so no caret can be put in it.
+  const pre = replica('\\documentclass{article}\n\\begin{document}\nText.\n\\end{document}\n');
+  pre.select(1);
+  expect(pre.bridge.listCommand(pre.state, false)).toBeNull();
+  const p = replica('One.\n');
+  const first = textblocks(p)[0];
+  const tr = p.state.tr.split(first.start + first.size);
+  p.dispatch(tr.setSelection(TextSelection.near(tr.doc.resolve(first.start + first.size + 2))));
+  expect(p.bridge.model.phantom).not.toBeNull();
+  expect(p.bridge.listCommand(p.state, false)).toBeNull();
+});
+
+test('Enter in the empty last item takes that \\item away and leaves the caret after the list', () => {
+  const src = 'Intro.\n\n\\begin{itemize}\n  \\item one\n  \\item two\n  \\item \n\\end{itemize}\n';
+  const r = replica(src);
+  expect(items(r).length).toBe(3);
+  expect(enterAt(r, items(r)[2].start)).toBe(true);
+  expect(r.src).toBe('Intro.\n\n\\begin{itemize}\n  \\item one\n  \\item two\n\\end{itemize}\n');
+  expect(r.bridge.model.phantom).not.toBeNull();
+  r.check();
+  expect(r.state.doc.children.map((n) => n.type.name)).toEqual(['paragraph', 'list', 'paragraph']);
+  expect(r.state.doc.child(1).childCount).toBe(2);
+  // The caret is in the paragraph after the list; typing there writes after \end{itemize}.
+  const $h = r.state.selection.$head;
+  expect($h.depth).toBe(1);
+  expect($h.index(0)).toBe(2);
+  expect(r.dispatch(r.state.tr.insertText('x', r.state.selection.head))).toBe(true);
+  expect(r.src).toBe(
+    'Intro.\n\n\\begin{itemize}\n  \\item one\n  \\item two\n\\end{itemize}\n\nx\n',
+  );
+  r.check();
+  expect(r.state.doc.children.map((n) => n.type.name)).toEqual(['paragraph', 'list', 'paragraph']);
+});
+
+test('Enter in a middle or a sole empty item still does nothing', () => {
+  for (const src of [
+    '\\begin{itemize}\n  \\item \n  \\item two\n\\end{itemize}\n',
+    '\\begin{itemize}\n  \\item \n\\end{itemize}\n',
+  ]) {
+    const r = replica(src);
+    enterAt(r, items(r)[0].start);
+    expect(r.src).toBe(src);
+    r.check();
+    expect(r.bridge.model.phantom).toBeNull();
+  }
+});
+
+test('a list started, filled, left and written after, on two replicas that converge', () => {
+  const r = listed('One.\n\nTwo.\n', 1, 4)!;
+  const { b, merge } = peer(r);
+  const at = r.src.indexOf('\\item ') + '\\item '.length;
+  let caret = fromSrc(r.bridge.model, r.state.doc, at);
+  r.select(caret);
+  r.dispatch(r.state.tr.insertText('a', caret));
+  expect(enterAt(r, items(r)[0].start + 1)).toBe(true);
+  r.select(items(r)[1].start);
+  r.dispatch(r.state.tr.insertText('b', items(r)[1].start));
+  expect(enterAt(r, items(r)[1].start + 1)).toBe(true);
+  expect(enterAt(r, items(r)[2].start)).toBe(true);
+  caret = r.state.selection.head;
+  r.dispatch(r.state.tr.insertText('c', caret));
+  merge();
+  Y.applyUpdate(b.ydoc, Y.encodeStateAsUpdate(r.ydoc));
+  expect(b.src).toBe(r.src);
+  expect(r.src).toBe(
+    'One.\n\nTwo.\n\n\\begin{itemize}\n\\item a\n\\item b\n\\end{itemize}\n\nc\n\n',
+  );
+  r.check();
+  b.check();
+});
