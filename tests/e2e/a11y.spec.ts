@@ -42,6 +42,9 @@ const MAIN = [
 ].join('\n');
 const BIB = '@book{knuth1984, author = {Donald Knuth}, title = {The TeXbook}, year = 1984}\n';
 const CSV = 'day,latency (ms)\n2024-03-01,9\n2024-03-02,38\n';
+/** The same with a 47-character column heading, which a chart's column choices must not let widen the page. */
+const WIDE_CSV =
+  'day,latency (ms),median round trip time of the slowest region\n2024-03-01,9,4\n2024-03-02,38,5\n';
 
 test('the main pages have no accessibility failures a machine can find', async ({ browser }) => {
   test.setTimeout(180_000);
@@ -226,7 +229,7 @@ test('the main pages can be read in a narrow window without scrolling sideways',
     await writeZip([
       { path: 'main.tex', bytes: Buffer.from(MAIN) },
       { path: 'refs.bib', bytes: Buffer.from(BIB) },
-      { path: 'data/latency.csv', bytes: Buffer.from(CSV) },
+      { path: 'data/latency.csv', bytes: Buffer.from(WIDE_CSV) },
     ]),
   );
   await page.getByLabel('Or import a ZIP of a LaTeX project').setInputFiles(zip);

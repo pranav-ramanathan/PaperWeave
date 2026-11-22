@@ -770,3 +770,141 @@ test('removing two checks of one citation says so each time and keeps the keyboa
     expect((await focused(page)).name).toBe(line);
   }
 });
+
+test('taking a spelling finding keeps the keyboard in the panel and says what was done', async ({
+  browser,
+}) => {
+  test.setTimeout(180_000);
+  const main = [
+    '\\documentclass{article}',
+    '\\begin{document}',
+    'The sentense is short. Our system, Weavely, is fast.',
+    '',
+    'It was recieved.',
+    '\\end{document}',
+    '',
+  ].join('\n');
+  const page = await paper(browser, 'keys-grammar', false, main);
+  await page.getByRole('link', { name: 'main.tex' }).first().click();
+  const panel = page.getByRole('region', { name: 'Spelling and grammar' });
+  const article = (name: string) => panel.getByRole('article', { name });
+  await expect(article('Spelling: “sentense”')).toBeVisible({ timeout: 30_000 });
+  await expect(article('Spelling: “recieved”')).toBeVisible();
+
+  // Change: the next finding's first button has the keyboard, and the note says what was done.
+  await article('Spelling: “sentense”')
+    .getByRole('button', { name: /^Change to/ })
+    .first()
+    .focus();
+  await page.keyboard.press('Enter');
+  await expect(panel).toContainText('Changed “sentense” to “sentence”.');
+  await expect(article('Spelling: “sentense”')).toHaveCount(0);
+  await expect
+    .poll(() =>
+      page.evaluate(() => document.activeElement?.closest('article')?.getAttribute('aria-label')),
+    )
+    .toMatch(/^Spelling: “(Weavely|recieved)”$/);
+  expect((await focused(page)).region).toBe('Spelling and grammar');
+
+  // A word of the paper's own.
+  await article('Spelling: “Weavely”')
+    .getByRole('button', { name: 'It is a word of this paper' })
+    .focus();
+  await page.keyboard.press('Enter');
+  await expect(article('Spelling: “Weavely”')).toHaveCount(0);
+  expect((await focused(page)).region).toBe('Spelling and grammar');
+
+  // The last one: the heading has the keyboard.
+  await article('Spelling: “recieved”')
+    .getByRole('button', { name: /^Change to/ })
+    .first()
+    .focus();
+  await page.keyboard.press('Enter');
+  await expect(panel).toContainText('Changed “recieved” to');
+  await expect(panel.getByRole('article')).toHaveCount(0);
+  await expect(panel.getByRole('heading', { name: 'Spelling and grammar' })).toBeFocused();
+});
+
+test('a reviewer proposing a spelling change keeps the keyboard in the panel', async ({
+  browser,
+}) => {
+  test.setTimeout(180_000);
+  const main = [
+    '\\documentclass{article}',
+    '\\begin{document}',
+    'The sentense is short and it was recieved.',
+    '\\end{document}',
+    '',
+  ].join('\n');
+  const owner = await paper(browser, 'keys-gprop-owner', false, main);
+  const reviewer = await person(browser, 'keys-gprop-reviewer');
+  await owner.getByLabel('Their email address').fill(reviewer.email);
+  await owner.getByLabel('Their role').selectOption('reviewer');
+  await owner.getByRole('button', { name: 'Send invitation' }).click();
+  await expect(owner.getByRole('status')).toContainText(reviewer.email);
+  await reviewer.page.goto(await emailedLink(reviewer.email, '/invitations/'));
+  await signIn(reviewer.page, reviewer.email);
+  await reviewer.page.getByRole('button', { name: 'Join this paper' }).click();
+  await reviewer.page.getByRole('link', { name: 'main.tex' }).first().click();
+  const page = reviewer.page;
+  const panel = page.getByRole('region', { name: 'Spelling and grammar' });
+  await expect(panel.getByRole('article', { name: 'Spelling: “sentense”' })).toBeVisible({
+    timeout: 30_000,
+  });
+  await panel
+    .getByRole('button', { name: /^Propose “/ })
+    .first()
+    .focus();
+  await page.keyboard.press('Enter');
+  await expect(panel).toContainText(/Proposed changing “(sentense|recieved)”/);
+  await expect
+    .poll(() =>
+      page.evaluate(() => document.activeElement?.closest('article')?.getAttribute('aria-label')),
+    )
+    .toMatch(/^Spelling: “(sentense|recieved)”$/);
+  expect((await focused(page)).region).toBe('Spelling and grammar');
+});
+
+test('a reply sent with Enter on a Mention checkbox keeps the keyboard in the comments', async ({
+  browser,
+}) => {
+  test.setTimeout(240_000);
+  const page = await paper(browser, 'keys-mention', true);
+  const second = await person(browser, 'keys-mention-second');
+  // A second member, so that the reply form lists someone to mention.
+  const paperUrl = page.url().replace(/\/files\/.*$/, '');
+  await page.goto(paperUrl);
+  await page.getByLabel('Their email address').fill(second.email);
+  await page.getByLabel('Their role').selectOption('editor');
+  await page.getByRole('button', { name: 'Send invitation' }).click();
+  await expect(page.getByRole('status')).toContainText(second.email);
+  await second.page.goto(await emailedLink(second.email, '/invitations/'));
+  await signIn(second.page, second.email);
+  await second.page.getByRole('button', { name: 'Join this paper' }).click();
+  await page.getByRole('link', { name: 'main.tex' }).first().click();
+  await expect(page.locator('.editor .visual .ProseMirror[contenteditable=true]')).toBeVisible();
+
+  const comments = page.getByRole('region', { name: 'Comments' });
+  await selectLine(page, 1, 'Latency');
+  await tabTo(page, 'Comment on the selected text');
+  await page.keyboard.press('Enter');
+  await page.keyboard.type('Said with keys.');
+  await tabTo(page, 'Start thread');
+  await page.keyboard.press('Enter');
+  await expect(page.getByRole('article', { name: /^Thread on/ })).toContainText('Said with keys.');
+  await tabTo(page, /^Reply about/);
+  await page.keyboard.type('A reply with a mention.');
+  await page.keyboard.press('Tab');
+  expect(await page.evaluate(() => (document.activeElement as HTMLInputElement).type)).toBe(
+    'checkbox',
+  );
+  await page.keyboard.press('Space');
+  await page.keyboard.press('Enter');
+  await expect(comments.getByText('Reply sent.')).toBeVisible();
+  // The list of people has closed, with the checkbox the keyboard was on.
+  await expect(comments.getByRole('group', { name: 'Mention' })).toHaveCount(0);
+  await expect(page.getByRole('article', { name: /^Thread on/ })).toContainText(
+    'A reply with a mention.',
+  );
+  expect((await focused(page)).region).toBe('Comments');
+});

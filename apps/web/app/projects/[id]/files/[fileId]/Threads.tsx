@@ -30,6 +30,7 @@ function Say(props: {
   const [problem, setProblem] = useState('');
   const [busy, setBusy] = useState(false);
   const sending = useRef(false);
+  const box = useRef<HTMLTextAreaElement>(null);
   // The people who can be mentioned are listed once someone starts on the form, not before.
   // Every open thread has a form for replying, so listing them at once drew a box for each
   // person under each thread: 2,900 of them for thirty people and a hundred threads.
@@ -50,6 +51,9 @@ function Say(props: {
         if (wrong) return;
         setBody(props.initial ?? '');
         setTo([]);
+        // The list of people goes with the form being reset: if the keyboard was in it, it
+        // goes to the text box first. (Focusing it asks for the list; closing it comes last.)
+        if (document.activeElement?.closest('fieldset')) box.current?.focus();
         setBegun(false);
         props.onDraft?.(false);
       }}
@@ -57,6 +61,7 @@ function Say(props: {
       <label>
         {props.label}
         <textarea
+          ref={box}
           value={body}
           onChange={(e) => {
             setBody(e.target.value);
