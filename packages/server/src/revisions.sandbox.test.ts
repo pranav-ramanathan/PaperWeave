@@ -8,6 +8,7 @@ import * as Y from 'yjs';
 import { LATEXMK_RULES } from '@paperweave/latex';
 import { readZip, writeZip } from './archive.ts';
 import { blobStore } from './blobs.ts';
+import { replaceFile } from './files.ts';
 import { exportZip, importZip, listFiles } from './import.ts';
 import { acceptInvitation, getProject, invite } from './projects.ts';
 import { acceptProposal, listProposals, propose, undoAccept } from './proposals.ts';
@@ -719,4 +720,98 @@ test('restoring a file with mixed line endings records the restore, and the next
     (e) => e.path === 'x.tex',
   )!;
   expect(Buffer.from(out.bytes).toString()).toBe('one\ntwo\nthree\nfour\n');
+});
+
+// A paper with a Latin-1 refs.bib (read-only), a first revision, and a UTF-8 replacement of it.
+const LATIN = Buffer.from('@book{a, author = {Jos\xe9}}\n', 'latin1');
+const UTF8 = Buffer.from('@book{a, author = {Jos\u00e9}}\n');
+async function latinPaper() {
+  const zip = await writeZip([
+    { path: 'main.tex', bytes: Buffer.from(PMAIN) },
+    { path: 'refs.bib', bytes: LATIN },
+  ]);
+  const [project] = await importZip(t.pool, store, owner.id, zip, 'Latin');
+  const bib = (await listFiles(t.pool, owner.id, project.id)).find(
+    (f) => f.path === 'refs.bib',
+  )!.id;
+  const r1 = await saveRevision(t.pool, store, owner.id, project.id, 'Latin-1');
+  await replaceFile(t.pool, store, owner.id, project.id, 'refs.bib', UTF8);
+  return { id: project.id as string, bib, r1 };
+}
+const row = async (file: string) =>
+  (await t.pool.query('select eol, bom, readonly_reason as ro from files where id = $1', [file]))
+    .rows[0];
+const exported = async (projectId: string) =>
+  Buffer.from(
+    (await readZip(await exportZip(t.pool, store, owner.id, projectId))).entries.find(
+      (e) => e.path === 'refs.bib',
+    )!.bytes,
+  );
+const readonlyOf = async (projectId: string) =>
+  (await listFiles(t.pool, owner.id, projectId)).find((f) => f.path === 'refs.bib')!.readonly;
+
+test('restoring a revision from before a file was made UTF-8 puts back its bytes and makes it read-only again', async () => {
+  // Never opened.
+  let p = await latinPaper();
+  expect((await row(p.bib)).eol).toBe('lf');
+  await restoreRevision(t.pool, store, owner.id, p.id, p.r1.id);
+  expect((await row(p.bib)).eol).toBeNull();
+  expect(await readonlyOf(p.id)).toBe('not-utf8');
+  expect((await exported(p.id)).equals(LATIN)).toBe(true);
+
+  // Opened, not edited.
+  p = await latinPaper();
+  await loadUpdates(t.pool, store, p.bib);
+  await restoreRevision(t.pool, store, owner.id, p.id, p.r1.id);
+  expect(await code(edit(p.bib, (x) => x.insert(0, 'w')))).toBe('not_found');
+  expect((await exported(p.id)).equals(LATIN)).toBe(true);
+
+  // Edited.
+  p = await latinPaper();
+  await edit(p.bib, (x) => x.insert(0, '% word\n'));
+  const made = await restoreRevision(t.pool, store, owner.id, p.id, p.r1.id);
+  expect((await exported(p.id)).equals(LATIN)).toBe(true);
+  const bytes = (await exportRevision(t.pool, store, owner.id, p.id, made.id)).zip;
+  const inRev = (await readZip(bytes)).entries.find((e) => e.path === 'refs.bib')!;
+  expect(Buffer.from(inRev.bytes).equals(LATIN)).toBe(true);
+});
+
+test('restoring forward again makes the file editable text with its history', async () => {
+  const p = await latinPaper();
+  await edit(p.bib, (x) => x.insert(0, '% word\n'));
+  const edited = Buffer.from('% word\n' + UTF8.toString());
+  const at = (await textOf(p.bib)).indexOf('word');
+  await startThread(t.pool, store, owner.id, p.id, p.bib, {
+    from: Y.encodeRelativePosition(
+      Y.createRelativePositionFromTypeIndex((await docOf(p.bib)).text, at, 0),
+    ),
+    to: Y.encodeRelativePosition(
+      Y.createRelativePositionFromTypeIndex((await docOf(p.bib)).text, at + 4, -1),
+    ),
+    body: 'Which word?',
+  });
+  const back = await restoreRevision(t.pool, store, owner.id, p.id, p.r1.id);
+  expect((await row(p.bib)).eol).toBeNull();
+  const kept = (await listRevisions(t.pool, owner.id, p.id)).find(
+    (r) => r.number === back.number - 1,
+  )!;
+  await restoreRevision(t.pool, store, owner.id, p.id, kept.id);
+  expect(await row(p.bib)).toMatchObject({ eol: 'lf', ro: null });
+  expect(await textOf(p.bib)).toBe(edited.toString());
+  expect((await exported(p.id)).equals(edited)).toBe(true);
+  const threads = await listThreads(t.pool, store, owner.id, p.id);
+  expect(threads).toHaveLength(1);
+  expect(threads[0].now).not.toBe('');
+  await replace(p.bib, 'Jos', 'JOS');
+  expect((await exported(p.id)).toString()).toContain('JOS');
+});
+
+test('a read-only file that was once text takes a UTF-8 replacement into its log', async () => {
+  const p = await latinPaper();
+  await edit(p.bib, (x) => x.insert(0, '% word\n'));
+  await restoreRevision(t.pool, store, owner.id, p.id, p.r1.id);
+  const v = Buffer.from('@book{b, author = {V\u00e9}}\n');
+  await replaceFile(t.pool, store, owner.id, p.id, 'refs.bib', v);
+  expect(await textOf(p.bib)).toBe(v.toString());
+  expect((await exported(p.id)).equals(v)).toBe(true);
 });

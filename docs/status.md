@@ -4610,3 +4610,20 @@ Found by a three-person walkthrough.
 - **Not done.** An already-edited text file (`head_seq > 1`) replaced by an upload that differs only
   in line endings or byte order mark still reads as up to date: the PDF is the same, but the built
   revision's ZIP keeps the old line endings.
+
+## Restoring a revision brings back whether a file is text
+
+- **What was wrong.** A restore swapped a read-only file's digest and nothing else. If a Latin-1
+  `refs.bib` had since been replaced by a UTF-8 copy, restoring an earlier revision left it
+  marked editable text: a never-opened file could not be opened, an opened one showed the UTF-8
+  text while builds and exports read the Latin-1 bytes, and an edited one was not restored at all.
+- **Now** a restore makes each file's text-ness match the revision's bytes. A file that is text
+  but whose revision bytes are not UTF-8 goes back to read-only (`eol`, `bom` cleared,
+  `not-utf8`) and its connected editors are closed with `no-access`, as for a removed file. A
+  read-only file that is text in the revision becomes text again and, if it has a log, the log is
+  edited to the revision's text. The log is never deleted. `replaceFile` also syncs the log when a
+  once-text, now read-only file gets a UTF-8 replacement.
+- **Held by** sandbox tests in `revisions` (unopened, opened and edited cases; restoring forward
+  again with a thread; replacing a read-only file that has a log) and in `sync` (editor closed).
+- **Not done.** The editor's closing notice says "no longer have access... or deleted". Old
+  read-only rows from mixed line endings are still not migrated.

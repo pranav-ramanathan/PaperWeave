@@ -16,7 +16,7 @@ import { authorize } from './authz.ts';
 import type { BlobStore } from './blobs.ts';
 import { type Db, transaction } from './db.ts';
 import { AppError } from './errors.ts';
-import { removeFile } from './files.ts';
+import { fileMeta, removeFile } from './files.ts';
 import { recordDownload } from './metrics.ts';
 import { id } from './projects.ts';
 import * as Y from 'yjs';
@@ -814,7 +814,15 @@ export async function restoreRevision(
     const appends: { fileId: string; update: Uint8Array }[] = [];
     const restored: { fileId: string; digest: string; size: number }[] = [];
     const renames: { id: string; path: string }[] = [];
-    const others: { id: string; digest: string; size: number }[] = [];
+    const others: {
+      id: string;
+      digest: string;
+      size: number;
+      eol: string | null;
+      bom: boolean | null;
+      readonly: string | null;
+    }[] = [];
+    let leftText = false;
     for (const target of files) {
       const file = live.find((f) => f.id === target.file_id);
       if (!file) throw new Error(`file ${target.file_id} of revision ${revisionId} is gone`);
@@ -844,8 +852,51 @@ export async function restoreRevision(
             if (e.ins) text.insert(e.at, e.ins);
           }
         });
-      } else if (file.digest !== target.digest)
-        others.push({ id: file.id, digest: target.digest, size: bytes.length });
+      } else if (file.eol) {
+        // Text now, but the revision's bytes are not: the file goes back to being read-only, and
+        // its log stays where it is. Connected editors are told below.
+        others.push({
+          id: file.id,
+          digest: target.digest,
+          size: bytes.length,
+          eol: null,
+          bom: null,
+          readonly: 'not-utf8',
+        });
+        leftText = true;
+      } else if (file.digest !== target.digest) {
+        const meta = fileMeta(target.path, bytes);
+        if (!meta.eol) {
+          others.push({
+            id: file.id,
+            digest: target.digest,
+            size: bytes.length,
+            eol: null,
+            bom: null,
+            readonly: meta.readonly,
+          });
+        } else {
+          // Read-only now, text in the revision. The row says so first: a log is only edited for
+          // a file that is text.
+          await db.query(
+            `update files set digest = $2, size = $3, eol = $4, bom = $5, readonly_reason = null
+             where id = $1`,
+            [file.id, target.digest, bytes.length, meta.eol, meta.bom],
+          );
+          if (Number(locked.get(file.id)?.head_seq) > 0) {
+            const read = decodeFile(bytes);
+            if (!read.editable)
+              throw new Error(`file ${file.id} is text in one place and not in another`);
+            const want = read.text;
+            await editLocked(db, store, file.id, userId, (text) => {
+              for (const e of restoreEdits(text.toString(), want)) {
+                if (e.del) text.delete(e.at, e.del);
+                if (e.ins) text.insert(e.at, e.ins);
+              }
+            });
+          }
+        }
+      }
     }
     if (renames.length)
       await db.query(
@@ -857,10 +908,21 @@ export async function restoreRevision(
     await notifyEdits(db, seqs);
     if (others.length)
       await db.query(
-        `update files f set digest = c.digest, size = c.size
-         from unnest($1::uuid[], $2::text[], $3::int[]) as c(id, digest, size) where f.id = c.id`,
-        [others.map((o) => o.id), others.map((o) => o.digest), others.map((o) => o.size)],
+        `update files f set digest = c.digest, size = c.size, eol = c.eol, bom = c.bom,
+           readonly_reason = c.readonly
+         from unnest($1::uuid[], $2::text[], $3::int[], $4::text[], $5::bool[], $6::text[])
+           as c(id, digest, size, eol, bom, readonly) where f.id = c.id`,
+        [
+          others.map((o) => o.id),
+          others.map((o) => o.digest),
+          others.map((o) => o.size),
+          others.map((o) => o.eol),
+          others.map((o) => o.bom),
+          others.map((o) => o.readonly),
+        ],
       );
+    // Editors of a file that stopped being text are sent away, as for a removed file.
+    if (leftText) await db.query("select pg_notify('acl', $1)", [projectId]);
     // What those files now hold is known, so the cut below does not read their logs again.
     for (const r of restored) {
       const seq = seqs.get(r.fileId);
