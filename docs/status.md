@@ -3845,6 +3845,14 @@ Coming back online, the editor said "This paper was restored to an earlier revis
   focus went to `<body>` and nothing was announced. It now says "The words were found again."
   in the comments' note and moves focus to the Comments heading, as "Find these words again"
   does in `Proposals.tsx`. Test: `keys.spec.ts` (fails on the old code).
+- **Follow-up, done.** `removeAction` returned a bare address after removing someone: no status
+  line, focus fell to `<body>` as the row unmounted, and a stale `?saved=1` was dropped without
+  a word. `removeMember` now returns the removed person's email, and the action goes to
+  `?removed=<email>`; People says "Removed <email> from this paper." in a `Result`, which takes
+  the keyboard. The name comes from the server, not the form. Tests: `keys.spec.ts` and
+  `projects.sandbox.test.ts` (both fail on the old code).
+- **Follow-ups, not fixed.** `removeEvidenceAction` and `removeChartAction` also return no
+  result. Leaving a paper is not announced on `/projects`.
 
 ## Decisions waiting on the owner
 
