@@ -143,3 +143,7 @@ test('a DOI is read from an entry the way a registry wants it', () => {
   expect(doi({ doi: '10.1000/own', url: 'https://doi.org/10.1000/other' })).toBe('10.1000/own');
   expect(doi({ title: 'T' })).toBe('');
 });
+
+test('a command whose name starts with an accent letter is not an accent', () => {
+  expect(plainText('a \\textbf{bold} and \\cite{x} but \\c{c}a')).toBe('a bold and x but ça');
+});

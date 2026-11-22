@@ -27,6 +27,7 @@ import { Decoration, DecorationSet, type EditorView } from '@tiptap/pm/view';
 import katex from 'katex';
 import * as Y from 'yjs';
 import { bibliography, onBibliography } from './bibliography';
+import { footnoteText } from './footnote';
 import { pageNonce } from './nonce';
 import { numbers, onNumbers } from './numbers';
 
@@ -384,6 +385,11 @@ export function createVisual(opts: {
     (label: (src: string) => string) => (node: PMNode, getPos: () => number | undefined) => {
       const dom = el('span', `pw-atom pw-${node.type.name}`, label(node.attrs.src));
       dom.title = node.attrs.src;
+      const note = footnoteText(node.attrs.src);
+      if (note !== null) {
+        dom.textContent = `Footnote: ${note.length > 40 ? note.slice(0, 39).trimEnd() + '…' : note}`;
+        dom.setAttribute('aria-label', `footnote: ${note}`);
+      }
       opensAtom(dom, node, getPos);
       return { dom };
     };
