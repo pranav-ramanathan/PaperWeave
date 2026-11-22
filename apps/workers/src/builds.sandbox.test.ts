@@ -25,7 +25,9 @@ import {
   writeZip,
   pdfToSource,
   putFile,
+  readZip,
   renameFileAndReferences,
+  replaceFile,
   setCompiler,
   setRootFile,
   sourceToPdf,
@@ -209,6 +211,69 @@ test('a build is behind a paper that has changed without anything being typed', 
     rootBack: false,
     deleted: true,
   });
+});
+
+test('a build is behind a paper whose text file was replaced without being typed in', async () => {
+  const { project } = await paper();
+  const bib = (await listFiles(t.pool, owner.id, project)).find((f) => f.path === 'refs.bib')!;
+  const original = readFileSync(join(FIXTURES, 'article-basic', 'refs.bib'), 'utf8');
+  const latest = async () => (await latestBuilds(t.pool, owner.id, project)).latest!;
+  const headSeq = async () =>
+    (await t.pool.query('select head_seq from files where id = $1', [bib.id])).rows[0].head_seq;
+  const first = await build(project);
+  expect(first.stale).toBe(false);
+
+  // refs.bib is uploaded anew, and was never opened: its log is still empty.
+  const added = `${original}\n@misc{added2026, title = {Added}, year = 2026}\n`;
+  await replaceFile(t.pool, store, owner.id, project, 'refs.bib', Buffer.from(added));
+  expect(await headSeq()).toBe('0');
+  expect((await latest()).stale).toBe(true);
+
+  // The checks before submitting do not offer the old revision.
+  const checks = await submissionChecks(t.pool, store, owner.id, project);
+  expect(checks.findings).toContainEqual(
+    expect.objectContaining({
+      kind: 'build',
+      message: 'The paper has changed since it was last built.',
+    }),
+  );
+  expect(checks).toMatchObject({ ready: false, revisionId: null });
+
+  // The next build is of the new file, and the ZIP of its revision holds it.
+  const second = await build(project);
+  expect(second).toMatchObject({ stale: false, cached: false });
+  expect(second.revisionId).not.toBe(first.revisionId);
+  const { zip } = await exportRevision(t.pool, store, owner.id, project, second.revisionId!);
+  const entry = (await readZip(zip)).entries.find((e) => e.path === 'refs.bib')!;
+  expect(Buffer.from(entry.bytes).toString()).toContain('added2026');
+
+  // Opened (the log has its first entry), then replaced by the same text with other line
+  // endings: nothing was typed, and the file is still the upload.
+  await loadUpdates(t.pool, store, bib.id);
+  expect(await headSeq()).toBe('1');
+  expect((await latest()).stale).toBe(false);
+  await replaceFile(
+    t.pool,
+    store,
+    owner.id,
+    project,
+    'refs.bib',
+    Buffer.from(added.replace(/\n/g, '\r\n')),
+  );
+  expect(await headSeq()).toBe('1');
+  expect((await latest()).stale).toBe(true);
+  expect((await build(project)).stale).toBe(false);
+
+  // The very bytes it already has are no change.
+  await replaceFile(
+    t.pool,
+    store,
+    owner.id,
+    project,
+    'refs.bib',
+    Buffer.from(added.replace(/\n/g, '\r\n')),
+  );
+  expect((await latest()).stale).toBe(false);
 });
 
 test('two workers never build the same build, and build two papers side by side', async () => {
