@@ -644,6 +644,34 @@ Read this first. Update it in every pull request.
 - **Not done:** a second PUT to an address before the take replaces the object (same length);
   concurrent requests may pass the count together by a few.
 
+## One account cannot fill the build queue
+
+- **Found by** the planner: one account started 100 papers and queued 100 builds in under a
+  second, none refused, and a victim's was the 101st. Two papers of `\def\x{\x}\x` ran the full
+  60 s each; the victim's 1 s build waited 121 s. Builds were counted per paper only, taken
+  oldest first, and the worker drew a chart only when no build was queued.
+- **Now** `requestBuild` counts by requester under a per-person advisory lock: 3 builds waiting
+  or running over all papers and 120 asked for per hour (`BUILDS_WAITING_PER_USER`,
+  `BUILDS_PER_USER_HOUR`), with a message that says why. Every build is queued there (the
+  editor, the submit page's "build and check", a revision's build). The editor's own automatic
+  build (header `x-auto-build`) is refused earlier, `BUILDS_RESERVED_FOR_PRESSED` (20) short of
+  each hourly limit (per paper, `BUILDS_PER_PAPER_HOUR`, and per person), so pressed, submit and
+  revision builds can still get in; once half the paper's hour is used, automatic builds are
+  also 30 s apart. The route
+  answers `{ id: null, paused: reason }`; the pane says "Automatic compiling is paused: ..." in
+  its status and asks again every 30 s while the PDF is behind the text. Measured before this
+  (typing in the editor, a sentence then a 3 to 5 s pause, 2 minutes): 16 automatic builds, one
+  every 7 s, 17 rows and none answered from an earlier result, about 480 an hour of writing:
+  the paper's 120 would have been gone in 15 minutes, and then every press refused. The worker takes the
+  queued build whose requester has had the fewest builds done in the last hour, then the oldest
+  (`takeBuild`; index `builds_requester`, migration 0031), and alternates builds and chart
+  drawings (`takeTurns`) so neither starves the other.
+- **Held by** `packages/server/src/builds.sandbox.test.ts`, `apps/workers/src/builds.sandbox.test.ts`
+  (fair order) and `apps/workers/src/turns.test.ts`; each failed on the old code.
+- **Not done:** several accounts still share one worker in proportion to their requests, and
+  a build runs up to 60 s: more workers are a deployment decision. A running build is not
+  counted in the fair order until it is done.
+
 ## Next
 
 Every item in `docs/plan.md` from the scaffold to Phase F has been built. Since then the work

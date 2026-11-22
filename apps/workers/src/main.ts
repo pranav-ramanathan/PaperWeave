@@ -2,6 +2,7 @@
 import { blobStore, connect, forgetUploads, listen, UPLOAD_KEEP_MS } from '@paperweave/server';
 import { buildNext, imageId } from './builder.ts';
 import { drawNext } from './charts.ts';
+import { takeTurns } from './turns.ts';
 
 const pool = connect();
 const store = blobStore();
@@ -15,6 +16,10 @@ console.log(`build worker ready, toolchain ${image.slice(0, 19)}`);
 // Uploads that were put in the store and never taken (the person closed the page): removed
 // when they are half an hour old. Checked every hour, and once at the start.
 let swept = 0;
+const next = takeTurns(
+  () => buildNext(pool, store, image),
+  () => drawNext(pool, store, image),
+);
 for (;;) {
   try {
     if (Date.now() - swept > 3600_000) {
@@ -23,7 +28,7 @@ for (;;) {
       if (n) console.log(`removed ${n} old uploads`);
       await forgetUploads(pool);
     }
-    while ((await buildNext(pool, store, image)) || (await drawNext(pool, store, image)));
+    while (await next());
   } catch (err) {
     console.error('worker error:', (err as Error).message);
   }

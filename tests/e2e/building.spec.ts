@@ -286,6 +286,44 @@ test('an editor nobody is looking at asks the server for nothing', async ({ brow
   await expect(buildStatus(page)).toHaveText('The PDF is up to date.');
 });
 
+test('a paused automatic build says why, and is asked for again without an edit', async ({
+  browser,
+}) => {
+  test.setTimeout(150_000);
+  const { page, email } = await person(browser, 'build-paused');
+  await page.goto('/sign-in');
+  await signIn(page, email);
+  await page
+    .getByLabel('Or import a ZIP of a LaTeX project')
+    .setInputFiles(await fixtureZip('Paused'));
+  await page.getByRole('button', { name: 'Import ZIP' }).click();
+  await page.getByRole('link', { name: 'main.tex' }).first().click();
+  await expect(buildStatus(page)).toHaveText('The PDF is up to date.', { timeout: 60_000 });
+
+  // The server's answer as it would be with the paper's automatic builds used up, once; then
+  // the real one.
+  const reason = 'this paper has built 100 times this hour. Compile now still works.';
+  const asked: number[] = [];
+  await page.route(/\/projects\/[0-9a-f-]+\/builds$/, async (route) => {
+    if (route.request().method() !== 'POST') return route.fallback();
+    asked.push(Date.now());
+    if (asked.length === 1) return route.fulfill({ json: { id: null, paused: reason } });
+    return route.fallback();
+  });
+  await showSource(page);
+  await source(page).click();
+  await page.keyboard.press('ControlOrMeta+End');
+  await page.keyboard.type('% paused');
+  await expect(buildStatus(page)).toHaveText(
+    `The PDF is behind the text. Automatic compiling is paused: ${reason}`,
+    { timeout: 30_000 },
+  );
+  expect(asked).toHaveLength(1);
+  // Nothing more is typed: it asks again by itself, and the PDF catches up.
+  await expect(buildStatus(page)).toHaveText('The PDF is up to date.', { timeout: 90_000 });
+  expect(asked.length).toBeGreaterThanOrEqual(2);
+});
+
 test('a build that is not being built says so, and does not say "compiling" for ever', async ({
   browser,
 }) => {
