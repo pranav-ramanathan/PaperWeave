@@ -205,6 +205,7 @@ export default function FileEditor(props: {
   const [menu, setMenu] = useState<{
     x: number;
     y: number;
+    top: number;
     edit?: { name: string; run(): void };
   } | null>(null);
   /** Start inserting something where the caret is. The place is fixed now, not when it is done. */

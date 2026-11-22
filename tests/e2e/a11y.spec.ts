@@ -6,7 +6,16 @@ import { mkdtempSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { writeZip } from '../../packages/server/src/archive';
-import { audit, person, run, selectWord, showSource, signIn, sticksOut } from './helpers';
+import {
+  audit,
+  clickAfter,
+  person,
+  run,
+  selectWord,
+  showSource,
+  signIn,
+  sticksOut,
+} from './helpers';
 
 const MAIN = [
   '\\documentclass{article}',
@@ -270,6 +279,18 @@ test('the main pages can be read in a narrow window without scrolling sideways',
     timeout: 90_000,
   });
   await look('editor, visual view');
+  // A long formula makes the preview wider than the window, so it scrolls: that needs a tab stop.
+  await clickAfter(page, '.editor .visual .ProseMirror', 'forty');
+  await page.keyboard.press('Alt+=');
+  const equation = page.getByRole('dialog', { name: 'Insert an equation' });
+  await equation
+    .getByLabel('LaTeX')
+    .fill(`\\sqrt{${Array.from({ length: 40 }, (_, i) => `a_{${i}}`).join('')}}`);
+  const preview = equation.getByRole('group', { name: 'As it will look' });
+  await expect(preview.locator('.katex')).toBeVisible();
+  expect(await preview.evaluate((e) => e.scrollWidth > e.clientWidth)).toBe(true);
+  await audit(page, 'a long formula, narrow window');
+  await equation.getByRole('button', { name: 'Cancel' }).click();
   await showSource(page);
   await look('editor, source view');
   expect(found).toEqual([]);

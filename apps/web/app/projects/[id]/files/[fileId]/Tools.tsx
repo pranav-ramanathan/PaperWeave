@@ -4,7 +4,7 @@
 // labels to refer to, and the menu of things to do at a place in the text.
 import type { CommandResult } from '@paperweave/bridge';
 import { cellText } from '@paperweave/latex';
-import { type RefObject, useEffect, useRef, useState } from 'react';
+import { type RefObject, useEffect, useLayoutEffect, useRef, useState } from 'react';
 import { numbers } from '../../../../../lib/numbers';
 import { renderMath } from '../../../../../lib/visual';
 
@@ -147,7 +147,15 @@ export function FormulaBox(props: {
           />
         </label>
         {!request?.what && <p className="label">As it will look</p>}
-        {!request?.what && <div className="preview" ref={preview} />}
+        {!request?.what && (
+          <div
+            className="preview"
+            ref={preview}
+            tabIndex={0}
+            role="group"
+            aria-label="As it will look"
+          />
+        )}
         {!request?.what && undrawable && draft.trim() && (
           <p className="note">
             This cannot be drawn here ({undrawable}). It can still be applied: the PDF is what
@@ -642,7 +650,7 @@ export function CitationPicker(props: {
 
 /** The menu that opens on a right click, or the menu key, in the visual view. */
 export function EditorMenu(props: {
-  at: { x: number; y: number; edit?: { name: string; run(): void } } | null;
+  at: { x: number; y: number; top: number; edit?: { name: string; run(): void } } | null;
   onClose(): void;
   onReference(): void;
   onCitation(): void;
@@ -659,9 +667,21 @@ export function EditorMenu(props: {
   // itself again whenever anyone arrives, moves or types, and hands this a new `onClose` each
   // time: taking the keyboard again on those would throw someone working down the menu with
   // the arrow keys back to the top.
-  useEffect(() => {
-    if (at) menu.current?.querySelector('button')?.focus();
+  // Where it goes is worked out before it is first drawn on screen, from its own size: below
+  // the place if it fits there, else above it, and always inside the window.
+  const [put, setPut] = useState<{ left: number; top: number } | null>(null);
+  useLayoutEffect(() => {
+    const m = menu.current;
+    if (!at || !m) return setPut(null);
+    const { offsetWidth: w, offsetHeight: h } = m;
+    const room = window.innerHeight - 8;
+    const top = at.y + h <= room ? at.y : Math.max(8, Math.min(at.top - h, room - h));
+    const left = Math.max(8, Math.min(at.x, window.innerWidth - w - 8));
+    setPut({ left, top });
   }, [at]);
+  useEffect(() => {
+    if (at && put) menu.current?.querySelector('button')?.focus();
+  }, [put, at]);
   useEffect(() => {
     if (!at) return;
     // A click anywhere else puts the menu away.
@@ -692,7 +712,7 @@ export function EditorMenu(props: {
       role="menu"
       aria-label="At this place"
       className="menu"
-      style={{ left: at.x, top: at.y }}
+      style={put ?? { left: at.x, top: at.y, visibility: 'hidden' }}
       onKeyDown={(e) => {
         if (e.key === 'Escape') onClose();
         else if (e.key === 'ArrowDown') move(1);
