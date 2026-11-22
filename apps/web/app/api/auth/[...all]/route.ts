@@ -1,6 +1,7 @@
 import { auth } from '../../../../lib/server';
 
 export const GET = (request: Request) => auth().handler(request);
+// (`/magic-link/verify`, the library's link that signs in on a GET, is switched off in `createAuth`.)
 export async function POST(request: Request) {
   const answer = await auth().handler(request);
   if (!new URL(request.url).pathname.endsWith('/sign-out')) return answer;

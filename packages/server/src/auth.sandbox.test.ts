@@ -2,7 +2,7 @@
 import type pg from 'pg';
 import { afterAll, afterEach, beforeAll, expect, test, vi } from 'vitest';
 import { cookiesToSet } from './auth.ts';
-import { testDb } from './testing.ts';
+import { TEST_ENV, testDb } from './testing.ts';
 
 let t: Awaited<ReturnType<typeof testDb>>;
 beforeAll(async () => {
@@ -120,4 +120,58 @@ test('a session ended elsewhere goes on working from the cache for the minute, a
   // After the minute, nothing is left of it.
   vi.useFakeTimers({ toFake: ['Date'], now: Date.now() + 61_000 });
   expect((await get(headers)).response).toBeNull();
+});
+
+const sessionRows = async () =>
+  Number((await t.pool.query('select count(*) from "session"')).rows[0].count);
+
+test('a mail scanner that fetches the emailed address does not use the link up or get a session', async () => {
+  const email = 'scanned@example.com';
+  const base = `${TEST_ENV.BETTER_AUTH_URL}/api/auth`;
+  const asked = await t.auth.handler(
+    new Request(`${base}/sign-in/magic-link`, {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ email, callbackURL: '/projects/abc#comments' }),
+    }),
+  );
+  expect(asked.status).toBe(200);
+  const link = t.links.at(-1)!;
+  const sent = new URL(link.url);
+  expect(sent.pathname).toBe('/sign-in/confirm');
+  expect(sent.searchParams.get('next')).toBe('/projects/abc#comments');
+  const before = await sessionRows();
+  // The scanner: no cookies, a plain GET of the emailed address, and of the library's own link.
+  const scanner = await t.auth.handler(new Request(link.url));
+  const old = await t.auth.handler(
+    new Request(`${base}/magic-link/verify?token=${link.token}&callbackURL=%2Fprojects`),
+  );
+  expect(scanner.headers.getSetCookie()).toEqual([]);
+  expect(old.status).toBe(404);
+  expect(old.headers.getSetCookie()).toEqual([]);
+  expect(await sessionRows()).toBe(before);
+  // The person's own press still works, once.
+  const verified = await t.auth.api.magicLinkVerify({
+    query: { token: link.token },
+    headers: new Headers(),
+    returnHeaders: true,
+  });
+  expect(verified.headers.getSetCookie().join()).toContain('session_token=');
+  expect(await sessionRows()).toBe(before + 1);
+  await expect(
+    t.auth.api.magicLinkVerify({ query: { token: link.token }, headers: new Headers() }),
+  ).rejects.toThrow();
+});
+
+test('a destination that is not a path on this site is not carried into the emailed address', async () => {
+  for (const bad of ['https://evil.example/x', '//evil.example', '/\\evil.example']) {
+    await t.auth.handler(
+      new Request(`${TEST_ENV.BETTER_AUTH_URL}/api/auth/sign-in/magic-link`, {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({ email: 'dest@example.com', callbackURL: bad }),
+      }),
+    );
+    expect(new URL(t.links.at(-1)!.url).searchParams.get('next')).toBe('/projects');
+  }
 });

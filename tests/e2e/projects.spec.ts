@@ -5,7 +5,17 @@ import { mkdtempSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { writeZip } from '../../packages/server/src/archive';
-import { address, audit, emailedLink, MAIL, person, run, scriptsHeld, signIn } from './helpers';
+import {
+  address,
+  audit,
+  confirmSignIn,
+  emailedLink,
+  MAIL,
+  person,
+  run,
+  scriptsHeld,
+  signIn,
+} from './helpers';
 
 test('sign in, create a paper, invite people, and keep outsiders out', async ({ browser }) => {
   const owner = await person(browser, 'owner');
@@ -311,8 +321,8 @@ test('a sign-in link that has been used says so, and never shows its code', asyn
   await signIn(visitor.page, visitor.email);
   await expect(visitor.page.getByRole('heading', { name: 'Your papers' })).toBeVisible();
   // The same link, in a browser that is not signed in.
-  const link = await emailedLink(visitor.email, '/magic-link/verify');
-  await again.page.goto(link);
+  const link = await emailedLink(visitor.email, '/sign-in/confirm');
+  await confirmSignIn(again.page, link);
   await expect(again.page).toHaveURL(/\/sign-in/);
   await expect(again.page.locator('main [role=alert]')).toHaveText(
     'That sign-in link has been used or has expired. Ask for a new one below.',
@@ -322,6 +332,48 @@ test('a sign-in link that has been used says so, and never shows its code', asyn
   // Asking for a new one from there works, and goes where the first was going.
   await signIn(again.page, visitor.email);
   await expect(again.page.getByRole('heading', { name: 'Your papers' })).toBeVisible();
+});
+
+test('a mail scanner opening the sign-in link does not use it up; the person can still sign in', async ({
+  browser,
+  request,
+  baseURL,
+}) => {
+  const visitor = await person(browser, 'scanned');
+  await visitor.page.goto('/sign-in?next=%2Fprojects%3Fthread%3D1');
+  await visitor.page.getByLabel('Email address').fill(visitor.email);
+  await visitor.page.getByRole('button', { name: 'Email me a sign-in link' }).click();
+  await expect(visitor.page.getByRole('status')).toContainText('Check');
+  const link = await emailedLink(visitor.email, '/sign-in/confirm');
+  // The scanner: no cookies, plain fetches, nothing pressed.
+  const scan = await request.get(link, { maxRedirects: 0 });
+  expect(scan.status()).toBe(200);
+  expect(scan.headers()['set-cookie']).toBeUndefined();
+  expect(scan.headers()['cache-control']).toContain('no-store');
+  expect(scan.headers()['referrer-policy']).toBe('same-origin');
+  // Not the library's own link either: it signs in on a GET, and is switched off.
+  const token = new URL(link).searchParams.get('token')!;
+  const old = await request.get(
+    `${baseURL}/api/auth/magic-link/verify?token=${token}&callbackURL=%2Fprojects`,
+    { maxRedirects: 0 },
+  );
+  expect(old.status()).toBe(404);
+  expect(old.headers()['set-cookie']).toBeUndefined();
+  // The person's own visit.
+  await visitor.page.goto(link);
+  await expect(visitor.page.getByRole('heading', { name: 'Sign in to PaperWeave' })).toBeVisible();
+  await expect(visitor.page.getByRole('button', { name: 'Sign in', exact: true })).toBeFocused();
+  await audit(visitor.page, 'the sign-in confirm page');
+  await visitor.page.getByRole('button', { name: 'Sign in', exact: true }).click();
+  // Where they were going survives.
+  await expect(visitor.page).toHaveURL(/\/projects\?thread=1$/);
+  await expect(visitor.page.getByRole('heading', { name: 'Your papers' })).toBeVisible();
+  // A second press of the same link, elsewhere, says it is used.
+  const other = await person(browser, 'scanned-again');
+  await confirmSignIn(other.page, link);
+  await expect(other.page.locator('main [role=alert]')).toHaveText(
+    'That sign-in link has been used or has expired. Ask for a new one below.',
+  );
 });
 
 test('one address is sent only so many sign-in links in an hour, whoever asks for them', async ({

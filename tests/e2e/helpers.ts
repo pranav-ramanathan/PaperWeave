@@ -47,7 +47,13 @@ export async function signIn(page: Page, email: string) {
     'the answer to asking for a sign-in link',
   ).toBe('200');
   await expect(page.getByRole('status')).toContainText('Check');
-  await page.goto(await emailedLink(email, '/magic-link/verify'));
+  await confirmSignIn(page, await emailedLink(email, '/sign-in/confirm'));
+}
+
+/** Open the emailed page and press its button, as a person does. */
+export async function confirmSignIn(page: Page, link: string) {
+  await page.goto(link);
+  await page.getByRole('button', { name: 'Sign in', exact: true }).click();
 }
 
 /**

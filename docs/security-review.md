@@ -140,6 +140,18 @@ What it found is fixed in the same change, or listed under "Open" with what to d
   longer leaves an owner unable to stop whoever owns it from joining. Service tests hold each,
   and failed on the old code.
 
+- **A mail scanner's fetch used up the sign-in link, and was handed the session.** The emailed
+  link signed in on a plain GET. University mail gateways fetch links before delivery: the
+  scanner got the session cookie, one session row existed for a person who had not yet seen the
+  email, and their own visit found the link used. The email now leads to `/sign-in/confirm`,
+  which shows a page and changes nothing; the button posts to a server action, and only that
+  calls the library's verify. The library's GET `/api/auth/magic-link/verify` is switched off
+  (`disabledPaths`, 404), so an old or crafted link cannot hand a session to a GET. The page
+  does not sign in by script (scanners run scripts), is sent `Cache-Control: no-store`, keeps
+  `Referrer-Policy: same-origin`, and loads nothing from another site. The token and the link
+  are never logged. A service test and a browser test failed on the old code. Not covered: a
+  scanner that submits forms.
+
 ## Open
 
 In rough order of how much they matter.

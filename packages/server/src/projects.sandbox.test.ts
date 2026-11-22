@@ -53,7 +53,7 @@ test('migrating twice changes nothing the second time', async () => {
 
 test('a magic link signs a person in', () => {
   expect(users.owner.cookie).toContain('session_token=');
-  expect(t.links.every((l) => l.url.includes('/api/auth/magic-link/verify?token='))).toBe(true);
+  expect(t.links.every((l) => l.url.includes('/sign-in/confirm?token='))).toBe(true);
 });
 
 test('one address is sent only so many sign-in links in an hour, whoever asks', async () => {

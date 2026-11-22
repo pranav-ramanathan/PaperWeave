@@ -11,6 +11,7 @@ import {
   getProject,
   listCharts,
   listFiles,
+  safePath,
   withScope,
   type Auth,
 } from '@paperweave/server';
@@ -51,7 +52,7 @@ function services() {
     sendEmail(
       email,
       'Sign in to PaperWeave',
-      `Open this link to sign in to PaperWeave:\n\n${url}\n\nIt works once and expires in 15 minutes. If you did not ask for it, ignore this email.`,
+      `To sign in to PaperWeave, go to this page and press "Sign in":\n\n${url}\n\nThe link works once and expires in 15 minutes. If you did not ask for it, ignore this email.`,
     ),
   );
   return (g.__paperweave = { pool, auth });
@@ -154,9 +155,7 @@ export async function bounded(request: Request, max: number): Promise<Request | 
 export const readJson = async (request: Request, max = 200_000) =>
   (await bounded(request, max))?.json().catch(() => null) ?? null;
 
-/** Only ever send people to a path on this site. */
-export const safePath = (next: unknown, fallback = '/projects') =>
-  typeof next === 'string' && /^\/(?!\/)/.test(next) && !next.includes('\\') ? next : fallback;
+export { safePath };
 
 /**
  * Who is signed in, and the sign-in itself. The session is read from the cookie the browser
