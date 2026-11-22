@@ -61,8 +61,10 @@ const COLUMNS = `b.id, b.status, b.created_at as "createdAt", b.finished_at as "
         -- A file's log starts at nothing and gets its first entry, the upload itself, the first
         -- time the file is opened. Neither is an edit.
         or greatest(rf.seq, 1) <> greatest(f.head_seq, 1)
-        -- A file that is not text has no log: it is replaced whole, as a chart is when drawn again.
-        or (f.eol is null and rf.digest <> f.digest)
+        -- A file with nothing typed into it is its stored bytes: one that is not text (it has no
+        -- log), or text whose log is empty or holds only the upload itself. It is replaced whole,
+        -- as a chart is when drawn again, or a refs.bib uploaded anew.
+        or ((f.eol is null or f.head_seq <= 1) and rf.digest <> f.digest)
       )
     )
     -- A file the build read has since been deleted.

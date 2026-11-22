@@ -1281,9 +1281,10 @@ Two things about tests, found on the way and not about the product:
   - The library's client goes on calling itself connected after the server has closed its
     file this way. The editor has to drop the connection itself to find out where it stands;
     without that it sat at "All edits saved" while nothing it typed was being taken.
-- **Not covered:** a sign-in that runs out is not deleted, so nothing is told. Its editors
-  keep their connections until they drop, and then find themselves signed out. The sync
-  server checks a person's role on every edit, not whether they are still signed in.
+- **A sign-in that runs out** is found by a check every minute and when a connection is made;
+  its editors are closed as on sign-out. The sync server neither renews nor deletes sign-ins
+  (the table is the auth library's). Within that minute an edit is still taken. Held by two
+  service tests (`sync.sandbox.test`).
 
 ## Someone taken off the paper while a file is open
 
@@ -4577,3 +4578,35 @@ Found by a three-person walkthrough.
   `data` and `revisions`. The byte-for-byte export of every encoding fixture is unchanged.
 - **Not done.** A mixed file typed in and taken back (more than one change, same text) exports
   uniform bytes and so makes one new revision.
+
+## A sign-in that runs out closes its editors
+
+- **What was wrong.** The sync server asked only whether a session row existed. An expired row
+  is not deleted, so an editor opened under it kept saving as its person until the connection
+  dropped, and a new connection under it was let in.
+- **Now** both the check at connect time and a check every minute (`sessionCheckMs`, fixed in
+  the service, shortened only by tests) treat an expired row like a missing one: the connection
+  is closed with `signed-out`, which the editor already handles. Tickets that name no sign-in
+  are exempt as before.
+- **Not done.** No per-edit check: for up to a minute after the expiry an edit is still taken.
+  A connection under a run-out sign-in is closed when the server accepts it, so the editor may
+  receive the file's text once before that.
+
+## A replaced file nobody had opened left the build "up to date"
+
+- **What was wrong.** Uploading a new `refs.bib` (or `.sty`, `.cls`, `.csv`, a generated `.tex`) with
+  "Replace the file of this name" did not make the build stale if the file had never been opened in
+  the editor. The editor said "The PDF is up to date." and did not rebuild, and the check before
+  submitting said nothing stood in the way and offered the ZIP and PDF of the old revision, holding
+  the old file. The stale rule compared a file's digest only for files that are not text, and an
+  unopened text file keeps `head_seq` 0 when it is replaced, so no clause fired.
+- **Now** the digest is also compared for text whose log is empty or holds only the upload itself
+  (`head_seq <= 1`). Text with edits (`head_seq > 1`) is still read from its log, as its digest in
+  `files` is the old upload and would always differ. A file opened but not edited, mixed line
+  endings included, is not stale after its build: `cut()` takes `files.digest` for it.
+- **Held by** a sandbox test in `builds`: replace an unopened `refs.bib` (stale, the checks are not
+  ready, the next build's ZIP holds the new file), replace it again after opening with the same text
+  in other line endings (stale, then built), and replace it with its own bytes (not stale).
+- **Not done.** An already-edited text file (`head_seq > 1`) replaced by an upload that differs only
+  in line endings or byte order mark still reads as up to date: the PDF is the same, but the built
+  revision's ZIP keeps the old line endings.

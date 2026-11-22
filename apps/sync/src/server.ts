@@ -44,8 +44,13 @@ export async function startSync(opts: {
   metricsToken?: string;
   /** The longest a file's text may be made by editing. The default is what could be imported. */
   maxFileText?: number;
+  /**
+   * How often to look for sign-ins that have run out. Fixed at a minute in the service; only
+   * tests shorten it.
+   */
+  sessionCheckMs?: number;
 }) {
-  const { pool, store, secret, compactEvery = 500 } = opts;
+  const { pool, store, secret, compactEvery = 500, sessionCheckMs = 60_000 } = opts;
   const counts = newCounts();
   /** For a file being read from its log: where the log stood when the reading began. */
   const loadedAt = new Map<string, number>();
@@ -144,9 +149,10 @@ export async function startSync(opts: {
       try {
         if (await look(connection, documentName)) return;
         if (context.sessionId !== null) {
-          const { rowCount } = await pool.query('select 1 from session where id::text = $1', [
-            context.sessionId,
-          ]);
+          const { rowCount } = await pool.query(
+            'select 1 from session where id::text = $1 and "expiresAt" > now()',
+            [context.sessionId],
+          );
           if (!rowCount) return connection.close({ code: 4401, reason: 'signed-out' });
         }
       } catch (err) {
@@ -288,7 +294,10 @@ export async function startSync(opts: {
       }
     }
   };
-  /** Close the editors opened under sign-ins that have ended: these, or any that are gone. */
+  /**
+   * Close the editors opened under sign-ins that have ended (deleted, or run out): these, or
+   * any that have.
+   */
   const signedOut = async (ended?: string) => {
     const open = [...server.hocuspocus.documents.values()].flatMap(
       (document) => document.getConnections() as Connection<Context>[],
@@ -297,9 +306,10 @@ export async function startSync(opts: {
     if (!ended) {
       const ids = [...new Set(open.map((c) => c.context.sessionId).filter((id) => id !== null))];
       if (!ids.length) return;
-      const { rows } = await pool.query('select id::text from session where id::text = any($1)', [
-        ids,
-      ]);
+      const { rows } = await pool.query(
+        'select id::text from session where id::text = any($1) and "expiresAt" > now()',
+        [ids],
+      );
       const still = new Set(rows.map((r) => r.id));
       gone = new Set(ids.filter((id) => !still.has(id)));
     }
@@ -310,7 +320,8 @@ export async function startSync(opts: {
         connection.close({ code: 4401, reason: 'signed-out' });
   };
   // Told at once when someone's role changes or they are removed, when an edit is made on the
-  // server, and when someone signs out.
+  // server, and when someone signs out. A sign-in that merely runs out announces nothing: that
+  // is found by the timed check below, and when a connection is made.
   const stopListening = await listen(
     opts.databaseUrl,
     ['acl', 'file_edits', 'session_ended', 'restored'],
@@ -359,12 +370,26 @@ export async function startSync(opts: {
     ticked = Date.now();
   }, 500);
   clock.unref();
+  // Sign-ins that run out are not deleted, so nothing announces them: look every so often.
+  // A failed look closes no one; the next one tries again.
+  let checking = false;
+  const sweep = setInterval(() => {
+    if (checking) return;
+    checking = true;
+    signedOut()
+      .catch((err) => console.error('could not check which sign-ins have run out:', err.message))
+      .finally(() => {
+        checking = false;
+      });
+  }, sessionCheckMs);
+  sweep.unref();
 
   await server.listen();
   return {
     port: opts.port,
     async stop() {
       clearInterval(clock);
+      clearInterval(sweep);
       await stopListening();
       await server.destroy();
     },
