@@ -4422,3 +4422,24 @@ http-equiv="refresh" content="2">`: a reload every 2 seconds that restarts a scr
   `INVITATIONS_PER_ADDRESS_BURST=1000` for the others, which invite the same addresses to
   paper after paper (adapted to the new rule, not weakened).
 - **Not done:** no UI change; counts are not locked, so parallel requests can pass by a few.
+
+## Braced text macros in titles, and a focusable diff
+
+Found by a three-person walkthrough.
+
+- **Was:** `title = {The {\TeX}book}` was read as "The book": `plainText`
+  (`packages/latex/src/bib.ts`) dropped every unknown macro, so "Look up again" said the title
+  differed from the registry's "The TeXbook", and the Entry column showed "Knuth 1984. The book".
+  Accents were reduced to the bare letter (`\"o` to o).
+- **Now** `plainText` gives `\TeX`, `\LaTeX`, `\LaTeXe` (LaTeX2e) and `\BibTeX` as their text,
+  accents as the accented letter (`\"o`, `{\"u}`, `\c{c}`, `\'{\i}`, `\v{S}`), `\ss`, `\o`,
+  `\aa`, `\l` and the other letters, `\&`, `--` and `~`. An unknown macro goes alone: its braced
+  text and whatever follows stay. The DOI comparison still ignores case, accents and punctuation
+  (`squash`), so "Schön" and "Schon" are the same, as before.
+- **Tests:** `bib.test.ts` (the converter; the old expectation "Erdos", "Schon" is now "Erdős",
+  "Schön") and a sandbox test in `evidence.sandbox.test.ts` with `{\TeX}book` against a registry
+  stub. Both fail on the old converter.
+- **Also:** the comparison of two revisions scrolled sideways on a long line, but its `<pre>` could
+  not be reached with the keyboard (axe `scrollable-region-focusable`). It is now a named region
+  ("Changes to main.tex") with a tab stop and a visible outline. `a11y.spec.ts` audits it with a
+  line wider than the window; that failed before.

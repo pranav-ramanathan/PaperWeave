@@ -54,7 +54,8 @@ export default async function Diff({
           </h2>
           {f.lines ? (
             // The + and - at the start of each line carry the meaning; the shading only helps.
-            <pre className="diff">
+            // A long line scrolls it sideways, so it has a name and a tab stop (see Wide.tsx).
+            <pre className="diff" role="region" aria-label={`Changes to ${f.path}`} tabIndex={0}>
               {f.lines.map((l, i) => (
                 <span key={i} className={MARK[l.op]}>
                   {l.op} {l.text}

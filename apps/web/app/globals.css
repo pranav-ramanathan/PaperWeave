@@ -580,6 +580,10 @@ button[aria-disabled='true'] {
   overflow-x: auto;
   font-size: 0.85rem;
 }
+.diff:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 2px;
+}
 .diff span {
   display: block;
   padding: 0 0.75rem;
