@@ -174,6 +174,7 @@ Read this first. Update it in every pull request.
   at once, as before.
   - A name written without its extension stays without it; one of several names in a
     `\bibliography` list changes alone; a line in a comment is left as it is.
+  - Names in `\includeonly` are updated too, written as the `\include` lines are.
   - "Rename only" is offered too, and says the paper will not build until the lines are fixed.
   - Not handled: moving the root file to another folder, which changes what every relative
     path in the paper means.
@@ -4732,3 +4733,18 @@ Found by a three-person walkthrough.
 - **Not done.** A `]` inside a braced `\bibitem` label; a key BibTeX broke across lines with `%`;
   a biblatex `.bbl` whose format version differs from the image's (a build error, separate); a DOI
   lookup for `.bbl` entries.
+
+## Renaming a chapter left `\includeonly` on the old name, and the chapter dropped out of the PDF
+
+- **What was wrong.** `\includeonly{...}` was not read as naming files, so renaming a chapter
+  with its references changed the `\include` line but not the `\includeonly` entry. TeX then
+  built without error and silently left the renamed chapter out of the PDF.
+- **Now** each `\includeonly` entry is read as a name (kind `only`) and renaming a file rewrites
+  the entries that point at it, written as a plain `\include` would be: from the root's folder,
+  with the extension only if it was written. The include graph ignores them: they make no edge,
+  are never walked, and are never reported missing, so a chapter named there is still read where
+  it is `\include`d and not in the preamble.
+- **Held by** unit tests in `graph.test.ts` and `files.test.ts`, and a sandbox test in
+  `files.sandbox.test.ts`.
+- **Not done.** No warning on the submit check that an active `\includeonly` leaves chapters out
+  of the PDF.

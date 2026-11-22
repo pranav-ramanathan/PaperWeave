@@ -326,3 +326,32 @@ test('findRoot refuses a class it cannot honestly reach', () => {
   };
   for (const [name, files] of Object.entries(none)) expect(findRoot(files), name).toBeNull();
 });
+
+test('\\includeonly names are read one by one, and a comment in the list hides nothing else', () => {
+  const src =
+    '\\includeonly{chapters/intro , % chapters/old, {x}\n  chapters/method.tex,, "chapters/q"}\n\\include{chapters/intro}';
+  expect(includes(src).map((i) => [i.kind, i.target])).toEqual([
+    ['only', 'chapters/intro'],
+    ['only', 'chapters/method.tex'],
+    ['only', 'chapters/q'],
+    ['input', 'chapters/intro'],
+  ]);
+  expect(named(src).every((n) => n.split('=')[0] === n.split('=')[1])).toBe(true);
+  expect(includes('% \\includeonly{a}')).toEqual([]);
+});
+
+test('a file named in \\includeonly is not read in the preamble, and a name there for no file is not missing', () => {
+  // Passes without the fix too: it guards against reading \includeonly as an \input.
+  const files = {
+    'main.tex':
+      '\\documentclass{book}\\includeonly{ch/a,ch/gone,\\x}\\begin{document}\\include{ch/a}\\include{ch/b}\\end{document}',
+    'ch/a.tex': 'A',
+    'ch/b.tex': 'B',
+  };
+  const g = includeGraph(files, 'main.tex', Object.keys(files));
+  expect(g.order).toEqual(['main.tex', 'ch/a.tex', 'ch/b.tex']);
+  expect(g.preamble).toEqual([]);
+  expect(g.missing).toEqual([]);
+  expect(g.dynamic).toEqual([]);
+  expect(g.edges.map((e) => e.kind)).toEqual(['input', 'input']);
+});

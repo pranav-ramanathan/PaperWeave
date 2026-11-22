@@ -498,6 +498,66 @@ test('a file named in two groups of \\import is renamed group by group', async (
   );
 });
 
+test('renaming a chapter changes its name in \\includeonly too', async () => {
+  const main = [
+    '\\documentclass{book}',
+    '\\includeonly{chapters/intro , % chapters/intro',
+    '  chapters/method.tex,chapters/gone}',
+    '\\begin{document}',
+    '\\include{chapters/intro}',
+    '\\include{chapters/method.tex}',
+    '\\include{chapters/results}',
+    '\\end{document}',
+    '',
+  ].join('\n');
+  const zip = await writeZip(
+    Object.entries({
+      'main.tex': main,
+      'chapters/intro.tex': 'Intro.\n',
+      'chapters/method.tex': 'Method.\n',
+      'chapters/results.tex': 'Results.\n',
+    }).map(([path, text]) => ({ path, bytes: Buffer.from(text) })),
+  );
+  const [project] = await importZip(t.pool, store, owner.id, zip, 'Imported');
+  const ids = Object.fromEntries(
+    (await listFiles(t.pool, owner.id, project.id)).map((f) => [f.path, f.id]),
+  );
+  const rename = async (from: string, to: string) => {
+    const proposal = await proposeFileRename(t.pool, store, owner.id, project.id, ids[from], to);
+    const done = await renameFileAndReferences(
+      t.pool,
+      store,
+      owner.id,
+      project.id,
+      ids[from],
+      to,
+      proposal.digest,
+    );
+    return { list: proposal.changes.map((c) => `${c.path}:${c.line} ${c.after}`), done };
+  };
+  const a = await rename('chapters/intro.tex', 'parts/introduction.tex');
+  expect(a.list).toEqual([
+    'main.tex:2 \\includeonly{parts/introduction , % chapters/intro',
+    'main.tex:5 \\include{parts/introduction}',
+  ]);
+  expect(a.done.places).toBe(2);
+  expect((await rename('chapters/method.tex', 'chapters/design.tex')).list).toEqual([
+    'main.tex:3   chapters/design.tex,chapters/gone}',
+    'main.tex:6 \\include{chapters/design.tex}',
+  ]);
+  expect((await rename('chapters/results.tex', 'parts/results.tex')).list).toEqual([
+    'main.tex:7 \\include{parts/results}',
+  ]);
+  expect((await content(project.id))['main.tex']).toBe(
+    main
+      .replace('\\includeonly{chapters/intro ,', '\\includeonly{parts/introduction ,')
+      .replace('\\include{chapters/intro}', '\\include{parts/introduction}')
+      .replace('  chapters/method.tex,', '  chapters/design.tex,')
+      .replace('\\include{chapters/method.tex}', '\\include{chapters/design.tex}')
+      .replace('\\include{chapters/results}', '\\include{parts/results}'),
+  );
+});
+
 test('a file rename is refused whole when the lines have changed, and can leave them alone when asked', async () => {
   const p = await named();
   const intro = p.ids['sections/intro.tex'];
