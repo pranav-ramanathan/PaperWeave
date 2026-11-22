@@ -13,8 +13,9 @@ import type { Node as PMNode, Schema } from '@tiptap/pm/model';
 import { ReplaceStep } from '@tiptap/pm/transform';
 import { type EditorState, Selection, TextSelection, type Transaction } from '@tiptap/pm/state';
 import * as Y from 'yjs';
+import { needs, pasteable } from './clipboard.ts';
 import { locate, model, type Model, projector, toSrc } from './project.ts';
-import { diff, type Edit, emphEdit, translate, type Translation } from './translate.ts';
+import { diff, type Edit, emphEdit, guard, translate, type Translation } from './translate.ts';
 
 export type Host = { getState(): EditorState; dispatch(tr: Transaction): void };
 
@@ -228,6 +229,72 @@ export class Bridge {
   }
 
   /**
+   * The source text of the selection, exactly as written, or null if it cannot travel on its own:
+   * nothing is selected, an end is not in running text, an end splits a group (half of an
+   * `\\emph`), or the stretch would not stand alone (see pasteable). Paragraph breaks and
+   * whole blocks between the ends come as they are in the source.
+   */
+  sourceOf(state: EditorState): string | null {
+    const { from, to } = state.selection;
+    if (from === to) return null;
+    const x = locate(this.model, state.doc, from);
+    const y = locate(this.model, state.doc, to);
+    const src = this.ytext.toString();
+    if (!x || !y || x.block < 0 || y.block < x.block || src !== this.model.parsed.src) return null;
+    const a = toSrc(this.model, state.doc, from, 1);
+    const b = toSrc(this.model, state.doc, to, -1);
+    if (b <= a || inPair(src, a) || inPair(src, b)) return null;
+    // Every group opened inside the stretch is closed inside it, and the other way round.
+    let depth = 0;
+    for (let k = x.block; k <= y.block; k++) {
+      const { start, body } = this.model.blocks[k];
+      const runs =
+        body.kind === 'list'
+          ? body.items.map((it) => it.pieces)
+          : 'pieces' in body
+            ? [body.pieces]
+            : [];
+      for (const pieces of runs)
+        for (const p of pieces) {
+          if (start + p.s < a || start + p.e > b) continue;
+          if (p.k === 'open') depth++;
+          else if (p.k === 'close' && --depth < 0) return null;
+        }
+    }
+    const latex = src.slice(a, b);
+    return depth === 0 && pasteable(latex) ? latex : null;
+  }
+
+  /**
+   * What kind of block the caret is at the top level of: 'para' (an ordinary paragraph), 'item'
+   * (a list item), or null if it is inside a group (`\\emph{...}`), in a heading, caption or raw
+   * block, not in running text, or in a paragraph not yet in the source. Block-level LaTeX (a
+   * blank line, a heading, a list, an `\\item`) can only be put where this is not null.
+   */
+  blockPlace(state: EditorState): 'para' | 'item' | null {
+    const spot = locate(this.model, state.doc, state.selection.to);
+    if (!spot || spot.block < 0) return null;
+    const kind = this.model.blocks[spot.block].body.kind;
+    if (kind !== 'para' && kind !== 'list') return null;
+    const i = toSrc(this.model, state.doc, state.selection.to, -1) - spot.base;
+    let depth = 0;
+    for (const p of spot.pieces) {
+      if (p.e > i) break;
+      if (p.k === 'open') depth++;
+      else if (p.k === 'close') depth--;
+    }
+    if (depth !== 0) return null;
+    return kind === 'list' ? 'item' : 'para';
+  }
+
+  /** Whether `latex` (copied from a paper) can go where the caret is as LaTeX (see needs). */
+  accepts(state: EditorState, latex: string): boolean {
+    const need = needs(latex);
+    const place = this.blockPlace(state);
+    return need === 'item' ? place === 'item' : need === 'block' ? place !== null : true;
+  }
+
+  /**
    * Build the command that inserts LaTeX where the caret is (at the end of the selection, if
    * there is one), or null if the caret is not in running text. The place is fixed now: text
    * typed elsewhere before the command runs does not move it.
@@ -248,6 +315,21 @@ export class Bridge {
       expected: '',
       replacement,
     };
+  }
+
+  /**
+   * `c` (from insertCommand) with `latex` as its replacement, guarded as typed text is: `{}` before
+   * it where it would join a command name or become the argument of one (`[`, `*`), `{}` after it
+   * where the text that follows would, and a line break before it where the place is in a comment.
+   * Built against the text as it is now.
+   */
+  fillCommand(c: Command, latex: string): Command {
+    const at = Y.createAbsolutePositionFromRelativePosition(c.to, this.ytext.doc!)?.index;
+    if (at == null || !latex) return { ...c, replacement: latex };
+    const src = this.ytext.toString();
+    const lead = guard(src.slice(0, at), latex);
+    const trail = guard(src.slice(0, at) + lead + latex, src[at] ?? '');
+    return { ...c, replacement: lead + latex + trail };
   }
 
   /**
@@ -277,8 +359,7 @@ export class Bridge {
     level: 'section' | 'subsection' | 'subsubsection',
     title: string,
   ): Command | null {
-    const spot = locate(this.model, state.doc, state.selection.to);
-    if (!spot || spot.block < 0 || this.model.blocks[spot.block].body.kind !== 'para') return null;
+    if (this.blockPlace(state) !== 'para') return null;
     const src = this.model.parsed.src;
     const i = toSrc(this.model, state.doc, state.selection.to, -1);
     const [before, after] = this.padding(src, i);
@@ -293,8 +374,7 @@ export class Bridge {
    * after `\item `, inside the empty item.
    */
   listCommand(state: EditorState, ordered: boolean): Command | null {
-    const spot = locate(this.model, state.doc, state.selection.to);
-    if (!spot || spot.block < 0 || this.model.blocks[spot.block].body.kind !== 'para') return null;
+    if (this.blockPlace(state) !== 'para') return null;
     const i = toSrc(this.model, state.doc, state.selection.to, -1);
     const [before, after] = this.padding(this.model.parsed.src, i);
     const env = ordered ? 'enumerate' : 'itemize';

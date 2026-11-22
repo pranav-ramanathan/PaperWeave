@@ -7,6 +7,9 @@ import { fixtures, replica, shown, textblocks, visualOp } from './harness.ts';
 import { contained, DEFAULT_TRANSPARENT, parse } from '@paperweave/latex';
 import type { Command } from './bridge.ts';
 import { fromSrc, toSrc } from './project.ts';
+import { needs, pasteable } from './clipboard.ts';
+import { schema } from './schema.ts';
+import { getTextBetween, getTextSerializersFromSchema } from '@tiptap/core';
 
 const N = Number(process.env.FUZZ ?? 10000);
 const DOC = 'First para with \\emph{styled} text.\n\nSecond para, see \\cite{k} and $x$.\n';
@@ -2030,5 +2033,260 @@ describe('" typed in the visual view', () => {
     expect(r.dispatch(r.state.tr.insertText('X', textblocks(r)[0].start))).toBe(true);
     expect(r.src).toBe('X' + src);
     r.check();
+  });
+});
+
+describe('cut and paste of a stretch of source', () => {
+  const SENT =
+    'The effect was significant ($p < 0.05$) as shown by \\cite{smith2020} in Figure~\\ref{fig:a}\\footnote{See appendix.}, with p \\textless{} 0.05 in 50\\% of \\emph{all} cases.';
+  const SRC = `${SENT}\n\nSecond paragraph here.\n`;
+  const selectFirst = (r: ReturnType<typeof replica>) => {
+    const tb = textblocks(r)[0];
+    r.select(tb.start, tb.start + tb.size);
+  };
+
+  test('sourceOf is the selected source, byte for byte', () => {
+    const r = replica(SRC);
+    selectFirst(r);
+    expect(r.bridge.sourceOf(r.state)).toBe(SENT);
+    // Part of a paragraph, from the first word to just before the formula.
+    const tb = textblocks(r)[0];
+    r.select(tb.start + 4, tb.start + 25);
+    expect(r.bridge.sourceOf(r.state)).toBe(SENT.slice(4, 25));
+    // Nothing selected: nothing to say.
+    r.select(tb.start + 3);
+    expect(r.bridge.sourceOf(r.state)).toBeNull();
+  });
+
+  test('the default text serializer keeps formulas and citations', () => {
+    const r = replica(SRC);
+    const tb = textblocks(r)[0];
+    const text = getTextBetween(
+      r.state.doc,
+      { from: tb.start, to: tb.start + tb.size },
+      { textSerializers: getTextSerializersFromSchema(schema) },
+    );
+    expect(text).toContain('$p < 0.05$');
+    expect(text).toContain('\\cite{smith2020}');
+    expect(text).toContain('\\ref{fig:a}');
+    expect(text).toContain('\\footnote{See appendix.}');
+  });
+
+  test('cut, then insert at another paragraph, loses nothing', () => {
+    const r = replica(SRC);
+    selectFirst(r);
+    const latex = r.bridge.sourceOf(r.state)!;
+    expect(r.dispatch(r.state.tr.deleteSelection())).toBe(true);
+    r.check();
+    const tbs = textblocks(r);
+    r.select(tbs[tbs.length - 1].start + tbs[tbs.length - 1].size);
+    const c = r.bridge.insertCommand(r.state, latex)!;
+    expect(r.bridge.applyCommand(c)).toBe('applied');
+    r.check();
+    for (const part of [
+      '$p < 0.05$',
+      '\\cite{smith2020}',
+      'Figure~\\ref{fig:a}',
+      '\\footnote{See appendix.}',
+      '\\emph{all}',
+      '\\textless{}',
+      '50\\%',
+    ])
+      expect(r.src).toContain(part);
+    expect(r.src).toContain(`Second paragraph here.${SENT}`);
+  });
+
+  test('several paragraphs come with their breaks', () => {
+    const src = 'One \\emph{a} b.\n\nTwo $x$ c.\n\nThree d.\n';
+    const r = replica(src);
+    const tbs = textblocks(r);
+    r.select(tbs[0].start + 2, tbs[2].start + 3);
+    expect(r.bridge.sourceOf(r.state)).toBe(src.slice(2, src.indexOf('Three') + 3));
+  });
+
+  test('half of a group, or of a block, is not offered', () => {
+    const r = replica('A \\emph{bc de} f.\n');
+    const tb = textblocks(r)[0];
+    r.select(tb.start + 4, tb.start + 9); // "c de f" runs out of the emphasis
+    expect(r.bridge.sourceOf(r.state)).toBeNull();
+    r.select(tb.start + 2, tb.start + 4); // "bc" is inside it, balanced
+    expect(r.bridge.sourceOf(r.state)).toBe('bc');
+    const l = replica('Before.\n\n\\begin{itemize}\n\\item one\n\\item two\n\\end{itemize}\n');
+    const t = textblocks(l);
+    l.select(t[0].start + 2, t[1].start + 2);
+    expect(l.bridge.sourceOf(l.state)).toBeNull();
+  });
+
+  test('the paste check refuses what would change the text around it', () => {
+    for (const bad of [
+      'a { b',
+      'a } b',
+      '\\begin{itemize} x',
+      'x \\end{itemize}',
+      '\\begin{a} x \\end{b}',
+      '\\end{document}',
+      '\\documentclass{article}',
+      '\\usepackage{x} y',
+      'text % a comment',
+      'a $b',
+      'a \\[ b',
+      'ends with \\',
+      '',
+      '   ',
+    ])
+      expect(pasteable(bad), bad).toBe(false);
+    for (const ok of [
+      SENT,
+      'a \\{ b \\} c \\% d',
+      'x % note\ny',
+      'a\n\nb \\begin{itemize}\\item q\\end{itemize}',
+      '$$x$$ and $y$ and \\(z\\)',
+      '\\\\% a comment\nz',
+    ])
+      expect(pasteable(ok), ok).toBe(true);
+  });
+});
+
+describe('text put in by a command is guarded as typed text is', () => {
+  /** Put `latex` where the caret is, through the command path, and return the source. */
+  const put = (src: string, at: (r: ReturnType<typeof replica>) => number, latex: string) => {
+    const r = replica(src);
+    r.select(at(r));
+    const c = r.bridge.fillCommand(r.bridge.insertCommand(r.state, '')!, latex);
+    expect(r.bridge.applyCommand(c)).toBe('applied');
+    r.check();
+    return r.src;
+  };
+  const start = (i: number) => (r: ReturnType<typeof replica>) => textblocks(r)[i].start;
+  const end = (i: number) => (r: ReturnType<typeof replica>) =>
+    textblocks(r)[i].start + textblocks(r)[i].size;
+  const LIST = (item: string) => `\\begin{itemize}\n\\item ${item}\n\\end{itemize}\n`;
+
+  test('a [ at the start of an item does not become its label', () => {
+    expect(put(LIST('Run it.'), start(0), '[Optional] ')).toBe(LIST('{}[Optional] Run it.'));
+  });
+
+  test('cut guarded text, paste at the start of another item', () => {
+    const src = `\\begin{itemize}\n\\item {}[Optional] Run it.\n\\item Stop.\n\\end{itemize}\n`;
+    const r = replica(src);
+    r.select(textblocks(r)[0].start, textblocks(r)[0].start + textblocks(r)[0].size);
+    const latex = r.bridge.sourceOf(r.state)!;
+    expect(latex).toContain('[Optional] Run it.');
+    expect(r.dispatch(r.state.tr.deleteSelection())).toBe(true);
+    r.select(textblocks(r)[1].start);
+    const c = r.bridge.fillCommand(r.bridge.insertCommand(r.state, '')!, latex);
+    expect(r.bridge.applyCommand(c)).toBe('applied');
+    r.check();
+    expect(r.src).toContain('\\item {}[Optional] Run it.Stop.');
+  });
+
+  test('paragraphs starting with [ at an item start', () => {
+    expect(put(LIST('Run it.'), start(0), '[1] First.\n\nSecond.')).toContain(
+      '\\item {}[1] First.',
+    );
+  });
+
+  test('a command name is not joined to the word after it, or before it', () => {
+    expect(put('Then go.\n', start(0), 'so on\\ldots')).toBe('so on\\ldots{}Then go.\n');
+    const after = put('A \\ldots\n', end(0), 'and');
+    expect(after).toBe('A \\ldots{}and\n');
+  });
+
+  test('text put after a comment starts on a new line', () => {
+    const r = replica('Para text % TODO check\n\nNext.\n');
+    r.select(end(0)(r));
+    const c = r.bridge.fillCommand(r.bridge.insertCommand(r.state, '')!, 'Pasted $x$.');
+    expect(r.bridge.applyCommand(c)).toBe('applied');
+    expect(r.src).toContain('% TODO check\nPasted $x$.');
+  });
+
+  test('plain words after a space are left as they are', () => {
+    expect(put('A b.\n', (r) => textblocks(r)[0].start + 2, 'word ')).toBe('A word b.\n');
+    expect(put('Figure x\n', (r) => textblocks(r)[0].start + 7, '~\\ref{a}')).toBe(
+      'Figure ~\\ref{a}x\n',
+    );
+  });
+});
+
+describe('block-level text only goes where LaTeX can take it', () => {
+  const LIST =
+    'Before.\n\n\\begin{itemize}\n\\item alpha \\textbf{bold}\n\\item two\n\\end{itemize}\n\n';
+  const caretIn = (r: ReturnType<typeof replica>, tb: number, at: number) =>
+    r.select(textblocks(r)[tb].start + at);
+
+  test('blockPlace names the block the caret is at the top level of', () => {
+    const r = replica(`\\section{Head}\n\n${LIST}Text \\emph{inside} here.\n`);
+    // heading, list items, paragraph
+    const tbs = textblocks(r);
+    r.select(tbs[0].start + 2);
+    expect(r.bridge.blockPlace(r.state)).toBeNull();
+    r.select(tbs[1].start + 2);
+    expect(r.bridge.blockPlace(r.state)).toBe('para');
+    r.select(tbs[2].start + 2);
+    expect(r.bridge.blockPlace(r.state)).toBe('item');
+    r.select(tbs[2].start + 'alpha '.length + 2); // inside \textbf
+    expect(r.bridge.blockPlace(r.state)).toBeNull();
+    r.select(tbs[4].start + 'Text '.length + 2); // inside \emph
+    expect(r.bridge.blockPlace(r.state)).toBeNull();
+    r.select(tbs[4].start + 2);
+    expect(r.bridge.blockPlace(r.state)).toBe('para');
+  });
+
+  test('a heading or a list is refused inside a group', () => {
+    const r = replica('a \\emph{bcd} e.\n');
+    caretIn(r, 0, 4);
+    expect(r.bridge.headingCommand(r.state, 'section', 'T')).toBeNull();
+    expect(r.bridge.listCommand(r.state, false)).toBeNull();
+    caretIn(r, 0, 1);
+    expect(r.bridge.headingCommand(r.state, 'section', 'T')).not.toBeNull();
+    expect(r.bridge.listCommand(r.state, false)).not.toBeNull();
+  });
+
+  test('needs', () => {
+    expect(needs('alpha\n\\item two')).toBe('item');
+    expect(needs('\\begin{itemize}\n\\item a\n\\end{itemize}')).toBe('block');
+    expect(needs('a $x$ b')).toBe('inline');
+    expect(needs('a\n\nb')).toBe('block');
+    expect(needs('a \\[x\\] b')).toBe('block');
+    expect(needs('a \\section{T} b')).toBe('block');
+    expect(needs('a\n\\item b\n\n')).toBe('item');
+  });
+
+  test('none of the failing pastes and inserts writes a source LaTeX cannot take', () => {
+    // Copy across two items.
+    const l = replica(LIST + 'Para text.\n');
+    const tbs = textblocks(l);
+    l.select(tbs[1].start + 2, tbs[2].start + 2);
+    const slice = l.bridge.sourceOf(l.state);
+    expect(slice).not.toBeNull();
+    {
+      expect(needs(slice!)).toBe('item');
+      l.select(tbs[3].start + 2);
+      expect(l.bridge.accepts(l.state, slice!)).toBe(false);
+      // At an item's top level it is accepted, and splits the item correctly.
+      l.select(tbs[2].start + 2);
+      expect(l.bridge.accepts(l.state, slice!)).toBe(true);
+      const c = l.bridge.insertCommand(l.state, slice!)!;
+      expect(l.bridge.applyCommand(c)).toBe('applied');
+      l.check();
+      expect(parse(l.src).blocks.length).toBeGreaterThan(0);
+      expect(l.src).toContain('\\item twpha \\textbf{bold}\n\\item two\n\\end{itemize}');
+    }
+    // Two paragraphs, caret in a heading or inside \emph.
+    for (const [src, at] of [
+      ['\\section{Intro}\n\nx\n', 3],
+      ['a \\emph{bcd} e.\n', 4],
+    ] as const) {
+      const r = replica(src);
+      r.select(textblocks(r)[0].start + at);
+      expect(r.bridge.blockPlace(r.state)).toBeNull();
+      expect(r.bridge.accepts(r.state, 'P one.\n\nP two.')).toBe(false);
+      expect(r.bridge.headingCommand(r.state, 'section', 'T')).toBeNull();
+      expect(r.bridge.listCommand(r.state, true)).toBeNull();
+    }
+    // Plain words stay fine anywhere.
+    const h = replica('\\section{Intro}\n');
+    h.select(textblocks(h)[0].start + 3);
+    expect(h.bridge.accepts(h.state, 'a $x$ b')).toBe(true);
   });
 });

@@ -6,6 +6,8 @@ import {
   type CommandResult,
   extensions,
   fromSrc,
+  LATEX_TYPE,
+  pasteable,
   toSrc,
 } from '@paperweave/bridge';
 import {
@@ -743,7 +745,15 @@ export function createVisual(opts: {
     resume = { from: editor.state.selection.from, to: editor.state.selection.to, acted };
     return async (latex) => {
       const before = moves;
-      const result = await run({ ...c, key: crypto.randomUUID(), replacement: latex });
+      // Guarded as typed text is, against the text as the earlier commands left it.
+      let sent = latex;
+      const result = await inOrder(() => {
+        const filled = bridge.fillCommand({ ...c, key: crypto.randomUUID() }, latex);
+        sent = filled.replacement;
+        return opts.run(filled);
+      });
+      const lead = sent.indexOf(latex);
+      const trail = sent.length - lead - latex.length;
       // The caret goes just after what was inserted, so that typing carries on from there
       // rather than over a selection that now reaches across it. The place was named by the
       // character after it, which is now the character after the insertion.
@@ -756,7 +766,8 @@ export function createVisual(opts: {
         const text = opts.ytext.toString();
         while (after < text.length && /\s/.test(text[after])) after++;
       }
-      if (caretIn && after != null) after -= latex.length - caretIn(latex);
+      // `after` is past what was inserted, guard after it included; the caret goes before that.
+      if (after != null) after -= caretIn ? sent.length - lead - caretIn(latex) : trail;
       if (moves !== before)
         resume = null; // the person has gone elsewhere meanwhile
       else if (result !== 'conflict' && after != null) {
@@ -825,7 +836,8 @@ export function createVisual(opts: {
       say(`Put the caret where the paragraphs should go, with nothing selected, then ${act}.`);
       return true;
     }
-    const put = insertion();
+    catchUp();
+    const put = bridge.blockPlace(view.state) ? insertion() : null;
     if (!put) {
       say(
         `Several paragraphs cannot be ${verb} here. ${act[0]!.toUpperCase() + act.slice(1)} them one at a time, or in the source.`,
@@ -837,6 +849,51 @@ export function createVisual(opts: {
         result === 'conflict' && say('That text changed before the edit arrived. Try again.'),
       () => say('That edit could not be made. Check the connection and try again.'),
     );
+    return true;
+  };
+  /**
+   * Put LaTeX copied from a paper where the caret is, as LaTeX, replacing the selection. False if
+   * it cannot be done here (the caller then takes the plain text as typed words).
+   */
+  const takeSource = (latex: string): boolean => {
+    const { view } = editor;
+    // The selection as the screen has it: a key pressed a moment ago may not have reached the editor.
+    catchUp();
+    if (!view.state.selection.empty) {
+      view.dispatch(view.state.tr.deleteSelection().scrollIntoView());
+      // Refused (it spans structure the visual view cannot express): nothing was changed.
+      if (!view.state.selection.empty) return false;
+    }
+    if (!bridge.accepts(view.state, latex)) return false;
+    const put = insertion();
+    if (!put) return false;
+    void put(latex).then(
+      (result) =>
+        result === 'conflict' && say('That text changed before the edit arrived. Try again.'),
+      () => say('That edit could not be made. Check the connection and try again.'),
+    );
+    return true;
+  };
+  /**
+   * Copy and cut: when the selection is a stretch of source that stands alone, it goes on the
+   * clipboard as LaTeX too, beside the words and HTML the editor puts there. The editor's own
+   * handler clears the clipboard, so it is redone here.
+   */
+  const copySource = (view: EditorView, event: Event): boolean => {
+    const data = (event as ClipboardEvent).clipboardData;
+    const cut = event.type === 'cut';
+    if (!data || (cut && !opts.editable)) return false;
+    catchUp();
+    const latex = bridge.sourceOf(view.state);
+    if (latex === null) return false;
+    const { dom, text } = view.serializeForClipboard(view.state.selection.content());
+    event.preventDefault();
+    data.clearData();
+    data.setData('text/html', dom.innerHTML);
+    data.setData('text/plain', text);
+    data.setData(LATEX_TYPE, latex);
+    if (cut)
+      view.dispatch(view.state.tr.deleteSelection().scrollIntoView().setMeta('uiEvent', 'cut'));
     return true;
   };
   const editor: Editor = new Editor({
@@ -1053,10 +1110,15 @@ export function createVisual(opts: {
           acted++;
           return false;
         },
+        copy: copySource,
+        cut: copySource,
       },
       // What is pasted goes in as its words, as if typed: the clipboard's formatting is not LaTeX.
       handlePaste: (_view, event) => {
         const data = event.clipboardData;
+        // LaTeX copied from a paper (this view or the source) goes in as LaTeX, if it stands alone.
+        const latex = data?.getData(LATEX_TYPE) ?? '';
+        if (opts.editable && latex && pasteable(latex) && takeSource(latex)) return true;
         return take(data?.getData('text/plain') ?? '', data?.files.length ?? 0);
       },
       // What is dropped goes in as its words, where it is dropped, as pasted text does.

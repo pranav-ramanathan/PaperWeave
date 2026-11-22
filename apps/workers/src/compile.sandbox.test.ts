@@ -143,6 +143,26 @@ test('a [ typed at the start of an item or a theorem body prints as text', async
   expect(text).toContain('[0,1] or more.');
 });
 
+test('a list and a sentence pasted through the command path build and print as written', async () => {
+  const r0 = replica('\\begin{itemize}\n\\item Run it.\n\\end{itemize}\n\nThen go.\n');
+  const put = (at: number, latex: string) => {
+    r0.select(at);
+    const c = r0.bridge.fillCommand(r0.bridge.insertCommand(r0.state, '')!, latex);
+    expect(r0.bridge.applyCommand(c)).toBe('applied');
+    r0.check();
+  };
+  put(textblocks(r0)[1].start, 'so on\\ldots');
+  put(textblocks(r0)[0].start, '[Optional] ');
+  const { r, out } = await buildSource(
+    `\\documentclass{article}\n\\begin{document}\n${r0.src}\\end{document}\n`,
+  );
+  expect(r.diagnostics.filter((d) => d.severity === 'error')).toEqual([]);
+  expect(r.ok).toBe(true);
+  const text = execFileSync('pdftotext', [join(out, r.pdf!), '-'], { encoding: 'utf8' });
+  expect(text).toContain('[Optional] Run it.');
+  expect(text).toContain('so on');
+});
+
 test('a " typed in the visual view stays a quote under German babel', async () => {
   const rep = replica('Er sagte x und y.\n');
   const tb = textblocks(rep)[0];

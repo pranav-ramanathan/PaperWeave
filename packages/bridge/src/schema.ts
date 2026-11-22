@@ -10,6 +10,8 @@ const atom = (name: string, inline: boolean, extra: Record<string, { default: st
     atom: true,
     selectable: true,
     addAttributes: () => ({ ...src(), ...extra }),
+    // Copied as text, a formula or a citation keeps its LaTeX instead of vanishing.
+    renderText: ({ node }) => node.attrs.src,
     renderHTML: ({ node }) => [
       inline ? 'span' : 'div',
       { class: `pw-atom pw-${name}`, 'data-label': node.attrs.label ?? null },

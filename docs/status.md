@@ -970,6 +970,48 @@ is printed without that field.` (once, though latexmk runs BibTeX again). The su
   (not an error; the build is ok) and the PDF bookmark just lacks the quote. Not wrapped in
   `\texorpdfstring`: it exists only with hyperref, so it would fail every paper without it.
 
+## Cut and copy from the visual view dropped formulas, citations and emphasis
+
+- **Before:** Ctrl+X then Ctrl+V of a sentence deleted every formula, `\cite`, `\ref`,
+  `\footnote` and `\emph` in it. The editor put only the shown words on the clipboard (an atom
+  has no text) and paste took `text/plain` as typed words. Seen in Chromium: `...significant
+($p < 0.05$) as shown by \cite{smith2020}...` came back as `...significant () as shown by  in
+Figure~, ...`, with no warning and `check()` passing.
+- **Now:** copy and cut in the visual view also put the selection's source on the clipboard as
+  `application/x-paperweave-latex` (`Bridge.sourceOf`: the bytes between the ends, paragraph
+  breaks and whole blocks included). The plain text now carries each atom's LaTeX too
+  (`renderText`), which helps other programs. Paste of that type, if `pasteable()` accepts it
+  (braces, environments, `$`, `\[ \(` balanced; no trailing comment; no preamble or
+  `\end{document}`), deletes the selection and inserts the LaTeX through the server's command
+  path, in the same queue as other structural edits. The source view takes it too, so `<` arrives
+  as `\textless{}` and a formula as its source. Reviewers and viewers can copy.
+- **Limits:** a selection that ends inside a group (half of an `\emph`), or whose source would
+  not stand alone, puts only plain text on the clipboard and pastes as typed words. Pasting
+  over a selection is two undo steps (the delete, then the insert). Custom clipboard types are
+  tested only in Chromium. Clipboard contents are never logged.
+- **Guarded like typing.** Anything put in through the command path (this paste, the
+  several-paragraph paste and drop, and the other inserts from `insertion()`) went into the
+  source verbatim, so `[Optional] ` at the start of an item became its label, `so on\ldots`
+  before `then` gave `\ldotsthen`, and text after a `% comment` was swallowed. `fillCommand`
+  now adds what typing adds (`guard()`): `{}` before or after where a command name would
+  run on or take a `[`/`*`, and a line break after a comment. It is built in the queue, against
+  the text the earlier commands left. Not covered: the source-view paste (the source is
+  raw LaTeX there), and proposal and grammar replacements.
+- **Block-level text only goes where LaTeX can take it.** A copy from mid-item to mid-item
+  pasted in a paragraph wrote `Before text.alpha\n\item two` (`Lonely \item`), and two
+  paragraphs pasted or a heading or list inserted with the caret in a heading or inside
+  `\emph{...}` wrote a blank line there (`Paragraph ended before \@sect was complete`): no PDF.
+  `Bridge.blockPlace` says whether the caret is at the top level of a paragraph (`'para'`), of a
+  list item (`'item'`) or neither (null: in a group, heading, caption or raw block). The
+  heading and list inserts need `'para'`; `needs()` sorts pasted LaTeX into `'item'` (an `\item`
+  outside any environment), `'block'` (blank line, `\begin`, `\[`, `$$`, sectioning) and
+  `'inline'`, and `Bridge.accepts` lets an `'item'` paste into an item only and a `'block'` paste
+  into a paragraph or item only. Otherwise the paste falls back to the plain words (a copy
+  across items arrives as words), and several pasted paragraphs where the place is null say
+  "Several paragraphs cannot be pasted here" and change nothing. Copy across items pasted into
+  another item still goes in as LaTeX and splits that item. Not covered: a heading inserted in an
+  item is still refused; the source-view paste is raw LaTeX as before.
+
 ## How long a large import takes
 
 - An import still runs inside its request. Measured at the most files a paper may hold
