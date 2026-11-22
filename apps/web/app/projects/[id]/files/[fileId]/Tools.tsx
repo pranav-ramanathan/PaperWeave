@@ -378,6 +378,12 @@ export function HeadingBox(props: {
     setTitle('');
     setProblem('');
   }, [request]);
+  // `useDialog` opens the window when a request appears. One that replaces another at once (the
+  // key pressed just after Escape, before the close was heard) finds it closed by the browser
+  // with the request still there, so each request opens it again if it is shut.
+  useEffect(() => {
+    if (request && !box.current?.open) box.current?.showModal();
+  }, [request, box]);
   // The title is what is typed first: the keyboard starts there (the window's own effect has opened it).
   useEffect(() => {
     if (!request) return;
