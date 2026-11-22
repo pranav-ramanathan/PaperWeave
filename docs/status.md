@@ -97,9 +97,10 @@ Read this first. Update it in every pull request.
     took back the wrong thing), so it was removed.
   - Found and fixed on the way: after a file's text first arrived, the visual editor's selection
     was the whole document, and keys pressed before the first click registered were refused.
-  - Not built: structural edits other than emphasis and headings (see "A heading from the visual
-    view"): lists, moving or deleting a block, and changing an existing heading's level; and
-    remembering which view a person last used.
+  - Not built: structural edits other than emphasis, headings and starting a list (see "A heading
+    from the visual view" and "Starting a list from the visual view"): moving or deleting a
+    block, and changing an existing heading's level; and remembering which view a person last
+    used.
   - Whether a file is "definitions, source only" comes from the import report, so a file added
     later is never marked that way.
 - **C8, first part: edits made offline across a restore.** Someone who comes back online to a
@@ -3925,7 +3926,8 @@ Coming back online, the editor said "This paper was restored to an earlier revis
     item, Enter then Backspace gives back the original bytes. Split in the middle of text that
     has a space at the split, the space stays at the front of the new item and Backspace removes
     it too (paragraph Enter does the same).
-  - Enter in an empty item does nothing and says nothing. Enter inside `\emph{...}` is refused as
+  - Enter in an empty item does nothing and says nothing, except in the last of two or more
+    (see "Starting a list from the visual view"). Enter inside `\emph{...}` is refused as
     in paragraphs. Backspace at the start of the first item is unchanged.
   - `parse.ts`: an empty item's `pre` now ends after the spaces on its own line and the rest is
     `post`, so text typed into it goes right after `\item `, not after the next line's indent.
@@ -3935,6 +3937,30 @@ Coming back online, the editor said "This paper was restored to an earlier revis
 - **Tests.** `bridge.test.ts` (exact bytes, indentation, typing, Backspace as inverse, refusals,
   two replicas), `parse.test.ts` (pieces of an empty item, incremental equals full), and
   `visual.spec.ts` (Enter, typing, undo, a second person).
+
+## Starting a list from the visual view
+
+- **What was missing.** A list could not be started without the source view, and Enter in an
+  empty item did nothing, so a list could not be left.
+- **What happens now.** "Bulleted list" and "Numbered list" on the toolbar, Alt+L and Alt+N, and
+  "Insert a bulleted list" and "Insert a numbered list" in the menu at the caret put
+  `\begin{itemize}`, `\item ` and `\end{itemize}` (`enumerate` for numbered) at the caret, at
+  once, with no window. `Bridge.listCommand` builds it like `headingCommand` (same refusals, and
+  the same blank-line counting, now one private helper). The caret goes in the new empty item,
+  right after `\item `, so typing fills it.
+  - Only in an ordinary paragraph; elsewhere "Put the caret in a paragraph to add a list." A
+    caret in the middle of a paragraph splits it. Undo takes the list back in one step.
+  - Enter in the empty last item of a list of two or more removes that `\item` (the splice
+    Backspace uses) and puts the caret in a new empty paragraph after the list: typing there
+    writes after `\end{itemize}`. The paragraph is anchored to the list's end before the edit;
+    `Bridge.sync` moves the anchor along with it, so the offset is that of the old text. Enter
+    in a middle item, or the only item, still does nothing.
+- **Left as it is.** Alt+L and Alt+N: Firefox on Windows and Linux uses neither for its menu bar
+  (they are free), but some browsers or window managers may; the editor takes them while it has
+  the keyboard. Nested lists, `\item[label]` and description lists are not made here.
+- **Tests.** `bridge.test.ts` (exact bytes, both ends, file start, no run of three line breaks,
+  enumerate, refusals, the projected node and caret, leaving the list, two replicas) and
+  `insert.spec.ts` (toolbar, Alt+L, menu, leave, a second person, undo, refusal, axe).
 
 ## Decisions waiting on the owner
 

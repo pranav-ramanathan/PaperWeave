@@ -46,6 +46,8 @@ export class Bridge {
   private host: Host | null = null;
   private pending = new WeakMap<Transaction, Translation>();
   private seen = new Set<string>();
+  /** Set while a change that leaves a list is drawn: the caret goes to the phantom paragraph. */
+  private leaving = false;
   private observer = () => this.sync();
   private project: (m: Model) => PMNode;
   readonly ytext: Y.Text;
@@ -109,20 +111,18 @@ export class Bridge {
     // A just-opened empty paragraph lasts only while the caret is in it.
     let phantom = t ? t.phantom : this.model.phantom;
     const $head = tr.doc.resolve(tr.selection.head);
-    if (phantom && !t?.leave && ($head.depth !== 1 || $head.index(0) !== phantom.index)) phantom = null;
+    if (phantom && !t?.leave && ($head.depth !== 1 || $head.index(0) !== phantom.index))
+      phantom = null;
     const dropped = phantom !== this.model.phantom;
     this.model.phantom = phantom;
-    if (t?.edits.length) this.splice(t.edits);
-    else if (t || dropped) this.sync();
-    // Leaving a list: the caret was in the \item that is gone, and goes to the paragraph after.
-    if (t?.leave && this.model.phantom && this.host) {
-      const state = this.host.getState();
-      let pos = 0;
-      for (let i = 0; i < this.model.phantom.index; i++) pos += state.doc.child(i).nodeSize;
-      if (state.doc.child(this.model.phantom.index).type.name === 'paragraph')
-        this.host.dispatch(
-          state.tr.setSelection(TextSelection.create(state.doc, pos + 1)).setMeta('projection', true),
-        );
+    // Leaving a list: the caret was in the \item that is gone. The same transaction that draws
+    // the change puts it in the paragraph after the list (see sync).
+    this.leaving = !!t?.leave;
+    try {
+      if (t?.edits.length) this.splice(t.edits);
+      else if (t || dropped) this.sync();
+    } finally {
+      this.leaving = false;
     }
   };
 
@@ -192,6 +192,12 @@ export class Bridge {
         const near = Selection.findFrom($at, -1, true) ?? Selection.findFrom($at, 1, true);
         if (near) tr.setSelection(near);
       }
+    }
+    if (this.leaving && phantom) {
+      let at = 0;
+      for (let i = 0; i < phantom.index; i++) at += tr.doc.child(i).nodeSize;
+      if (tr.doc.child(phantom.index).type.name === 'paragraph')
+        tr.setSelection(TextSelection.create(tr.doc, at + 1));
     }
     this.host.dispatch(tr.setMeta('projection', true).setMeta('addToHistory', false));
   }

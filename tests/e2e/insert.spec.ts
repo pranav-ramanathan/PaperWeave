@@ -136,6 +136,8 @@ test('references and equations are inserted from the toolbar, the keyboard and t
     'Insert a figure…',
     'Insert a table…',
     'Insert a heading…',
+    'Insert a bulleted list',
+    'Insert a numbered list',
   ]);
   // It can be worked from the keyboard, and put away with Escape.
   await expect(menu.getByRole('menuitem').first()).toBeFocused();
@@ -465,4 +467,136 @@ test('a heading is inserted from the toolbar, the keyboard and the menu, and tak
   await edit.getByRole('button', { name: 'Heading' }).click();
   await expect(page.getByText('Put the caret in a paragraph to add a heading.')).toBeVisible();
   await expect(box).toBeHidden();
+});
+
+test('a list is started from the toolbar, the keyboard and the menu, and left with Enter in an empty item', async ({
+  browser,
+}) => {
+  test.setTimeout(180_000);
+  const { page, email } = await person(browser, 'insert-list');
+  const other = await person(browser, 'insert-list-2');
+  const main =
+    '\\documentclass{article}\n\\begin{document}\nHello world here.\n\nSecond paragraph.\n\\end{document}\n';
+  const zip = join(mkdtempSync(join(tmpdir(), 'paperweave-e2e-')), `Lists ${run}.zip`);
+  writeFileSync(zip, await writeZip([{ path: 'main.tex', bytes: Buffer.from(main) }]));
+  await page.goto('/sign-in');
+  await signIn(page, email);
+  await page.getByLabel('Or import a ZIP of a LaTeX project').setInputFiles(zip);
+  await page.getByRole('button', { name: 'Import ZIP' }).click();
+  await page.getByLabel('Their email address').fill(other.email);
+  await page.getByLabel('Their role').selectOption('editor');
+  await page.getByRole('button', { name: 'Send invitation' }).click();
+  await expect(page.getByRole('status')).toContainText(other.email);
+  await other.page.goto(await emailedLink(other.email, '/invitations/'));
+  await signIn(other.page, other.email);
+  await other.page.getByRole('button', { name: 'Join this paper' }).click();
+  await expect(other.page.getByText('You are an editor')).toBeVisible();
+  await page.getByRole('link', { name: 'main.tex' }).first().click();
+  const status = page.getByRole('region', { name: /^Editor for/ }).getByRole('status');
+  await expect(status).toHaveText('All edits saved.');
+  await expect(page).toHaveURL(/\/files\//);
+  await other.page.goto(page.url());
+  await expect(other.page.locator(VISUAL)).toContainText('Hello world here.');
+
+  /** The lines of the source that have something on them. */
+  const lines = async () => {
+    await showSource(page);
+    const all = (await page.locator('.editor .cm-line').allTextContents()).filter((l) => l.trim());
+    await page.getByRole('group', { name: 'View' }).getByRole('button', { name: 'Visual' }).click();
+    return all;
+  };
+  const edit = page.getByRole('group', { name: 'Edit' });
+  const items = page.locator(`${VISUAL} li`);
+  const theirs = other.page.locator(`${VISUAL} li`);
+  const original = [
+    '\\documentclass{article}',
+    '\\begin{document}',
+    'Hello world here.',
+    'Second paragraph.',
+    '\\end{document}',
+  ];
+  expect(await lines()).toEqual(original);
+
+  // The toolbar, at the end of a paragraph. The caret is in the new item: type, Enter, type;
+  // Enter in the empty last item leaves the list, and typing then lands in a paragraph after it.
+  await clickAfter(page, VISUAL, 'here.');
+  await page.keyboard.press('End');
+  await edit.getByRole('button', { name: 'Bulleted list' }).click();
+  await expect(items).toHaveCount(1);
+  await expect(status).toHaveText('All edits saved.');
+  expect(await lines()).toEqual([
+    original[0],
+    original[1],
+    original[2],
+    '\\begin{itemize}',
+    '\\item ',
+    '\\end{itemize}',
+    original[3],
+    original[4],
+  ]);
+  await expect(theirs).toHaveCount(1);
+  await expect(page.locator(VISUAL)).toBeFocused();
+  await page.keyboard.type('one');
+  await page.keyboard.press('Enter');
+  await page.keyboard.type('two');
+  await page.keyboard.press('Enter');
+  await expect(items).toHaveCount(3);
+  await page.keyboard.press('Enter');
+  await expect(items).toHaveCount(2);
+  await page.keyboard.type('After');
+  await expect(status).toHaveText('All edits saved.');
+  const withList = [
+    original[0],
+    original[1],
+    original[2],
+    '\\begin{itemize}',
+    '\\item one',
+    '\\item two',
+    '\\end{itemize}',
+    'After',
+    original[3],
+    original[4],
+  ];
+  expect(await lines()).toEqual(withList);
+  // A second person sees it.
+  await expect(theirs).toHaveText(['one', 'two']);
+  await expect(other.page.locator(`${VISUAL} p`, { hasText: 'After' })).toHaveCount(1);
+
+  // The keyboard: Alt+L, at the end of the last paragraph. Undo takes it back in one step.
+  await clickAfter(page, VISUAL, 'paragraph.');
+  await page.keyboard.press('End');
+  await page.keyboard.press('Alt+l');
+  await expect(items).toHaveCount(3);
+  await page.keyboard.type('x');
+  await expect(status).toHaveText('All edits saved.');
+  expect((await lines()).slice(-4)).toEqual([
+    '\\begin{itemize}',
+    '\\item x',
+    '\\end{itemize}',
+    '\\end{document}',
+  ]);
+  await page.keyboard.press('ControlOrMeta+z');
+  await page.keyboard.press('ControlOrMeta+z');
+  await expect(items).toHaveCount(2);
+  await expect(status).toHaveText('All edits saved.');
+  expect(await lines()).toEqual(withList);
+  await expect(theirs).toHaveCount(2);
+
+  // The menu, in the middle of a paragraph: a numbered list, which is an enumerate.
+  const word = await caretAfter(page, 'Hello');
+  await page.mouse.click(word.end, word.y, { button: 'right' });
+  const menu = page.getByRole('menu', { name: 'At this place' });
+  await menu.getByRole('menuitem', { name: 'Insert a numbered list' }).click();
+  await expect(page.locator(`${VISUAL} ol li`)).toHaveCount(1);
+  await expect(status).toHaveText('All edits saved.');
+  const text = (await lines()).join('\n');
+  expect(text).toContain('Hello\n\\begin{enumerate}\n\\item \n\\end{enumerate}\n world here.');
+  await expect(other.page.locator(`${VISUAL} ol li`)).toHaveCount(1);
+
+  // Not in a paragraph (here, in a list item): said so, and nothing is inserted.
+  await items.first().click();
+  await edit.getByRole('button', { name: 'Numbered list' }).click();
+  await expect(page.getByText('Put the caret in a paragraph to add a list.')).toBeVisible();
+  await expect(page.locator(`${VISUAL} ol li`)).toHaveCount(1);
+  await audit(page, 'the file page with the list buttons and a refusal');
 });

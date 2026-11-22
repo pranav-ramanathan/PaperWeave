@@ -213,6 +213,18 @@ export default function FileEditor(props: {
     if (apply) setHeading({ apply });
     else setNote('Put the caret in a paragraph to add a heading.');
   };
+  const askList = (ordered: boolean) => {
+    const apply = live.current?.visual?.list(ordered);
+    if (!apply) return setNote('Put the caret in a paragraph to add a list.');
+    // Applied at once, with no window: the keyboard goes back to the text, in the new item.
+    apply().then(
+      (result) => {
+        if (result === 'conflict') setNote('That text changed before the edit arrived. Try again.');
+        live.current?.visual?.focus();
+      },
+      () => setNote('That edit could not be made. Check the connection and try again.'),
+    );
+  };
   // The editors are made once; what they call must be what this render means.
   const all = {
     equation: askEquation,
@@ -221,6 +233,8 @@ export default function FileEditor(props: {
     figure: askFigure,
     table: askTable,
     heading: askHeading,
+    bulleted: () => askList(false),
+    numbered: () => askList(true),
   };
   const asks = useRef(all);
   asks.current = all;
@@ -885,6 +899,22 @@ export default function FileEditor(props: {
               <button type="button" onClick={askHeading} aria-keyshortcuts="Alt+H" title="Alt+H">
                 Heading
               </button>
+              <button
+                type="button"
+                onClick={() => askList(false)}
+                aria-keyshortcuts="Alt+L"
+                title="Alt+L"
+              >
+                Bulleted list
+              </button>
+              <button
+                type="button"
+                onClick={() => askList(true)}
+                aria-keyshortcuts="Alt+N"
+                title="Alt+N"
+              >
+                Numbered list
+              </button>
             </span>
           )}
           <span role="group" aria-label="Go to">
@@ -928,6 +958,8 @@ export default function FileEditor(props: {
           onFigure={askFigure}
           onTable={askTable}
           onHeading={askHeading}
+          onBulleted={() => askList(false)}
+          onNumbered={() => askList(true)}
         />
         <div className="source" ref={host} hidden={mode !== 'source'} />
       </div>

@@ -648,6 +648,8 @@ export function EditorMenu(props: {
   onFigure(): void;
   onTable(): void;
   onHeading(): void;
+  onBulleted(): void;
+  onNumbered(): void;
 }) {
   const { at, onClose } = props;
   const menu = useRef<HTMLUListElement>(null);
@@ -674,6 +676,8 @@ export function EditorMenu(props: {
     ['Insert a figure…', props.onFigure],
     ['Insert a table…', props.onTable],
     ['Insert a heading…', props.onHeading],
+    ['Insert a bulleted list', props.onBulleted],
+    ['Insert a numbered list', props.onNumbered],
   ];
   const move = (by: number) => {
     const buttons = [...(menu.current?.querySelectorAll('button') ?? [])];
