@@ -49,6 +49,9 @@ the services in `infra/compose.yaml`.
   to 60 seconds. Editing in the editor stops at once, and who may do what on a paper is read from
   the database every time. Not a setting: it is `SESSION_CACHE_SECONDS` in
   `packages/server/src/auth.ts`. `docs/deploy.md` has the rest.
+- **The sign-in check, every 60 seconds.** The sync server closes the editors of any sign-in that
+  has run out. Not a setting: `sessionCheckMs` in `apps/sync/src/server.ts` is shortened only by
+  tests.
 - **Limits on a line that has gone quiet.** None is a setting.
   - A transaction that sits 15 seconds between two statements is ended by the database, which
     frees the rows it held (`transaction` in `packages/server/src/db.ts`). The build and chart

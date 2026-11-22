@@ -245,6 +245,71 @@ test('signing out closes the editors opened under that sign-in, and no others', 
   expect(first.text.toString()).not.toContain('% still here');
 });
 
+/** Two sign-ins for the second user, newest first. */
+async function twoSignIns() {
+  await t.pool.query('delete from sign_in_links');
+  await t.signIn(users.second.email);
+  await t.signIn(users.second.email);
+  const ids: string[] = (
+    await t.pool.query(
+      'select id from session where "userId" = $1 order by "createdAt" desc limit 2',
+      [users.second.id],
+    )
+  ).rows.map((r) => r.id);
+  return ids;
+}
+const runOut = (id: string) =>
+  t.pool.query(`update session set "expiresAt" = now() - interval '1 minute' where id = $1`, [id]);
+
+test('a sign-in that runs out closes the editors opened under it, and no others', async () => {
+  const { file } = await paper();
+  const [here, elsewhere] = await twoSignIns();
+  const quick = await startSync({
+    pool: t.pool,
+    store,
+    secret: SECRET,
+    port: sync.port + 500,
+    databaseUrl: t.url,
+    sessionCheckMs: 100,
+  });
+  try {
+    const ticket = (session?: string) => syncTicket(SECRET, users.second.id, file, 60, session);
+    const first = client(users.second, file, quick.port, () => ticket(here));
+    const other = client(users.second, file, quick.port, () => ticket(elsewhere));
+    const unnamed = client(users.second, file, quick.port);
+    for (const c of [first, other, unnamed])
+      await until('the file to arrive', () => c.text.toString().includes('Hello.'));
+
+    await runOut(here);
+    await until('the connection to be closed', () =>
+      first.state.reasons.some((r) => r.endsWith('signed-out')),
+    );
+    expect(other.state.reasons).toEqual([]);
+    expect(unnamed.state.reasons).toEqual([]);
+    other.text.insert(0, '% still here\n');
+    await saved(other);
+    expect(unnamed.text.toString()).toContain('% still here');
+    expect(first.text.toString()).not.toContain('% still here');
+    // The sync server neither renews nor deletes sign-ins.
+    expect((await t.pool.query('select 1 from session where id = $1', [here])).rowCount).toBe(1);
+  } finally {
+    closeAll();
+    await quick.stop();
+  }
+});
+
+test('a ticket under a sign-in that has since run out is not served', async () => {
+  const { file } = await paper();
+  const [id] = await twoSignIns();
+  await runOut(id);
+  const late = client(users.second, file, sync.port, () =>
+    syncTicket(SECRET, users.second.id, file, 60, id),
+  );
+  await until('the connection to be closed', () =>
+    late.state.reasons.some((r) => r.endsWith('signed-out')),
+  );
+});
+
 test('taking away write access stops writes at once; removal ends the connection', async () => {
   const { project, file } = await paper();
   const owner = client(users.owner, file);

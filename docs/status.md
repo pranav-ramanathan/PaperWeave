@@ -1281,9 +1281,10 @@ Two things about tests, found on the way and not about the product:
   - The library's client goes on calling itself connected after the server has closed its
     file this way. The editor has to drop the connection itself to find out where it stands;
     without that it sat at "All edits saved" while nothing it typed was being taken.
-- **Not covered:** a sign-in that runs out is not deleted, so nothing is told. Its editors
-  keep their connections until they drop, and then find themselves signed out. The sync
-  server checks a person's role on every edit, not whether they are still signed in.
+- **A sign-in that runs out** is found by a check every minute and when a connection is made;
+  its editors are closed as on sign-out. The sync server neither renews nor deletes sign-ins
+  (the table is the auth library's). Within that minute an edit is still taken. Held by two
+  service tests (`sync.sandbox.test`).
 
 ## Someone taken off the paper while a file is open
 
@@ -4577,3 +4578,16 @@ Found by a three-person walkthrough.
   `data` and `revisions`. The byte-for-byte export of every encoding fixture is unchanged.
 - **Not done.** A mixed file typed in and taken back (more than one change, same text) exports
   uniform bytes and so makes one new revision.
+
+## A sign-in that runs out closes its editors
+
+- **What was wrong.** The sync server asked only whether a session row existed. An expired row
+  is not deleted, so an editor opened under it kept saving as its person until the connection
+  dropped, and a new connection under it was let in.
+- **Now** both the check at connect time and a check every minute (`sessionCheckMs`, fixed in
+  the service, shortened only by tests) treat an expired row like a missing one: the connection
+  is closed with `signed-out`, which the editor already handles. Tickets that name no sign-in
+  are exempt as before.
+- **Not done.** No per-edit check: for up to a minute after the expiry an edit is still taken.
+  A connection under a run-out sign-in is closed when the server accepts it, so the editor may
+  receive the file's text once before that.
