@@ -25,6 +25,7 @@ import {
   pictures,
   readZip,
   removeChart,
+  replaceFile,
   requestBuild,
   restoreRevision,
   saveChart,
@@ -189,6 +190,35 @@ test('a chart is out of date once its data changes, and is not redrawn from data
   await saveChart(t.pool, store, users.owner.id, p.id, { ...LINE, id });
   expect(await drawNext(t.pool, store, image)).toBe(true);
   expect(await charts(p)).toMatchObject([{ status: 'drawn', stale: false, leftOut: 1 }]);
+}, 120_000);
+
+test('a data file replaced by a newer copy keeps its chart, which is out of date until the data is looked at again', async () => {
+  const p = await paper();
+  await approve(p);
+  const id = await saveChart(t.pool, store, users.owner.id, p.id, {
+    ...LINE,
+    name: 'latency',
+    dataset: p.csv,
+  });
+  await drawNext(t.pool, store, image);
+  expect(await charts(p)).toMatchObject([{ status: 'drawn', stale: false, leftOut: 1 }]);
+  const v2 = CSV + '2024-03-04,41,Lab\n2024-03-05,44,Lab\n';
+  expect(
+    await replaceFile(t.pool, store, users.owner.id, p.id, 'data/latency.csv', Buffer.from(v2)),
+  ).toBe(p.csv);
+  expect(await charts(p)).toMatchObject([
+    { dataPath: 'data/latency.csv', status: 'drawn', stale: true, changed: 'data' },
+  ]);
+  // Not redrawn from data nobody has looked at.
+  expect(await code(saveChart(t.pool, store, users.owner.id, p.id, { ...LINE, id }))).toBe(
+    'conflict',
+  );
+  await approve(p);
+  await saveChart(t.pool, store, users.owner.id, p.id, { ...LINE, id });
+  expect(await drawNext(t.pool, store, image)).toBe(true);
+  expect(await charts(p)).toMatchObject([{ status: 'drawn', stale: false, leftOut: 1 }]);
+  const chart = (await charts(p))[0];
+  expect(chart.version).toBe(createHash('sha256').update(v2).digest('hex'));
 }, 120_000);
 
 test('a chart whose files have left the paper says so, and drawing it again puts them back', async () => {

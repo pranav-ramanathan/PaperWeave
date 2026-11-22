@@ -24,8 +24,8 @@ import {
   type Splice,
   texFiles,
 } from './labels.ts';
-import { cutRevision, renameFile } from './revisions.ts';
-import { loadUpdates } from './sync.ts';
+import { cutRevision, renameFile, restoreEdits } from './revisions.ts';
+import { editLocked, loadUpdates } from './sync.ts';
 
 /** Extensions that hold text the editors can open. Everything else is kept as bytes. */
 export const TEXT_FILE = new RegExp(
@@ -92,7 +92,10 @@ export async function createFile(
     .catch((err) => {
       // The unique index decides, so two people adding the same name cannot both succeed.
       if (err.code === '23505')
-        throw new AppError('conflict', 'Another file already has that name.');
+        throw new AppError(
+          'conflict',
+          'Another file already has that name. Tick "Replace the file of this name" to put this file in its place.',
+        );
       throw err;
     });
   const fileId: string = made.rows[0].id;
@@ -103,6 +106,95 @@ export async function createFile(
      where id = $1`,
     [projectId, fileId, root],
   );
+  return fileId;
+}
+
+/**
+ * Put new bytes in the place of the file at `path`, keeping the file's ID, so that whatever is
+ * tied to it (a dataset's description, the charts drawn from it) stays tied. The paper is saved
+ * as a revision first, in the same transaction, so the old content is always kept. Text that
+ * people may have open is changed by edits, as a restore does, so they see it at once. A path
+ * with no file is added as a new file. Returns the file's ID.
+ */
+export async function replaceFile(
+  pool: pg.Pool,
+  store: BlobStore,
+  userId: string,
+  projectId: string,
+  path: unknown,
+  bytes: Uint8Array,
+  limits: Limits = LIMITS,
+): Promise<string> {
+  await authorize(pool, userId, id(projectId), 'file.write');
+  const problem = checkPath(path);
+  if (problem) throw new AppError('invalid_input', `That name cannot be used: ${problem}.`);
+  const name = path as string;
+  if (bytes.length > limits.fileBytes)
+    throw new AppError('invalid_input', 'That file is too large.');
+  const paths: string[] = (
+    await pool.query('select path from files where project_id = $1', [projectId])
+  ).rows.map((r) => r.path);
+  if (!paths.includes(name)) {
+    if (paths.some((p) => p.startsWith(`${name}/`)))
+      throw new AppError('invalid_input', `${name} is a folder, and cannot be replaced by a file.`);
+    return createFile(pool, store, userId, projectId, name, bytes, limits);
+  }
+  const meta = fileMeta(name, bytes);
+  const digest = await store.put(bytes);
+  let fileId = '';
+  await cutRevision(pool, store, userId, projectId, {
+    within: async (db) => {
+      // Asked again with the files held: a role lowered while this waited is in force.
+      await authorize(db, userId, id(projectId), 'file.write');
+      const file = (
+        await db.query(
+          `select id, size, eol, head_seq from files where project_id = $1 and path = $2`,
+          [projectId, name],
+        )
+      ).rows[0];
+      if (!file)
+        throw new AppError('conflict', 'The file was removed while it was being replaced.');
+      fileId = file.id;
+      if (file.eol && meta.readonly)
+        throw new AppError(
+          'invalid_input',
+          `${name} is text that can be edited, and the new file cannot be read as text (${meta.readonly}). It was not replaced.`,
+        );
+      const total = (
+        await db.query(
+          'select coalesce(sum(size), 0)::float8 as bytes from files where project_id = $1',
+          [projectId],
+        )
+      ).rows[0].bytes;
+      if (total - file.size + bytes.length > limits.totalBytes)
+        throw new AppError(
+          'invalid_input',
+          `This paper is full: its files can add up to ${Math.round(limits.totalBytes / 1e6)} MB.`,
+        );
+      if (file.eol && Number(file.head_seq) > 0) {
+        const decoded = decodeFile(bytes);
+        if (!decoded.editable)
+          throw new AppError('invalid_input', 'The new file cannot be read as text.');
+        const want = decoded.text;
+        await editLocked(db, store, file.id, userId, (text) => {
+          for (const e of restoreEdits(text.toString(), want)) {
+            if (e.del) text.delete(e.at, e.del);
+            if (e.ins) text.insert(e.at, e.ins);
+          }
+        });
+      }
+      // The digest is what an untouched file is read from; a file with edits is read from its
+      // log, with the newline style and byte order mark set here.
+      await db.query(
+        `update files set digest = $2, size = $3, eol = $4, bom = $5, readonly_reason = $6
+         where id = $1`,
+        [file.id, digest, bytes.length, meta.eol, meta.bom, meta.readonly],
+      );
+      await db.query('update projects set manifest_version = manifest_version + 1 where id = $1', [
+        projectId,
+      ]);
+    },
+  });
   return fileId;
 }
 

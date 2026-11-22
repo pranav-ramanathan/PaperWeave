@@ -3,7 +3,7 @@
 // itself (app/api/uploads) and posts only its `key` and the file's name here, because a function
 // takes no more than 4.5 MB in a request. A file posted whole, as `file`, is still taken, up to
 // the same limit: for a browser with no scripts, and for local work.
-import { AppError, addUploaded, createFile, LIMITS } from '@paperweave/server';
+import { AppError, addUploaded, createFile, LIMITS, replaceFile } from '@paperweave/server';
 import { blobs, bounded, currentUser, db, sameOrigin, seeOther } from '../../../../lib/server';
 
 export async function POST(request: Request, { params }: { params: Promise<{ id: string }> }) {
@@ -26,9 +26,22 @@ export async function POST(request: Request, { params }: { params: Promise<{ id:
     String(form?.get('path') ?? '').trim() ||
     (typeof key === 'string' ? String(form?.get('name') ?? '') : file?.name);
   if (!path) return failed('Give the file a name, or choose a file to upload.');
+  // Ticked: the upload takes the place of the file of this name, and keeps that file's ID.
+  const replace = form?.get('replace') !== null && form?.get('replace') !== undefined;
+  if (replace && typeof key !== 'string' && !file)
+    return failed('Choose the file that is to take the place of the old one.');
   try {
     if (typeof key === 'string')
-      await addUploaded(db(), blobs(), user.id, (await params).id, key, path);
+      await addUploaded(db(), blobs(), user.id, (await params).id, key, path, LIMITS, replace);
+    else if (replace)
+      await replaceFile(
+        db(),
+        blobs(),
+        user.id,
+        (await params).id,
+        path,
+        new Uint8Array(await file!.arrayBuffer()),
+      );
     else
       await createFile(
         db(),
@@ -38,7 +51,7 @@ export async function POST(request: Request, { params }: { params: Promise<{ id:
         path,
         file ? new Uint8Array(await file.arrayBuffer()) : undefined,
       );
-    return seeOther(`${back}?added=${encodeURIComponent(path)}`);
+    return seeOther(`${back}?added=${encodeURIComponent(path)}${replace ? '&replaced=1' : ''}`);
   } catch (err) {
     if (!(err instanceof AppError)) throw err;
     // Not a member, or no such paper: the page itself answers that with "not found".
