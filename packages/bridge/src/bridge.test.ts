@@ -1339,3 +1339,76 @@ test('a list started, filled, left and written after, on two replicas that conve
   r.check();
   b.check();
 });
+
+// Bold works as emphasis does, with \textbf.
+/** Select display offsets [a, b) of paragraph `n`, toggle `mark`, and return the replica. */
+function marked(src: string, a: number, b: number, mark: 'emph' | 'textbf', n = 0) {
+  const r = replica(src);
+  const t = textblocks(r).filter((x) => x.para)[n];
+  r.select(t.start + a, t.start + b);
+  const c = r.bridge.markCommand(r.state, mark);
+  if (!c) return null;
+  expect(r.bridge.applyCommand(c)).toBe('applied');
+  r.check();
+  return r;
+}
+
+test('bold wraps the selection in \\textbf and a second press removes exactly those bytes', () => {
+  const src = 'Alpha beta gamma.\n\nDelta.\n';
+  const on = marked(src, 6, 10, 'textbf')!;
+  expect(on.src).toBe('Alpha \\textbf{beta} gamma.\n\nDelta.\n');
+  const t = textblocks(on)[0];
+  on.select(t.start + 6, t.start + 10);
+  const off = on.bridge.markCommand(on.state, 'textbf')!;
+  expect(off.replacement).toBe('beta');
+  expect(on.bridge.applyCommand(off)).toBe('applied');
+  expect(on.src).toBe(src);
+  on.check();
+  // Emphasis is the same command with another name.
+  expect(marked(src, 6, 10, 'emph')!.src).toBe('Alpha \\emph{beta} gamma.\n\nDelta.\n');
+});
+
+test('bold inside and around emphasis leaves the other mark alone', () => {
+  const nested = 'A \\emph{\\textbf{xy}} B.\n';
+  // Bold off, with emphasis outside it; emphasis off, with bold inside it.
+  expect(marked(nested, 2, 4, 'textbf')!.src).toBe('A \\emph{xy} B.\n');
+  expect(marked(nested, 2, 4, 'emph')!.src).toBe('A \\textbf{xy} B.\n');
+  // Bold on, inside emphasis and around it.
+  expect(marked('A \\emph{xy} B.\n', 2, 4, 'textbf')!.src).toBe('A \\emph{\\textbf{xy}} B.\n');
+  expect(marked('A \\emph{xy} B.\n', 0, 6, 'textbf')!.src).toBe('\\textbf{A \\emph{xy} B}.\n');
+  // Part of the emphasised text: a new mark inside, the old one stays.
+  expect(marked('A \\emph{xyz} B.\n', 2, 3, 'textbf')!.src).toBe('A \\emph{\\textbf{x}yz} B.\n');
+  // A selection that ends inside a group it did not start in does not nest: refused.
+  expect(marked('\\textbf{A \\emph{xy}}\n', 0, 4, 'textbf')).toBeNull();
+});
+
+test('bold is refused where emphasis is refused', () => {
+  const r = replica('Text \\newcommand{\\todo}[1]{x} end.\n\nSecond one.\n');
+  const [a, b] = textblocks(r);
+  r.select(a.start, a.start + 8);
+  expect(r.bridge.markCommand(r.state, 'textbf')).toBeNull();
+  // Across two paragraphs, and with no selection.
+  r.select(a.start, b.start + 2);
+  expect(r.bridge.markCommand(r.state, 'textbf')).toBeNull();
+  r.select(b.start + 1);
+  expect(r.bridge.markCommand(r.state, 'textbf')).toBeNull();
+  // Over parts of two groups, which would not nest.
+  expect(marked('A \\emph{xy} B \\emph{zw}.\n', 3, 9, 'textbf')).toBeNull();
+});
+
+test('bold made on one replica and typing on another converge', () => {
+  const r = replica('Alpha beta gamma.\n');
+  const { b, merge } = peer(r);
+  const t = textblocks(r)[0];
+  r.select(t.start + 6, t.start + 10);
+  const c = r.bridge.markCommand(r.state, 'textbf')!;
+  const tb = textblocks(b)[0];
+  expect(b.dispatch(b.state.tr.insertText('!', tb.start + 17))).toBe(true);
+  expect(r.bridge.applyCommand(c)).toBe('applied');
+  merge();
+  Y.applyUpdate(b.ydoc, Y.encodeStateAsUpdate(r.ydoc));
+  expect(b.src).toBe(r.src);
+  expect(r.src).toBe('Alpha \\textbf{beta} gamma.!\n');
+  r.check();
+  b.check();
+});

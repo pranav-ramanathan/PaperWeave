@@ -97,7 +97,10 @@ Read this first. Update it in every pull request.
     took back the wrong thing), so it was removed.
   - Found and fixed on the way: after a file's text first arrived, the visual editor's selection
     was the whole document, and keys pressed before the first click registered were refused.
-  - Not built: structural edits other than emphasis, headings and starting a list (see "A heading
+  - Bold (`\textbf`, Ctrl/Cmd+B and a "Bold" button) is made and taken off the same way as emphasis, by the same
+    command with another name. Taking one off with the other inside it (`\emph{\textbf{x}}`) removes only its own
+    `\name{` and `}`. A selection that ends inside a group it did not start in is refused, as for emphasis.
+  - Not built: structural edits other than emphasis and bold, headings and starting a list (see "A heading
     from the visual view" and "Starting a list from the visual view"): moving or deleting a
     block, and changing an existing heading's level; and remembering which view a person last
     used.

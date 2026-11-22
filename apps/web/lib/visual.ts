@@ -240,10 +240,10 @@ export function createVisual(opts: {
       return typeof next === 'string' ? next : opts.run(next);
     });
   };
-  const emph = () => {
+  const mark = (kind: 'emph' | 'textbf') => {
     catchUp();
-    const c = bridge.emphCommand(editor.state);
-    if (!c) say('Emphasis needs a selection inside one block.');
+    const c = bridge.markCommand(editor.state, kind);
+    if (!c) say(`${kind === 'emph' ? 'Emphasis' : 'Bold'} needs a selection inside one block.`);
     else
       Promise.resolve(opts.run(c)).then(
         (result) =>
@@ -252,6 +252,8 @@ export function createVisual(opts: {
       );
     return true;
   };
+  const emph = () => mark('emph');
+  const bold = () => mark('textbf');
 
   /** Mark an element whose number comes from a PDF that is behind the text. */
   const age = (dom: HTMLElement, src: string) => {
@@ -913,6 +915,7 @@ export function createVisual(opts: {
           'Mod-y': () => !!undo.redo() || true,
           'Mod-Shift-z': () => !!undo.redo() || true,
           'Mod-i': emph,
+          'Mod-b': bold,
           // The paper starts and ends with drawn blocks (the preamble, \end{document}), where the
           // browser's own move to the start or end of the document finds no caret.
           'Mod-Home': ({ editor: e }) => edge(e.view, false, false),
@@ -1049,6 +1052,7 @@ export function createVisual(opts: {
     editor,
     bridge,
     emph,
+    bold,
     insertion,
     heading,
     list,

@@ -136,6 +136,29 @@ test('visual edits reach the source through the server, byte for byte', async ({
   await expect.poll(() => sourceText(editor.page)).not.toContain('\\emph{Reviewers}');
   await expect.poll(() => sourceText(editor.page)).toContain(both);
 
+  // Bold is the same kind of edit: the button and Ctrl+B, undone, and taken off again. The
+  // other person sees each change in their source.
+  await pick(owner.page, VISUAL, 'Reviewers');
+  await owner.page.getByRole('button', { name: 'Bold' }).click();
+  await expect.poll(() => sourceText(editor.page)).toContain('\\textbf{Reviewers} then see');
+  await expect(owner.page.locator(`${VISUAL} strong`, { hasText: 'Reviewers' })).toBeVisible();
+  await owner.page.getByRole('button', { name: 'Undo' }).click();
+  await expect.poll(() => sourceText(editor.page)).not.toContain('\\textbf{Reviewers}');
+  await pick(owner.page, VISUAL, 'Reviewers');
+  await owner.page.keyboard.press('ControlOrMeta+b');
+  await expect.poll(() => sourceText(editor.page)).toContain('\\textbf{Reviewers} then see');
+  await owner.page.keyboard.press('ControlOrMeta+i');
+  await expect
+    .poll(() => sourceText(editor.page))
+    .toContain('\\emph{\\textbf{Reviewers}} then see');
+  // Bold off leaves the emphasis; emphasis off then leaves the plain word.
+  await owner.page.keyboard.press('ControlOrMeta+b');
+  await expect.poll(() => sourceText(editor.page)).toContain('\\emph{Reviewers} then see');
+  await owner.page.keyboard.press('ControlOrMeta+i');
+  await expect.poll(() => sourceText(editor.page)).toContain(both);
+  await expect.poll(() => sourceText(editor.page)).not.toContain('\\textbf{Reviewers}');
+  await expect.poll(() => sourceText(editor.page)).not.toContain('\\emph{Reviewers}');
+
   // Switching views carries the selection across, both ways.
   await pick(owner.page, VISUAL, 'organised');
   await view(owner.page, 'Source').click();
@@ -161,6 +184,7 @@ test('visual edits reach the source through the server, byte for byte', async ({
   await expect(reviewer.page.locator(VISUAL)).toContainText(both);
   await expect(reviewer.page.locator(VISUAL)).toHaveAttribute('contenteditable', 'false');
   await expect(reviewer.page.getByRole('button', { name: 'Emphasise' })).toHaveCount(0);
+  await expect(reviewer.page.getByRole('button', { name: 'Bold' })).toHaveCount(0);
 
   // The download: the edited file differs by exactly what was typed, every other file by nothing.
   await owner.page.getByRole('link', { name: 'Paper overview' }).click();

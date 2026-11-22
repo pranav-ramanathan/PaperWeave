@@ -392,7 +392,7 @@ test('the toolbar is one Tab stop, and the arrow keys move along it', async ({ b
   test.setTimeout(180_000);
   const page = await paper(browser, 'keys-toolbar', true);
   const bar = page.getByRole('toolbar', { name: 'Editor tools' });
-  await expect(bar.getByRole('button')).toHaveCount(14);
+  await expect(bar.getByRole('button')).toHaveCount(15);
   await expect(bar.locator('button[tabindex="0"]')).toHaveCount(1);
 
   await tabTo(page, 'Visual');
@@ -405,6 +405,8 @@ test('the toolbar is one Tab stop, and the arrow keys move along it', async ({ b
   expect(await press('Shift+Tab')).toBe('Visual');
   expect(await press('ArrowRight')).toBe('Source');
   expect(await press('ArrowRight')).toBe('Emphasise');
+  expect(await press('ArrowRight')).toBe('Bold');
+  expect(await press('ArrowLeft')).toBe('Emphasise');
   expect(await press('End')).toBe('Show in PDF');
   expect(await press('ArrowRight')).toBe('Visual');
   expect(await press('ArrowLeft')).toBe('Show in PDF');
@@ -412,7 +414,7 @@ test('the toolbar is one Tab stop, and the arrow keys move along it', async ({ b
   expect(await press('Home')).toBe('Visual');
 
   // The stop is the button that was left.
-  for (let i = 0; i < 7; i++) await page.keyboard.press('ArrowRight');
+  for (let i = 0; i < 8; i++) await page.keyboard.press('ArrowRight');
   expect(await name()).toBe('Equation');
   expect(await press('Tab')).toBe('main.tex, visual editor');
   expect(await press('Shift+Tab')).toBe('Equation');
