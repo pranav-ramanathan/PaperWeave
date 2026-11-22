@@ -2166,8 +2166,8 @@ update` held the paper's file rows for **189.6 s** (until the proxy was cut; it 
 - **Held by** service tests (`reviewdata.sandbox.test`, `import.sandbox.test`,
   `critique.sandbox.test`), each failed on the old code, and one that a file exported before this
   still comes in whole.
-- **Not changed:** a thread on more than 500
-  characters comes back on its first 500. The compiler is the one the importer read from the
+- **Not changed:** (a thread on more than 500
+  characters now comes back whole; see the last section). The compiler is the one the importer read from the
   files, which the root may not decide. A review file at the top of an archive of several papers
   is given to none. There is no limit on how many comments a thread may have, and sign-in takes
   an address longer than the 320 characters an export keeps. No browser test makes the round
@@ -4677,3 +4677,21 @@ Found by a three-person walkthrough.
   shown with a space LaTeX drops; a line break exposed after a command by a deletion gets no `{}`;
   putting bold back on leaves the `{}` (`\noindent{}\textbf{Setup.}`); source-view paste and
   grammar replacements are unguarded as before.
+
+## A comment on a long passage keeps all of it through export and import
+
+- **What was wrong.** A review file keeps at most 500 characters of the words a thread is on, so
+  an imported thread on a longer passage was attached to only the first 500. Editing the rest
+  never marked it "Changed since".
+- **Now** the review file's thread has optional `length` and `hash` (of the whole passage),
+  written only when the passage is longer than the quote. On import, if the text at the found
+  place still hashes to it, the thread is attached on the whole passage and its fingerprint is
+  that hash. Otherwise, and for files without them, it is placed on the quote as before. The
+  quote, `before` and `after` are unchanged, so older files and the placing of quotes are not
+  affected.
+- **Held by** three service tests in `reviewdata.sandbox.test.ts`: a long thread arrives on all
+  700 characters and reads "changed" when the tail is edited; the file carries `length` and
+  `hash` for the long thread and not the short one; and a tail that differs on arrival falls
+  back to the quote (a guard that also passed on the old code).
+- **Not done.** A long thread whose text beyond the first 500 differs on arrival is placed on
+  its first 500 without a report line. The comment panel still shows only the first 500.

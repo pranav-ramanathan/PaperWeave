@@ -33,6 +33,12 @@ const MAX_COMMENTS = 5000;
 const Thread = z.object({
   file: text(500),
   quote: text(500),
+  /** The stretch was longer than the quote: how long, and its hash. Absent in older files. */
+  length: z.number().int().min(1).max(50_000_000).optional(),
+  hash: z
+    .string()
+    .regex(/^[0-9a-f]{64}$/)
+    .optional(),
   before: text(CONTEXT),
   after: text(CONTEXT),
   status: z.enum(['open', 'resolved']),
@@ -176,9 +182,16 @@ export async function exportReview(
     }
     const all = f.text.toString();
     const end = at + t.now.length;
+    // A stretch longer than the quote says how long it is and what it hashes to.
+    const toIdx = Y.createAbsolutePositionFromRelativePosition(
+      Y.decodeRelativePosition(Buffer.from(t.to, 'base64')),
+      f.doc,
+    )?.index;
+    const whole = toIdx !== undefined && toIdx - at > t.now.length ? all.slice(at, toIdx) : '';
     threads.push({
       ...base,
       quote: t.now,
+      ...(whole && { length: whole.length, hash: sha256(Buffer.from(whole)) }),
       before: all.slice(Math.max(0, at - CONTEXT), at),
       after: all.slice(end, end + CONTEXT),
     });
@@ -301,9 +314,18 @@ export async function importReview(
     }
     // A thread detached where it came from is not placed again by its old words, which may
     // have been typed elsewhere since.
-    const at = t.detached ? -1 : locateQuote(f.text.toString(), t.quote, t.before, t.after);
+    const all = f.text.toString();
+    const at = t.detached ? -1 : locateQuote(all, t.quote, t.before, t.after);
+    // A longer stretch is kept whole if what stands there still hashes as it did; otherwise the
+    // quote is all there is to go by.
+    const whole =
+      at >= 0 &&
+      t.length !== undefined &&
+      t.hash !== undefined &&
+      t.length > t.quote.length &&
+      sha256(Buffer.from(all.slice(at, at + t.length))) === t.hash;
     // Not there (or there too often to say where): the thread is kept, with nothing to point at.
-    const [from, to] = at < 0 ? [0, 0] : [at, at + t.quote.length];
+    const [from, to] = at < 0 ? [0, 0] : [at, at + (whole ? t.length! : t.quote.length)];
     if (at < 0) done.detached++;
     const made = (
       await pool.query(
@@ -318,7 +340,7 @@ export async function importReview(
           t.quote,
           t.before,
           t.after,
-          sha256(Buffer.from(t.quote)),
+          whole ? t.hash : sha256(Buffer.from(t.quote)),
           t.status,
           t.createdAt,
           t.startedBy,
