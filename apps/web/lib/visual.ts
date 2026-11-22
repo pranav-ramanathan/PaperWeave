@@ -134,7 +134,7 @@ export function createVisual(opts: {
     apply: (replacement: string) => Promise<CommandResult | 'spills'>,
   ): void;
   /** The person asked, from the keyboard, to insert a reference, a citation or an equation. */
-  ask?(what: 'reference' | 'citation' | 'equation' | 'figure' | 'table'): void;
+  ask?(what: 'reference' | 'citation' | 'equation' | 'figure' | 'table' | 'heading'): void;
   /**
    * The person asked for the menu of things to do here: a right click, or the menu key. `x`
    * and `y` are where on the page; `edit` is set when it was asked for on a formula or an
@@ -651,7 +651,7 @@ export function createVisual(opts: {
    * Get ready to insert LaTeX where the caret is now. Returns the function that inserts it, by
    * way of the server, or null if the caret is not in running text.
    */
-  const insertion = (): ((latex: string) => Promise<CommandResult>) | null => {
+  const insertion = (skipSpace = false): ((latex: string) => Promise<CommandResult>) | null => {
     catchUp();
     const c = bridge.insertCommand(editor.state, '');
     if (!c) return null;
@@ -662,7 +662,15 @@ export function createVisual(opts: {
       // The caret goes just after what was inserted, so that typing carries on from there
       // rather than over a selection that now reaches across it. The place was named by the
       // character after it, which is now the character after the insertion.
-      const after = Y.createAbsolutePositionFromRelativePosition(c.to, opts.ytext.doc!)?.index;
+      const at = Y.createAbsolutePositionFromRelativePosition(c.to, opts.ytext.doc!)?.index;
+      // Text that begins with a space (what is left of a paragraph that a heading split) starts
+      // after it, not before: the space is between two blocks, and a caret there is read as the
+      // end of the block before.
+      let after = at;
+      if (skipSpace && after != null) {
+        const text = opts.ytext.toString();
+        while (after < text.length && /\s/.test(text[after])) after++;
+      }
       if (moves !== before)
         resume = null; // the person has gone elsewhere meanwhile
       else if (result !== 'conflict' && after != null) {
@@ -673,6 +681,22 @@ export function createVisual(opts: {
       }
       return result;
     };
+  };
+  /**
+   * Get ready to insert a section heading where the caret is, which splits its paragraph. Returns
+   * the function that inserts it, by way of the server, or null if the caret is not in a paragraph.
+   */
+  const heading = ():
+    | ((level: 'section' | 'subsection' | 'subsubsection', title: string) => Promise<CommandResult>)
+    | null => {
+    catchUp();
+    // The line breaks it needs around it depend on the text where the caret is, which is settled
+    // now, with the place; the level and the title are only known when the person is done.
+    const probe = bridge.headingCommand(editor.state, 'section', 'x');
+    const around = probe?.replacement.match(/^(\n*)\\section\{x\}(\n*)$/);
+    const put = around && insertion(true);
+    if (!around || !put) return null;
+    return (level, title) => put(`${around[1]}\\${level}{${title}}${around[2]}`);
   };
   /**
    * Put text that was pasted or dropped where the caret is, as its words, as if typed: a
@@ -876,6 +900,7 @@ export function createVisual(opts: {
           'Alt-c': () => (opts.ask && opts.editable ? (opts.ask('citation'), true) : false),
           'Alt-g': () => (opts.ask && opts.editable ? (opts.ask('figure'), true) : false),
           'Alt-t': () => (opts.ask && opts.editable ? (opts.ask('table'), true) : false),
+          'Alt-h': () => (opts.ask && opts.editable ? (opts.ask('heading'), true) : false),
           // Enter on a selected formula, or inline atom, opens it for editing.
           Enter: ({ editor: e }) => {
             const { selection } = e.state;
@@ -994,6 +1019,7 @@ export function createVisual(opts: {
     bridge,
     emph,
     insertion,
+    heading,
     /** Put the keyboard back in the visual view, with the caret where it should be. */
     focus() {
       const kept = resume;
