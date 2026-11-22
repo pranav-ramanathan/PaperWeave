@@ -7,6 +7,9 @@ import { fixtures, replica, shown, textblocks, visualOp } from './harness.ts';
 import { contained, DEFAULT_TRANSPARENT, parse } from '@paperweave/latex';
 import type { Command } from './bridge.ts';
 import { fromSrc, toSrc } from './project.ts';
+import { pasteable } from './clipboard.ts';
+import { schema } from './schema.ts';
+import { getTextBetween, getTextSerializersFromSchema } from '@tiptap/core';
 
 const N = Number(process.env.FUZZ ?? 10000);
 const DOC = 'First para with \\emph{styled} text.\n\nSecond para, see \\cite{k} and $x$.\n';
@@ -2030,5 +2033,116 @@ describe('" typed in the visual view', () => {
     expect(r.dispatch(r.state.tr.insertText('X', textblocks(r)[0].start))).toBe(true);
     expect(r.src).toBe('X' + src);
     r.check();
+  });
+});
+
+describe('cut and paste of a stretch of source', () => {
+  const SENT =
+    'The effect was significant ($p < 0.05$) as shown by \\cite{smith2020} in Figure~\\ref{fig:a}\\footnote{See appendix.}, with p \\textless{} 0.05 in 50\\% of \\emph{all} cases.';
+  const SRC = `${SENT}\n\nSecond paragraph here.\n`;
+  const selectFirst = (r: ReturnType<typeof replica>) => {
+    const tb = textblocks(r)[0];
+    r.select(tb.start, tb.start + tb.size);
+  };
+
+  test('sourceOf is the selected source, byte for byte', () => {
+    const r = replica(SRC);
+    selectFirst(r);
+    expect(r.bridge.sourceOf(r.state)).toBe(SENT);
+    // Part of a paragraph, from the first word to just before the formula.
+    const tb = textblocks(r)[0];
+    r.select(tb.start + 4, tb.start + 25);
+    expect(r.bridge.sourceOf(r.state)).toBe(SENT.slice(4, 25));
+    // Nothing selected: nothing to say.
+    r.select(tb.start + 3);
+    expect(r.bridge.sourceOf(r.state)).toBeNull();
+  });
+
+  test('the default text serializer keeps formulas and citations', () => {
+    const r = replica(SRC);
+    const tb = textblocks(r)[0];
+    const text = getTextBetween(
+      r.state.doc,
+      { from: tb.start, to: tb.start + tb.size },
+      { textSerializers: getTextSerializersFromSchema(schema) },
+    );
+    expect(text).toContain('$p < 0.05$');
+    expect(text).toContain('\\cite{smith2020}');
+    expect(text).toContain('\\ref{fig:a}');
+    expect(text).toContain('\\footnote{See appendix.}');
+  });
+
+  test('cut, then insert at another paragraph, loses nothing', () => {
+    const r = replica(SRC);
+    selectFirst(r);
+    const latex = r.bridge.sourceOf(r.state)!;
+    expect(r.dispatch(r.state.tr.deleteSelection())).toBe(true);
+    r.check();
+    const tbs = textblocks(r);
+    r.select(tbs[tbs.length - 1].start + tbs[tbs.length - 1].size);
+    const c = r.bridge.insertCommand(r.state, latex)!;
+    expect(r.bridge.applyCommand(c)).toBe('applied');
+    r.check();
+    for (const part of [
+      '$p < 0.05$',
+      '\\cite{smith2020}',
+      'Figure~\\ref{fig:a}',
+      '\\footnote{See appendix.}',
+      '\\emph{all}',
+      '\\textless{}',
+      '50\\%',
+    ])
+      expect(r.src).toContain(part);
+    expect(r.src).toContain(`Second paragraph here.${SENT}`);
+  });
+
+  test('several paragraphs come with their breaks', () => {
+    const src = 'One \\emph{a} b.\n\nTwo $x$ c.\n\nThree d.\n';
+    const r = replica(src);
+    const tbs = textblocks(r);
+    r.select(tbs[0].start + 2, tbs[2].start + 3);
+    expect(r.bridge.sourceOf(r.state)).toBe(src.slice(2, src.indexOf('Three') + 3));
+  });
+
+  test('half of a group, or of a block, is not offered', () => {
+    const r = replica('A \\emph{bc de} f.\n');
+    const tb = textblocks(r)[0];
+    r.select(tb.start + 4, tb.start + 9); // "c de f" runs out of the emphasis
+    expect(r.bridge.sourceOf(r.state)).toBeNull();
+    r.select(tb.start + 2, tb.start + 4); // "bc" is inside it, balanced
+    expect(r.bridge.sourceOf(r.state)).toBe('bc');
+    const l = replica('Before.\n\n\\begin{itemize}\n\\item one\n\\item two\n\\end{itemize}\n');
+    const t = textblocks(l);
+    l.select(t[0].start + 2, t[1].start + 2);
+    expect(l.bridge.sourceOf(l.state)).toBeNull();
+  });
+
+  test('the paste check refuses what would change the text around it', () => {
+    for (const bad of [
+      'a { b',
+      'a } b',
+      '\\begin{itemize} x',
+      'x \\end{itemize}',
+      '\\begin{a} x \\end{b}',
+      '\\end{document}',
+      '\\documentclass{article}',
+      '\\usepackage{x} y',
+      'text % a comment',
+      'a $b',
+      'a \\[ b',
+      'ends with \\',
+      '',
+      '   ',
+    ])
+      expect(pasteable(bad), bad).toBe(false);
+    for (const ok of [
+      SENT,
+      'a \\{ b \\} c \\% d',
+      'x % note\ny',
+      'a\n\nb \\begin{itemize}\\item q\\end{itemize}',
+      '$$x$$ and $y$ and \\(z\\)',
+      '\\\\% a comment\nz',
+    ])
+      expect(pasteable(ok), ok).toBe(true);
   });
 });

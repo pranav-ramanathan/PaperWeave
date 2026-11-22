@@ -13,6 +13,7 @@ import type { Node as PMNode, Schema } from '@tiptap/pm/model';
 import { ReplaceStep } from '@tiptap/pm/transform';
 import { type EditorState, Selection, TextSelection, type Transaction } from '@tiptap/pm/state';
 import * as Y from 'yjs';
+import { pasteable } from './clipboard.ts';
 import { locate, model, type Model, projector, toSrc } from './project.ts';
 import { diff, type Edit, emphEdit, translate, type Translation } from './translate.ts';
 
@@ -225,6 +226,43 @@ export class Bridge {
       expected: x.text.slice(e.from, e.to),
       replacement: e.insert,
     };
+  }
+
+  /**
+   * The source text of the selection, exactly as written, or null if it cannot travel on its own:
+   * nothing is selected, an end is not in running text, an end splits a group (half of an
+   * `\\emph`), or the stretch would not stand alone (see pasteable). Paragraph breaks and
+   * whole blocks between the ends come as they are in the source.
+   */
+  sourceOf(state: EditorState): string | null {
+    const { from, to } = state.selection;
+    if (from === to) return null;
+    const x = locate(this.model, state.doc, from);
+    const y = locate(this.model, state.doc, to);
+    const src = this.ytext.toString();
+    if (!x || !y || x.block < 0 || y.block < x.block || src !== this.model.parsed.src) return null;
+    const a = toSrc(this.model, state.doc, from, 1);
+    const b = toSrc(this.model, state.doc, to, -1);
+    if (b <= a || inPair(src, a) || inPair(src, b)) return null;
+    // Every group opened inside the stretch is closed inside it, and the other way round.
+    let depth = 0;
+    for (let k = x.block; k <= y.block; k++) {
+      const { start, body } = this.model.blocks[k];
+      const runs =
+        body.kind === 'list'
+          ? body.items.map((it) => it.pieces)
+          : 'pieces' in body
+            ? [body.pieces]
+            : [];
+      for (const pieces of runs)
+        for (const p of pieces) {
+          if (start + p.s < a || start + p.e > b) continue;
+          if (p.k === 'open') depth++;
+          else if (p.k === 'close' && --depth < 0) return null;
+        }
+    }
+    const latex = src.slice(a, b);
+    return depth === 0 && pasteable(latex) ? latex : null;
   }
 
   /**

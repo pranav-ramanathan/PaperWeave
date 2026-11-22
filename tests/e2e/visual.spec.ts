@@ -899,3 +899,114 @@ test('the body of an environment the paper declares itself is typed into, and it
   expect(await sourceText(other)).toContain('Closing words here.');
   await audit(owner.page, 'own theorem environment');
 });
+
+test('cut and paste keep formulas, citations, references, footnotes and emphasis', async ({
+  browser,
+}) => {
+  const owner = await person(browser, 'vis-clip-owner');
+  const reviewer = await person(browser, 'vis-clip-reviewer');
+  const origin = 'http://localhost:3100';
+  for (const p of [owner, reviewer])
+    await p.page.context().grantPermissions(['clipboard-read', 'clipboard-write'], { origin });
+  const sentence =
+    'The effect was significant ($p < 0.05$) as shown by \\cite{smith2020} in Figure~\\ref{fig:a}\\footnote{See appendix.}, with p \\textless{} 0.05 in 50\\% of \\emph{all} cases.';
+  const main = [
+    '\\documentclass{article}',
+    '\\begin{document}',
+    sentence,
+    '',
+    'Second paragraph here.',
+    '\\end{document}',
+    '',
+  ].join('\n');
+  const zip = join(mkdtempSync(join(tmpdir(), 'paperweave-e2e-')), `Clip ${run}.zip`);
+  writeFileSync(zip, await writeZip([{ path: 'main.tex', bytes: Buffer.from(main) }]));
+  await owner.page.goto('/sign-in');
+  await signIn(owner.page, owner.email);
+  await owner.page.getByLabel('Or import a ZIP of a LaTeX project').setInputFiles(zip);
+  await owner.page.getByRole('button', { name: 'Import ZIP' }).click();
+  await owner.page.getByLabel('Their email address').fill(reviewer.email);
+  await owner.page.getByLabel('Their role').selectOption('reviewer');
+  await owner.page.getByRole('button', { name: 'Send invitation' }).click();
+  await expect(owner.page.getByRole('status')).toContainText(reviewer.email);
+  await reviewer.page.goto(await emailedLink(reviewer.email, '/invitations/'));
+  await signIn(reviewer.page, reviewer.email);
+  await reviewer.page.getByRole('button', { name: 'Join this paper' }).click();
+  await expect(reviewer.page.getByText('You are a reviewer')).toBeVisible();
+  await owner.page.getByRole('link', { name: 'main.tex' }).first().click();
+  await expect(status(owner.page)).toHaveText('All edits saved.');
+  await reviewer.page.goto(owner.page.url());
+  await expect(status(reviewer.page)).toHaveText('Read only. You can read along but not edit.');
+  await showSource(reviewer.page);
+  const count = async (page: Page, part: string) => (await sourceText(page)).split(part).length - 1;
+  await expect.poll(() => count(reviewer.page, sentence)).toBe(1);
+  await view(reviewer.page, 'Visual').click();
+
+  // Select the whole sentence, formula and citation in it, and cut it.
+  const selectSentence = (page: Page) =>
+    page.evaluate((sel) => {
+      const host = document.querySelector<HTMLElement>(sel)!;
+      const p = [...host.querySelectorAll('p')].find((x) =>
+        x.textContent!.includes('significant'),
+      )!;
+      host.focus();
+      const range = document.createRange();
+      range.selectNodeContents(p);
+      getSelection()!.removeAllRanges();
+      getSelection()!.addRange(range);
+    }, VISUAL);
+  await selectSentence(owner.page);
+  await owner.page.keyboard.press('ControlOrMeta+x');
+  await expect.poll(() => count(reviewer.page, '$p < 0.05$')).toBe(0);
+
+  // Pasted at another paragraph, all of it arrives, byte for byte, for the other person too.
+  await clickAfter(owner.page, VISUAL, 'Second paragraph here.');
+  await owner.page.keyboard.press('ControlOrMeta+v');
+  await showSource(reviewer.page);
+  await expect.poll(() => sourceText(reviewer.page)).toContain(`Second paragraph here.${sentence}`);
+  expect(await count(reviewer.page, sentence)).toBe(1);
+  await expect(status(owner.page)).toHaveText('All edits saved.');
+
+  // Undo takes the paste back; undoing again takes the cut back.
+  await owner.page.locator(VISUAL).focus();
+  await owner.page.keyboard.press('ControlOrMeta+z');
+  await expect.poll(() => count(reviewer.page, '$p < 0.05$')).toBe(0);
+  await owner.page.keyboard.press('ControlOrMeta+z');
+  await expect.poll(() => count(reviewer.page, sentence)).toBe(1);
+  await expect.poll(() => sourceText(reviewer.page)).not.toContain(`here.${sentence}`);
+
+  // Copied from the visual view, the sentence goes into the source view as LaTeX.
+  await selectSentence(owner.page);
+  await owner.page.keyboard.press('ControlOrMeta+c');
+  await showSource(owner.page);
+  await clickAfter(owner.page, SOURCE, 'Second paragraph here.');
+  await owner.page.keyboard.press('End');
+  await owner.page.keyboard.press('ControlOrMeta+v');
+  await expect.poll(() => sourceText(reviewer.page)).toContain(`Second paragraph here.${sentence}`);
+  expect(await count(reviewer.page, sentence)).toBe(2);
+  await expect(status(owner.page)).toHaveText('All edits saved.');
+
+  // A reviewer cannot edit, but can copy: the clipboard carries the words and the LaTeX.
+  await view(reviewer.page, 'Visual').click();
+  await selectSentence(reviewer.page);
+  await reviewer.page.keyboard.press('ControlOrMeta+c');
+  expect(await reviewer.page.evaluate(() => navigator.clipboard.readText())).toContain(
+    '\\cite{smith2020}',
+  );
+  await reviewer.page.evaluate(() => {
+    const box = document.createElement('textarea');
+    box.id = 'probe';
+    document.body.append(box);
+    box.addEventListener('paste', (e) => {
+      (window as unknown as { clip: string }).clip = e.clipboardData!.getData(
+        'application/x-paperweave-latex',
+      );
+      e.preventDefault();
+    });
+    box.focus();
+  });
+  await reviewer.page.keyboard.press('ControlOrMeta+v');
+  await expect
+    .poll(() => reviewer.page.evaluate(() => (window as unknown as { clip?: string }).clip))
+    .toBe(sentence);
+});

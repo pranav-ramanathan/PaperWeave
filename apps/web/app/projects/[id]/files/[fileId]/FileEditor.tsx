@@ -4,7 +4,13 @@ import { defaultKeymap } from '@codemirror/commands';
 import { Compartment, EditorState, StateEffect, StateField } from '@codemirror/state';
 import { Decoration, type DecorationSet, EditorView, keymap, lineNumbers } from '@codemirror/view';
 import { HocuspocusProvider } from '@hocuspocus/provider';
-import { type Command, type CommandResult, watchSaved } from '@paperweave/bridge';
+import {
+  type Command,
+  type CommandResult,
+  LATEX_TYPE,
+  pasteable,
+  watchSaved,
+} from '@paperweave/bridge';
 import { useRouter } from 'next/navigation';
 import { useEffect, useLayoutEffect, useRef, useState } from 'react';
 import { flushSync } from 'react-dom';
@@ -471,6 +477,18 @@ export default function FileEditor(props: {
         extensions: [
           EditorView.cspNonce.of(pageNonce()),
           EditorView.domEventHandlers({
+            // LaTeX copied from the visual view goes in as it is: `<` as \textless{}, a formula
+            // as its source. Anything else is pasted as the browser would.
+            paste: (e, v) => {
+              const latex = e.clipboardData?.getData(LATEX_TYPE) ?? '';
+              if (!latex || v.state.readOnly || !pasteable(latex)) return false;
+              e.preventDefault();
+              v.dispatch(v.state.replaceSelection(latex), {
+                scrollIntoView: true,
+                userEvent: 'input.paste',
+              });
+              return true;
+            },
             drop: (e) => {
               if (!e.dataTransfer?.files.length) return false; // dragged text goes in as before
               e.preventDefault();

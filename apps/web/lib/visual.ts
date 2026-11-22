@@ -6,6 +6,8 @@ import {
   type CommandResult,
   extensions,
   fromSrc,
+  LATEX_TYPE,
+  pasteable,
   toSrc,
 } from '@paperweave/bridge';
 import {
@@ -839,6 +841,48 @@ export function createVisual(opts: {
     );
     return true;
   };
+  /**
+   * Put LaTeX copied from a paper where the caret is, as LaTeX, replacing the selection. False if
+   * it cannot be done here (the caller then takes the plain text as typed words).
+   */
+  const takeSource = (latex: string): boolean => {
+    const { view } = editor;
+    if (!view.state.selection.empty) {
+      view.dispatch(view.state.tr.deleteSelection().scrollIntoView());
+      // Refused (it spans structure the visual view cannot express): nothing was changed.
+      if (!view.state.selection.empty) return false;
+    }
+    const put = insertion();
+    if (!put) return false;
+    void put(latex).then(
+      (result) =>
+        result === 'conflict' && say('That text changed before the edit arrived. Try again.'),
+      () => say('That edit could not be made. Check the connection and try again.'),
+    );
+    return true;
+  };
+  /**
+   * Copy and cut: when the selection is a stretch of source that stands alone, it goes on the
+   * clipboard as LaTeX too, beside the words and HTML the editor puts there. The editor's own
+   * handler clears the clipboard, so it is redone here.
+   */
+  const copySource = (view: EditorView, event: Event): boolean => {
+    const data = (event as ClipboardEvent).clipboardData;
+    const cut = event.type === 'cut';
+    if (!data || (cut && !opts.editable)) return false;
+    catchUp();
+    const latex = bridge.sourceOf(view.state);
+    if (latex === null) return false;
+    const { dom, text } = view.serializeForClipboard(view.state.selection.content());
+    event.preventDefault();
+    data.clearData();
+    data.setData('text/html', dom.innerHTML);
+    data.setData('text/plain', text);
+    data.setData(LATEX_TYPE, latex);
+    if (cut)
+      view.dispatch(view.state.tr.deleteSelection().scrollIntoView().setMeta('uiEvent', 'cut'));
+    return true;
+  };
   const editor: Editor = new Editor({
     element: opts.element,
     injectNonce: pageNonce(),
@@ -1053,10 +1097,15 @@ export function createVisual(opts: {
           acted++;
           return false;
         },
+        copy: copySource,
+        cut: copySource,
       },
       // What is pasted goes in as its words, as if typed: the clipboard's formatting is not LaTeX.
       handlePaste: (_view, event) => {
         const data = event.clipboardData;
+        // LaTeX copied from a paper (this view or the source) goes in as LaTeX, if it stands alone.
+        const latex = data?.getData(LATEX_TYPE) ?? '';
+        if (opts.editable && latex && pasteable(latex) && takeSource(latex)) return true;
         return take(data?.getData('text/plain') ?? '', data?.files.length ?? 0);
       },
       // What is dropped goes in as its words, where it is dropped, as pasted text does.

@@ -3,3 +3,4 @@ export * from './project.ts';
 export * from './translate.ts';
 export * from './bridge.ts';
 export * from './saved.ts';
+export * from './clipboard.ts';

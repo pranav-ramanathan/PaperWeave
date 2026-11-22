@@ -970,6 +970,26 @@ is printed without that field.` (once, though latexmk runs BibTeX again). The su
   (not an error; the build is ok) and the PDF bookmark just lacks the quote. Not wrapped in
   `\texorpdfstring`: it exists only with hyperref, so it would fail every paper without it.
 
+## Cut and copy from the visual view dropped formulas, citations and emphasis
+
+- **Before:** Ctrl+X then Ctrl+V of a sentence deleted every formula, `\cite`, `\ref`,
+  `\footnote` and `\emph` in it. The editor put only the shown words on the clipboard (an atom
+  has no text) and paste took `text/plain` as typed words. Seen in Chromium: `...significant
+($p < 0.05$) as shown by \cite{smith2020}...` came back as `...significant () as shown by  in
+Figure~, ...`, with no warning and `check()` passing.
+- **Now:** copy and cut in the visual view also put the selection's source on the clipboard as
+  `application/x-paperweave-latex` (`Bridge.sourceOf`: the bytes between the ends, paragraph
+  breaks and whole blocks included). The plain text now carries each atom's LaTeX too
+  (`renderText`), which helps other programs. Paste of that type, if `pasteable()` accepts it
+  (braces, environments, `$`, `\[ \(` balanced; no trailing comment; no preamble or
+  `\end{document}`), deletes the selection and inserts the LaTeX through the server's command
+  path, in the same queue as other structural edits. The source view takes it too, so `<` arrives
+  as `\textless{}` and a formula as its source. Reviewers and viewers can copy.
+- **Limits:** a selection that ends inside a group (half of an `\emph`), or whose source would
+  not stand alone, puts only plain text on the clipboard and pastes as typed words. Pasting
+  over a selection is two undo steps (the delete, then the insert). Custom clipboard types are
+  tested only in Chromium. Clipboard contents are never logged.
+
 ## How long a large import takes
 
 - An import still runs inside its request. Measured at the most files a paper may hold
