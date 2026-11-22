@@ -76,10 +76,21 @@ export default function Language(props: {
       : (((await res?.json().catch(() => null)) as { error?: string } | null)?.error ??
           'That could not be sent. Check the connection and try again.');
   };
+  /** Count what was done with a finding. Not waited for, and nothing it does can be seen. */
+  const count = (kind: string, outcome: 'changed' | 'proposed') => {
+    fetch(url, {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ used: kind, outcome }),
+    }).catch(() => {});
+  };
   const use = async (f: LanguageFinding, replacement: string) => {
     if (canWrite) {
       const done = await props.change(f.from, f.to, f.words, replacement);
-      if (done) drop((x) => x === f);
+      if (done) {
+        drop((x) => x === f);
+        count(f.kind, 'changed');
+      }
       return setNote(done ? '' : 'That text has changed. It will be checked again in a moment.');
     }
     const wrong = await post(`/projects/${projectId}/proposals`, {
@@ -89,7 +100,10 @@ export default function Language(props: {
       replacement,
       reason: f.message,
     });
-    if (!wrong) drop((x) => x === f);
+    if (!wrong) {
+      drop((x) => x === f);
+      count(f.kind, 'proposed');
+    }
     setNote(wrong ?? `Proposed changing “${f.words}” to “${replacement}”.`);
   };
 
@@ -127,7 +141,7 @@ export default function Language(props: {
                   <button
                     type="button"
                     onClick={async () => {
-                      const wrong = await post(url, { word: f.words });
+                      const wrong = await post(url, { word: f.words, kind: f.kind });
                       if (!wrong) drop((x) => x.kind === 'spelling' && x.words === f.words);
                       setNote(wrong ?? `“${f.words}” is now one of the paper's own words.`);
                     }}
@@ -139,7 +153,7 @@ export default function Language(props: {
                   <button
                     type="button"
                     onClick={async () => {
-                      const wrong = await post(url, { rule: f.rule });
+                      const wrong = await post(url, { rule: f.rule, kind: f.kind });
                       if (!wrong) drop((x) => x.rule === f.rule);
                       setNote(
                         wrong ??
