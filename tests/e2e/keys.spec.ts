@@ -12,10 +12,12 @@ import {
   emailedLink,
   person,
   run,
+  selectWord,
   showSource,
   showVisual,
   signIn,
   sourceText,
+  typingSaved,
 } from './helpers';
 
 const MAIN = [
@@ -587,4 +589,101 @@ test('Ctrl+Home and Ctrl+End go to the start and the end of the text, with Shift
   await middle();
   await page.keyboard.press('Shift+ControlOrMeta+End');
   expect((await selected()).trimEnd()).toMatch(/proposal is here\.$/);
+});
+
+test('Compile now keeps the keyboard while the PDF is built', async ({ browser }) => {
+  test.setTimeout(180_000);
+  const page = await paper(browser, 'keys-compile', true);
+  const build = page.locator('.build');
+  const status = build.getByRole('status');
+  await expect(status).toHaveText('The PDF is up to date.', { timeout: 60_000 });
+  const builds: string[] = [];
+  page.on('request', (r) => {
+    if (r.method() === 'POST' && r.url().endsWith('/builds')) builds.push(r.url());
+  });
+
+  // Behind the text, and not built by itself: the button is the way to the PDF.
+  await build.getByRole('checkbox', { name: 'Compile automatically' }).uncheck();
+  await showSource(page);
+  await page.locator('.editor .cm-content').click();
+  await page.keyboard.type('x');
+  await expect(status).toHaveText('The PDF is behind the text.', { timeout: 30_000 });
+
+  await tabTo(page, 'Compile now');
+  await page.keyboard.press('Enter');
+  await expect(status).toHaveText('Compiling…');
+  expect((await focused(page)).name).toBe('Compile now');
+  // Pressed again while it builds, by Enter and by Space: nothing is sent.
+  await page.keyboard.press('Enter');
+  await page.keyboard.press('Space');
+  expect((await focused(page)).name).toBe('Compile now');
+  await expect(status).toHaveText('The PDF is up to date.', { timeout: 60_000 });
+  expect((await focused(page)).name).toBe('Compile now');
+  expect(builds).toHaveLength(1);
+});
+
+test('Attach to the same words again keeps the keyboard and says what happened', async ({
+  browser,
+}) => {
+  test.setTimeout(180_000);
+  const page = await paper(browser, 'keys-attach', true);
+  const comments = page.getByRole('region', { name: 'Comments' });
+
+  await selectLine(page, 1, 'Latency');
+  await tabTo(page, 'Comment on the selected text');
+  await page.keyboard.press('Enter');
+  await page.keyboard.type('Where did this go?');
+  await tabTo(page, 'Start thread');
+  await page.keyboard.press('Enter');
+  await expect(page.getByRole('article', { name: /^Thread on/ })).toContainText(
+    'Where did this go?',
+  );
+
+  // The words are deleted, so the thread is detached, and then written again by hand (not
+  // undone), in a comment line where they occur once: only the button can attach it.
+  await showSource(page);
+  await selectWord(page, '.editor .cm-content', 'Latency');
+  await page.keyboard.press('Backspace');
+  await typingSaved(page);
+  await expect(comments).toContainText('This text has been deleted.', { timeout: 15_000 });
+  await page.keyboard.press('ControlOrMeta+End');
+  await page.keyboard.type('% Latency');
+  await typingSaved(page);
+
+  await tabTo(page, 'Attach to the same words again');
+  await page.keyboard.press('Enter');
+  await expect(comments.locator('[aria-live=polite]')).toHaveText('The words were found again.');
+  await expect(comments).not.toContainText('This text has been deleted.');
+  // The button is gone: the keyboard is on something in the comments, not on the page.
+  const now = await focused(page);
+  expect(now.name).not.toBe('(nothing has the keyboard)');
+  expect(now.region).toBe('Comments');
+});
+
+test('removing someone says so and keeps the keyboard', async ({ browser }) => {
+  test.setTimeout(180_000);
+  const page = await paper(browser, 'keys-remove');
+  const guest = await person(browser, 'keys-remove-guest');
+  await page.getByLabel('Their email address').fill(guest.email);
+  await page.getByLabel('Their email address').press('Enter');
+  await expect(page.getByRole('status')).toHaveText(`Invitation sent to ${guest.email}.`);
+  await guest.page.goto(await emailedLink(guest.email, '/invitations/'));
+  await signIn(guest.page, guest.email);
+  await guest.page.getByRole('button', { name: 'Join this paper' }).click();
+  await expect(guest.page.getByText('You are a')).toBeVisible();
+
+  // A role is changed first, so the address holds ?saved=1 when the guest is removed.
+  await page.goto(page.url().split('?')[0]);
+  await page.getByLabel(`Role of ${guest.email}`).selectOption('editor');
+  await tabTo(page, 'Change');
+  await page.keyboard.press('Enter');
+  await expect(page.getByRole('status')).toHaveText('Role changed.');
+  expect(page.url()).toContain('saved=1');
+
+  await tabTo(page, `Remove ${guest.email}`);
+  await page.keyboard.press('Enter');
+  await expect(page.getByRole('status')).toHaveText(`Removed ${guest.email} from this paper.`);
+  expect(page.url()).not.toContain('saved=1');
+  expect((await focused(page)).name).toBe(`Removed ${guest.email} from this paper.`);
+  await expect(page.getByRole('rowheader', { name: guest.email })).toHaveCount(0);
 });

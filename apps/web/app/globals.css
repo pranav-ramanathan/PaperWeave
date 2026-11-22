@@ -541,6 +541,11 @@ div.pw-frozen strong {
   background: var(--paper);
   cursor: pointer;
 }
+/* Busy, but still in the tab order: the button is aria-disabled, not disabled. */
+button[aria-disabled='true'] {
+  opacity: 0.55;
+  cursor: not-allowed;
+}
 .build-links {
   margin: 0.2rem 0 0.4rem;
   color: var(--muted);

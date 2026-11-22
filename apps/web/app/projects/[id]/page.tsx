@@ -65,6 +65,7 @@ async function Project({
     error?: string;
     invited?: string;
     cancelled?: string;
+    removed?: string;
     saved?: string;
     revision?: string;
     restored?: string;
@@ -1054,6 +1055,7 @@ async function Project({
       </h2>
       {saved && <Result>Role changed.</Result>}
       {query.cancelled && <Result>Invitation to {query.cancelled} cancelled.</Result>}
+      {query.removed && <Result>Removed {query.removed} from this paper.</Result>}
       <Wide label="Table of people">
         <table>
           <thead>

@@ -370,3 +370,50 @@ test('a proposal survives a deletion that is undone, for the owner and after a r
   await expect(proposal(owner.page).getByRole('button', { name: 'Accept' })).toBeEnabled();
   await expect(owner.page.locator(`${SOURCE} .proposal-mark`)).toHaveText('forty');
 });
+
+test('the review button keeps the keyboard while the model is asked', async ({ browser }) => {
+  test.setTimeout(120_000);
+  const { page, email } = await person(browser, 'proposal-review-keys');
+  const zip = join(mkdtempSync(join(tmpdir(), 'paperweave-e2e-')), `Review keys ${run}.zip`);
+  writeFileSync(zip, await writeZip([{ path: 'main.tex', bytes: Buffer.from(MAIN) }]));
+  await page.goto('/sign-in');
+  await signIn(page, email);
+  await page.getByLabel('Or import a ZIP of a LaTeX project').setInputFiles(zip);
+  await page.getByRole('button', { name: 'Import ZIP' }).click();
+  await page.waitForURL(/\/projects\/[^/]+$/);
+  const allow = page.getByRole('checkbox', { name: /Allow passages of this paper/ });
+  await allow.check();
+  await page.locator('form').filter({ has: allow }).getByRole('button', { name: 'Save' }).click();
+  await expect(page.getByRole('status')).toHaveText('Saved.');
+  await page.getByRole('link', { name: 'main.tex' }).first().click();
+  await showSource(page);
+  await selectWord(page, SOURCE, 'Nothing');
+  await page.keyboard.press('Home');
+  await page.keyboard.press('Shift+End');
+
+  // The answer is held back, so that the button is seen busy.
+  let posts = 0;
+  let release = () => {};
+  const held = new Promise<void>((resolve) => (release = resolve));
+  await page.route('**/review', async (route) => {
+    if (route.request().method() !== 'POST') return route.continue();
+    posts++;
+    await held;
+    await route.continue();
+  });
+  const ask = panel(page).getByRole('button', { name: 'Ask a model to review the selected text' });
+  await ask.focus();
+  await page.keyboard.press('Enter');
+  await expect(panel(page)).toContainText('Asking the model.');
+  await expect(ask).toHaveAttribute('aria-disabled', 'true');
+  await expect(ask).toBeFocused();
+  // A second press while it is busy sends nothing.
+  await page.keyboard.press('Enter');
+  await page.keyboard.press('Space');
+  await expect(ask).toBeFocused();
+  release();
+  await expect(panel(page)).toContainText('Reviews by a model are not set up.');
+  await expect(ask).not.toHaveAttribute('aria-disabled', 'true');
+  await expect(ask).toBeFocused();
+  expect(posts).toBe(1);
+});

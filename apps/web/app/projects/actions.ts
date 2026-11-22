@@ -96,9 +96,9 @@ export async function removeAction(projectId: string, memberId: string) {
   const back = `/projects/${projectId}`;
   const user = await requireUser(back);
   await act(back, async () => {
-    await removeMember(db(), user.id, projectId, memberId);
+    const { email } = await removeMember(db(), user.id, projectId, memberId);
     // Someone who just left has nothing more to see here.
-    return memberId === user.id ? '/projects' : back;
+    return memberId === user.id ? '/projects' : `${back}?removed=${encodeURIComponent(email)}`;
   });
 }
 

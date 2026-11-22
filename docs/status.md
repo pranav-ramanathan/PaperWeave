@@ -3826,6 +3826,34 @@ Coming back online, the editor said "This paper was restored to an earlier revis
   Accept lands at the right place; other words refused; not out of date refused; insertion
   refused) and `tests/e2e/proposals.spec.ts` (delete, save, Ctrl+Z, save; also after a reload).
 
+## Busy buttons keep the keyboard
+
+- **What was wrong.** "Compile now" was `disabled` while a build was queued, and "Ask a model to
+  review the selected text" while a review was asked for (up to a minute). A button that is
+  disabled while it has the keyboard drops it to the page: Chromium moves focus to `<body>`
+  and it stays there. After a failed build "Compile now" is the keyboard user's only way on.
+- **What happens now.** Both are `aria-disabled` while busy and ignore a press (Enter, Space,
+  click), as `Once`, `Say` and `Change` do. The review button has a ref guard, since state is
+  seen too late for a double press; Compile now posts one build at a time and sends none while
+  one is queued. `globals.css` greys any `button[aria-disabled='true']` with `not-allowed`.
+- **Left as they are.** "Accept" and "Undo the accept" (`disabled={p.stale}`) are unavailable
+  for good, not busy; `spike/Spike.tsx`.
+- **Tests.** `keys.spec.ts` (Compile now has the keyboard while compiling and after; a second
+  Enter and Space send no second build) and `proposals.spec.ts` (the review button, the answer
+  held back, keeps the keyboard and sends one request). Both fail on the old code.
+- **Follow-up, done.** In `Threads.tsx`, "Attach to the same words again" unmounted on success,
+  focus went to `<body>` and nothing was announced. It now says "The words were found again."
+  in the comments' note and moves focus to the Comments heading, as "Find these words again"
+  does in `Proposals.tsx`. Test: `keys.spec.ts` (fails on the old code).
+- **Follow-up, done.** `removeAction` returned a bare address after removing someone: no status
+  line, focus fell to `<body>` as the row unmounted, and a stale `?saved=1` was dropped without
+  a word. `removeMember` now returns the removed person's email, and the action goes to
+  `?removed=<email>`; People says "Removed <email> from this paper." in a `Result`, which takes
+  the keyboard. The name comes from the server, not the form. Tests: `keys.spec.ts` and
+  `projects.sandbox.test.ts` (both fail on the old code).
+- **Follow-ups, not fixed.** `removeEvidenceAction` and `removeChartAction` also return no
+  result. Leaving a paper is not announced on `/projects`.
+
 ## Decisions waiting on the owner
 
 See "What I need from you" in `docs/plan.md`. None blocks C1.
