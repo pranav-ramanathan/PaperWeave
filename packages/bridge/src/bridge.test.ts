@@ -1750,3 +1750,145 @@ describe("a paper's own theorem environment", () => {
     expect(r.bridge.applyCommand(c)).toBe('conflict');
   });
 });
+
+// Delete or type over a selection that runs from one list item into another.
+const wrap = (...rows: string[]) => `\\begin{itemize}\n${rows.join('\n')}\n\\end{itemize}\n`;
+const L3 = wrap('  \\item one two', '  \\item three four', '  \\item five six');
+
+/** Select item i at offset o to item j at offset p, then delete (no text) or type `text` over it. */
+function overItems(src: string, i: number, o: number, j: number, p: number, text = '') {
+  const r = replica(src);
+  const li = items(r);
+  const from = li[i].start + o;
+  const to = li[j].start + p;
+  r.select(from, to);
+  const ok = r.dispatch(text ? r.state.tr.insertText(text, from, to) : r.state.tr.delete(from, to));
+  return { r, ok };
+}
+
+test('deleting from the middle of one item into the middle of the next joins them', () => {
+  const { r, ok } = overItems(L3, 0, 4, 1, 3);
+  expect(ok).toBe(true);
+  expect(r.src).toBe(wrap('  \\item one ee four', '  \\item five six'));
+  r.check();
+  expect(items(r).length).toBe(2);
+});
+
+test('deleting across three items takes the one between whole', () => {
+  const { r, ok } = overItems(L3, 0, 4, 2, 5);
+  expect(ok).toBe(true);
+  expect(r.src).toBe(wrap('  \\item one six'));
+  r.check();
+});
+
+test('typing over a selection across items replaces it with the typed text', () => {
+  const { r, ok } = overItems(L3, 0, 4, 1, 3, 'X');
+  expect(ok).toBe(true);
+  expect(r.src).toBe(wrap('  \\item one Xee four', '  \\item five six'));
+  r.check();
+  const t = overItems(L3, 0, 3, 2, 5, 'a_b');
+  expect(t.ok).toBe(true);
+  expect(t.r.src).toBe(wrap('  \\item onea\\_bsix'.replace('onea', 'one' + 'a')));
+  t.r.check();
+});
+
+test('selecting from the start of the first item to the end of the last leaves one empty \\item', () => {
+  const { r, ok } = overItems(L3, 0, 0, 2, 'five six'.length);
+  expect(ok).toBe(true);
+  expect(r.src).toBe(wrap('  \\item '));
+  r.check();
+  expect(items(r).length).toBe(1);
+});
+
+test('a selection ending at the start of an item removes the \\item before it', () => {
+  const { r, ok } = overItems(L3, 0, 4, 1, 0);
+  expect(ok).toBe(true);
+  expect(r.src).toBe(wrap('  \\item one three four', '  \\item five six'));
+  r.check();
+});
+
+test('a first item that ends in a comment loses the comment with its tail, and the line stays valid', () => {
+  const src = wrap('  \\item one% note', '  \\item two', '  \\item three');
+  for (const [text, out] of [
+    ['', 'onewo'],
+    ['Q', 'oneQwo'],
+  ]) {
+    const { r, ok } = overItems(src, 0, 3, 1, 1, text);
+    expect(ok).toBe(true);
+    expect(r.src).toBe(wrap(`  \\item ${out}`, '  \\item three'));
+    r.check();
+  }
+});
+
+test('tab and space indentation are both left alone', () => {
+  for (const ind of ['\t', '    ', '']) {
+    const src = wrap(`${ind}\\item aa bb`, `${ind}\\item cc dd`, `${ind}\\item ee ff`);
+    const { r, ok } = overItems(src, 0, 3, 2, 3);
+    expect(ok, JSON.stringify(ind)).toBe(true);
+    expect(r.src).toBe(wrap(`${ind}\\item aa ff`));
+    r.check();
+  }
+});
+
+test('a selection across items is refused when an end sits inside \\emph, or when it leaves a paragraph', () => {
+  const emph = wrap('  \\item a \\emph{bc} d', '  \\item two');
+  let { r, ok } = overItems(emph, 0, 3, 1, 1);
+  expect(ok).toBe(false);
+  expect(r.src).toBe(emph);
+  r.check();
+  ({ r, ok } = overItems(wrap('  \\item a', '  \\item \\emph{bc} d'), 0, 1, 1, 1));
+  expect(ok).toBe(false);
+  r.check();
+  // Paragraph to item would orphan the \begin.
+  const src = `Intro text.\n\n${L3}`;
+  const q = replica(src);
+  const p = textblocks(q).filter((t) => t.para)[0];
+  const li = items(q)[1];
+  q.select(p.start + 3, li.start + 2);
+  expect(q.dispatch(q.state.tr.delete(p.start + 3, li.start + 2))).toBe(false);
+  expect(q.src).toBe(src);
+  q.check();
+});
+
+test('a macro definition inside the removed items is refused', () => {
+  const src = wrap('  \\item aa', '  \\item \\newcommand{\\z}{1}', '  \\item bb');
+  const { r, ok } = overItems(src, 0, 1, 2, 1);
+  expect(ok).toBe(false);
+  expect(r.src).toBe(src);
+  r.check();
+});
+
+test('two replicas converge when one edits across items and the other types in a middle one', () => {
+  const r = replica(L3);
+  const { b, merge } = peer(r);
+  r.select(items(r)[0].start + 4, items(r)[2].start + 5);
+  expect(r.dispatch(r.state.tr.delete(items(r)[0].start + 4, items(r)[2].start + 5))).toBe(true);
+  const mid = items(b)[1];
+  expect(b.dispatch(b.state.tr.insertText('!', mid.start + 2))).toBe(true);
+  merge();
+  Y.applyUpdate(b.ydoc, Y.encodeStateAsUpdate(r.ydoc));
+  expect(b.src).toBe(r.src);
+  r.check();
+  b.check();
+});
+
+test('undo restores every byte of a deletion or type-over across items', () => {
+  for (const text of ['', 'Q']) {
+    const r = replica(L3);
+    const um = new Y.UndoManager(r.ytext, { trackedOrigins: new Set([r.bridge]) });
+    const from = items(r)[0].start + 4;
+    const to = items(r)[2].start + 5;
+    r.select(from, to);
+    expect(
+      r.dispatch(text ? r.state.tr.insertText(text, from, to) : r.state.tr.delete(from, to)),
+    ).toBe(true);
+    expect(r.src).not.toBe(L3);
+    um.undo();
+    expect(r.src).toBe(L3);
+    r.check();
+    um.redo();
+    expect(r.src).toBe(wrap(`  \\item one ${text}six`));
+    um.undo();
+    expect(r.src).toBe(L3);
+  }
+});
