@@ -10,6 +10,7 @@ import {
 } from '@paperweave/bridge';
 import {
   altEdit,
+  DEFAULT_TRANSPARENT,
   cellText,
   escape,
   floatParts,
@@ -115,6 +116,8 @@ export function createVisual(opts: {
   run(command: Command): CommandResult | Promise<CommandResult>;
   /** The paper's own macros, for drawing formulas that use them. */
   macros?: Record<string, string>;
+  /** Environments the paper declares as theorems (`\\newtheorem`): prose, like `lemma`. */
+  prose?: string[];
   /** The address of a picture, given the name an \\includegraphics uses for it. */
   picture?(target: string): string;
   /**
@@ -1044,7 +1047,12 @@ export function createVisual(opts: {
       },
     },
   });
-  bridge = new Bridge(opts.ytext, editor.schema, { sourceOnly: opts.sourceOnly });
+  bridge = new Bridge(opts.ytext, editor.schema, {
+    sourceOnly: opts.sourceOnly,
+    transparent: opts.prose?.length
+      ? new Set([...DEFAULT_TRANSPARENT, ...opts.prose])
+      : DEFAULT_TRANSPARENT,
+  });
   undo.addTrackedOrigin(bridge);
   bridge.onReject = () => say('That edit spans LaTeX structure. Make it in the source editor.');
   bridge.attach({ getState: () => editor.state, dispatch: (tr) => editor.view.dispatch(tr) });

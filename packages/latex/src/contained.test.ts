@@ -160,3 +160,16 @@ test('containedNear accepts a window that starts inside a publisher front matter
     expect(containedNear(src, first, 8, '\\citep{a}'), `${n}`).toBe(true);
   }
 });
+
+test("an atom inside a paper's own theorem environment is contained only with its name in the set", () => {
+  const src = '\\begin{observation}\nWords \\cite{a} here.\n\\end{observation}\n\nAfter.\n';
+  const from = src.indexOf('\\cite{a}');
+  const own = new Set([...DEFAULT_TRANSPARENT, 'observation']);
+  expect(containedNear(src, from, 8, '\\cite{b}', own)).toBe(true);
+  expect(containedNear(src, from, 8, '\\cite{b}')).toBe(false);
+  // The set does not make a spill acceptable.
+  expect(containedNear(src, from, 8, '\\cite{b}\n\nnew', own)).toBe(false);
+  expect(
+    contained(parse(src, own), parse(src.replace('\\cite{a}', '\\cite{b}'), own), from, 8, 8),
+  ).toBe(true);
+});

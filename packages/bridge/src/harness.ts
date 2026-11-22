@@ -19,12 +19,16 @@ export const fixtures = Object.fromEntries(
   }),
 );
 
-export function replica(text: string, from?: Y.Doc) {
+export function replica(
+  text: string,
+  from?: Y.Doc,
+  opts: { transparent?: ReadonlySet<string> } = {},
+) {
   const ydoc = new Y.Doc();
   if (from) Y.applyUpdate(ydoc, Y.encodeStateAsUpdate(from));
   const ytext = ydoc.getText('t');
   if (!from) ytext.insert(0, text);
-  const bridge = new Bridge(ytext, schema);
+  const bridge = new Bridge(ytext, schema, opts);
   let state = EditorState.create({ schema, doc: bridge.doc() });
   bridge.attach({ getState: () => state, dispatch: (tr) => void (state = state.apply(tr)) });
   return {
@@ -51,7 +55,7 @@ export function replica(text: string, from?: Y.Doc) {
     check() {
       const src = ytext.toString();
       if (bridge.model.parsed.src !== src) throw new Error('model is stale');
-      const fresh = parse(src);
+      const fresh = parse(src, bridge.model.parsed.transparent);
       if (JSON.stringify(fresh.blocks) !== JSON.stringify(bridge.model.parsed.blocks))
         throw new Error('incremental parse differs from a full parse');
       if (!state.doc.eq(project(model(fresh, bridge.model.phantom))))

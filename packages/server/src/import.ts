@@ -4,10 +4,12 @@
 // sooner than imports take there.
 import {
   coverage,
+  DEFAULT_TRANSPARENT,
   decodeFile,
   type Graph,
   includeGraph,
   parse,
+  proseEnvs,
   uncomment,
 } from '@paperweave/latex';
 import type pg from 'pg';
@@ -241,6 +243,8 @@ export function describeImport(
     notes.push(
       'The project uses a package that runs external programs (shell escape). That is turned off, so those parts will not build.',
     );
+  // The paper's own theorem environments are prose in the editor too: count them the same way.
+  const set = new Set([...DEFAULT_TRANSPARENT, ...proseEnvs(texts, root)]);
   const files = entries
     .map((e): FileReport => {
       const d = meta.get(e.path);
@@ -248,7 +252,7 @@ export function describeImport(
       if (!d.editable) return { path: e.path, readonly: d.reason };
       if (!/\.(tex|ltx)$/i.test(e.path) || !graph.order.includes(e.path)) return { path: e.path };
       if (graph.preamble.includes(e.path)) return { path: e.path, sourceOnly: true };
-      const c = coverage(parse(d.text));
+      const c = coverage(parse(d.text, set));
       return { path: e.path, visual: { editable: c.editable, raw: c.raw + c.frozen } };
     })
     .sort((a, b) => a.path.localeCompare(b.path));

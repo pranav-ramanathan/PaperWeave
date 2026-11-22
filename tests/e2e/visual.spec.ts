@@ -738,3 +738,57 @@ test('each person sees where the other is, in either view', async ({ browser }) 
   await expect(caretOf(editor.page, owner.email)).toHaveCount(0, { timeout: 30_000 });
   await expect(caretOf(reviewer.page, owner.email)).toHaveCount(0);
 });
+
+test('the body of an environment the paper declares itself is typed into, and its formulas edited', async ({
+  browser,
+}) => {
+  test.setTimeout(120_000);
+  const owner = await person(browser, 'own-theorem');
+  const main = [
+    '\\documentclass{article}',
+    '\\newtheorem{observation}{Observation}',
+    '\\begin{document}',
+    '',
+    '\\begin{observation}',
+    'Gauges drift slowly when $x+1$ stays small.',
+    '\\end{observation}',
+    '',
+    'Closing words here.',
+    '\\end{document}',
+    '',
+  ].join('\n');
+  const zip = join(mkdtempSync(join(tmpdir(), 'paperweave-e2e-')), `Own theorem ${run}.zip`);
+  writeFileSync(zip, await writeZip([{ path: 'main.tex', bytes: Buffer.from(main) }]));
+  await owner.page.goto('/sign-in');
+  await signIn(owner.page, owner.email);
+  await owner.page.getByLabel('Or import a ZIP of a LaTeX project').setInputFiles(zip);
+  await owner.page.getByRole('button', { name: 'Import ZIP' }).click();
+  await owner.page.getByRole('link', { name: 'main.tex' }).click();
+  await expect(owner.page.getByRole('region', { name: 'Editor for main.tex' })).toBeVisible();
+  const file = owner.page.url();
+  // A second tab on the same file, in the source view: another person's view of the text.
+  const other = await owner.page.context().newPage();
+  await other.goto(file);
+  await showSource(other);
+  await expect(other.locator(SOURCE)).toContainText('Gauges drift slowly');
+  await showVisual(owner.page);
+
+  // The words of the observation are text, not a block of LaTeX.
+  await typeAfter(owner.page, VISUAL, 'drift', ' quite');
+  await expect
+    .poll(() => sourceText(other))
+    .toContain('Gauges drift quite slowly when $x+1$ stays small.');
+  // The environment's own lines are untouched.
+  expect(await sourceText(other)).toContain('\\end{observation}');
+
+  // A formula inside it opens in the formula box and goes through the server.
+  const box = owner.page.getByRole('dialog', { name: 'Edit formula' });
+  await owner.page.locator(`${VISUAL} span.pw-math`).first().dblclick();
+  await expect(box.getByLabel('LaTeX')).toHaveValue('$x+1$');
+  await box.getByLabel('LaTeX').fill('$x+2$');
+  await box.getByRole('button', { name: 'Apply' }).click();
+  await expect(box).toBeHidden();
+  await expect.poll(() => sourceText(other)).toContain('when $x+2$ stays small.');
+  expect(await sourceText(other)).toContain('Closing words here.');
+  await audit(owner.page, 'own theorem environment');
+});

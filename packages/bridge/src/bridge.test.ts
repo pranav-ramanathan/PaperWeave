@@ -1,10 +1,10 @@
 import { floatParts } from '../../latex/src/floats.ts';
 import { fragment, rng, soup } from '../../latex/src/testutil.ts';
 import { NodeSelection, TextSelection } from '@tiptap/pm/state';
-import { expect, test } from 'vitest';
+import { describe, expect, test } from 'vitest';
 import * as Y from 'yjs';
 import { fixtures, replica, shown, textblocks, visualOp } from './harness.ts';
-import { contained, parse } from '@paperweave/latex';
+import { contained, DEFAULT_TRANSPARENT, parse } from '@paperweave/latex';
 import type { Command } from './bridge.ts';
 import { fromSrc, toSrc } from './project.ts';
 
@@ -1705,4 +1705,48 @@ test('a citation in the acknowledgments opens in the atom window and its rewrite
   expect(r.bridge.applyCommand(out as Command)).toBe('applied');
   expect(r.src).toBe(src.replace('\\cite{a}', '\\citep{a}'));
   r.check();
+});
+
+describe("a paper's own theorem environment", () => {
+  const OBS = '\\begin{observation}\nWords \\cite{a} here.\n\\end{observation}\n\nAfter.\n';
+  const own = new Set([...DEFAULT_TRANSPARENT, 'observation']);
+
+  test('typing inside it splices only those bytes', () => {
+    const r = replica(OBS, undefined, { transparent: own });
+    const tb = textblocks(r)[0];
+    expect(r.dispatch(r.state.tr.insertText('new ', tb.start + 'Words '.length))).toBe(true);
+    expect(r.src).toBe(OBS.replace('Words ', 'Words new '));
+    r.check();
+    // Without the name it is one raw block: nothing in it is typed into.
+    expect(shown(replica(OBS))).not.toContain('Words');
+  });
+
+  test('a contained command carries the set, and applyCommand applies it', () => {
+    const r = replica(OBS, undefined, { transparent: own });
+    const { out } = rewrite(r, '\\cite{a}', '\\cite{b}');
+    expect(out).toMatchObject({ contained: true, prose: ['observation'] });
+    expect(r.bridge.applyCommand(out as Command)).toBe('applied');
+    expect(r.src).toBe(OBS.replace('\\cite{a}', '\\cite{b}'));
+    r.check();
+  });
+
+  test('the default set sends no names', () => {
+    const r = replica('Use \\cite{a} now.\n');
+    const { out } = rewrite(r, '\\cite{a}', '\\cite{b}');
+    expect(out).toMatchObject({ contained: true });
+    expect(out).not.toHaveProperty('prose');
+  });
+
+  test('a command made for a set the replica does not hold is a conflict', () => {
+    const maker = replica(OBS, undefined, { transparent: own });
+    const { out } = rewrite(maker, '\\cite{a}', '\\cite{b}');
+    // Another replica of the same text, with the default set: the atom is not in prose there.
+    const r = replica(OBS);
+    const c = {
+      ...(out as Command),
+      from: Y.createRelativePositionFromTypeIndex(r.ytext, OBS.indexOf('\\cite')),
+      to: Y.createRelativePositionFromTypeIndex(r.ytext, OBS.indexOf('\\cite') + 8),
+    };
+    expect(r.bridge.applyCommand(c)).toBe('conflict');
+  });
 });

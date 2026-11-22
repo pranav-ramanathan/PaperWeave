@@ -139,9 +139,9 @@ function matrix() {
     '- `\\title`, `\\author`, `\\affiliation`, `\\address`, `\\ead`, `\\institute` and the `\\begin` and',
     '  `\\end` lines of `frontmatter`, `abstract` and `keyword`: one raw block each. The abstract,',
     '  the keywords and an acknowledgments section between them are ordinary paragraphs.',
-    '- An environment a paper declares with `\\newtheorem` that is not one of `theorem`, `lemma`,',
-    '  `claim` and the other names the editor knows: shown whole as a raw block, and not counted',
-    '  as editable above.',
+    '- An environment a paper declares with `\\newtheorem` (or `\\declaretheorem`, `\\spnewtheorem`,',
+    '  `\\newmdtheoremenv`) in its preamble or in its own `.sty`: edited as prose like `lemma`, and',
+    '  counted as editable above. The names are read when the page loads.',
     "- `\\subfile`, `\\import`, `\\include` and `\\input` lines, and a subfile's own preamble.",
     '- A citation or a reference is shown in place with its source as its title; it is changed as',
     '  LaTeX in the same box (a double click or Enter opens it, as it does a formula).',
@@ -181,9 +181,9 @@ test('every template is found whole: its root, its files and nothing missing', (
   }
 });
 
-// The editor never learns which environments a paper declared with \newtheorem, so the report
-// must not count their bodies as typed-into text: they show as LaTeX there.
-test('the import report counts only the environments the editor treats as prose', () => {
+// The editor is given the environments a paper declared with \newtheorem, so the report counts
+// their bodies as typed-into text, as it does those of `lemma`.
+test("the import report counts a paper's own theorem environments as prose", () => {
   const tex = (env: string) =>
     Buffer.from(
       `\\documentclass{article}\n\\newtheorem{${env}}{Thing}\n\\begin{document}\n\\begin{${env}}\n` +
@@ -196,6 +196,8 @@ test('the import report counts only the environments the editor treats as prose'
   const known = share('lemma');
   const own = share('observation');
   expect(known.editable).toBeGreaterThan(200);
-  expect(own.editable).toBeLessThan(known.editable / 4);
-  expect(own.raw).toBeGreaterThan(200);
+  expect(own.editable).toBe(known.editable);
+  expect(own.raw).toBe(known.raw);
+  // A name that is not prose stays raw however it is declared.
+  expect(share('verbatim').editable).toBeLessThan(known.editable / 4);
 });

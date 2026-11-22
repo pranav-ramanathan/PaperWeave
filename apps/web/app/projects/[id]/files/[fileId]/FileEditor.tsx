@@ -141,6 +141,8 @@ export default function FileEditor(props: {
   sourceOnly: boolean;
   /** The paper's own macros, so that formulas written with them are drawn as formulas. */
   macros: Record<string, string>;
+  /** Environments the paper declares with \\newtheorem: prose in the visual view. */
+  prose: string[];
   /** Whether this person may comment, and the others on the paper, whom they can mention. */
   canComment: boolean;
   members: Member[];
@@ -186,6 +188,8 @@ export default function FileEditor(props: {
   );
   // The paper's macros as they were when the page was made. Not a reason to rebuild the editors.
   const macros = useRef(props.macros);
+  // The same for the paper's own theorem environments: a \\newtheorem added since shows raw until reload.
+  const prose = useRef(props.prose);
   /** A formula being edited or inserted, a reference being chosen, and the menu, when open. */
   const [formula, setFormula] = useState<FormulaRequest | null>(null);
   const [picker, setPicker] = useState<{ apply: FormulaRequest['apply'] } | null>(null);
@@ -555,6 +559,7 @@ export default function FileEditor(props: {
           showInSource: (from, to) => show('source', from, to),
           run,
           macros: macros.current,
+          prose: prose.current,
           picture: (target) =>
             `/projects/${projectId}/picture?target=${encodeURIComponent(target)}`,
           editMath: (src, apply) => setFormula({ src, place: null, apply }),

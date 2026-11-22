@@ -1,6 +1,6 @@
 // A paper's labels and the references to them, read from the text as it stands now.
 import { createHash } from 'node:crypto';
-import { decodeFile, includeGraph, labelIndex, macroDefs } from '@paperweave/latex';
+import { decodeFile, includeGraph, labelIndex, macroDefs, proseEnvs } from '@paperweave/latex';
 import type pg from 'pg';
 import * as Y from 'yjs';
 import { authorize } from './authz.ts';
@@ -160,6 +160,29 @@ export async function paperMacros(
   for (const path of includeGraph(texts, root.path).preamble)
     macros = { ...macros, ...macroDefs(texts[path] ?? '') };
   return macros;
+}
+
+/**
+ * The environments the paper declares as theorems (`\\newtheorem{observation}`), which the
+ * editor treats as prose. Read from the root's preamble, the files it reads and the project's own
+ * packages it loads (`proseEnvs`).
+ */
+export async function paperProse(
+  pool: pg.Pool,
+  store: BlobStore,
+  userId: string,
+  projectId: string,
+): Promise<string[]> {
+  await authorize(pool, userId, id(projectId), 'project.read');
+  return proseOf(pool, store, projectId);
+}
+
+/** `paperProse` for a caller that has already checked the person's access. */
+export async function proseOf(pool: Db, store: BlobStore, projectId: string): Promise<string[]> {
+  const files = await texFiles(pool, store, projectId, false, '\\.(tex|ltx|sty|cls)$');
+  const root = files.find((f) => f.root);
+  if (!root) return [];
+  return proseEnvs(Object.fromEntries(files.map((f) => [f.path, f.text])), root.path);
 }
 
 /** One line that a rename would change, before and after. */

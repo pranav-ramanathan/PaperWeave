@@ -62,9 +62,9 @@ to their source. Measured on the `real-*` fixtures and on small samples:
 - `\title`, `\author`, `\affiliation`, `\address`, `\ead`, `\institute` and the `\begin` and
   `\end` lines of `frontmatter`, `abstract` and `keyword`: one raw block each. The abstract,
   the keywords and an acknowledgments section between them are ordinary paragraphs.
-- An environment a paper declares with `\newtheorem` that is not one of `theorem`, `lemma`,
-  `claim` and the other names the editor knows: shown whole as a raw block, and not counted
-  as editable above.
+- An environment a paper declares with `\newtheorem` (or `\declaretheorem`, `\spnewtheorem`,
+  `\newmdtheoremenv`) in its preamble or in its own `.sty`: edited as prose like `lemma`, and
+  counted as editable above. The names are read when the page loads.
 - `\subfile`, `\import`, `\include` and `\input` lines, and a subfile's own preamble.
 - A citation or a reference is shown in place with its source as its title; it is changed as
   LaTeX in the same box (a double click or Enter opens it, as it does a formula).
