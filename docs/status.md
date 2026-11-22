@@ -4627,3 +4627,22 @@ Found by a three-person walkthrough.
   again with a thread; replacing a read-only file that has a log) and in `sync` (editor closed).
 - **Not done.** The editor's closing notice says "no longer have access... or deleted". Old
   read-only rows from mixed line endings are still not migrated.
+
+## Table cells ignore comments, and a wrapped caption is not rewritten by Enter
+
+- **What was wrong.** A table cut its cells from the source, comments included. A commented-out
+  row ran into the next row's first cell (shown with a `%` that could not be saved, and "Delete
+  column 1" removed the commented row too); a `% note` after `\\` moved onto a new row when one was
+  added below; a commented-out last row showed as a phantom row; a `% was 2` at the end of a cell
+  swallowed the `&` of a new column; and `\\%` was taken for an escaped percent. In the visual view
+  the field for a caption or cell was a one-line input, so a caption wrapped over lines read as
+  joined text and an unchanged Enter wrote the joined text, and `\caption{%` followed by a line
+  break was written back as `\caption{%  Text}`, commenting out the closing brace.
+- **Now** comments are left out of the cells and of the rows: a comment line above a row, or on a
+  row's own line after `\\`, stays where it is when rows and columns are added or removed. A comment
+  inside a cell makes the table not simple. The field shows a part as one line (`fieldText`), with
+  bare `%` line-enders joined, and Enter on an unchanged field writes nothing.
+- **Held by** unit tests in `floats.test.ts` and a Playwright test in `tables.spec.ts`.
+- **Not done.** A caption or cell with a worded comment or a blank line is read-only in the visual
+  view (edit it in the source). Bare `%` line-enders and line breaks inside a part are not kept when
+  the part is changed. `\verb|%|` in a cell is taken for a comment.

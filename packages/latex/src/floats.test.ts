@@ -1,5 +1,5 @@
 import { expect, test } from 'vitest';
-import { altEdit, cellText, floatParts, tableEdit, type TableOp } from './floats.ts';
+import { altEdit, cellText, fieldText, floatParts, tableEdit, type TableOp } from './floats.ts';
 import { fixtureFiles } from './testutil.ts';
 
 const text = (path: string) => Buffer.from(fixtureFiles()[path]).toString();
@@ -184,4 +184,102 @@ test('rows and columns are added and removed, and adding then removing restores 
   expect(
     tableEdit(starred, floatParts(starred)!.table!, { kind: 'row-after', row: 0 }),
   ).not.toBeNull();
+});
+
+/** The table of a tabular body, as rows of cell text. */
+const tab = (body: string) =>
+  `\\begin{table}\n\\begin{tabular}{lr}\n${body}\n\\end{tabular}\n\\end{table}`;
+const rowsOf = (src: string) => floatParts(src)!.table!.rows.map((r) => r.map((c) => c.text));
+const editBy = (from: string, op: TableOp) => {
+  const e = tableEdit(from, floatParts(from)!.table!, op)!;
+  expect(e, JSON.stringify(op)).not.toBeNull();
+  return from.slice(0, e.at) + e.insert + from.slice(e.at + e.length);
+};
+
+test('a commented-out row is not part of the rows around it', () => {
+  const src = tab('Name & Value \\\\\na & 1 \\\\\n% c & 3 \\\\\nb & 2 \\\\');
+  const t = floatParts(src)!.table!;
+  expect(rowsOf(src)).toEqual([
+    ['Name', 'Value'],
+    ['a', '1'],
+    ['b', '2'],
+  ]);
+  expect(t.simple).toBe(true);
+  honest(src, t.rows.flat());
+  // Deleting a column leaves the comment alone.
+  expect(editBy(src, { kind: 'column-delete', column: 0 }).split('\n')).toContain('% c & 3 \\\\');
+  // Deleting the row after the comment takes that row and no more.
+  expect(editBy(src, { kind: 'row-delete', row: 2 })).toBe(src.replace('\nb & 2 \\\\', ''));
+});
+
+test('a commented-out last row is not a row', () => {
+  const src = tab('Name & Value \\\\\na & 1 \\\\\n% b & 2 \\\\');
+  expect(rowsOf(src)).toEqual([
+    ['Name', 'Value'],
+    ['a', '1'],
+  ]);
+  expect(floatParts(src)!.table!.simple).toBe(true);
+});
+
+test('a comment right after the end of a row stays with that row', () => {
+  const src = tab('Name & Value \\\\% note\nb & 2 \\\\');
+  expect(rowsOf(src)).toEqual([
+    ['Name', 'Value'],
+    ['b', '2'],
+  ]);
+  const src2 = tab('Name & Value \\\\ % header\na & 1 \\\\');
+  expect(rowsOf(src2)).toEqual([
+    ['Name', 'Value'],
+    ['a', '1'],
+  ]);
+  const taller = editBy(src2, { kind: 'row-after', row: 0 });
+  expect(taller).toBe(tab('Name & Value \\\\ % header\n     &  \\\\\na & 1 \\\\'));
+  expect(editBy(taller, { kind: 'row-delete', row: 1 })).toBe(src2);
+});
+
+test('a comment at the end of a cell is not its text, and a new column goes before it', () => {
+  const src = tab('Name & Value \\\\\na & 1 % was 2\n\\\\');
+  expect(rowsOf(src)).toEqual([
+    ['Name', 'Value'],
+    ['a', '1'],
+  ]);
+  const wider = editBy(src, { kind: 'column-after', column: 1 });
+  const t = floatParts(wider)!.table!;
+  expect(t.simple).toBe(true);
+  expect(t.rows.map((r) => r.length)).toEqual([3, 3]);
+});
+
+test('a comment in the middle of a cell makes the table not simple', () => {
+  expect(floatParts(tab('a % note\n& 1 more % x\n words \\\\'))!.table!.simple).toBe(false);
+});
+
+test('rules before a comment leave the comment out of the next row', () => {
+  const src = tab('Name & Value \\\\ \\hline % c\na & 1 \\\\\nb & 2 \\\\');
+  expect(rowsOf(src)).toEqual([
+    ['Name', 'Value'],
+    ['a', '1'],
+    ['b', '2'],
+  ]);
+  expect(editBy(src, { kind: 'row-delete', row: 1 })).toBe(
+    tab('Name & Value \\\\ \\hline % c\nb & 2 \\\\'),
+  );
+  // A comment line straight after the specification survives deleting the first row.
+  const top = tab('% top\na & 1 \\\\\nb & 2 \\\\');
+  expect(editBy(top, { kind: 'row-delete', row: 0 })).toBe(tab('% top\nb & 2 \\\\'));
+  // An empty first cell after a comment line is placed after the comment, not inside it.
+  const gap = tab('% top\n & 1 \\\\\nb & 2 \\\\');
+  const first = floatParts(gap)!.table!.rows[0][0];
+  expect(first.at).toBeGreaterThan(gap.indexOf('% top\n'));
+  expect(gap.slice(first.at - 1, first.at)).toBe(' ');
+  expect(rowsOf(tab('50\\% & 1 \\\\'))).toEqual([['50\\%', '1']]);
+});
+
+test('a part is shown as one line if that loses nothing', () => {
+  expect(fieldText('Scores on the\nbenchmark.')).toBe('Scores on the benchmark.');
+  expect(fieldText('%\n  Text')).toBe('Text');
+  expect(fieldText('a%\n b')).toBe('ab');
+  expect(fieldText(' x ')).toBe('x');
+  expect(fieldText('50\\% of')).toBe('50\\% of');
+  expect(fieldText('a % note\nb')).toBeNull();
+  expect(fieldText('a\n\nb')).toBeNull();
 });
