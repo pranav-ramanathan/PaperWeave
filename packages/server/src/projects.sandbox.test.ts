@@ -56,29 +56,36 @@ test('a magic link signs a person in', () => {
   expect(t.links.every((l) => l.url.includes('/sign-in/confirm?token='))).toBe(true);
 });
 
-test('one address is sent only so many sign-in links in an hour, whoever asks', async () => {
-  const sends = async (email: string) => maySendSignInLink(t.pool, email, 3);
+test('one address is sent a burst of links, then one every six minutes, whoever asks', async () => {
+  await t.pool.query('delete from sign_in_links');
+  const sends = (email: string, cap?: number) => maySendSignInLink(t.pool, email, cap);
   expect([await sends('Victim@Example.org'), await sends('victim@example.org')]).toEqual([
-    true,
-    true,
+    'ok',
+    'ok',
   ]);
-  expect(await sends(' victim@example.org ')).toBe(true);
+  expect(await sends(' victim@example.org ')).toBe('ok');
   // The fourth is not sent, however the address is written. Someone else's still is.
-  expect(await sends('VICTIM@example.org')).toBe(false);
-  expect(await sends('someone-else@example.org')).toBe(true);
+  expect(await sends('VICTIM@example.org')).toBe('address');
+  expect(await sends('someone-else@example.org')).toBe('ok');
   // The address is not kept, only a hash of it.
   const kept = await t.pool.query('select email_hash from sign_in_links');
   expect(kept.rows.every((r) => /^[0-9a-f]{64}$/.test(r.email_hash))).toBe(true);
   expect(JSON.stringify(kept.rows)).not.toContain('victim');
   // A link that could not be sent is not counted.
   await forgetSignInLink(t.pool, 'Victim@example.org');
-  expect(await sends('victim@example.org')).toBe(true);
-  expect(await sends('victim@example.org')).toBe(false);
-  // An hour on there is room again, and after a day the record is gone.
-  await t.pool.query("update sign_in_links set sent_at = sent_at - interval '61 minutes'");
-  expect(await sends('victim@example.org')).toBe(true);
+  expect(await sends('victim@example.org')).toBe('ok');
+  expect(await sends('victim@example.org')).toBe('address');
+  // Five minutes on there is still no room; seven, and there is room for one.
+  await t.pool.query("update sign_in_links set sent_at = sent_at - interval '5 minutes'");
+  expect(await sends('victim@example.org')).toBe('address');
+  await t.pool.query("update sign_in_links set sent_at = sent_at - interval '2 minutes'");
+  expect(await sends('victim@example.org')).toBe('ok');
+  expect(await sends('victim@example.org')).toBe('address');
+  // The cap on all addresses together is its own refusal.
+  expect(await sends('another@example.org', 3)).toBe('busy');
+  // After a day the record is gone.
   await t.pool.query("update sign_in_links set sent_at = sent_at - interval '25 hours'");
-  expect(await sends('victim@example.org')).toBe(true);
+  expect(await sends('victim@example.org')).toBe('ok');
   expect((await t.pool.query('select 1 from sign_in_links')).rowCount).toBe(1);
 });
 
@@ -100,7 +107,7 @@ test('with the mail down, a sign-in link is not counted and an invitation is not
   );
   expect(asked.ok).toBe(false);
   for (let i = 0; i < 3; i++)
-    expect(await maySendSignInLink(t.pool, 'mail-down@example.org', 3)).toBe(true);
+    expect(await maySendSignInLink(t.pool, 'mail-down@example.org')).toBe('ok');
 
   // An invitation whose email could not be sent is taken back: its link is nowhere else, and
   // it does not count against how many its sender may send.

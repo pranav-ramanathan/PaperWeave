@@ -4,6 +4,7 @@ import { APIError } from 'better-auth/api';
 import { parseSetCookieHeader, toCookieOptions } from 'better-auth/cookies';
 import { magicLink } from 'better-auth/plugins';
 import { createHash } from 'node:crypto';
+import { isIP } from 'node:net';
 import type pg from 'pg';
 
 type Env = Record<string, string | undefined>;
@@ -68,7 +69,29 @@ export const authOptions = (pool: pg.Pool, sendLink: SendLink, env: Env = proces
     secret: env.BETTER_AUTH_SECRET,
     baseURL: env.BETTER_AUTH_URL,
     // UUIDs, so our own tables can reference users with a real foreign key type.
-    advanced: { database: { generateId: 'uuid' } },
+    advanced: {
+      database: { generateId: 'uuid' },
+      // A client's address is only ever read from the one header an operator names as set by
+      // their own proxy (TRUSTED_IP_HEADER). Any client can send `x-forwarded-for`, so by default
+      // no address is read at all.
+      ipAddress: trustedHeader(env)
+        ? { ipAddressHeaders: [trustedHeader(env)!] }
+        : { disableIpTracking: true },
+    },
+    // Limits by client address need a trustworthy address, so they are on only with
+    // TRUSTED_IP_HEADER. Without it the limits are the ones below on the address written to and
+    // on all sign-in emails together. Kept in the database, so that every instance of the web
+    // app counts the same clients (the table is made with the others, used or not).
+    rateLimit: {
+      enabled: Boolean(trustedHeader(env)),
+      storage: 'database',
+      customRules: {
+        // A request without a usable single address in the header is not counted at all: the
+        // library would put every such request in one bucket shared by everyone.
+        '/**': (req: Request, rule: { window: number; max: number }) =>
+          isIP(req.headers.get(trustedHeader(env) ?? '')?.trim() ?? '') ? rule : false,
+      },
+    },
     session: {
       // Pages and actions are read with the session as the browser last kept it, for up to
       // this many seconds, without asking the database who is signed in. It costs this: a
@@ -89,10 +112,10 @@ export const authOptions = (pool: pg.Pool, sendLink: SendLink, env: Env = proces
         expiresIn: 15 * 60,
         sendMagicLink: async ({ email, url, token }) => {
           // Said to the person asking as "too many requests", not as a fault of the server.
-          if (!(await maySendSignInLink(pool, email)))
-            throw new APIError('TOO_MANY_REQUESTS', {
-              message: 'Too many sign-in links have been sent to this address. Try again later.',
-            });
+          const may = await maySendSignInLink(pool, email, perHour(env));
+          if (may === 'address')
+            throw new APIError('TOO_MANY_REQUESTS', { message: ADDRESS_REFUSED });
+          if (may === 'busy') throw new APIError('TOO_MANY_REQUESTS', { message: BUSY_REFUSED });
           try {
             await sendLink({
               email,
@@ -101,7 +124,7 @@ export const authOptions = (pool: pg.Pool, sendLink: SendLink, env: Env = proces
             });
           } catch (err) {
             // Not sent, so not counted: someone trying again while the mail is down should
-            // not find themselves shut out for an hour once it is back.
+            // not find themselves shut out once it is back.
             await forgetSignInLink(pool, email);
             throw err;
           }
@@ -114,15 +137,24 @@ export const createAuth = (pool: pg.Pool, sendLink: SendLink, env: Env = process
   betterAuth(authOptions(pool, sendLink, env));
 export type Auth = ReturnType<typeof createAuth>;
 
-/** How many sign-in links are sent to one address in an hour. */
-export const SIGN_IN_LINKS_PER_HOUR = 10;
+/** Links to one address: a burst of this many, then one more each `SIGN_IN_SPACING_MINUTES`. */
+export const SIGN_IN_BURST = 3;
+export const SIGN_IN_SPACING_MINUTES = 6;
+/** Sign-in emails sent to anyone in an hour, when SIGN_IN_EMAILS_PER_HOUR does not say. */
+export const SIGN_IN_EMAILS_PER_HOUR = 500;
 
-/**
- * Whether one more sign-in link may be sent to an address now, and if so, on record that it
- * was. The sign-in library limits how often one client may ask; this limits how often one
- * address is written to, whoever asks, so that the service cannot be used to fill someone's
- * inbox. Only a hash of the address is kept, and only for a day.
- */
+export const ADDRESS_REFUSED =
+  'A sign-in link was sent to this address a few minutes ago. Use the newest email, or try again in a few minutes.';
+export const BUSY_REFUSED =
+  'Sign-in emails are being sent at the most this service allows for the hour. Try again in a little while.';
+
+/** The header an operator has said their own proxy sets to the client's address, if any. */
+const trustedHeader = (env: Env) => env.TRUSTED_IP_HEADER?.trim().toLowerCase() || undefined;
+const perHour = (env: Env) => {
+  const n = Number(env.SIGN_IN_EMAILS_PER_HOUR);
+  return Number.isInteger(n) && n > 0 ? n : SIGN_IN_EMAILS_PER_HOUR;
+};
+
 const addressHash = (email: string) =>
   createHash('sha256').update(email.trim().toLowerCase()).digest('hex');
 
@@ -136,20 +168,81 @@ export async function forgetSignInLink(pool: pg.Pool, email: string): Promise<vo
   );
 }
 
+/**
+ * Whether one more sign-in link may be sent to an address now, and if so, on record that it
+ * was. Two limits, neither of which depends on who asks (so that nobody can use the service to
+ * fill an inbox, and nobody can shut someone else out):
+ * - one address: a burst of `SIGN_IN_BURST`, then one more every `SIGN_IN_SPACING_MINUTES`. A
+ *   link lives 15 minutes, so whoever is refused has been sent one in the last few minutes,
+ *   which is still good. (Counting links per hour instead let ten requests lock an address
+ *   out for most of the hour.)
+ * - all addresses: `perHour` emails in an hour, for the cost of the mail service.
+ * Only a hash of the address is kept, and only for a day. 'address' and 'busy' say which limit
+ * refused.
+ */
 export async function maySendSignInLink(
   pool: pg.Pool,
   email: string,
-  perHour = SIGN_IN_LINKS_PER_HOUR,
-): Promise<boolean> {
+  perHour = SIGN_IN_EMAILS_PER_HOUR,
+): Promise<'ok' | 'address' | 'busy'> {
   const hash = addressHash(email);
-  await pool.query("delete from sign_in_links where sent_at < now() - interval '1 day'");
-  const { rowCount } = await pool.query(
-    `insert into sign_in_links (email_hash)
-     select $1 where (
-       select count(*) from sign_in_links
-       where email_hash = $1 and sent_at > now() - interval '1 hour'
-     ) < $2`,
-    [hash, perHour],
-  );
-  return rowCount === 1;
+  const client = await pool.connect();
+  try {
+    await client.query('begin');
+    // One decision at a time: two requests must not both see room for one more.
+    await client.query('select pg_advisory_xact_lock(7265002)');
+    await client.query("delete from sign_in_links where sent_at < now() - interval '1 day'");
+    const { rows } = await client.query<{ at: number; now: number }>(
+      `select extract(epoch from sent_at)::float8 as at, extract(epoch from now())::float8 as now
+       from sign_in_links where email_hash = $1 order by sent_at`,
+      [hash],
+    );
+    // A bucket that holds the burst and fills by one each spacing, emptied by one for each send.
+    const spacing = SIGN_IN_SPACING_MINUTES * 60;
+    let tokens = SIGN_IN_BURST;
+    let last = rows[0]?.at ?? 0;
+    for (const { at } of rows) {
+      tokens = Math.min(SIGN_IN_BURST, tokens + (at - last) / spacing) - 1;
+      last = at;
+    }
+    const now = rows[0]?.now ?? 0;
+    tokens = Math.min(SIGN_IN_BURST, tokens + (now - last) / spacing);
+    let answer: 'ok' | 'address' | 'busy' = 'ok';
+    if (rows.length && tokens < 1) answer = 'address';
+    else {
+      const { rows: n } = await client.query<{ n: string }>(
+        "select count(*) as n from sign_in_links where sent_at > now() - interval '1 hour'",
+      );
+      if (Number(n[0].n) >= perHour) answer = 'busy';
+    }
+    if (answer === 'ok')
+      await client.query('insert into sign_in_links (email_hash) values ($1)', [hash]);
+    await client.query('commit');
+    return answer;
+  } catch (err) {
+    await client.query('rollback').catch(() => {});
+    throw err;
+  } finally {
+    client.release();
+  }
+}
+
+/**
+ * The address a sign-in token was issued for, partly hidden, or null if there is no such token
+ * or it has expired. Only reads: showing the confirm page must not use the token up. Anyone
+ * with the token has the email it came in, so they know the address; the page is reachable
+ * without signing in, so it shows the first letter and the domain, not the whole address.
+ */
+export async function signInLinkAddress(auth: Auth, token: string): Promise<string | null> {
+  const stored = createHash('sha256').update(token).digest('base64url');
+  const context = await auth.$context;
+  const row = await context.internalAdapter.findVerificationValue(`magic-link:${stored}`);
+  if (!row || row.expiresAt.getTime() < Date.now()) return null;
+  try {
+    const email = String(JSON.parse(row.value).email ?? '');
+    const at = email.lastIndexOf('@');
+    return at > 0 ? `${email[0]}…${email.slice(at)}` : null;
+  } catch {
+    return null;
+  }
 }

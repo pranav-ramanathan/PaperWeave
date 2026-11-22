@@ -400,11 +400,12 @@ test('a mail scanner opening the sign-in link does not use it up; the person can
   );
 });
 
-test('one address is sent only so many sign-in links in an hour, whoever asks for them', async ({
+test('one address is sent a burst of sign-in links, then is spaced, whoever asks for them', async ({
   browser,
 }) => {
   // Three people, each asking a few times for a link to be sent to someone else. None of them
-  // asks often enough to be stopped for that; together they pass what one address is sent.
+  // asks often enough to be stopped for that; together they pass what one address is sent in a
+  // burst (three), and the rest are told a link was sent a few minutes ago.
   const inbox = address('inbox');
   let sent = 0;
   let refused = 0;
@@ -419,15 +420,42 @@ test('one address is sent only so many sign-in links in an hour, whoever asks fo
       if ((await said.getAttribute('role')) === 'status') sent++;
       else {
         refused++;
-        await expect(said).toContainText('Only so many links are sent to one address');
+        await expect(said).toContainText(
+          'A sign-in link was sent to this address a few minutes ago',
+        );
       }
     }
   }
-  expect({ sent, refused }).toEqual({ sent: 10, refused: 2 });
+  expect({ sent, refused }).toEqual({ sent: 3, refused: 9 });
   const mail = await (
     await fetch(`${MAIL}/api/v1/search?query=${encodeURIComponent(`to:${inbox}`)}`)
   ).json();
-  expect(mail.messages).toHaveLength(10);
+  expect(mail.messages).toHaveLength(3);
+});
+
+test('the confirm page says whose sign-in it is, and showing it does not use the link up', async ({
+  browser,
+}) => {
+  const visitor = await person(browser, 'whose');
+  await visitor.page.goto('/sign-in');
+  await visitor.page.getByLabel('Email address').fill(visitor.email);
+  await visitor.page.getByRole('button', { name: 'Email me a sign-in link' }).click();
+  await expect(visitor.page.getByRole('status')).toContainText('Check');
+  const link = await emailedLink(visitor.email, '/sign-in/confirm');
+  const masked = `${visitor.email[0]}…${visitor.email.slice(visitor.email.indexOf('@'))}`;
+  // Seen twice: the page reads the link and changes nothing.
+  for (let i = 0; i < 2; i++) {
+    await visitor.page.goto(link);
+    await expect(visitor.page.getByText(`This signs you in as ${masked}`)).toBeVisible();
+    // The button says what it is for, to someone using a screen reader.
+    await expect(
+      visitor.page.getByRole('button', { name: 'Sign in', exact: true }),
+    ).toHaveAccessibleDescription(new RegExp(`signs you in as ${masked}`));
+    // The whole address is not on the page, which anyone holding the link can open.
+    await expect(visitor.page.locator('body')).not.toContainText(visitor.email);
+  }
+  await visitor.page.getByRole('button', { name: 'Sign in', exact: true }).click();
+  await expect(visitor.page.getByRole('heading', { name: 'Your papers' })).toBeVisible();
 });
 
 test('the owner sees pending invitations and cancels one', async ({ browser }) => {

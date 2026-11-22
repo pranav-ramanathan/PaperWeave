@@ -26,6 +26,25 @@ What it found is fixed in the same change, or listed under "Open" with what to d
 
 ## Found and fixed
 
+- **Sign-in limits could be turned against people and walked around.** Four faults, shown with
+  the real handler in production mode. (1) Ten sign-in requests for an address, from any
+  clients, refused the owner's own request for most of the hour, because ten per hour were
+  counted for the address whoever asked and a link lives 15 minutes. Now one address gets a
+  burst of three, then one every six minutes, so whoever is refused has a live link at most six
+  minutes old, and there is an hourly cap on all sign-in emails (`SIGN_IN_EMAILS_PER_HOUR`,
+  default 500, its own message). (2) With no `x-forwarded-for`, the library put every request in
+  one shared bucket per path: five anonymous requests in a minute and an unrelated person was
+  refused. (3) A single-value `x-forwarded-for` was believed as sent, so 40 spoofed addresses
+  got 40 emails to one address. Now no address is read from a request unless an operator names
+  the header their proxy sets (`TRUSTED_IP_HEADER`); without it the library's by-client limit
+  is off (no shared bucket, nothing to spoof), with it the count is kept in the database and a
+  request without a usable address is not counted. (4) Login CSRF: `/sign-in/confirm?token=` named
+  no account, so an attacker's own link, forwarded, would sign a person in as the attacker. The
+  page now says which address it signs in (first letter and domain, since anyone holding the
+  link can open the page), read without using the token up. Held by `auth.sandbox.test.ts` and
+  `projects.spec`. **Not covered:** a person who has the link and the page open is still signed
+  in as whoever it names if they press the button without reading.
+
 - **Sign-in could send people to another site.** `safePath` only refused a second slash and a
   backslash, so `/<TAB>/evil.example` passed; browsers drop tab, newline and return from an
   address, so it became `//evil.example`. Both the sign-in page (when already signed in) and the

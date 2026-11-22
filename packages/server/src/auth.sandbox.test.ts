@@ -1,7 +1,7 @@
 // Needs the services in infra/compose.yaml. Run: pnpm test:sandbox
 import type pg from 'pg';
-import { afterAll, afterEach, beforeAll, expect, test, vi } from 'vitest';
-import { cookiesToSet } from './auth.ts';
+import { afterAll, afterEach, beforeAll, beforeEach, expect, test, vi } from 'vitest';
+import { authOptions, cookiesToSet, createAuth, signInLinkAddress } from './auth.ts';
 import { TEST_ENV, testDb } from './testing.ts';
 
 let t: Awaited<ReturnType<typeof testDb>>;
@@ -179,4 +179,120 @@ test('a destination that is not a path on this site is not carried into the emai
     );
     expect(new URL(t.links.at(-1)!.url).searchParams.get('next')).toBe('/projects');
   }
+});
+
+// What a person at a browser does, as far as the sign-in library can tell: a POST, from a client
+// the server may or may not be able to tell apart from others.
+const ask = (auth: typeof t.auth, email: string, headers: Record<string, string> = {}) =>
+  auth.handler(
+    new Request(`${TEST_ENV.BETTER_AUTH_URL}/api/auth/sign-in/magic-link`, {
+      method: 'POST',
+      headers: { 'content-type': 'application/json', ...headers },
+      body: JSON.stringify({ email }),
+    }),
+  );
+const sentTo = (links: typeof t.links, email: string) =>
+  links.filter((l) => l.email === email).length;
+const sink = () => {
+  const links: typeof t.links = [];
+  return { links, send: async (l: (typeof t.links)[number]) => void links.push(l) };
+};
+beforeEach(async () => void (await t.pool.query('delete from sign_in_links')));
+
+test('ten requests by others do not shut the owner out: refused only while a link under six minutes old exists', async () => {
+  const { links, send } = sink();
+  const auth = createAuth(t.pool, send, TEST_ENV);
+  const victim = 'victim@example.org';
+  const statuses: number[] = [];
+  for (let i = 0; i < 10; i++)
+    statuses.push((await ask(auth, victim, { 'x-forwarded-for': `203.0.113.${i + 1}` })).status);
+  // A burst of three, then refused.
+  expect(statuses).toEqual([200, 200, 200, 429, 429, 429, 429, 429, 429, 429]);
+  expect(sentTo(links, victim)).toBe(3);
+  const mine = await ask(auth, victim);
+  expect(mine.status).toBe(429);
+  expect(((await mine.json()) as { message: string }).message).toBe(
+    'A sign-in link was sent to this address a few minutes ago. Use the newest email, or try again in a few minutes.',
+  );
+  // The refusal is only because a link under six minutes old exists, and it is still good.
+  const newest = await t.pool.query(
+    `select now() - max(sent_at) < interval '6 minutes' as fresh from sign_in_links`,
+  );
+  expect(newest.rows[0].fresh).toBe(true);
+  // Six minutes on, the owner is sent one; and the refusal is back at once after.
+  await t.pool.query("update sign_in_links set sent_at = sent_at - interval '7 minutes'");
+  expect((await ask(auth, victim)).status).toBe(200);
+  expect(sentTo(links, victim)).toBe(4);
+  expect((await ask(auth, victim)).status).toBe(429);
+  // Long after, the whole burst is back.
+  await t.pool.query("update sign_in_links set sent_at = sent_at - interval '30 minutes'");
+  for (let i = 0; i < 3; i++) expect((await ask(auth, victim)).status).toBe(200);
+});
+
+test('with no trusted address header, five requests by one caller do not refuse another address', async () => {
+  const { links, send } = sink();
+  // The library limits by client only in production; run this file with NODE_ENV=production to
+  // see the old behaviour fail (a shared bucket: five a minute, then everyone is refused).
+  expect(authOptions(t.pool, send, TEST_ENV).rateLimit.enabled).toBe(false);
+  const auth = createAuth(t.pool, send, TEST_ENV);
+  for (let i = 0; i < 8; i++) expect((await ask(auth, `anon${i}@example.org`)).status).toBe(200);
+  expect((await ask(auth, 'unrelated@example.org')).status).toBe(200);
+  expect(links).toHaveLength(9);
+});
+
+test('spoofed single-value forwarded headers do not buy more emails to one address, nor get past the global cap', async () => {
+  const { links, send } = sink();
+  const auth = createAuth(t.pool, send, { ...TEST_ENV, SIGN_IN_EMAILS_PER_HOUR: '12' });
+  let n = 0;
+  for (let i = 0; i < 40; i++)
+    await ask(auth, 'spoofed@example.org', { 'x-forwarded-for': `198.51.100.${++n}` });
+  expect(sentTo(links, 'spoofed@example.org')).toBe(3);
+  for (let i = 0; i < 40; i++)
+    await ask(auth, `spoof${i}@example.org`, { 'x-forwarded-for': `198.51.100.${++n}` });
+  // The cap counts everything sent in the hour, wherever it was asked from.
+  expect(links.length).toBe(12);
+});
+
+test('the global cap refuses past N with its own message, and a failed send does not use it up', async () => {
+  const { links, send } = sink();
+  const auth = createAuth(t.pool, send, { ...TEST_ENV, SIGN_IN_EMAILS_PER_HOUR: '4' });
+  for (let i = 0; i < 4; i++) expect((await ask(auth, `cap${i}@example.org`)).status).toBe(200);
+  const over = await ask(auth, 'cap-over@example.org');
+  expect(over.status).toBe(429);
+  expect(((await over.json()) as { message: string }).message).toMatch(/at the most/);
+  expect(links).toHaveLength(4);
+  // An hour on, room again.
+  await t.pool.query("update sign_in_links set sent_at = sent_at - interval '61 minutes'");
+  expect((await ask(auth, 'cap-over@example.org')).status).toBe(200);
+});
+
+test('where an operator names the header their proxy sets, a client is limited by it, and a request without it is not', async () => {
+  const { send } = sink();
+  const auth = createAuth(t.pool, send, { ...TEST_ENV, TRUSTED_IP_HEADER: 'X-Real-IP' });
+  const from = (ip: string, i: number) =>
+    ask(auth, `ip-${ip}-${i}@example.org`, { 'x-real-ip': ip });
+  const codes: number[] = [];
+  for (let i = 0; i < 7; i++) codes.push((await from('192.0.2.7', i)).status);
+  expect(codes).toEqual([200, 200, 200, 200, 200, 429, 429]);
+  // Another client is not affected; nor is a request that does not carry the header.
+  expect((await from('192.0.2.8', 0)).status).toBe(200);
+  for (let i = 0; i < 7; i++)
+    expect(
+      (await ask(auth, `bare${i}@example.org`, { 'x-forwarded-for': '192.0.2.7' })).status,
+    ).toBe(200);
+});
+
+test('the confirm page can say whose link it is without using it up', async () => {
+  const { links, send } = sink();
+  const auth = createAuth(t.pool, send, TEST_ENV);
+  expect((await ask(auth, 'Reader@Example.org')).status).toBe(200);
+  const { token } = links.at(-1)!;
+  expect(await signInLinkAddress(auth, token)).toBe('R…@Example.org');
+  expect(await signInLinkAddress(auth, token)).toBe('R…@Example.org');
+  expect(await signInLinkAddress(auth, 'not-a-token')).toBeNull();
+  // Still there to be used, once.
+  const before = await sessionRows();
+  await auth.api.magicLinkVerify({ query: { token }, headers: new Headers() });
+  expect(await sessionRows()).toBe(before + 1);
+  expect(await signInLinkAddress(auth, token)).toBeNull();
 });

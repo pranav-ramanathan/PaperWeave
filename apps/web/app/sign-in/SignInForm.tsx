@@ -4,6 +4,8 @@ import { useEffect, useState } from 'react';
 
 export default function SignInForm({ next }: { next: string }) {
   const [state, setState] = useState<'idle' | 'sending' | 'sent' | 'refused' | 'unsent'>('idle');
+  // What the server said when it refused for want of room (429): said as it was said.
+  const [why, setWhy] = useState('');
   const [email, setEmail] = useState('');
   // Before the page's script has started the form would be sent as a plain GET, and nothing
   // would read the field: the button waits for the script.
@@ -39,6 +41,11 @@ export default function SignInForm({ next }: { next: string }) {
         }).catch(() => null);
         // A refusal (too many links to one address, or not an address) says so with a 4xx. The mail
         // service not answering is the server's fault, and is said to be.
+        setWhy(
+          res?.status === 429
+            ? String(((await res.json().catch(() => null)) as { message?: unknown })?.message ?? '')
+            : '',
+        );
         setState(res?.ok ? 'sent' : res && res.status < 500 ? 'refused' : 'unsent');
       }}
     >
@@ -56,9 +63,7 @@ export default function SignInForm({ next }: { next: string }) {
       )}
       {state === 'refused' && (
         <p role="alert">
-          The link could not be sent. Check the address and try again in a minute. Only so many
-          links are sent to one address in an hour: if you have asked several times, use the newest
-          one you were sent, or wait.
+          {why || 'The link could not be sent. Check the address and try again in a minute.'}
         </p>
       )}
     </form>

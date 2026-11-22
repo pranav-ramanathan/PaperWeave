@@ -4337,3 +4337,24 @@ http-equiv="refresh" content="2">`: a reload every 2 seconds that restarts a scr
   server's own paths.
 - **Held by** `auth.test.ts` (including a property over random strings), `auth.sandbox.test.ts`
   and `projects.spec` (signed in, and the emailed page with a tab in `next`).
+
+## Sign-in limits that cannot be turned against people
+
+- **Found by** the planner, with the real handler in production mode: ten requests by others
+  locked an address out for most of each hour; with no `x-forwarded-for` everyone shared one
+  bucket per path; a spoofed single-value `x-forwarded-for` bought a bucket each; a forwarded
+  confirm link signed a person in as someone else without saying whose it was.
+- **Now** `maySendSignInLink` (`packages/server/src/auth.ts`): per address a bucket of three
+  links filling one per six minutes (refusal: "A sign-in link was sent to this address a few
+  minutes ago. Use the newest email, or try again in a few minutes."), and an hourly cap on all
+  sign-in emails, `SIGN_IN_EMAILS_PER_HOUR` (default 500). Both are decided under one database
+  lock. By-client limiting of the library is on only with `TRUSTED_IP_HEADER`, kept in the
+  database (`rateLimit` table, made by the library's migration), and skips a request without a
+  usable single address. Migration `0029` indexes the hourly count.
+- **The confirm page** shows "This signs you in as R…@example.org" (`signInLinkAddress`, read
+  only), and the button is described by it.
+- **Tests:** the e2e server trusts `x-forwarded-for` (`TRUSTED_IP_HEADER` in
+  `playwright.config.ts`) so each test person is a client of their own; the "ten arrive" test is
+  now "three arrive, nine are told a link was sent" (changed on purpose for the new rule).
+- **Not done:** the by-client limit is off in a deployment that sets no header; the owner picks
+  hosting and proxy (`docs/settings.md`).
