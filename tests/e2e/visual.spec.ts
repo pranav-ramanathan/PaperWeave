@@ -147,15 +147,24 @@ test('visual edits reach the source through the server, byte for byte', async ({
   await expect.poll(() => sourceText(editor.page)).not.toContain('\\textbf{Reviewers} then see');
   await owner.page.waitForTimeout(700); // a second double click too soon would count as a triple
   await pick(owner.page, VISUAL, 'Reviewers');
+  // Each shortcut acts on the text as the person sees it, so the next waits until the visual
+  // view shows the last one done: pressed sooner, it would act on text the server has changed.
+  const marked = (page: Page, tag: 'strong' | 'em') =>
+    page.locator(`${VISUAL} ${tag}`, { hasText: 'Reviewers' });
   await owner.page.keyboard.press('ControlOrMeta+b');
   await expect.poll(() => sourceText(editor.page)).toContain('\\textbf{Reviewers}');
+  await expect(marked(owner.page, 'strong')).toBeVisible();
   await owner.page.keyboard.press('ControlOrMeta+i');
   await expect
     .poll(() => sourceText(editor.page))
     .toContain('\\textbf{\\emph{Reviewers}} then see');
+  await expect(marked(owner.page, 'em')).toBeVisible();
   // Bold off leaves the emphasis; emphasis off then leaves the plain word.
   await owner.page.keyboard.press('ControlOrMeta+b');
-  await expect.poll(() => sourceText(editor.page)).toContain('\\emph{Reviewers}');
+  await expect.poll(() => sourceText(editor.page)).toContain('\\emph{Reviewers} then see');
+  await expect.poll(() => sourceText(editor.page)).not.toContain('\\textbf{');
+  await expect(marked(owner.page, 'strong')).toHaveCount(0);
+  await expect(marked(owner.page, 'em')).toBeVisible();
   await owner.page.keyboard.press('ControlOrMeta+i');
   await expect.poll(() => sourceText(editor.page)).toContain(both);
   await expect.poll(() => sourceText(editor.page)).not.toContain('\\textbf{Reviewers}');
