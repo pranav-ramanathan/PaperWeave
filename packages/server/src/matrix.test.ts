@@ -33,6 +33,8 @@ const PAPERS = [
     'real-tikz',
     'real-acm',
     'real-xelatex',
+    'real-elsevier',
+    'real-llncs',
   ].map((name) => ({
     name: `Fixture \`fixtures/${name}\``,
     entries: fixture(name),
@@ -134,6 +136,12 @@ function matrix() {
     '- `tikzpicture`, `pgfplots` axes, `lstlisting`, `algorithm`, `figure` and `table` (the caption of',
     '  a figure or table is edited through its own control, the first of several in `subfigure`s),',
     '  `CCSXML`, `\\ccsdesc`, `\\keywords`, `teaserfigure` and the title block of `acmart`.',
+    '- `\\title`, `\\author`, `\\affiliation`, `\\address`, `\\ead`, `\\institute` and the `\\begin` and',
+    '  `\\end` lines of `frontmatter`, `abstract` and `keyword`: one raw block each. The abstract,',
+    '  the keywords and an acknowledgments section between them are ordinary paragraphs.',
+    '- An environment a paper declares with `\\newtheorem` that is not one of `theorem`, `lemma`,',
+    '  `claim` and the other names the editor knows: shown whole as a raw block, and not counted',
+    '  as editable above.',
     "- `\\subfile`, `\\import`, `\\include` and `\\input` lines, and a subfile's own preamble.",
     '- A citation or a reference is shown in place with its source as its title; it is changed as',
     '  LaTeX in the same box (a double click or Enter opens it, as it does a formula).',
@@ -171,4 +179,23 @@ test('every template is found whole: its root, its files and nothing missing', (
     const raw = visual.reduce((n, v) => n + v.raw, 0);
     expect(editable / (editable + raw), t.id).toBeGreaterThan(0.4);
   }
+});
+
+// The editor never learns which environments a paper declared with \newtheorem, so the report
+// must not count their bodies as typed-into text: they show as LaTeX there.
+test('the import report counts only the environments the editor treats as prose', () => {
+  const tex = (env: string) =>
+    Buffer.from(
+      `\\documentclass{article}\n\\newtheorem{${env}}{Thing}\n\\begin{document}\n\\begin{${env}}\n` +
+        `${'Some words inside the environment. '.repeat(8)}\n\\end{${env}}\n\\end{document}\n`,
+    );
+  const share = (env: string) => {
+    const { report } = describeImport([{ path: 'main.tex', bytes: tex(env) }]);
+    return report.files.find((f) => f.path === 'main.tex')!.visual!;
+  };
+  const known = share('lemma');
+  const own = share('observation');
+  expect(known.editable).toBeGreaterThan(200);
+  expect(own.editable).toBeLessThan(known.editable / 4);
+  expect(own.raw).toBeGreaterThan(200);
 });

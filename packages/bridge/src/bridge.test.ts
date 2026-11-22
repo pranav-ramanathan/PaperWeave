@@ -1676,3 +1676,33 @@ test('undoing the deletion of a block restores every byte', () => {
     expect(r.src).toBe(src);
   }
 });
+
+const ELSEVIER = fixtures['real-elsevier/main.tex'];
+
+test('typing in an abstract inside frontmatter splices only those bytes, and undo restores them', () => {
+  const r = replica(ELSEVIER);
+  const um = new Y.UndoManager(r.ytext, { trackedOrigins: new Set([r.bridge]) });
+  const tb = textblocks(r).find(
+    (t) => r.state.doc.textBetween(t.start, t.start + 10) === 'River gaug',
+  )!;
+  expect(tb, 'the abstract is a paragraph').toBeDefined();
+  expect(r.dispatch(r.state.tr.insertText('really ', tb.start + 'River gauges are '.length))).toBe(
+    true,
+  );
+  r.check();
+  const at = ELSEVIER.indexOf('read far more');
+  expect(r.src).toBe(ELSEVIER.slice(0, at) + 'really ' + ELSEVIER.slice(at));
+  um.undo();
+  expect(r.src).toBe(ELSEVIER);
+  r.check();
+});
+
+test('a citation in the acknowledgments opens in the atom window and its rewrite is accepted', () => {
+  const src = `\\begin{acknowledgments}\nThanks to the crews \\cite{a}.\n\\end{acknowledgments}\n`;
+  const r = replica(src);
+  const { out } = rewrite(r, '\\cite{a}', '\\citep{a}');
+  expect(typeof out).toBe('object');
+  expect(r.bridge.applyCommand(out as Command)).toBe('applied');
+  expect(r.src).toBe(src.replace('\\cite{a}', '\\citep{a}'));
+  r.check();
+});

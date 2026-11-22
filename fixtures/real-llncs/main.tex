@@ -1,0 +1,42 @@
+% Synthetic fixture: a Springer LNCS paper.
+\documentclass{llncs}
+\usepackage{amsmath}
+
+\begin{document}
+
+\title{Counting Quiet Cycles in Sparse Graphs}
+\author{Ilse Brandt \and Joao Pires}
+\institute{Example University, Utrecht, The Netherlands\\
+\email{ilse@example.org}}
+
+\maketitle
+
+\begin{abstract}
+We count cycles that never share an edge with a longer cycle. A short
+argument bounds their number and a small program confirms the bound.
+\keywords{graphs \and cycles \and counting}
+\end{abstract}
+
+\section{Introduction}
+Cycles in sparse graphs are well studied \cite{brandt18}. Quiet cycles are
+a new kind and we bound them here.
+
+\section{Bound}
+\begin{claim}
+A graph on $n$ vertices has at most $n$ quiet cycles.
+\end{claim}
+\begin{proof}
+Charge each quiet cycle to its smallest vertex. No vertex is charged twice.
+\end{proof}
+
+\begin{lemma}
+Every quiet cycle has a vertex of degree two.
+\end{lemma}
+
+\subsubsection*{Acknowledgements.}
+We thank the reading group for many careful questions.
+
+\bibliographystyle{splncs04}
+\bibliography{refs}
+
+\end{document}

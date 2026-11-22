@@ -5,12 +5,10 @@
 import {
   coverage,
   decodeFile,
-  DEFAULT_TRANSPARENT,
   type Graph,
   includeGraph,
   parse,
   uncomment,
-  theoremEnvs,
 } from '@paperweave/latex';
 import type pg from 'pg';
 import { type Entry, type Limits, LIMITS, readZip, type Skipped } from './archive.ts';
@@ -223,10 +221,6 @@ export function describeImport(
   );
   const root = candidates[0];
   const graph = includeGraph(texts, root, paths);
-  const transparent = new Set([
-    ...DEFAULT_TRANSPARENT,
-    ...Object.values(texts).flatMap(theoremEnvs),
-  ]);
   const notes: string[] = [
     'A ZIP holds files only. Comments, history and sharing settings from where it came from are not in it.',
   ];
@@ -254,7 +248,7 @@ export function describeImport(
       if (!d.editable) return { path: e.path, readonly: d.reason };
       if (!/\.(tex|ltx)$/i.test(e.path) || !graph.order.includes(e.path)) return { path: e.path };
       if (graph.preamble.includes(e.path)) return { path: e.path, sourceOnly: true };
-      const c = coverage(parse(d.text, transparent));
+      const c = coverage(parse(d.text));
       return { path: e.path, visual: { editable: c.editable, raw: c.raw + c.frozen } };
     })
     .sort((a, b) => a.path.localeCompare(b.path));

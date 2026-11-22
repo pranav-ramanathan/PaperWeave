@@ -214,3 +214,74 @@ test('a paper with a percent-encoded address imports whole, takes typing after i
     else expect(got.equals(f.bytes), f.path).toBe(true);
   }
 });
+
+test('an Elsevier paper imports with its abstract editable, shows the edit to a second person, and builds', async ({
+  browser,
+}) => {
+  test.setTimeout(240_000);
+  const owner = await person(browser, 'elsevier');
+  const viewer = await person(browser, 'elsevier-viewer');
+  const dir = join(import.meta.dirname, '../../fixtures/real-elsevier');
+  const files: { path: string; bytes: Buffer }[] = [];
+  const walk = (d: string) => {
+    for (const f of readdirSync(d).sort()) {
+      const p = join(d, f);
+      if (statSync(p).isDirectory()) walk(p);
+      else files.push({ path: relative(dir, p), bytes: readFileSync(p) });
+    }
+  };
+  walk(dir);
+  const name = `Elsevier ${run}`;
+  const zip = join(mkdtempSync(join(tmpdir(), 'paperweave-e2e-')), `${name}.zip`);
+  writeFileSync(zip, await writeZip(files));
+  await owner.page.goto('/sign-in');
+  await signIn(owner.page, owner.email);
+  await owner.page.getByLabel('Or import a ZIP of a LaTeX project').setInputFiles(zip);
+  await owner.page.getByRole('button', { name: 'Import ZIP' }).click();
+  await expect(owner.page.getByText('Root file: main.tex. Compiler: pdflatex.')).toBeVisible();
+  await expect(owner.page.getByRole('row', { name: 'main.tex' })).toContainText(
+    '% editable visually',
+  );
+
+  // The abstract, inside \begin{frontmatter}, is a paragraph that takes typing.
+  await owner.page.getByRole('link', { name: 'main.tex', exact: true }).click();
+  const visual = '.editor .visual .ProseMirror';
+  await expect(owner.page.locator(`${visual} p`, { hasText: 'River gauges' })).toBeVisible();
+  await selectWord(owner.page, visual, 'recover');
+  await owner.page.keyboard.press('ArrowRight');
+  await owner.page.keyboard.type(' zqword');
+  await typingSaved(owner.page);
+
+  // A second person, let in to the paper, sees the word in the same place.
+  await owner.page.getByRole('link', { name: 'Paper overview' }).click();
+  await owner.page.getByLabel('Their email address').fill(viewer.email);
+  await owner.page.getByLabel('Their role').selectOption('viewer');
+  await owner.page.getByRole('button', { name: 'Send invitation' }).click();
+  await viewer.page.goto(await emailedLink(viewer.email, '/invitations/'));
+  await signIn(viewer.page, viewer.email);
+  await viewer.page.getByRole('button', { name: 'Join this paper' }).click();
+  await viewer.page.getByRole('link', { name: 'main.tex', exact: true }).click();
+  await expect(viewer.page.locator(`${visual} p`, { hasText: 'recover zqword' })).toBeVisible();
+
+  // The build finds nothing wrong with it.
+  await owner.page.getByRole('link', { name: 'main.tex', exact: true }).click();
+  await expect(owner.page.locator('.build').getByRole('status')).toHaveText(
+    'The PDF is up to date.',
+    { timeout: 120_000 },
+  );
+
+  // Downloaded, the paper differs from what came in by that word and nothing else.
+  await owner.page.getByRole('link', { name: 'Paper overview' }).click();
+  const [download] = await Promise.all([
+    owner.page.waitForEvent('download'),
+    owner.page.getByRole('link', { name: 'Download ZIP' }).click(),
+  ]);
+  const back = await readZip(readFileSync(await download.path()));
+  expect(back.entries.map((e) => e.path).sort()).toEqual(files.map((f) => f.path).sort());
+  for (const f of files) {
+    const got = Buffer.from(back.entries.find((e) => e.path === f.path)!.bytes);
+    if (f.path === 'main.tex')
+      expect(got.toString()).toBe(f.bytes.toString().replace('recover', 'recover zqword'));
+    else expect(got.equals(f.bytes), f.path).toBe(true);
+  }
+});
