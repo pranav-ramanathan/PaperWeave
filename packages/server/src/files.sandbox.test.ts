@@ -16,12 +16,17 @@ import {
   pictures,
   proposeFileRename,
   renameFileAndReferences,
+  replaceFile,
   setRootFile,
 } from './files.ts';
 import { exportZip, importZip, listFiles } from './import.ts';
 import { acceptInvitation, createProject, getProject, invite, setRole } from './projects.ts';
 import { listRevisions, renameFile, restoreRevision, saveRevision } from './revisions.ts';
-import { editFile, openFile } from './sync.ts';
+import * as Y from 'yjs';
+import { saveChart, listCharts } from './charts.ts';
+import { approveDataset, datasetProposal, listDatasets } from './data.ts';
+import { currentBytes, editFile, loadUpdates, openFile, TEXT } from './sync.ts';
+import { exportRevision } from './revisions.ts';
 import { TEST_ENV, testDb } from './testing.ts';
 
 const store = blobStore(TEST_ENV);
@@ -849,4 +854,145 @@ test('an archive that has a file and a folder of one name imports the file and r
   // Never both: the paper must be writable to disk.
   expect(listed).toContain('a.tex/b.tex');
   expect(listed).not.toContain('a.tex');
+});
+
+// Replacing a file keeps its ID, so what is tied to the ID (a dataset's description, the charts
+// drawn from it) stays tied.
+const bytesOf = async (fileId: string) =>
+  currentBytes(
+    t.pool,
+    store,
+    (await t.pool.query('select id, digest, eol, bom, head_seq from files where id = $1', [fileId]))
+      .rows[0],
+  );
+const text = (s: string) => Uint8Array.from(Buffer.from(s));
+const REPLACE_WORDS = 'Tick "Replace the file of this name" to put this file in its place.';
+
+test('a file can be replaced by a newer copy, keeping its ID, its dataset and its chart', async () => {
+  const p = await paper();
+  const csv = await createFile(
+    t.pool,
+    store,
+    owner.id,
+    p.id,
+    'results.csv',
+    text('x,y\n1,2\n3,4\n'),
+  );
+  const seen = await datasetProposal(t.pool, store, owner.id, p.id, csv);
+  await approveDataset(t.pool, store, owner.id, p.id, csv, {
+    version: seen.version,
+    columns: [
+      { name: 'x', type: 'number', unit: '' },
+      { name: 'y', type: 'number', unit: '' },
+    ],
+    missing: [],
+    exported: true,
+  });
+  await saveChart(t.pool, store, owner.id, p.id, {
+    name: 'trend',
+    dataset: csv,
+    kind: 'line',
+    x: 'x',
+    y: 'y',
+  });
+  expect((await listDatasets(t.pool, store, owner.id, p.id))[0].changed).toBe(false);
+  // Without the flag, a conflict that says what to do.
+  const clash = await createFile(
+    t.pool,
+    store,
+    owner.id,
+    p.id,
+    'results.csv',
+    text('x,y\n9,9\n'),
+  ).catch((e) => e);
+  expect(clash.code).toBe('conflict');
+  expect(clash.message).toBe(`Another file already has that name. ${REPLACE_WORDS}`);
+
+  const v2 = text('x,y\n1,2\n3,4\n5,6\n');
+  expect(await replaceFile(t.pool, store, owner.id, p.id, 'results.csv', v2)).toBe(csv);
+  expect(Buffer.from(await bytesOf(csv)).toString()).toBe('x,y\n1,2\n3,4\n5,6\n');
+  expect((await paths(p.id)).filter((x) => x === 'results.csv')).toHaveLength(1);
+  const sets = await listDatasets(t.pool, store, owner.id, p.id);
+  expect(sets).toHaveLength(1);
+  expect(sets[0].changed).toBe(true);
+  // Still tied to the file (the worker test draws it and sees it out of date).
+  expect((await listCharts(t.pool, store, owner.id, p.id))[0].dataPath).toBe('results.csv');
+  // The content before is in the revision the replace cut (listed before an export cuts another).
+  const revs = await listRevisions(t.pool, owner.id, p.id);
+  expect((await content(p.id))['results.csv']).toBe('x,y\n1,2\n3,4\n5,6\n');
+  const before = (
+    await readZip((await exportRevision(t.pool, store, owner.id, p.id, revs[0].id)).zip)
+  ).entries.find((e) => e.path === 'results.csv')!;
+  expect(Buffer.from(before.bytes).toString()).toBe('x,y\n1,2\n3,4\n');
+});
+
+test('a picture is replaced under the same ID and the old one stays in a revision', async () => {
+  const p = await paper();
+  const one = Buffer.from([0x89, 0x50, 0x4e, 0x47, 1, 1, 1]);
+  const two = Buffer.from([0x89, 0x50, 0x4e, 0x47, 2, 2, 2, 2]);
+  const fig = await createFile(t.pool, store, owner.id, p.id, 'fig.png', one);
+  const was = (await pictureDigest(t.pool, store, owner.id, p.id, 'fig.png')).digest;
+  expect(await replaceFile(t.pool, store, owner.id, p.id, 'fig.png', two)).toBe(fig);
+  const now = (await pictureDigest(t.pool, store, owner.id, p.id, 'fig.png')).digest;
+  expect(now).not.toBe(was);
+  expect(Buffer.from((await picture(t.pool, store, owner.id, p.id, 'fig.png')).bytes)).toEqual(two);
+  // The revision the replace cut holds the paper as it was.
+  const old = (await listRevisions(t.pool, owner.id, p.id))[0];
+  const out = (
+    await readZip((await exportRevision(t.pool, store, owner.id, p.id, old.id)).zip)
+  ).entries.find((e) => e.path === 'fig.png')!;
+  expect(Buffer.from(out.bytes)).toEqual(one);
+});
+
+test('only someone who may write can replace a file, and a folder or an unreadable text is refused', async () => {
+  const p = await paper();
+  expect(await code(replaceFile(t.pool, store, viewer.id, p.id, 'intro.tex', text('x\n')))).toBe(
+    'permission_denied',
+  );
+  expect(await code(replaceFile(t.pool, store, outsider.id, p.id, 'intro.tex', text('x\n')))).toBe(
+    'not_found',
+  );
+  await createFile(t.pool, store, owner.id, p.id, 'sub/a.tex', text('A\n'));
+  expect(await code(replaceFile(t.pool, store, owner.id, p.id, 'sub', text('x\n')))).toBe(
+    'invalid_input',
+  );
+  // Text that people edit is not turned into a read-only file by bytes that are not text.
+  expect(
+    await code(
+      replaceFile(
+        t.pool,
+        store,
+        owner.id,
+        p.id,
+        'intro.tex',
+        Uint8Array.from([0xff, 0xfe, 0, 0x80, 0x81]),
+      ),
+    ),
+  ).toBe('invalid_input');
+  expect(Buffer.from(await bytesOf(p.intro)).toString()).toBe('Intro text.\n');
+  // A path with no file is added.
+  const added = await replaceFile(t.pool, store, owner.id, p.id, 'new.tex', text('N\n'));
+  expect(await paths(p.id)).toContain('new.tex');
+  expect(added).toBeTruthy();
+});
+
+test('text with other line endings replaces text, and connected editors see it', async () => {
+  const p = await paper();
+  const csv = await createFile(t.pool, store, owner.id, p.id, 'rows.csv', text('a,b\n1,2\n'));
+  // Opened by an editor, which holds its own copy of the document.
+  const theirs = new Y.Doc();
+  for (const u of await loadUpdates(t.pool, store, csv)) Y.applyUpdate(theirs, u);
+  expect(theirs.getText(TEXT).toString()).toBe('a,b\n1,2\n');
+  await replaceFile(t.pool, store, owner.id, p.id, 'rows.csv', text('a,b\r\n1,2\r\n3,4\r\n'));
+  const row = (
+    await t.pool.query('select eol, bom, readonly_reason from files where id = $1', [csv])
+  ).rows[0];
+  expect(row).toMatchObject({ eol: 'crlf', bom: false, readonly_reason: null });
+  expect(Buffer.from(await bytesOf(csv)).toString()).toBe('a,b\r\n1,2\r\n3,4\r\n');
+  for (const u of await loadUpdates(t.pool, store, csv)) Y.applyUpdate(theirs, u);
+  expect(theirs.getText(TEXT).toString()).toBe('a,b\n1,2\n3,4\n');
+  // Typed on top, then replaced again: the exported file is the latest.
+  await editFile(t.pool, store, csv, owner.id, (tx) => tx.insert(0, '#'));
+  await replaceFile(t.pool, store, owner.id, p.id, 'rows.csv', text('z\n'));
+  expect((await content(p.id))['rows.csv']).toBe('z\n');
 });

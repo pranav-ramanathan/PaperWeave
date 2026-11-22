@@ -8,7 +8,7 @@ import { authorize } from './authz.ts';
 import type { BlobStore } from './blobs.ts';
 import type { Db } from './db.ts';
 import { AppError } from './errors.ts';
-import { createFile } from './files.ts';
+import { createFile, replaceFile } from './files.ts';
 import { importZip } from './import.ts';
 import { id } from './projects.ts';
 
@@ -93,11 +93,14 @@ export async function addUploaded(
   key: string,
   path: unknown,
   limits: Limits = LIMITS,
+  replace = false,
 ): Promise<string> {
   // Before anything is read, and before the upload is touched: someone with no right to the
   // paper removes nothing.
   await authorize(db, userId, id(projectId), 'file.write');
   return takeUpload(store, userId, key, limits.fileBytes, FILE_TOO_LARGE, (bytes) =>
-    createFile(db, store, userId, projectId, path, bytes, limits),
+    replace
+      ? replaceFile(db as pg.Pool, store, userId, projectId, path, bytes, limits)
+      : createFile(db, store, userId, projectId, path, bytes, limits),
   );
 }

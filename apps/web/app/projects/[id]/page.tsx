@@ -74,6 +74,7 @@ async function Project({
     restored?: string;
     building?: string;
     added?: string;
+    replaced?: string;
     deleted?: string;
     in?: string;
     root?: string;
@@ -178,8 +179,19 @@ async function Project({
     (e) => allEntries || e.cited || checks.lookups[e.key] || checks.evidence[e.key]?.length,
   );
   const unlisted = oneOfEach.length - listedEntries.length;
-  const { error, invited, saved, revision, restored, building, added, deleted, root, compiler } =
-    query;
+  const {
+    error,
+    invited,
+    saved,
+    revision,
+    restored,
+    building,
+    added,
+    replaced,
+    deleted,
+    root,
+    compiler,
+  } = query;
   const canWrite = can(project.role, 'file.write');
   const owner = project.role === 'owner';
   const showLabels = labels.labels.length > 0 || labels.undefined.length > 0;
@@ -218,7 +230,7 @@ async function Project({
       {error && <Result alert>{error}</Result>}
       {added && (
         <Result>
-          Added <code>{added}</code>.
+          {replaced ? 'Replaced' : 'Added'} <code>{added}</code>.
         </Result>
       )}
       {deleted && (
@@ -427,6 +439,9 @@ async function Project({
           <label>
             A file to upload. Leave empty to start a blank text file.
             <input type="file" name="file" />
+          </label>
+          <label>
+            <input type="checkbox" name="replace" /> Replace the file of this name
           </label>
           <Once>Add file</Once>
         </DirectUpload>

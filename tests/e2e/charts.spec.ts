@@ -200,3 +200,69 @@ test('a chart is drawn from approved data and is out of date once the data chang
   await expect(page.locator('main [role=alert]')).toHaveCount(0);
   await expect(picture).toBeVisible();
 });
+
+test('a data file uploaded again with the box ticked keeps its chart, which is out of date until redrawn', async ({
+  browser,
+}) => {
+  const { page, email } = await person(browser, 'chart-replacer');
+  const dir = mkdtempSync(join(tmpdir(), 'paperweave-e2e-'));
+  const zip = join(dir, `Replace ${run}.zip`);
+  writeFileSync(
+    zip,
+    await writeZip([
+      { path: 'main.tex', bytes: Buffer.from(MAIN) },
+      { path: 'data/latency.csv', bytes: Buffer.from(CSV) },
+    ]),
+  );
+  const newer = join(dir, 'latency.csv');
+  writeFileSync(newer, CSV + '2024-03-05,44,Field\n');
+  await page.goto('/sign-in');
+  await signIn(page, email);
+  await page.getByLabel('Or import a ZIP of a LaTeX project').setInputFiles(zip);
+  await page.getByRole('button', { name: 'Import ZIP' }).click();
+  await expect(page.getByRole('heading', { name: 'Data' })).toBeVisible();
+  const paper = page.url();
+  const data = page.getByRole('listitem').filter({ hasText: 'data/latency.csv:' });
+  await data.getByRole('link', { name: 'Describe it' }).click();
+  await page.getByRole('button', { name: 'Approve this description' }).click();
+  await data.getByRole('link', { name: 'New chart from data/latency.csv' }).click();
+  await page.getByLabel('Name', { exact: true }).fill('latency');
+  await page.getByRole('combobox', { name: 'Kind', exact: true }).selectOption('line');
+  await page.getByRole('combobox', { name: 'Along the bottom', exact: true }).selectOption('day');
+  await page.getByLabel('Where a line has no value').selectOption('join');
+  await page.getByRole('button', { name: 'Draw the chart' }).click();
+  const picture = page.getByRole('img', { name: 'Line chart of latency (ms) against day.' });
+  await expect(picture).toBeVisible({ timeout: 30_000 });
+  const chart = page.url();
+
+  // Uploaded again under the same name: refused, with the way round it.
+  await page.goto(paper);
+  await page.getByLabel('Name, with folders if you like').fill('data/latency.csv');
+  await page.getByLabel(/^A file to upload/).setInputFiles(newer);
+  await page.getByRole('button', { name: 'Add file' }).click();
+  await expect(page.locator('main [role=alert]')).toContainText(
+    'Tick "Replace the file of this name" to put this file in its place.',
+  );
+
+  // With the box ticked it takes the old file's place, and the chart is still there.
+  await page.getByLabel('Name, with folders if you like').fill('data/latency.csv');
+  await page.getByLabel(/^A file to upload/).setInputFiles(newer);
+  await page.getByLabel('Replace the file of this name').check();
+  await page.getByRole('button', { name: 'Add file' }).click();
+  await expect(page.getByRole('status')).toContainText('Replaced data/latency.csv');
+  const listed = page.getByRole('listitem').filter({ hasText: 'Line chart of latency' });
+  await expect(listed).toContainText('Out of date: its data has changed since it was drawn.');
+  await expect(data).toContainText('Look at it again');
+  await page.goto(chart);
+  await expect(page.getByRole('status')).toContainText('Out of date.');
+  await audit(page, 'a chart whose data file was replaced');
+  await page.getByRole('link', { name: 'Look at the data again' }).click();
+  await page.getByRole('button', { name: 'Approve this description' }).click();
+  await expect(page.getByRole('status')).toHaveText('Description approved.');
+  await page.goto(chart);
+  await page.getByRole('button', { name: 'Draw it again' }).click();
+  await expect(page.locator('main')).not.toContainText('Out of date.', { timeout: 30_000 });
+  await expect(page.getByText('Waiting to be drawn…')).toHaveCount(0, { timeout: 30_000 });
+  await expect(page.locator('main [role=alert]')).toHaveCount(0);
+  await expect(picture).toBeVisible();
+});

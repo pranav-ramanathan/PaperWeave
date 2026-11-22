@@ -94,7 +94,9 @@ test('a paper is started from nothing, and a deleted file comes back by restorin
   await expect(page.locator('p[role=alert]')).toContainText('That name cannot be used');
   await page.getByLabel('Name, with folders if you like').fill('paper.tex');
   await page.getByRole('button', { name: 'Add file' }).click();
-  await expect(page.locator('p[role=alert]')).toHaveText('Another file already has that name.');
+  await expect(page.locator('p[role=alert]')).toHaveText(
+    'Another file already has that name. Tick "Replace the file of this name" to put this file in its place.',
+  );
 
   // Write the paper, and it builds with the uploaded file included.
   await page.getByRole('link', { name: 'paper.tex' }).click();

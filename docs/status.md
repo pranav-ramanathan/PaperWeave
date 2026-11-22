@@ -1358,6 +1358,33 @@ Two things about tests, found on the way and not about the product:
   "Your text was not put in:" and gives the text back (`tables.spec`).
 - **Also right:** someone made a viewer while writing a comment. Tried once with a probe: the form stayed with its words, and sending it said "A viewer cannot do that."
 
+## A file that could not be replaced by a newer copy
+
+- **What was wrong.** Uploading `results.csv` again said "Another file already has that name."
+  The only way round was to delete the file and upload it again, which makes a new file ID. The
+  dataset's description and every chart are tied to the old ID, so the chart was dead for good
+  (no data path, no described dataset, redraw `not_found`, and its name could not be used again).
+  The same for a regenerated figure or a re-exported `refs.bib`.
+- **Now** an upload can carry "Replace the file of this name" (a checkbox on the upload form,
+  `replace` in the post and for a file sent by way of the store). `replaceFile` in `files.ts`
+  puts the new bytes in the place of the file at that path and keeps its ID. The paper is cut as
+  a revision first, in the same transaction, so the old content is always kept. Text that has
+  been opened is changed by the same edits a restore makes, through the edit lock, so connected
+  editors see it at once; its newline style and byte order mark are taken from the upload. Other
+  files (pictures, PDFs, text never opened) get the new digest, size and kind, and the paper's
+  manifest version moves on. A path with no file is added as a new one; a folder at the path, a
+  reviewer's or viewer's upload, and editable text replaced by bytes that are not text (which
+  would silently make it read-only) are refused. The clash message now says how to replace.
+- **What follows.** The dataset says it has changed since it was looked at, and the chart says
+  "Out of date: its data has changed"; looking at the data again and drawing the chart again
+  gives a fresh chart from the new file.
+- **Held by** service tests (`files.sandbox.test`, `charts.sandbox.test` in the workers) and a
+  browser test in `charts.spec`.
+- **Risks.** Someone typing while a file is replaced is merged in as they would be by a restore:
+  their words in untouched lines stay, in changed lines they are lost to the new text (they are
+  in the revision). A paper already stranded is not repaired: restoring the revision from before
+  the delete brings the old file, and its ID, back.
+
 ## A file that said "0 B"
 
 - **What was wrong.** The paper's page lists each file with its size, and the size was the
