@@ -219,12 +219,17 @@ export class Bridge {
     const src = this.model.parsed.src;
     if (!e || inPair(src, x.base + e.from) || inPair(src, x.base + e.to)) return null;
     const rel = (i: number) => Y.createRelativePositionFromTypeIndex(this.ytext, x.base + i);
+    // Taking a mark off puts bare words where a command was: keep them out of a command name
+    // before them and keep the space after one (a wrap starts with \ and ends with }, so it is unchanged).
+    const at = x.base + e.from;
+    const lead = guard(src.slice(0, at), e.insert);
+    const trail = guard(src.slice(0, at) + lead + e.insert, src[x.base + e.to] ?? '');
     return {
       key: crypto.randomUUID(),
       from: rel(e.from),
       to: rel(e.to),
       expected: x.text.slice(e.from, e.to),
-      replacement: e.insert,
+      replacement: lead + e.insert + trail,
     };
   }
 

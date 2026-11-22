@@ -152,7 +152,8 @@ export function guard(tail: string, next: string) {
   // Anything placed after a comment on the same line would become part of the comment.
   const line = tail.slice(tail.lastIndexOf('\n') + 1);
   if (c && c !== '\n' && commentOpen(line)) return '\n';
-  // A letter after a command name would extend the name; * or [ would become its argument.
+  // A letter after a command name would extend the name; * or [ would become its argument; a
+  // space or tab would be swallowed (a line break is not, so it is left alone).
   tail = tail.slice(-64);
   // LaTeX looks past spaces and one line break (not a blank line) for a [ or a star.
   if (c === '[' || c === '*') {
@@ -161,6 +162,7 @@ export function guard(tail: string, next: string) {
   }
   const word = AFTER_WORD.test(tail);
   if (word && /[A-Za-z]/.test(c)) return '{}';
+  if (word && (c === ' ' || c === '\t')) return '{}';
   if ((word || AFTER_BREAK.test(tail)) && (c === '*' || c === '[')) return '{}';
   return '';
 }

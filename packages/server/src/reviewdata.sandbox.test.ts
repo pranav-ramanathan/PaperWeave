@@ -791,3 +791,88 @@ test('typing between the cut and the review read does not unplace the review', a
   for (const u of await loadUpdates(t.pool, store, p.file)) Y.applyUpdate(live, u);
   expect(live.getText(TEXT).toString()).toContain('A later run was fast.');
 });
+
+// ---- A comment on a passage longer than the quote keeps all of it. ----
+
+/** One paragraph of 700 characters of numbered sentences, with MARKER past the 500th. */
+const LONG = (() => {
+  let s = '';
+  for (let n = 1; s.length < 600; n++) s += `Sentence ${n} makes claim ${n}. `;
+  s += 'MARKER ';
+  for (let n = 90; s.length < 699; n++) s += `Then ${n} ends. `;
+  return s.slice(0, 699) + '.';
+})();
+async function longPaper() {
+  const main = MAIN.replace('Nothing else is claimed.', LONG);
+  const zip = await writeZip([{ path: 'main.tex', bytes: Buffer.from(main) }]);
+  const [project] = await importZip(t.pool, store, users.owner.id, zip, 'Long');
+  const [{ id: file }] = await listFiles(t.pool, users.owner.id, project.id);
+  await startThread(t.pool, store, users.owner.id, project.id, file, {
+    ...(await ends(file, LONG)),
+    body: 'Too much here.',
+  });
+  await startThread(t.pool, store, users.owner.id, project.id, file, {
+    ...(await ends(file, 'below 40 ms')),
+    body: 'Short.',
+  });
+  return { id: project.id, file, main };
+}
+
+test('a thread on a long passage arrives on all of it', async () => {
+  const p = await longPaper();
+  expect(LONG).toHaveLength(700);
+  const { id, report } = await trip(p.id);
+  expect(report.review).toMatchObject({ threads: 2, detached: 0 });
+  const [{ id: file }] = await listFiles(t.pool, users.importer.id, id);
+  const th = (await listThreads(t.pool, store, users.importer.id, id)).find(
+    (x) => x.comments[0].body === 'Too much here.',
+  )!;
+  expect([th.state, th.now]).toEqual(['attached', LONG.slice(0, 500)]);
+  const doc = new Y.Doc();
+  for (const u of await loadUpdates(t.pool, store, file)) Y.applyUpdate(doc, u);
+  const at = (b64: string) =>
+    Y.createAbsolutePositionFromRelativePosition(
+      Y.decodeRelativePosition(Buffer.from(b64, 'base64')),
+      doc,
+    )!.index;
+  expect(at(th.to) - at(th.from)).toBe(LONG.length);
+  await replaceIn(file, 'MARKER', 'CHANGED', users.importer.id);
+  const after = (await listThreads(t.pool, store, users.importer.id, id)).find(
+    (x) => x.comments[0].body === 'Too much here.',
+  )!;
+  expect(after.state).toBe('changed');
+});
+
+test('a long thread whose tail no longer matches falls back to its quote', async () => {
+  // Guard: this passes before the fix too, since the old import used the quote alone.
+  const p = await longPaper();
+  const packed = await readZip(
+    await exportZip(t.pool, store, users.owner.id, p.id, { review: true }),
+  );
+  const edited = p.main.replace('MARKER', 'ALTERED');
+  expect(edited).not.toBe(p.main);
+  const zip = await writeZip([
+    { path: 'main.tex', bytes: Buffer.from(edited) },
+    { path: REVIEW_FILE, bytes: packed.review[0].bytes },
+  ]);
+  const [made] = await importZip(t.pool, store, users.importer.id, zip, 'Tail');
+  expect((await importReport(t.pool, users.importer.id, made.id))!.review).toMatchObject({
+    threads: 2,
+    detached: 0,
+  });
+  const th = (await listThreads(t.pool, store, users.importer.id, made.id)).find(
+    (x) => x.comments[0].body === 'Too much here.',
+  )!;
+  expect([th.state, th.now]).toEqual(['attached', LONG.slice(0, 500)]);
+});
+
+test('a review file says how long a long passage is, and only then', async () => {
+  const p = await longPaper();
+  const out = await exportReview(t.pool, store, users.owner.id, p.id);
+  const long = out.threads.find((x) => x.comments[0].body === 'Too much here.')!;
+  const short = out.threads.find((x) => x.comments[0].body === 'Short.')!;
+  expect(long.quote).toHaveLength(500);
+  expect(long.length).toBe(700);
+  expect(long.hash).toMatch(/^[0-9a-f]{64}$/);
+  expect('length' in short || 'hash' in short).toBe(false);
+});

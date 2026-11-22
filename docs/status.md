@@ -2166,8 +2166,8 @@ update` held the paper's file rows for **189.6 s** (until the proxy was cut; it 
 - **Held by** service tests (`reviewdata.sandbox.test`, `import.sandbox.test`,
   `critique.sandbox.test`), each failed on the old code, and one that a file exported before this
   still comes in whole.
-- **Not changed:** a thread on more than 500
-  characters comes back on its first 500. The compiler is the one the importer read from the
+- **Not changed:** (a thread on more than 500
+  characters now comes back whole; see the last section). The compiler is the one the importer read from the
   files, which the root may not decide. A review file at the top of an archive of several papers
   is given to none. There is no limit on how many comments a thread may have, and sign-in takes
   an address longer than the 320 characters an export keeps. No browser test makes the round
@@ -4329,6 +4329,10 @@ One more, found since:
 - A `[` or `*` typed in the visual view where LaTeX looks past a space or one line break for an
   argument (start of an `\item`, of a body after `\begin{...}`, after `\\`) is written as `{}[`.
   Not covered: a comment line between the command and the `[`.
+- A space or tab that lands right after a command name (typed, left by a deletion, or pasted) is
+  written as `{}` plus the space, because LaTeX drops a space after a command name; so is the
+  bare text left when bold or emphasis is taken off right after a command name
+  (`\noindent\textbf{Setup.}` becomes `\noindent{}Setup.`).
 
 ## File names LaTeX cannot spell
 
@@ -4659,3 +4663,35 @@ Found by a three-person walkthrough.
 - **Held by** `projects.sandbox.test.ts` and a Playwright test in `projects.spec.ts`.
 - **Not done.** The invitation page's "already on this paper" answer is now only a defence for
   old links, and has no browser test.
+
+## Visual edits no longer glue words onto a command name
+
+- **What was wrong.** Taking bold or emphasis off wrote the words straight onto the command before
+  them (`\noindent\textbf{Setup.}` became `\noindentSetup.`, which does not build; `\item\textbf{Speed}`
+  broke the list). A space typed, pasted or exposed by a deletion right after a command name
+  (`\sys. It` with " today" typed) was shown in the visual view but dropped by LaTeX (`Systoday.`).
+- **Now** `guard()` puts `{}` between a command name and a following space or tab, and
+  `markCommand` guards both sides of the replacement as pasted text is. A wrap's bytes do not change.
+- **Held by** unit tests in `bridge.test.ts` and a build test in `compile.sandbox.test.ts`.
+- **Not done.** Source that already reads `\sys is` or `\sys` followed by a line break is still
+  shown with a space LaTeX drops; a line break exposed after a command by a deletion gets no `{}`;
+  putting bold back on leaves the `{}` (`\noindent{}\textbf{Setup.}`); source-view paste and
+  grammar replacements are unguarded as before.
+
+## A comment on a long passage keeps all of it through export and import
+
+- **What was wrong.** A review file keeps at most 500 characters of the words a thread is on, so
+  an imported thread on a longer passage was attached to only the first 500. Editing the rest
+  never marked it "Changed since".
+- **Now** the review file's thread has optional `length` and `hash` (of the whole passage),
+  written only when the passage is longer than the quote. On import, if the text at the found
+  place still hashes to it, the thread is attached on the whole passage and its fingerprint is
+  that hash. Otherwise, and for files without them, it is placed on the quote as before. The
+  quote, `before` and `after` are unchanged, so older files and the placing of quotes are not
+  affected.
+- **Held by** three service tests in `reviewdata.sandbox.test.ts`: a long thread arrives on all
+  700 characters and reads "changed" when the tail is edited; the file carries `length` and
+  `hash` for the long thread and not the short one; and a tail that differs on arrival falls
+  back to the quote (a guard that also passed on the old code).
+- **Not done.** A long thread whose text beyond the first 500 differs on arrival is placed on
+  its first 500 without a report line. The comment panel still shows only the first 500.
