@@ -21,6 +21,17 @@ Where this stands, what holds it there, and what nobody has checked yet.
   editor in both views with a spelling finding, a thread, a proposed change and the PDF showing,
   a comment being changed and the question before one is deleted (`threads.spec`),
   and the page for an address that leads nowhere. No failures.
+- **Two more states of the audit** (`numbers.spec`, `charts.spec`, `submit.spec`): a reference
+  whose number is behind the text, a chart waiting to be drawn, and the checks while a build
+  runs. They failed before: the stale reference was faded with `opacity: 0.65` (about 2.9:1,
+  WCAG 1.4.3); it is now in the muted colour (italic and its title stay as the cue that is not
+  colour). The two waiting pages reloaded themselves with `<meta http-equiv="refresh">` every
+  2 seconds (WCAG 2.2.1, axe `meta-refresh`), which starts a screen reader from the top and
+  drops the keyboard's place. `Again` (`apps/web/app/Again.tsx`) asks for the page again with
+  `router.refresh()` instead; the tests check that no such `<meta>` is there and that a focused
+  link is still focused after 2.5 seconds. No `<noscript>` refresh is kept: with scripts off
+  the page says to load it again.
+
 - **The same audit on pages the first one did not visit**, run from the tests that already go
   there: the differences between two revisions, the lines a file rename or a label rename
   would change, an invitation and one that is no longer valid, a chart whose files have gone,

@@ -61,6 +61,16 @@ test('a chart is drawn from approved data and is out of date once the data chang
   await page.getByRole('combobox', { name: 'Along the bottom', exact: true }).selectOption('day');
   await page.getByLabel('Where a line has no value').selectOption('join');
   await page.getByRole('button', { name: 'Draw the chart' }).click();
+  // While it waits, the page is not reloaded by a <meta> (which restarts a screen reader and
+  // drops the keyboard); it looks again by itself and the keyboard stays where it was.
+  await expect(page.getByText('Waiting to be drawn…')).toBeVisible();
+  // Counted at once: toHaveCount(0) would wait for the meta to go, and it goes when the work is done.
+  expect(await page.locator('meta[http-equiv="refresh"]').count()).toBe(0);
+  await audit(page, 'a chart waiting to be drawn');
+  const back = page.getByRole('link', { name: 'Back to the paper' });
+  await back.focus();
+  await page.waitForTimeout(2_500);
+  await expect(back).toBeFocused();
   // The page looks again by itself until the worker has drawn it.
   const picture = page.getByRole('img', { name: 'Line chart of latency (ms) against day.' });
   await expect(picture).toBeVisible({ timeout: 30_000 });

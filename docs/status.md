@@ -4279,3 +4279,20 @@ scanning`, `Illegal parameter number`), and they cannot be quoted, so the name i
   picture it cannot build with until it is renamed (the Figure tool and the rename form now
   tell the person). `CMD` in `packages/latex/src/graph.ts` still uses `[^{}]*`, which is right
   now that such names are not made here.
+
+## Waiting pages without a reload, and stale references you can read
+
+- **Found by** the accessibility audit run on two more states. A reference whose number is behind
+  the text was faded with `opacity: 0.65` (about 2.9:1, `color-contrast`). The checks before
+  submitting (while a build runs) and a chart waiting to be drawn had a `<meta
+http-equiv="refresh" content="2">`: a reload every 2 seconds that restarts a screen reader and
+  loses the keyboard's place (WCAG 2.2.1).
+- **Now** `.pw-stale.pw-ref` and `.pw-stale .katex-tag` use `var(--muted)` (italic kept) in
+  `globals.css`. `Again` (`apps/web/app/Again.tsx`) calls `router.refresh()` every 2 seconds
+  while it is drawn and the browser is online; the server stops drawing it when the build is
+  done or the chart has waited two minutes (`stuck`). `router.refresh` does not load the
+  document again, so the page's nonce is not re-issued (see `lib/nonce.ts`).
+- **Held by** `numbers.spec` (audit), `charts.spec` and `submit.spec` (no refresh `<meta>`,
+  audit, focus kept across a tick, the result still appears).
+- **Not done:** no `<noscript>` refresh; without scripts these pages no longer update by
+  themselves (the pages need scripts for most else).

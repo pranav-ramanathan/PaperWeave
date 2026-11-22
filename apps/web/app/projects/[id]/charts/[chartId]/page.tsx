@@ -1,4 +1,5 @@
 import { AppError, can, chartDraws, listDatasets } from '@paperweave/server';
+import Again from '../../../../Again';
 import Result from '../../../../Result';
 import Link from '../../../../Go';
 import Once from '../../../../Once';
@@ -70,7 +71,7 @@ export default async function ChartPage({
   return (
     <main className="page">
       {/* Until it is drawn, look again every two seconds: but not for ever. */}
-      {chart?.status === 'queued' && !stuck && <meta httpEquiv="refresh" content="2" />}
+      {chart?.status === 'queued' && !stuck && <Again />}
       <header className="bar">
         <h1>{chart ? `Chart ${chart.name}` : 'New chart'}</h1>
         {back}

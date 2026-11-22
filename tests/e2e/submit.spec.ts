@@ -6,7 +6,16 @@ import { mkdtempSync, readFileSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { readZip, writeZip } from '../../packages/server/src/archive';
-import { caretLine, clickAfter, person, run, showSource, signIn, typingSaved } from './helpers';
+import {
+  audit,
+  caretLine,
+  clickAfter,
+  person,
+  run,
+  showSource,
+  signIn,
+  typingSaved,
+} from './helpers';
 
 const MAIN = [
   '\\documentclass{article}',
@@ -59,7 +68,20 @@ test('a paper is checked before submitting, put right, and downloaded as one rev
   const again = page.getByRole('button', { name: 'Build the paper and check again' });
   // The editor may have asked for a build already; then there is nothing to press yet.
   await expect(again.or(ready).first()).toBeVisible({ timeout: 60_000 });
-  if (!(await ready.isVisible())) await again.click();
+  if (!(await ready.isVisible())) {
+    await again.click();
+    // While it builds the page looks again by itself, not by a <meta> reload, which would
+    // restart a screen reader and drop the keyboard.
+    const building = page.getByText('The paper is being built');
+    await expect(building).toBeVisible();
+    // Counted at once: toHaveCount(0) would wait for the meta to go, and it goes when done.
+    expect(await page.locator('meta[http-equiv="refresh"]').count()).toBe(0);
+    await audit(page, 'the checks while a build runs');
+    const back = page.getByRole('link', { name: 'Back to the paper' });
+    await back.focus();
+    await page.waitForTimeout(2_500);
+    await expect(back).toBeFocused();
+  }
   await expect(ready).toBeVisible({ timeout: 90_000 });
   await expect(page.getByRole('heading', { name: 'To put right' })).toHaveCount(0);
 

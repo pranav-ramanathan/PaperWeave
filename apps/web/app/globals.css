@@ -157,7 +157,7 @@ span.pw-math:not(.pw-raw) {
 .pw-stale.pw-ref,
 .pw-stale .katex-tag {
   font-style: italic;
-  opacity: 0.65;
+  color: var(--muted);
 }
 .pw-unknown {
   color: var(--warn);
