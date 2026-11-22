@@ -33,9 +33,18 @@ const selected = (page: Page) => page.evaluate(() => getSelection()!.toString())
 /**
  * Select a word in an editor. The selection is made on the word's own text, not by clicking
  * where it was last drawn: the page lays itself out again as status lines and previews arrive,
- * and a click aimed at old coordinates can land on something else.
+ * and a click aimed at old coordinates can land on something else. It is made again until it
+ * holds: another person's caret arriving redraws the editor, and a redraw between setting the
+ * selection and the editor reading it puts the editor's earlier selection back.
  */
 async function pick(page: Page, within: string, word: string) {
+  await expect(async () => {
+    await choose(page, within, word);
+    expect(await selected(page)).toBe(word);
+  }).toPass({ timeout: 10_000 });
+  await expect(page.locator(within)).toBeFocused();
+}
+async function choose(page: Page, within: string, word: string) {
   const found = await page.evaluate(
     ([sel, w]) => {
       const host = document.querySelector<HTMLElement>(sel)!;
@@ -56,8 +65,8 @@ async function pick(page: Page, within: string, word: string) {
     [within, word] as const,
   );
   if (!found) throw new Error(`"${word}" is not shown in ${within}`);
-  await expect(page.locator(within)).toBeFocused();
-  await expect.poll(() => selected(page)).toBe(word);
+  // Let the editor read the selection before it is checked.
+  await page.evaluate(() => new Promise((r) => requestAnimationFrame(() => setTimeout(r, 50))));
 }
 /** Type just after a word. */
 async function typeAfter(page: Page, within: string, word: string, text: string) {
