@@ -406,7 +406,7 @@ test('one address is sent a burst of sign-in links, then is spaced, whoever asks
   // Three people, each asking a few times for a link to be sent to someone else. None of them
   // asks often enough to be stopped for that; together they pass what one address is sent in a
   // burst (three), and the rest are told a link was sent a few minutes ago.
-  const inbox = address('inbox');
+  const inbox = address(`inbox-${test.info().repeatEachIndex}`);
   let sent = 0;
   let refused = 0;
   for (const who of ['asks-a', 'asks-b', 'asks-c']) {
