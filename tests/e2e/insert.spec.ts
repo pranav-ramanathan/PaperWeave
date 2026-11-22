@@ -600,3 +600,151 @@ test('a list is started from the toolbar, the keyboard and the menu, and left wi
   await expect(page.locator(`${VISUAL} ol li`)).toHaveCount(1);
   await audit(page, 'the file page with the list buttons and a refusal');
 });
+
+test('an equation, a heading, a list and a figure are removed from the visual view, and undo brings them back', async ({
+  browser,
+}) => {
+  test.setTimeout(240_000);
+  const owner = await person(browser, 'remove-owner');
+  const other = await person(browser, 'remove-editor');
+  const reviewer = await person(browser, 'remove-reviewer');
+  const main =
+    '\\documentclass{article}\n\\begin{document}\nHello world here.\n\nSecond paragraph.\n\n' +
+    '\\begin{figure}\n\\caption{Cap}\n\\end{figure}\n\\end{document}\n';
+  const zip = join(mkdtempSync(join(tmpdir(), 'paperweave-e2e-')), `Remove ${run}.zip`);
+  writeFileSync(zip, await writeZip([{ path: 'main.tex', bytes: Buffer.from(main) }]));
+  const { page } = owner;
+  await page.goto('/sign-in');
+  await signIn(page, owner.email);
+  await page.getByLabel('Or import a ZIP of a LaTeX project').setInputFiles(zip);
+  await page.getByRole('button', { name: 'Import ZIP' }).click();
+  for (const [who, role] of [
+    [other, 'editor'],
+    [reviewer, 'reviewer'],
+  ] as const) {
+    await page.getByLabel('Their email address').fill(who.email);
+    await page.getByLabel('Their role').selectOption(role);
+    await page.getByRole('button', { name: 'Send invitation' }).click();
+    await expect(page.getByRole('status')).toContainText(who.email);
+    await who.page.goto(await emailedLink(who.email, '/invitations/'));
+    await signIn(who.page, who.email);
+    await who.page.getByRole('button', { name: 'Join this paper' }).click();
+    await expect(
+      who.page.getByText(`You are ${role === 'editor' ? 'an' : 'a'} ${role}`),
+    ).toBeVisible();
+  }
+  await page.getByRole('link', { name: 'main.tex' }).first().click();
+  const status = page.getByRole('region', { name: /^Editor for/ }).getByRole('status');
+  await expect(status).toHaveText('All edits saved.');
+  await expect(page).toHaveURL(/\/files\//);
+  await other.page.goto(page.url());
+  await expect(other.page.locator(VISUAL)).toContainText('Hello world here.');
+
+  /** The source, every byte of it. */
+  const bytes = async () => {
+    await showSource(page);
+    const all = await page.locator('.editor .cm-line').allTextContents();
+    await page.getByRole('group', { name: 'View' }).getByRole('button', { name: 'Visual' }).click();
+    return all.join('\n');
+  };
+  expect(await bytes()).toBe(main);
+  const theirs = (what: string) => other.page.locator(`${VISUAL} ${what}`);
+
+  // An equation: put in at the end of a paragraph, selected with the arrow keys, deleted.
+  await clickAfter(page, VISUAL, 'here.');
+  await page.keyboard.press('End');
+  await page.keyboard.press('Alt+=');
+  const box = page.getByRole('dialog', { name: 'Insert an equation' });
+  await box.getByLabel('On a line of its own, numbered').check();
+  await box.getByLabel('LaTeX').fill('a = 1');
+  await box.getByRole('button', { name: 'Insert' }).click();
+  await expect(box).toBeHidden();
+  await expect(page.locator(`${VISUAL} div.pw-math .katex`)).toBeVisible();
+  await expect(status).toHaveText('All edits saved.');
+  await expect(theirs('div.pw-math')).toHaveCount(1);
+  const withEquation = await bytes();
+  expect(withEquation).toContain('\\begin{equation}');
+  await page.keyboard.press('ArrowLeft');
+  await expect(page.locator(`${VISUAL} .ProseMirror-selectednode`)).toHaveCount(1);
+  await page.keyboard.press('Delete');
+  await expect(page.locator(`${VISUAL} div.pw-math`)).toHaveCount(0);
+  await expect(status).toHaveText('All edits saved.');
+  expect(await bytes()).toBe(main);
+  await expect(theirs('div.pw-math')).toHaveCount(0);
+  await page.keyboard.press('ControlOrMeta+z');
+  await expect(page.locator(`${VISUAL} div.pw-math`)).toHaveCount(1);
+  await expect(status).toHaveText('All edits saved.');
+  expect(await bytes()).toBe(withEquation);
+  await expect(theirs('div.pw-math')).toHaveCount(1);
+  await page.keyboard.press('ControlOrMeta+z');
+  await expect(page.locator(`${VISUAL} div.pw-math`)).toHaveCount(0);
+  await expect(status).toHaveText('All edits saved.');
+  expect(await bytes()).toBe(main);
+
+  // A heading: its title is cleared, and Backspace in the empty heading removes it.
+  await clickAfter(page, VISUAL, 'here.');
+  await page.keyboard.press('End');
+  await page.keyboard.press('Alt+h');
+  const heading = page.getByRole('dialog', { name: 'Insert a heading' });
+  await heading.getByLabel('Title').fill('Temp');
+  await page.keyboard.press('Enter');
+  await expect(heading).toBeHidden();
+  const h2 = page.locator(`${VISUAL} h2`);
+  await expect(h2).toHaveText('Temp');
+  await expect(theirs('h2')).toHaveText('Temp');
+  await h2.click();
+  await page.keyboard.press('End');
+  for (let i = 0; i < 4; i++) await page.keyboard.press('Backspace');
+  await expect(h2).toHaveText('');
+  await expect(status).toHaveText('All edits saved.');
+  expect(await bytes()).toContain('\\section{}');
+  await page.keyboard.press('Backspace');
+  await expect(h2).toHaveCount(0);
+  await expect(status).toHaveText('All edits saved.');
+  expect(await bytes()).toBe(main);
+  await expect(theirs('h2')).toHaveCount(0);
+  // The caret is in the text, not lost: typing lands in the paragraph before.
+  await page.keyboard.type('!');
+  await expect(page.locator(`${VISUAL} p`, { hasText: 'Hello world here.!' })).toBeVisible();
+  await page.keyboard.press('Backspace');
+  await expect(status).toHaveText('All edits saved.');
+  expect(await bytes()).toBe(main);
+
+  // A list: Backspace in its one empty item removes the list.
+  await clickAfter(page, VISUAL, 'here.');
+  await page.keyboard.press('End');
+  await page.keyboard.press('Alt+l');
+  await expect(page.locator(`${VISUAL} li`)).toHaveCount(1);
+  await expect(theirs('li')).toHaveCount(1);
+  await expect(page.locator(VISUAL)).toBeFocused();
+  await page.keyboard.press('Backspace');
+  await expect(page.locator(`${VISUAL} li`)).toHaveCount(0);
+  await expect(status).toHaveText('All edits saved.');
+  expect(await bytes()).toBe(main);
+  await expect(theirs('li')).toHaveCount(0);
+
+  // A reviewer sees the figure and a way to its source, but no way to remove it.
+  await reviewer.page.goto(page.url());
+  await expect(reviewer.page.locator(VISUAL)).toHaveAttribute('contenteditable', 'false');
+  const there = reviewer.page.locator(VISUAL).getByRole('group', { name: 'Figure' });
+  await expect(there.getByRole('button', { name: 'Edit in source' })).toBeVisible();
+  await expect(reviewer.page.getByRole('button', { name: 'Remove figure' })).toHaveCount(0);
+
+  // A figure: its Remove button, reachable by keyboard, passes the accessibility check.
+  const fig = page.locator(VISUAL).getByRole('group', { name: 'Figure' });
+  const remove = fig.getByRole('button', { name: 'Remove figure' });
+  await expect(remove).toBeVisible();
+  await audit(page, 'a figure with its Remove button');
+  await remove.focus();
+  await expect(remove).toBeFocused();
+  await page.keyboard.press('Enter');
+  await expect(fig).toHaveCount(0);
+  await expect(status).toHaveText('All edits saved.');
+  const without = main.replace('\\begin{figure}\n\\caption{Cap}\n\\end{figure}\n', '');
+  expect(await bytes()).toBe(without);
+  await expect(other.page.locator(VISUAL).getByRole('group', { name: 'Figure' })).toHaveCount(0);
+  await page.keyboard.press('ControlOrMeta+z');
+  await expect(fig).toHaveCount(1);
+  await expect(status).toHaveText('All edits saved.');
+  expect(await bytes()).toBe(main);
+});

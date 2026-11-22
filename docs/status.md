@@ -101,9 +101,9 @@ Read this first. Update it in every pull request.
     command with another name. Taking one off with the other inside it (`\emph{\textbf{x}}`) removes only its own
     `\name{` and `}`. A selection that ends inside a group it did not start in is refused, as for emphasis.
   - Not built: structural edits other than emphasis and bold, headings and starting a list (see "A heading
-    from the visual view" and "Starting a list from the visual view"): moving or deleting a
-    block, and changing an existing heading's level; and remembering which view a person last
-    used.
+    from the visual view" and "Starting a list from the visual view"): moving a block,
+    and changing an existing heading's level; and remembering which view a person last used.
+    Deleting a block is built (see "Deleting a block from the visual view").
   - Whether a file is "definitions, source only" comes from the import report, so a file added
     later is never marked that way.
 - **C8, first part: edits made offline across a restore.** Someone who comes back online to a
@@ -3958,6 +3958,27 @@ Coming back online, the editor said "This paper was restored to an earlier revis
     writes after `\end{itemize}`. The paragraph is anchored to the list's end before the edit;
     `Bridge.sync` moves the anchor along with it, so the offset is that of the old text. Enter
     in a middle item, or the only item, still does nothing.
+- **Deleting a block from the visual view.** A display formula, a figure or table (any whole
+  `\begin{x}...\end{x}` raw block), a lone `\label{...}`, a heading with no title and a list of
+  one empty item can be removed. No server or schema change: `translate.ts` (`removeBlock`) turns
+  the deletion of exactly one top-level node into one splice of the source, the block's bytes
+  and one stretch of whitespace beside it.
+  - Which whitespace: the one after the block, unless that alone holds the blank line between
+    paragraphs, then the one before; at the end of the file, the one before. So `A\n\\[x\\]\nB`
+    becomes `A\nB` (no paragraph break appears) and `A\n\n\\[x\\]\n\nB` keeps exactly one blank
+    line. `guard()` is applied at the join, as for Backspace between paragraphs. A paragraph just
+    opened with Enter below the block keeps its place (its index moves up by one).
+  - Still refused, with the usual note: the preamble, `\begin` and `\end` halves of transparent
+    environments, `\end{document}`, frozen blocks, command lines (`\newcommand`, `\input`,
+    `\maketitle`), a `\label` with a comment after it, a heading with a title, a list with text
+    or more than one item, and typing over a selected block (a replacement, not a deletion).
+  - Keys and button (`visual.ts`): Backspace or Delete in an empty heading, and Backspace in a
+    sole empty list item, delete the whole block; Delete or Backspace on a selected formula
+    works through the same rule. Figures and tables have a "Remove" button (accessible name
+    "Remove figure" or "Remove table") after "Edit in source", only for people who can edit.
+    The caret goes to the nearest text. Undo restores every byte (`bridge.test.ts`,
+    `insert.spec.ts`).
+  - Not built: moving a block, and removing any other kind of block except in the source.
 - **Left as it is.** Alt+L and Alt+N: Firefox on Windows and Linux uses neither for its menu bar
   (they are free), but some browsers or window managers may; the editor takes them while it has
   the keyboard. Nested lists, `\item[label]` and description lists are not made here.

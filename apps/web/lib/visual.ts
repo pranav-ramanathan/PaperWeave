@@ -446,6 +446,40 @@ export function createVisual(opts: {
     return button;
   };
 
+  /**
+   * Take the block at `pos` out of the paper (a figure, a table, an empty heading, a list of one
+   * empty item). The bridge turns the deletion into one splice of the source, or refuses it and
+   * says so. The caret goes to the nearest text, looking the way `dir` points first.
+   */
+  const removeBlock = (pos: number | undefined, dir: -1 | 1 = -1) => {
+    const node = pos == null ? null : editor.state.doc.nodeAt(pos);
+    // Viewers and reviewers cannot change the paper, whichever way this was reached.
+    if (!opts.editable || pos == null || !node) return false;
+    const tr = editor.state.tr.delete(pos, pos + node.nodeSize);
+    const $at = tr.doc.resolve(Math.min(pos, tr.doc.content.size));
+    const near =
+      Selection.findFrom($at, dir, true) ?? Selection.findFrom($at, -dir as 1 | -1, true);
+    if (near) tr.setSelection(near);
+    editor.view.dispatch(tr.scrollIntoView());
+    editor.view.focus();
+    return true;
+  };
+  /** Backspace or Delete in a heading with no title, or Backspace in a list's only, empty item. */
+  const dropEmpty = (key: 'Backspace' | 'Delete'): boolean => {
+    const { selection } = editor.state;
+    if (!opts.editable || !selection.empty || editor.view.composing) return false;
+    const $f = selection.$from;
+    if (!$f.parent.isTextblock || $f.parent.content.size) return false;
+    const heading = $f.depth === 1 && $f.parent.type.name === 'heading';
+    const sole =
+      key === 'Backspace' &&
+      $f.depth === 2 &&
+      $f.node(1).type.name === 'list' &&
+      $f.node(1).childCount === 1;
+    if (!heading && !sole) return false;
+    return removeBlock($f.before(1), key === 'Backspace' ? -1 : 1);
+  };
+
   const block = (node: PMNode, getPos: () => number | undefined) => {
     const frozen = node.type.name === 'frozen';
     const float = frozen ? null : floatParts(node.attrs.src);
@@ -605,6 +639,13 @@ export function createVisual(opts: {
       go.type = 'button';
       go.onclick = () => opts.showInSource(getPos() ?? 0, getPos() ?? 0);
       dom.append(go);
+      if (opts.editable) {
+        const rm = el('button', '', 'Remove');
+        rm.type = 'button';
+        rm.setAttribute('aria-label', `Remove ${float.kind}`);
+        rm.onclick = () => void removeBlock(getPos());
+        dom.append(rm);
+      }
       return {
         dom,
         // What happens inside (typing in a field, pressing a part) is ours, not the editor's.
@@ -783,6 +824,16 @@ export function createVisual(opts: {
         return (ext as Node).extend({
           addNodeView: () => (p) => view(p.node, p.getPos as () => number | undefined),
         });
+      }),
+      // Ahead of the editor's own Backspace and Delete, which join in ways that vary with what is
+      // around the empty block.
+      Extension.create({
+        name: 'removeBlock',
+        priority: 1000,
+        addKeyboardShortcuts: () => ({
+          Backspace: () => dropEmpty('Backspace'),
+          Delete: () => dropEmpty('Delete'),
+        }),
       }),
       Extension.create({
         name: 'bridge',

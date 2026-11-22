@@ -33,6 +33,11 @@ Where this stands, what holds it there, and what nobody has checked yet.
   Alt+H is Firefox's Help menu key on Windows and Linux when the page does not take it, as Alt+T
   is Tools; the editor takes both while it has the keyboard. Alt+L and Alt+N have no menu in
   Firefox. A list is put in at once; the caret goes into its item.
+- **Removing a block in the visual view.** A figure or table has a "Remove" button after
+  "Edit in source", named "Remove figure" or "Remove table" (`aria-label`; the visible word is
+  part of it) and reached by Tab. It is not drawn for people who can only read. Backspace or
+  Delete in an empty heading, and Backspace in an empty list item, remove it from the keyboard;
+  the caret moves to the nearest text. axe passes with the button showing (`insert.spec`).
 - **The same audit of the editor when it has stopped** (`recover.spec`): its person signed out,
   their role lowered, an edit too large to save, edits held after a restore, and both views
   for someone who can only read, on a file long enough to scroll.

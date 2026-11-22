@@ -176,6 +176,7 @@ test(`${N} generated visual edits stay inside their intended range`, () => {
   }
   for (const k of ['ins', 'del', 'rep', 'enter', 'join', 'emph', 'xdel', 'xrep', 'xenter'])
     expect(counts[k], k).toBeGreaterThan(N / 100);
+  expect(counts.drop, 'drop').toBeGreaterThan(N / 500);
 });
 
 test(`${N} interleavings of visual and source edits converge with nothing lost`, () => {
@@ -1439,4 +1440,239 @@ test('bold made on one replica and typing on another converge', () => {
   expect(r.src).toBe('Alpha \\textbf{beta} gamma.!\n');
   r.check();
   b.check();
+});
+
+// Deleting a whole block from the visual view.
+type Rep = ReturnType<typeof replica>;
+/** Delete the top-level node at `index`, as Backspace or Delete on a selected block does. */
+function dropAt(r: Rep, index: number) {
+  let at = 0;
+  for (let i = 0; i < index; i++) at += r.state.doc.child(i).nodeSize;
+  return r.dispatch(r.state.tr.delete(at, at + r.state.doc.child(index).nodeSize));
+}
+/** Index of the first top-level node of a type, or the n-th. */
+const nodeIndex = (r: Rep, type: string, nth = 0) => {
+  const found: number[] = [];
+  r.state.doc.forEach((n, _o, i) => void (n.type.name === type && found.push(i)));
+  return found[nth];
+};
+const dropped = (src: string, type: string, nth = 0) => {
+  const r = replica(src);
+  expect(dropAt(r, nodeIndex(r, type, nth)), src).toBe(true);
+  r.check();
+  return r.src;
+};
+
+test('deleting a display formula leaves the blank lines as they were', () => {
+  const M = '\\[x\\]';
+  // Single newlines: no paragraph break appears.
+  expect(dropped(`A\n${M}\nB`, 'math_block')).toBe('A\nB');
+  expect(dropped(`A\n${M}\nB\n`, 'math_block')).toBe('A\nB\n');
+  // Double newlines: exactly one blank line stays.
+  expect(dropped(`A\n\n${M}\n\nB\n`, 'math_block')).toBe('A\n\nB\n');
+  // Only one side holds the blank line: it is kept, whichever side it is.
+  expect(dropped(`A\n${M}\n\nB\n`, 'math_block')).toBe('A\n\nB\n');
+  expect(dropped(`A\n\n${M}\nB\n`, 'math_block')).toBe('A\n\nB\n');
+  // An equation put in the middle of a break leaves one newline on one side and three on the
+  // other: removing it gives the break back.
+  expect(dropped(`A\n${M}\n\n\nB\n`, 'math_block')).toBe('A\n\nB\n');
+  expect(dropped(`A\n\n\n${M}\nB\n`, 'math_block')).toBe('A\n\nB\n');
+  expect(dropped(`A\n\n\n${M}\n\nB\n`, 'math_block')).toBe('A\n\nB\n');
+  // Several blank lines on both sides: one stays.
+  expect(dropped(`A\n\n\n${M}\n\n\n\nB\n`, 'math_block')).toBe('A\n\nB\n');
+  // The start and the end of the file.
+  expect(dropped(`${M}\n\nB\n`, 'math_block')).toBe('B\n');
+  expect(dropped(`${M}\nB\n`, 'math_block')).toBe('B\n');
+  expect(dropped(`A\n\n${M}\n`, 'math_block')).toBe('A\n');
+  expect(dropped(`A\n\n${M}`, 'math_block')).toBe('A');
+  expect(dropped(`A\n${M}`, 'math_block')).toBe('A');
+  expect(dropped(`A\n\n${M}\n\n`, 'math_block')).toBe('A\n\n');
+  expect(dropped(`${M}\n`, 'math_block')).toBe('');
+  expect(dropped(M, 'math_block')).toBe('');
+  // Next to another block, with and without blank lines between.
+  expect(dropped(`${M}\n\\[y\\]\n`, 'math_block')).toBe('\\[y\\]\n');
+  expect(dropped(`${M}\n\n\\[y\\]\n`, 'math_block', 1)).toBe(`${M}\n`);
+  expect(dropped(`A\n\n${M}\n\\[y\\]\n\nB\n`, 'math_block')).toBe('A\n\n\\[y\\]\n\nB\n');
+  expect(dropped(`A\n\n${M}\n\\[y\\]\n\nB\n`, 'math_block', 1)).toBe(`A\n\n${M}\n\nB\n`);
+  // The other display forms.
+  expect(dropped('A\n\n$$x$$\n\nB\n', 'math_block')).toBe('A\n\nB\n');
+  expect(dropped('A\n\n\\begin{equation}\n  x\n\\end{equation}\n\nB\n', 'math_block')).toBe(
+    'A\n\nB\n',
+  );
+});
+
+test('deleting a figure, a table or a lone label takes only that block', () => {
+  const fig = '\\begin{figure}\n  \\caption{Cap}\n  \\label{fig:a}\n\\end{figure}';
+  const tab = '\\begin{table}\n\\begin{tabular}{c}\na\n\\end{tabular}\n\\end{table}';
+  const src = `Intro.\n\n${fig}\n\n${tab}\n\nOutro.\n`;
+  let r = replica(src);
+  expect(dropAt(r, nodeIndex(r, 'raw_block', 0))).toBe(true);
+  expect(r.src).toBe(`Intro.\n\n${tab}\n\nOutro.\n`);
+  r.check();
+  r = replica(src);
+  expect(dropAt(r, nodeIndex(r, 'raw_block', 1))).toBe(true);
+  expect(r.src).toBe(`Intro.\n\n${fig}\n\nOutro.\n`);
+  r.check();
+  expect(dropped('A\n\n\\label{sec:a}\n\nB\n', 'raw_block')).toBe('A\n\nB\n');
+  expect(dropped('\\begin{verbatim}\nx\n\\end{verbatim}\n\nB\n', 'raw_block')).toBe('B\n');
+});
+
+test('deleting an empty heading or a list of one empty item removes the whole block', () => {
+  expect(dropped('A\n\n\\section{}\n\nB\n', 'heading')).toBe('A\n\nB\n');
+  expect(dropped('\\subsection{}\nB\n', 'heading')).toBe('B\n');
+  expect(dropped('A\n\n\\section{Keep}\n\n\\section{}\n', 'heading', 1)).toBe(
+    'A\n\n\\section{Keep}\n',
+  );
+  expect(dropped('A\n\n\\begin{itemize}\n  \\item \n\\end{itemize}\n\nB\n', 'list')).toBe(
+    'A\n\nB\n',
+  );
+  expect(dropped('A\n\n\\begin{enumerate}\n\\item\n\\end{enumerate}\n', 'list')).toBe('A\n');
+});
+
+test('deleting a block inside a document keeps the preamble and the end intact', () => {
+  const pre = '\\documentclass{article}\n\\begin{document}\n';
+  const post = '\\end{document}\n';
+  expect(dropped(`${pre}\n\\section{}\n\nText.\n${post}`, 'heading')).toBe(
+    `${pre}\nText.\n${post}`,
+  );
+  expect(dropped(`${pre}Text.\n\n\\[x\\]\n${post}`, 'math_block')).toBe(`${pre}Text.\n\n${post}`);
+  expect(dropped(`${pre}\\[x\\]\n${post}`, 'math_block')).toBe(`${pre}${post}`);
+});
+
+test('a block whose removal would glue two commands is separated', () => {
+  expect(dropped('\\LaTeX\\[x\\]foo\n', 'math_block')).toBe('\\LaTeX{}foo\n');
+});
+
+test('a block that is not a whole formula, figure, label, empty heading or list is refused', () => {
+  const cases: [string, string, number?][] = [
+    ['\\documentclass{article}\n\\begin{document}\nA\n\\end{document}\n', 'raw_block', 0],
+    ['\\documentclass{article}\n\\begin{document}\nA\n\\end{document}\n', 'raw_block', 1],
+    ['\\begin{document}\nA\n\\end{document}\n', 'raw_block', 0],
+    ['A\n\n\\begin{theorem}\nT\n\\end{theorem}\n', 'raw_block', 0],
+    ['A\n\n\\begin{theorem}\nT\n\\end{theorem}\n', 'raw_block', 1],
+    ['A\n\n\\newcommand{\\x}{y}\n\nB\n', 'raw_block', 0],
+    ['A\n\n\\input{other}\n\nB\n', 'raw_block', 0],
+    ['A\n\n\\maketitle\n\nB\n', 'raw_block', 0],
+    ['A\n\n% a comment\n\nB\n', 'raw_block', 0],
+    ['A\n\n\\label{a} % why\n\nB\n', 'raw_block', 0],
+    ['A\n\n\\section{Title}\n\nB\n', 'heading', 0],
+    ['A\n\n\\begin{itemize}\n\\item Full\n\\end{itemize}\n\nB\n', 'list', 0],
+    ['A\n\n\\begin{itemize}\n\\item \n\\item \n\\end{itemize}\n\nB\n', 'list', 0],
+    ['A\n\n\\begin{itemize}\n\\item\n\\item x\n\\end{itemize}\n\nB\n', 'list', 0],
+    ['A\n\n\\end{itemize}\n\nB\n', 'frozen', 0],
+  ];
+  for (const [src, type, nth] of cases) {
+    const r = replica(src);
+    const i = nodeIndex(r, type, nth ?? 0);
+    expect(i, `${type} in ${JSON.stringify(src)}`).toBeDefined();
+    expect(dropAt(r, i), JSON.stringify(src)).toBe(false);
+    expect(r.src).toBe(src);
+    r.check();
+  }
+});
+
+test('typing over a selected block is refused', () => {
+  const src = 'A\n\n\\[x\\]\n\nB\n';
+  const r = replica(src);
+  const at = r.state.doc.child(0).nodeSize;
+  const size = r.state.doc.child(1).nodeSize;
+  expect(r.dispatch(r.state.tr.insertText('hello', at, at + size))).toBe(false);
+  expect(r.src).toBe(src);
+  r.check();
+});
+
+test('two equal blocks side by side: the one chosen goes', () => {
+  const src = '\\label{x}\n\n\\label{x}\nB\n';
+  let r = replica(src);
+  expect(dropAt(r, 0)).toBe(true);
+  expect(r.src).toBe('\\label{x}\nB\n');
+  r.check();
+  r = replica(src);
+  expect(dropAt(r, 1)).toBe(true);
+  expect(r.src).toBe('\\label{x}\n\nB\n');
+  r.check();
+});
+
+test('a paragraph opened with Enter further down survives a block deleted above it', () => {
+  const r = replica('A\n\n\\[x\\]\n\nB\n');
+  const tr = r.state.tr.split(r.state.doc.content.size - 1);
+  const end = tr.doc.content.size;
+  expect(r.dispatch(tr.setSelection(TextSelection.near(tr.doc.resolve(end - 1))))).toBe(true);
+  expect(r.bridge.model.phantom).not.toBeNull();
+  expect(dropAt(r, 1)).toBe(true);
+  expect(r.src).toBe('A\n\nB\n');
+  r.check();
+  expect(r.bridge.model.phantom?.index).toBe(2);
+});
+
+test('one replica deletes a block while another types in the next paragraph, and both converge', () => {
+  for (const [src, typedIn] of [
+    ['A\n\n\\[x\\]\n\nB\n', 1],
+    ['A\n\n\\[x\\]\nB\n', 1],
+    ['A\n\\[x\\]\n\nB\n', 1],
+    ['A\n\n\\[x\\]\n\nB\n', 0],
+  ] as const) {
+    const r = replica(src);
+    const { b, merge } = peer(r);
+    const tb = textblocks(b)[typedIn];
+    expect(b.dispatch(b.state.tr.insertText('typed', tb.start + 1))).toBe(true);
+    expect(dropAt(r, nodeIndex(r, 'math_block'))).toBe(true);
+    merge();
+    Y.applyUpdate(b.ydoc, Y.encodeStateAsUpdate(r.ydoc));
+    expect(b.src).toBe(r.src);
+    expect(r.src).not.toContain('\\[x\\]');
+    expect(r.src.split('typed').length - 1).toBe(1);
+    r.check();
+    b.check();
+    expect(r.state.doc.eq(b.state.doc)).toBe(true);
+  }
+});
+
+test('one replica deletes a block while another edits inside it: nothing is left half-deleted', () => {
+  const r = replica('A\n\n\\begin{figure}\n\\caption{Cap}\n\\end{figure}\n\nB\n');
+  const { b, merge } = peer(r);
+  const at = b.src.indexOf('Cap') + 1;
+  b.ytext.insert(at, 'zz');
+  expect(dropAt(r, nodeIndex(r, 'raw_block'))).toBe(true);
+  merge();
+  Y.applyUpdate(b.ydoc, Y.encodeStateAsUpdate(r.ydoc));
+  expect(b.src).toBe(r.src);
+  r.check();
+  b.check();
+});
+
+test('undoing the deletion of a block restores every byte', () => {
+  const srcs = [
+    'A\n\n\\[x\\]\n\nB\n',
+    'A\n\\[x\\]\nB\n',
+    'A\n\n\\[x\\]\nB\n',
+    '\\[x\\]\n\nB\n',
+    'A\n\n\\[x\\]',
+    '\\LaTeX\\[x\\]foo\n',
+    'A\n\n\\begin{figure}\n\\caption{C}\n\\end{figure}\n\nB\n',
+    'A\n\n\\section{}\n\nB\n',
+    'A\n\n\\begin{itemize}\n  \\item \n\\end{itemize}\n\nB\n',
+    'A\n\n\\label{x}\n',
+  ];
+  for (const src of srcs) {
+    const r = replica(src);
+    const um = new Y.UndoManager(r.ytext, { trackedOrigins: new Set([r.bridge]) });
+    const i =
+      r.state.doc.childCount -
+      1 -
+      [...Array(r.state.doc.childCount).keys()]
+        .reverse()
+        .findIndex((k) =>
+          ['math_block', 'raw_block', 'heading', 'list'].includes(r.state.doc.child(k).type.name),
+        );
+    expect(dropAt(r, i), src).toBe(true);
+    expect(r.src).not.toBe(src);
+    um.undo();
+    expect(r.src, src).toBe(src);
+    r.check();
+    um.redo();
+    expect(r.src).not.toBe(src);
+    um.undo();
+    expect(r.src).toBe(src);
+  }
 });
