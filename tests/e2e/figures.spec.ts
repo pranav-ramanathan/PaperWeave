@@ -203,17 +203,19 @@ test('a picture whose name LaTeX cannot spell is not put in a figure', async ({ 
   await page.getByRole('button', { name: 'Import ZIP' }).click();
   await page.getByRole('link', { name: 'main.tex' }).click();
   await expect(page.getByRole('region', { name: 'Editor for main.tex' })).toBeVisible();
-  await showSource(page);
-  await expect(source(page)).toContainText('Text after the figure.');
+  const other = await page.context().newPage();
+  await other.goto(page.url());
+  await showSource(other);
+  await expect(source(other)).toContainText('Text after the figure.');
   await clickAfter(page, VISUAL, 'after');
   await page.getByRole('group', { name: 'Edit' }).getByRole('button', { name: 'Figure' }).click();
   const box = page.getByRole('dialog', { name: 'Insert a figure' });
-  await box.getByLabel('Picture').selectOption('50%.png');
+  await box.getByRole('combobox', { name: /^Picture/ }).selectOption('50%.png');
   await box.getByLabel('Caption').fill('Half');
   await box.getByRole('button', { name: 'Insert' }).click();
   await expect(box.getByRole('alert')).toHaveText(
     "LaTeX cannot use this picture's name. Rename it first.",
   );
-  await expect(source(page)).not.toContainText('50%.png');
+  await expect(source(other)).not.toContainText('50%.png');
   await expect(page.locator(VISUAL).getByRole('group', { name: 'Figure' })).toHaveCount(1);
 });
