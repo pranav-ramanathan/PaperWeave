@@ -7,6 +7,7 @@ import {
   heldLine,
   submissionChecks,
 } from '@paperweave/server';
+import Again from '../../../Again';
 import Result from '../../../Result';
 import Link from '../../../Go';
 import Once from '../../../Once';
@@ -76,7 +77,7 @@ async function Submit({
   return (
     <main className="page">
       {/* While a build runs, look again every two seconds. */}
-      {checks.building && <meta httpEquiv="refresh" content="2" />}
+      {checks.building && <Again />}
       <header className="bar">
         <h1>Check {project.name} before submitting</h1>
         <Link prefetch={false} href={`/projects/${id}`}>

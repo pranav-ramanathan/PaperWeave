@@ -5,7 +5,7 @@ import { mkdtempSync, readdirSync, readFileSync, statSync, writeFileSync } from 
 import { tmpdir } from 'node:os';
 import { join, relative } from 'node:path';
 import { writeZip } from '../../packages/server/src/archive';
-import { person, run, showSource, signIn } from './helpers';
+import { audit, person, run, showSource, signIn } from './helpers';
 
 const FIXTURE = join(import.meta.dirname, '../../fixtures/ieee-multifile');
 const VISUAL = '.editor .visual .ProseMirror';
@@ -66,6 +66,7 @@ test('numbers come from the compiled PDF and follow it when it changes', async (
   await expect(buildStatus(page)).toHaveText('The PDF is behind the text.', { timeout: 30_000 });
   await expect(reference(page, 'sec:method')).toHaveText('II');
   await expect(reference(page, 'sec:method')).toHaveClass(/pw-stale/);
+  await audit(page, 'a reference behind the text');
   await page.getByRole('button', { name: 'Compile now' }).click();
   await expect(reference(page, 'sec:method')).toHaveText('III', { timeout: 60_000 });
   await expect(reference(page, 'sec:method')).not.toHaveClass(/pw-stale/);
