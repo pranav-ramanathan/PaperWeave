@@ -1,5 +1,5 @@
 // Needs the services in infra/compose.yaml. Run: pnpm test:sandbox
-import { afterAll, beforeAll, expect, test } from 'vitest';
+import { afterAll, beforeAll, beforeEach, expect, test, vi } from 'vitest';
 import { writeZip } from './archive.ts';
 import { blobStore } from './blobs.ts';
 import { citationChecks, lookUpDoi, recordEvidence, removeEvidence } from './evidence.ts';
@@ -64,6 +64,8 @@ async function paper() {
   );
   return { id: project.id, ids };
 }
+// The limits count what this file's tests asked for; each test starts from none.
+beforeEach(() => t.pool.query('delete from doi_requests'));
 const code = (p: Promise<unknown>) =>
   p.then(
     () => 'ok',
@@ -117,7 +119,7 @@ test('a DOI lookup records what the registry said, where it came from and when',
   expect(r.asked).toEqual([
     {
       url: 'https://registry.test/works/10.1093%2Fcomjnl%2F27.2.97',
-      headers: { accept: 'application/json', 'user-agent': 'PaperWeave (DOI lookup)' },
+      headers: { accept: 'application/json', 'user-agent': 'PaperWeave/0.1' },
     },
   ]);
 
@@ -483,4 +485,68 @@ test('9. a claim copied from the PDF is still said while the sentence stands', a
   expect(result.map((c) => [c.claim, c.stillSaid])).toEqual(
     claims.map((c) => [c, !/20 percent|another/.test(c)]),
   );
+});
+
+test('DOI lookups are limited for each person and each paper, and a refusal asks nothing', async () => {
+  const p = await paper();
+  const r = registry();
+  const look = (who: string, opts = {}) =>
+    lookUpDoi(t.pool, store, who, p.id, 'knuth1984', { ...r, ...opts });
+  for (let i = 0; i < 30; i++) await look(users.owner.id);
+  const before = r.asked.length;
+  const refused = await look(users.owner.id).catch((e) => e);
+  expect(refused.code).toBe('conflict');
+  expect(refused.message).toBe('Too many DOI lookups just now. Try again in a few minutes.');
+  expect(r.asked.length).toBe(before);
+  // Someone else is not held back by it.
+  await look(users.reviewer.id);
+  expect(r.asked.length).toBe(before + 1);
+  // A person who may not look is told so before the limit is looked at.
+  expect(await code(look(users.viewer.id))).toBe('permission_denied');
+  // The paper's own cap, however many people ask.
+  expect(await code(look(users.reviewer.id, { perProject: 31 }))).toBe('conflict');
+  expect(await code(look(users.reviewer.id, { perProject: 32 }))).not.toBe('conflict');
+});
+
+test('the contact address is sent only when an operator has set one', async () => {
+  const p = await paper();
+  const r = registry();
+  const agent = () => (r.asked.at(-1)?.headers as Record<string, string>)['user-agent'];
+  vi.stubEnv('CROSSREF_MAILTO', '');
+  await lookUpDoi(t.pool, store, users.owner.id, p.id, 'knuth1984', r);
+  expect(agent()).toBe('PaperWeave/0.1');
+  vi.stubEnv('CROSSREF_MAILTO', 'ops@example.test');
+  try {
+    await lookUpDoi(t.pool, store, users.owner.id, p.id, 'knuth1984', r);
+    expect(agent()).toBe('PaperWeave/0.1 (mailto:ops@example.test)');
+  } finally {
+    vi.unstubAllEnvs();
+  }
+});
+
+test('an answer over 1 MB is not read, and a redirect is not followed', async () => {
+  const p = await paper();
+  const base = { registry: 'https://registry.test' };
+  const go = (fetcher: (u: string, i: RequestInit) => Promise<Response>) =>
+    code(lookUpDoi(t.pool, store, users.owner.id, p.id, 'knuth1984', { ...base, fetcher }));
+  const parse = vi.spyOn(JSON, 'parse');
+  const big = new Uint8Array(2_000_000).fill(32);
+  expect(await go(async () => new Response(big, { status: 200 }))).toBe('unavailable');
+  // No length is promised: the body is cut off as it arrives.
+  const stream = new ReadableStream({
+    start(c) {
+      for (let i = 0; i < 4; i++) c.enqueue(new Uint8Array(500_000).fill(32));
+      c.close();
+    },
+  });
+  expect(await go(async () => new Response(stream, { status: 200 }))).toBe('unavailable');
+  expect(parse).not.toHaveBeenCalled();
+  parse.mockRestore();
+  let init: RequestInit | undefined;
+  const sent = await go(async (_u, i) => {
+    init = i;
+    return new Response(null, { status: 302, headers: { location: 'http://169.254.169.254/' } });
+  });
+  expect(sent).toBe('unavailable');
+  expect(init?.redirect).toBe('manual');
 });

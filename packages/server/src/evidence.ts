@@ -9,6 +9,7 @@ import type { BlobStore } from './blobs.ts';
 import type { Db } from './db.ts';
 import { AppError } from './errors.ts';
 import { texFiles } from './labels.ts';
+import { boundedJson, redirected } from './outbound.ts';
 import { id } from './projects.ts';
 
 export type Compared = { field: string; entry: string; registry: string; same: boolean };
@@ -151,6 +152,16 @@ async function entriesByKey(db: Db, store: BlobStore, projectId: string) {
 
 type Fetcher = (url: string, init: RequestInit) => Promise<Response>;
 
+export const DOI_LOOKUPS_PER_USER = 30; // in ten minutes
+export const DOI_LOOKUPS_PER_PROJECT = 500; // in a day
+/** The most of the registry's answer that is read. */
+export const DOI_ANSWER_BYTES = 1_000_000;
+const PRODUCT = 'PaperWeave/0.1';
+const envCount = (name: string, fallback: number) => {
+  const n = Number(process.env[name]);
+  return Number.isInteger(n) && n > 0 ? n : fallback;
+};
+
 /**
  * Look an entry's DOI up in Crossref, set the registry's record beside the entry, and record
  * what was found, where and when. Only the DOI leaves this service. Nothing is changed in the
@@ -162,7 +173,7 @@ export async function lookUpDoi(
   userId: string,
   projectId: string,
   key: string,
-  opts: { fetcher?: Fetcher; registry?: string } = {},
+  opts: { fetcher?: Fetcher; registry?: string; perUser?: number; perProject?: number } = {},
 ): Promise<DoiLookup> {
   await authorize(pool, userId, id(projectId), 'comment.write');
   const entry = (await entriesByKey(pool, store, projectId)).get(key);
@@ -175,17 +186,44 @@ export async function lookUpDoi(
     'unavailable',
     'The DOI registry did not answer. Nothing was recorded; try again later.',
   );
+  // Counted before asking, so that a request that fails still counts. The registry may block
+  // this service for everyone if it is asked without bound.
+  const perUser = opts.perUser ?? envCount('DOI_LOOKUPS_PER_USER', DOI_LOOKUPS_PER_USER);
+  const perProject =
+    opts.perProject ?? envCount('DOI_LOOKUPS_PER_PROJECT', DOI_LOOKUPS_PER_PROJECT);
+  const counted = async (where: string, who: string) =>
+    (await pool.query(`select count(*)::int as n from doi_requests where ${where}`, [who])).rows[0]
+      .n as number;
+  const mine = await counted(`user_id = $1 and created_at > now() - interval '10 minutes'`, userId);
+  const paper = await counted(
+    `project_id = $1 and created_at > now() - interval '1 day'`,
+    projectId,
+  );
+  if (mine >= perUser || paper >= perProject)
+    throw new AppError('conflict', 'Too many DOI lookups just now. Try again in a few minutes.');
+  await pool.query('insert into doi_requests (project_id, user_id) values ($1, $2)', [
+    projectId,
+    userId,
+  ]);
+  // The registry's polite pool, for an operator who has given a contact address.
+  const mailto = process.env.CROSSREF_MAILTO?.trim();
   const res = await (opts.fetcher ?? fetch)(`${registry}/works/${encodeURIComponent(doi)}`, {
-    headers: { accept: 'application/json', 'user-agent': 'PaperWeave (DOI lookup)' },
+    headers: {
+      accept: 'application/json',
+      'user-agent': mailto ? `${PRODUCT} (mailto:${mailto})` : PRODUCT,
+    },
+    // A redirect could lead to a host the operator did not choose.
+    redirect: 'manual',
     signal: AbortSignal.timeout(10_000),
   }).catch(() => {
     throw unreachable;
   });
   let comparison: Compared[] = [];
   if (res.status !== 404) {
-    if (!res.ok) throw unreachable;
-    const record = ((await res.json().catch(() => null)) as { message?: Record<string, unknown> })
-      ?.message;
+    if (redirected(res) || !res.ok) throw unreachable;
+    const record = (
+      (await boundedJson(res, DOI_ANSWER_BYTES)) as { message?: Record<string, unknown> } | null
+    )?.message;
     if (!record) throw unreachable;
     const list = (v: unknown) => (Array.isArray(v) ? v : []);
     const texts = (v: unknown) =>

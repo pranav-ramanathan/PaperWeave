@@ -160,6 +160,19 @@ What it found is fixed in the same change, or listed under "Open" with what to d
   are never logged. A service test and a browser test failed on the old code. Not covered: a
   scanner that submits forms.
 
+- **Anyone who could comment could make the service ask the DOI registry without bound.**
+  A lookup had no limit, so one person could use up the registry's patience with this service
+  for everyone, and the registry was sent no way to reach the operator. The registry's answer
+  was read whole, and a redirect was followed to wherever it led. Lookups are now counted
+  before they are made (`doi_requests`, as model reviews are): 30 in ten minutes for a person
+  and 500 in a day for a paper, set by `DOI_LOOKUPS_PER_USER` and `DOI_LOOKUPS_PER_PROJECT`;
+  past either, nothing goes out. A contact address goes in the User-Agent only when an operator
+  sets `CROSSREF_MAILTO`. At most 1 MB of the answer is read (and the language checker's is
+  held to 8 MB), a redirect is not followed from either, and an answer too large or redirected
+  is "could not look up". Service tests hold each, and failed on the old code. The counts are in
+  the database, so they hold across processes. Other outbound requests: the object store (own
+  timeouts, signed, a host from configuration) and the model provider's library.
+
 ## Open
 
 In rough order of how much they matter.
