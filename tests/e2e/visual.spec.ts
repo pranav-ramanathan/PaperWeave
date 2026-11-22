@@ -138,14 +138,12 @@ test('visual edits reach the source through the server, byte for byte', async ({
 
   // Bold is the same kind of edit: the button and Ctrl+B, undone, and taken off again. The
   // other person sees each change in their source.
-  await owner.page.waitForTimeout(700); // a second double click too soon would count as a triple
   await pick(owner.page, VISUAL, 'Reviewers');
   await owner.page.getByRole('button', { name: 'Bold' }).click();
   await expect.poll(() => sourceText(editor.page)).toContain('\\textbf{Reviewers} then see');
   await expect(owner.page.locator(`${VISUAL} strong`, { hasText: 'Reviewers' })).toBeVisible();
   await owner.page.getByRole('button', { name: 'Undo' }).click();
   await expect.poll(() => sourceText(editor.page)).not.toContain('\\textbf{Reviewers} then see');
-  await owner.page.waitForTimeout(700); // a second double click too soon would count as a triple
   await pick(owner.page, VISUAL, 'Reviewers');
   // Each shortcut acts on the text as the person sees it, so the next waits until the visual
   // view shows the last one done: pressed sooner, it would act on text the server has changed.
@@ -169,6 +167,21 @@ test('visual edits reach the source through the server, byte for byte', async ({
   await expect.poll(() => sourceText(editor.page)).toContain(both);
   await expect.poll(() => sourceText(editor.page)).not.toContain('\\textbf{Reviewers}');
   await expect.poll(() => sourceText(editor.page)).not.toContain('\\emph{Reviewers}');
+
+  // A fast typist presses the next shortcut before the server has answered the last. Each acts
+  // on what the one before made, and none is refused as stale.
+  await pick(owner.page, VISUAL, 'Reviewers');
+  await owner.page.keyboard.press('ControlOrMeta+b');
+  await owner.page.keyboard.press('ControlOrMeta+i');
+  await expect
+    .poll(() => sourceText(editor.page))
+    .toContain('\\textbf{\\emph{Reviewers}} then see');
+  await owner.page.keyboard.press('ControlOrMeta+b');
+  await owner.page.keyboard.press('ControlOrMeta+i');
+  await expect.poll(() => sourceText(editor.page)).toContain(both);
+  await expect.poll(() => sourceText(editor.page)).not.toContain('\\textbf{');
+  await expect.poll(() => sourceText(editor.page)).not.toContain('\\emph{Reviewers}');
+  await expect(owner.page.getByText('changed before the edit arrived')).toHaveCount(0);
 
   // Switching views carries the selection across, both ways.
   await pick(owner.page, VISUAL, 'organised');

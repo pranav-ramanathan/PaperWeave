@@ -218,7 +218,7 @@ export function createVisual(opts: {
     resume = { from: editor.state.selection.from, to: editor.state.selection.to, acted };
     opts.editMath!(src, async (replacement) => {
       const next = bridge.rewriteCommand(c, replacement);
-      return typeof next === 'string' ? next : opts.run(next);
+      return typeof next === 'string' ? next : run(next);
     });
   };
   /** What an inline atom is called, in the window that edits it. */
@@ -240,19 +240,44 @@ export function createVisual(opts: {
     resume = { from: editor.state.selection.from, to: editor.state.selection.to, acted };
     opts.editAtom!(atomName(node), src, async (replacement) => {
       const next = bridge.rewriteCommand(c, replacement);
-      return typeof next === 'string' ? next : opts.run(next);
+      return typeof next === 'string' ? next : run(next);
     });
   };
+  /**
+   * Commands go to the server one at a time. One built while another is in flight would be
+   * built on text the server is about to change, and refused as stale.
+   */
+  let turn: Promise<unknown> = Promise.resolve();
+  const inOrder = <T>(task: () => T | Promise<T>): Promise<T> => {
+    const result = turn.then(task);
+    turn = result.catch(() => undefined);
+    return result;
+  };
+  const run = (c: Command) => inOrder(() => opts.run(c));
+  /** Marks asked for and not yet made: a person typing shortcuts faster than the server answers. */
+  let marking = 0;
   const mark = (kind: 'emph' | 'textbf') => {
-    catchUp();
-    const c = bridge.markCommand(editor.state, kind);
-    if (!c) say(`${kind === 'emph' ? 'Emphasis' : 'Bold'} needs a selection inside one block.`);
-    else
-      Promise.resolve(opts.run(c)).then(
+    if (marking >= 4) {
+      say('Still making the last changes. Try again in a moment.');
+      return true;
+    }
+    marking++;
+    // Built when its turn comes, from the text and selection as the earlier edits left them.
+    inOrder(() => {
+      catchUp();
+      const c = bridge.markCommand(editor.state, kind);
+      if (!c) {
+        say(`${kind === 'emph' ? 'Emphasis' : 'Bold'} needs a selection inside one block.`);
+        return undefined;
+      }
+      return opts.run(c);
+    })
+      .then(
         (result) =>
           result === 'conflict' && say('That text changed before the edit arrived. Try again.'),
         () => say('That edit could not be made. Check the connection and try again.'),
-      );
+      )
+      .finally(() => marking--);
     return true;
   };
   const emph = () => mark('emph');
@@ -417,7 +442,7 @@ export function createVisual(opts: {
         opened(null);
         const before = moves;
         try {
-          const result = await opts.run(c);
+          const result = await run(c);
           if (result === 'conflict')
             say('Someone changed that while you were editing it. Look again, then try again.');
         } catch {
@@ -522,7 +547,7 @@ export function createVisual(opts: {
           if (!c) return say('That has moved. Edit it in the source.');
           const before = moves;
           try {
-            if ((await opts.run(c)) === 'conflict')
+            if ((await run(c)) === 'conflict')
               say(
                 'Someone changed this table while you were changing it. Look again, then try again.',
               );
@@ -718,7 +743,7 @@ export function createVisual(opts: {
     resume = { from: editor.state.selection.from, to: editor.state.selection.to, acted };
     return async (latex) => {
       const before = moves;
-      const result = await opts.run({ ...c, key: crypto.randomUUID(), replacement: latex });
+      const result = await run({ ...c, key: crypto.randomUUID(), replacement: latex });
       // The caret goes just after what was inserted, so that typing carries on from there
       // rather than over a selection that now reaches across it. The place was named by the
       // character after it, which is now the character after the insertion.
