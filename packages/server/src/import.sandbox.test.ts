@@ -691,3 +691,13 @@ test('a \\documentclass that lives in an \\input-ed file still makes the paper i
     ),
   ).toContain('with a \\documentclass before it');
 });
+
+test('a file LaTeX cannot name imports, and the stored report lists it', async () => {
+  const { report, paths } = await reportOf(owner.id, [
+    file('main.tex', doc()),
+    file('figs/result#1.png', 'png'),
+    file('figs/ok.png', 'png'),
+  ]);
+  expect(paths).toContain('figs/result#1.png');
+  expect(report.unnamable).toEqual(['figs/result#1.png']);
+});

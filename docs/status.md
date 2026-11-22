@@ -4500,3 +4500,15 @@ Found by a three-person walkthrough.
   symbolic link row (`link.tex`) is still refused.
 - **Not done.** Other unwanted folders such as `node_modules` or `.venv` still count and can
   refuse.
+
+## The import report names files LaTeX cannot use
+
+- **What was wrong.** A paper imported with `figs/result#1.png` (or `%`, `"`, `{`, `}` anywhere in a
+  path) was accepted with no word in the report that LaTeX cannot name it; the team found out when a
+  build failed or a rename was refused.
+- **Now** `describeImport` (`packages/server/src/import.ts`) lists the paths that fail `texName` in
+  `report.unnamable` (sorted), and the web import report shows one item naming the first 10 and "and
+  N more", with "Rename them before using them." Nothing shows when there are none. Import still
+  succeeds. Reports stored earlier have no field and render as before.
+- **Held by** `compiler.test`, `import.sandbox.test` and `tests/e2e/atoms.spec.ts`.
+- **Not done.** The files are not renamed for the user, and the file list does not mark them.

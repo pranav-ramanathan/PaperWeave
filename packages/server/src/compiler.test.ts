@@ -103,3 +103,13 @@ test('the report opens with one line of what was found', () => {
     'Imported 3 files: root main.tex, compiler pdflatex, 100% of body prose editable visually, 1 source-only file.',
   );
 });
+
+test('files LaTeX cannot name are listed, sorted, and ordinary ones are not', () => {
+  const { report } = describeImport([
+    { path: 'main.tex', bytes: Buffer.from(doc('', 'Some prose here.')) },
+    { path: 'my{dir}/x.tex', bytes: Buffer.from('x') },
+    { path: 'figs/a#1.png', bytes: Buffer.from([0, 1]) },
+    { path: 'figs/b.png', bytes: Buffer.from([0, 1]) },
+  ]);
+  expect(report.unnamable).toEqual(['figs/a#1.png', 'my{dir}/x.tex']);
+});

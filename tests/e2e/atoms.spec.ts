@@ -99,3 +99,26 @@ test('a citation, a reference and a footnote are opened and edited as LaTeX', as
   const back = await readZip(readFileSync(await download.path()));
   expect(Buffer.from(back.entries.find((e) => e.path === 'main.tex')!.bytes).toString()).toBe(want);
 });
+
+test('the import report names files LaTeX cannot use', async ({ browser }) => {
+  test.setTimeout(120_000);
+  const { page, email } = await person(browser, 'unnamable');
+  const zip = join(mkdtempSync(join(tmpdir(), 'paperweave-e2e-')), `unnamable ${run}.zip`);
+  writeFileSync(
+    zip,
+    await writeZip([
+      { path: 'main.tex', bytes: Buffer.from(MAIN) },
+      { path: 'figs/result#1.png', bytes: Buffer.from([1, 2, 3]) },
+    ]),
+  );
+  await page.goto('/sign-in');
+  await signIn(page, email);
+  await page.getByLabel('Or import a ZIP of a LaTeX project').setInputFiles(zip);
+  await page.getByRole('button', { name: 'Import ZIP' }).click();
+  await page.waitForURL(/\/projects\/[^/]+$/);
+  await expect(
+    page.locator('.report:not(.first-steps) li', { hasText: 'LaTeX cannot use' }),
+  ).toHaveText(
+    'LaTeX cannot use these file names (they have % # " { or }): figs/result#1.png. Rename them before using them.',
+  );
+});

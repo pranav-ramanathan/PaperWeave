@@ -14,7 +14,7 @@ import {
   uncomment,
 } from '@paperweave/latex';
 import type pg from 'pg';
-import { type Entry, type Limits, LIMITS, readZip, type Skipped } from './archive.ts';
+import { type Entry, type Limits, LIMITS, readZip, type Skipped, texName } from './archive.ts';
 import { authorize } from './authz.ts';
 import type { BlobStore } from './blobs.ts';
 import { type Db, transaction } from './db.ts';
@@ -52,6 +52,8 @@ export type ImportReport = {
   dynamic: { from: string; target: string }[];
   cycles: string[][];
   notes: string[];
+  /** Files LaTeX cannot name (% # " { or } in the path), sorted. Absent in reports stored before it existed. */
+  unnamable?: string[];
   /** What was brought in of the review data the archive held, if it held any. */
   review?: ReviewImport;
 };
@@ -299,6 +301,7 @@ export function describeImport(
       dynamic: graph.dynamic,
       cycles: graph.cycles,
       notes,
+      unnamable: paths.filter((p) => texName(p)).sort(),
     },
   };
 }
