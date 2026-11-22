@@ -627,6 +627,23 @@ Read this first. Update it in every pull request.
 - **Held by** `evidence.sandbox.test.ts`.
 - **Not done:** no UI change; rows of `doi_requests` are not pruned.
 
+## Upload addresses carry a size and are counted
+
+- **Found by** the planner: one account got 300 size-less addresses, three 120 MB PUTs passed a
+  100 MB limit, and the bytes sat in `tmp/` until dropped by hand.
+- **Now** `startUpload` requires a whole `size` within the limit for ZIP or file and signs it as
+  `content-length`; each address is recorded in `upload_addresses` (migration 0030): 10 untaken
+  per person, 2 GiB declared per hour (`UPLOADS_OUTSTANDING_PER_USER`,
+  `UPLOAD_BYTES_PER_USER_HOUR`); a key is taken once. The worker's sweep removes untaken uploads
+  half an hour old (was a day; schedule unchanged) and forgets records a day old. `DirectUpload`
+  already sent the size.
+- **Store check:** SeaweedFS with an identity refuses a different length (403). The compose
+  store has none and takes any length, so there only the take-time size check holds.
+- **Held by** `uploads.sandbox.test.ts` (changed: size-less addresses are refused; a second take
+  now says "not found", not "did not arrive") and `uploading.spec.ts`.
+- **Not done:** a second PUT to an address before the take replaces the object (same length);
+  concurrent requests may pass the count together by a few.
+
 ## Next
 
 Every item in `docs/plan.md` from the scaffold to Phase F has been built. Since then the work

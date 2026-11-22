@@ -67,8 +67,9 @@ test('an upload is put in the store by the browser, then added to the paper by i
   expect(Buffer.from((await store.get(file!.digest))!).equals(bytes)).toBe(true);
   // Taken: the temporary object is gone, and cannot be taken again.
   expect(await gone(key)).toBe(true);
+  // (Changed from "did not arrive": a key is taken once, and the second take finds no address.)
   await expect(addUploaded(t.pool, store, owner.id, paperId, key, 'again.png')).rejects.toThrow(
-    'did not arrive',
+    'not found',
   );
 });
 
@@ -81,6 +82,81 @@ test.runIf(strict)('the address takes exactly the size it was made for', async (
     1000,
   );
   expect((await put(url, randomBytes(1001))).ok).toBe(false);
+  // And the right length is taken.
+  const right = await startUpload(
+    t.pool,
+    store,
+    owner.id,
+    { kind: 'file', projectId: paperId },
+    1000,
+  );
+  expect((await put(right.url, randomBytes(1000))).ok).toBe(true);
+});
+
+test('the length is one of the signed headers, whatever the store checks', async () => {
+  const { url } = await startUpload(t.pool, store, owner.id, { kind: 'zip' }, 1234);
+  const signedHeaders = new URL(url).searchParams.get('X-Amz-SignedHeaders') ?? '';
+  expect(signedHeaders.split(';')).toContain('content-length');
+});
+
+test('an address is asked for with a size, a whole number of bytes within the limit', async () => {
+  // Changed from "an address may be made without a size": that is how one person got 300
+  // addresses that took any length.
+  const file = { kind: 'file', projectId: paperId } as const;
+  for (const bad of [undefined, null, '10', 0, -1, 1.5, Number.NaN, Number.POSITIVE_INFINITY])
+    await expect(startUpload(t.pool, store, owner.id, file, bad)).rejects.toThrow('not a size');
+  await expect(startUpload(t.pool, store, owner.id, file, LIMITS.fileBytes + 1)).rejects.toThrow(
+    'That file is too large.',
+  );
+  await expect(
+    startUpload(t.pool, store, owner.id, { kind: 'zip' }, LIMITS.archiveBytes + 1),
+  ).rejects.toThrow('too large');
+});
+
+test('one person holds ten addresses at a time, and asks for a number of bytes an hour', async () => {
+  const me = await t.signIn('quota@example.org');
+  const zip = { kind: 'zip' } as const;
+  const made = [];
+  for (let i = 0; i < 10; i++) made.push(await startUpload(t.pool, store, me.id, zip, 100));
+  await expect(startUpload(t.pool, store, me.id, zip, 100)).rejects.toThrow('Too many uploads');
+  // Someone else is not held by it.
+  expect((await startUpload(t.pool, store, owner.id, zip, 100)).key).toBeTruthy();
+  // One taken frees its place.
+  const zipBytes = await writeZip([{ path: 'main.tex', bytes: Buffer.from(MAIN) }]);
+  const mine = await startUpload(t.pool, store, outsider.id, zip, zipBytes.length);
+  await put(mine.url, zipBytes);
+  await importUploaded(t.pool, store, outsider.id, mine.key, 'Quota');
+  // The bytes: a budget, whatever has been taken.
+  const small = { outstanding: 100, bytesPerHour: 1000 };
+  const you = await t.signIn('budget@example.org');
+  await startUpload(t.pool, store, you.id, zip, 600, LIMITS, small);
+  await expect(startUpload(t.pool, store, you.id, zip, 401, LIMITS, small)).rejects.toThrow(
+    'in an hour',
+  );
+  await startUpload(t.pool, store, you.id, zip, 400, LIMITS, small);
+  const room = { outstanding: 1, bytesPerHour: 1e9 };
+  const third = await t.signIn('taken@example.org');
+  const a = await startUpload(t.pool, store, third.id, zip, zipBytes.length, LIMITS, room);
+  await expect(startUpload(t.pool, store, third.id, zip, 1, LIMITS, room)).rejects.toThrow(
+    'Too many uploads',
+  );
+  await put(a.url, zipBytes);
+  await importUploaded(t.pool, store, third.id, a.key, 'Freed');
+  await startUpload(t.pool, store, third.id, zip, 1, LIMITS, room);
+  for (const m of made) await store.uploadDrop(m.key);
+});
+
+test('an address is taken once', async () => {
+  const zip = await writeZip([{ path: 'main.tex', bytes: Buffer.from(MAIN) }]);
+  const a = await startUpload(t.pool, store, owner.id, { kind: 'zip' }, zip.length);
+  await put(a.url, zip);
+  await importUploaded(t.pool, store, owner.id, a.key, 'Once');
+  // Put there again by whoever kept the address: not taken a second time.
+  await put(a.url, zip);
+  await expect(importUploaded(t.pool, store, owner.id, a.key, 'Twice')).rejects.toThrow(
+    'not found',
+  );
+  await store.uploadDrop(a.key);
 });
 
 test('an upload over the limit is refused before it is read, and removed', async () => {
@@ -92,11 +168,15 @@ test('an upload over the limit is refused before it is read, and removed', async
   await expect(
     startUpload(t.pool, store, owner.id, { kind: 'zip' }, LIMITS.archiveBytes + 1),
   ).rejects.toThrow('too large');
-  // And when it was put there anyway, by an address made without a size.
-  const { key, url } = await startUpload(t.pool, store, owner.id, {
-    kind: 'file',
-    projectId: paperId,
-  });
+  // And when it was put there anyway (a store that does not check the length, or a limit that
+  // was lowered since), the take looks at its size before it reads it.
+  const { key, url } = await startUpload(
+    t.pool,
+    store,
+    owner.id,
+    { kind: 'file', projectId: paperId },
+    2000,
+  );
   expect((await put(url, randomBytes(2000))).ok).toBe(true);
   const { spy, reads } = watched();
   await expect(addUploaded(t.pool, spy, owner.id, paperId, key, 'huge.txt', small)).rejects.toThrow(
@@ -119,7 +199,7 @@ test('a ZIP is imported from its key, and the object is removed whether or not t
   expect(await gone(ok.key)).toBe(true);
 
   // Not a ZIP at all: the whole import is refused, and nothing is left in tmp/.
-  const bad = await startUpload(t.pool, store, owner.id, { kind: 'zip' });
+  const bad = await startUpload(t.pool, store, owner.id, { kind: 'zip' }, 5000);
   expect((await put(bad.url, randomBytes(5000))).ok).toBe(true);
   await expect(importUploaded(t.pool, store, owner.id, bad.key, 'Bad')).rejects.toThrow(
     'cannot be imported',
@@ -151,7 +231,7 @@ test('someone who may not write to a paper gets no address and cannot take an up
 });
 
 test('uploads nobody took are swept when they are old, and not before', async () => {
-  const { key, url } = await startUpload(t.pool, store, owner.id, { kind: 'zip' });
+  const { key, url } = await startUpload(t.pool, store, owner.id, { kind: 'zip' }, 1);
   await put(url, Buffer.from('x'));
   expect(await store.uploadSweep(3600_000)).toBe(0);
   expect(await store.uploadSize(key)).toBe(1);

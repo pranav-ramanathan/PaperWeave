@@ -45,6 +45,24 @@ What it found is fixed in the same change, or listed under "Open" with what to d
   `projects.spec`. **Not covered:** a person who has the link and the page open is still signed
   in as whoever it names if they press the button without reading.
 
+- **One account could fill the store through upload addresses.** `/api/uploads` took a size only
+  if the browser offered one, and `startUpload` signed only `host` otherwise. One new account
+  got 300 such addresses; three PUTs of 120 MB each returned 200 against a 100 MB ZIP limit,
+  and the 360 MB stayed in `tmp/` until dropped by hand (an address is good for ten minutes and
+  could be used again; the sweep ran for objects a day old). Now: `startUpload` requires a
+  whole `size` of at least 1 and within the limit for that kind (ZIP or file), and signs it as
+  `content-length`, so a store that checks signatures refuses another length. Verified with
+  SeaweedFS started with an identity: a PUT of 1001 bytes to an address signed for 1000 is
+  refused (403), 1000 is taken. The store in `infra/compose.yaml` has no identities and checks
+  no signature, so there it takes any length; the test for the refusal runs only against a
+  store that has them (`S3_ENDPOINT`), and an always-run test holds that the length is among
+  the signed headers. Each address is recorded (`upload_addresses`, migration 0030): at most 10
+  not taken in ten minutes and 2 GiB of declared bytes in an hour per person
+  (`UPLOADS_OUTSTANDING_PER_USER`, `UPLOAD_BYTES_PER_USER_HOUR`), and a key is taken once. The
+  sweep now removes untaken uploads half an hour after they were put. Not prevented: a second
+  PUT to the same address before the take replaces the object (same length only); two requests
+  at the very same moment may pass the count together, by a few. Held by
+  `uploads.sandbox.test.ts` and `uploading.spec`.
 - **Sign-in could send people to another site.** `safePath` only refused a second slash and a
   backslash, so `/<TAB>/evil.example` passed; browsers drop tab, newline and return from an
   address, so it became `//evil.example`. Both the sign-in page (when already signed in) and the
