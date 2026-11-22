@@ -1,5 +1,5 @@
 import { expect, test } from 'vitest';
-import { bibEntries, bibItems, cleanDoi, describeEntry, plainText } from './bib.ts';
+import { bblEntries, bibEntries, bibItems, cleanDoi, describeEntry, plainText } from './bib.ts';
 import { citeIndex } from './labels.ts';
 import { fixtureFiles } from './testutil.ts';
 
@@ -146,4 +146,49 @@ test('a DOI is read from an entry the way a registry wants it', () => {
 
 test('a command whose name starts with an accent letter is not an accent', () => {
   expect(plainText('a \\textbf{bold} and \\cite{x} but \\c{c}a')).toBe('a bold and x but ça');
+});
+
+test('a bibtex .bbl gives its keys, a wrapped natbib label included', () => {
+  const plain =
+    '\\begin{thebibliography}{1}\n\\bibitem{k} A.~Author. \\newblock {\\em A Book}.\n\\end{thebibliography}\n';
+  expect(bblEntries(plain).map((e) => [e.key, e.text])).toEqual([
+    ['k', 'A.~Author. \\newblock {\\em A Book}.'],
+  ]);
+  const natbib =
+    '\\begin{thebibliography}{1}\n\\bibitem[Two(2002)]{two}\nB. Two.\n\\bibitem[Long\n  et~al.(2003)]{long} C.\n\\end{thebibliography}\n';
+  expect(bblEntries(natbib).map((e) => e.key)).toEqual(['two', 'long']);
+});
+
+test('a biblatex .bbl gives each key once, with its title', () => {
+  const bbl = [
+    '\\refsection{0}',
+    '  \\datalist[entry]{nty/global//global/global}',
+    '    \\entry{k}{book}{}',
+    '      \\name{author}{1}{}{{hash=1}{{un=0}{family={A}}}}',
+    '      \\field{title}{A {Book}',
+    '        of Things}',
+    '    \\endentry',
+    '    \\entry{shapiro2011}{inproceedings}{}',
+    '      \\field{title}{Conflict-Free Replicated Data Types}',
+    '    \\endentry',
+    '    \\entry{notitle}{misc}{}',
+    '    \\endentry',
+    '  \\enddatalist',
+    '  \\datalist[entry]{none/global//global/global}',
+    '    \\entry{k}{book}{}',
+    '      \\field{title}{A Book}',
+    '    \\endentry',
+    '  \\enddatalist',
+    '\\endrefsection',
+  ].join('\n');
+  expect(bblEntries(bbl).map((e) => [e.key, e.text])).toEqual([
+    ['k', 'A {Book} of Things'],
+    ['shapiro2011', 'Conflict-Free Replicated Data Types'],
+    ['notitle', ''],
+  ]);
+});
+
+test('a .bbl with no entries gives none', () => {
+  expect(bblEntries('')).toEqual([]);
+  expect(bblEntries('Just prose, \\cite{k}.')).toEqual([]);
 });

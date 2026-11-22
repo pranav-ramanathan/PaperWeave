@@ -1,17 +1,19 @@
-// A paper's bibliography: the entries in its .bib files and the citations in its text, read
-// from both as they stand now. Nothing here writes to a .bib file.
+// A paper's bibliography: the entries in its .bib files (or, with none, its ready-made .bbl)
+// and the citations in its text, read from both as they stand now. Nothing here writes to a .bib file.
 import {
+  bblEntries,
   bibEntries,
   bibItems,
   citeIndex,
   cleanDoi,
   describeEntry,
   includeGraph,
+  plainText,
 } from '@paperweave/latex';
 import type pg from 'pg';
 import { authorize } from './authz.ts';
 import type { BlobStore } from './blobs.ts';
-import { lineNumbers, texFiles } from './labels.ts';
+import { bblFiles, lineNumbers, texFiles } from './labels.ts';
 import { id } from './projects.ts';
 
 type Place = { fileId: string; path: string; line: number };
@@ -80,6 +82,26 @@ export async function citationReport(
         path,
         line: line(i.at),
       });
+  }
+  // A paper with no .bib came with its .bbl: its keys fill the gaps, so a citation it resolves
+  // is not reported missing. A key an entry above has is not added again.
+  const known = new Set(report.entries.map((e) => e.key));
+  for (const file of await bblFiles(pool, store, projectId)) {
+    const line = lineNumbers(file.text);
+    for (const i of bblEntries(file.text)) {
+      if (known.has(i.key)) continue;
+      const text = plainText(i.text);
+      report.entries.push({
+        key: i.key,
+        type: 'bibitem',
+        description: text.length > 160 ? `${text.slice(0, 159)}…` : text || i.key,
+        doi: null,
+        cited: false,
+        fileId: file.id,
+        path: file.path,
+        line: line(i.at),
+      });
+    }
   }
   const byKey = new Map<string, BibliographyEntry[]>();
   for (const e of report.entries) byKey.set(e.key, [...(byKey.get(e.key) ?? []), e]);

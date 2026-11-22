@@ -567,3 +567,33 @@ test('a braced text macro in a title is its text, so it is no difference from th
   });
   expect(seen(accents).title).toBe(true);
 });
+
+test('a paper with only a .bbl can have evidence recorded for its keys', async () => {
+  const bbl =
+    '\\begin{thebibliography}{1}\n\\bibitem{k} A.~One. First, 2001.\n\\end{thebibliography}\n';
+  const files = {
+    'main.tex':
+      '\\documentclass{article}\n\\begin{document}\n\\cite{k}\n\\bibliography{refs}\n\\end{document}\n',
+    'main.bbl': bbl,
+  };
+  const zip = await writeZip(
+    Object.entries(files).map(([path, text]) => ({ path, bytes: Buffer.from(text) })),
+  );
+  const [project] = await importZip(t.pool, store, users.owner.id, zip, 'Bbl evidence');
+  const claim = 'First was published in 2001';
+  await recordEvidence(t.pool, store, users.owner.id, project.id, 'k', {
+    claim,
+    verdict: 'supports',
+  } as never);
+  expect((await citationChecks(t.pool, store, users.owner.id, project.id)).evidence.k).toHaveLength(
+    1,
+  );
+  expect(
+    await code(
+      recordEvidence(t.pool, store, users.owner.id, project.id, 'nosuchkey', {
+        claim,
+        verdict: 'supports',
+      } as never),
+    ),
+  ).toBe('invalid_input');
+});

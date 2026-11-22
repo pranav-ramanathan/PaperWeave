@@ -229,6 +229,36 @@ export function bibItems(src: string): BibItem[] {
 }
 
 /**
+ * The entries of a .bbl, the file BibTeX or biblatex wrote, with the first of each key only. A
+ * BibTeX .bbl is a `thebibliography` and is read as one. A biblatex .bbl has `\entry{key}{type}{}`
+ * up to `\endentry`, its text being the first `\field{title}{...}`; biblatex repeats an entry
+ * for each datalist and refsection. Neither: no entries.
+ */
+export function bblEntries(text: string): BibItem[] {
+  const out: BibItem[] = [...bibItems(text)];
+  const ENTRY = /\\entry\{([^{}]+)\}\{[^{}]*\}/g;
+  for (let m = ENTRY.exec(text); m; m = ENTRY.exec(text)) {
+    const from = m.index + m[0].length;
+    const stop = text.indexOf('\\endentry', from);
+    const body = text.slice(from, stop < 0 ? text.length : stop);
+    const title = /\\field\{title\}\s*\{/.exec(body);
+    const open = title ? title.index + title[0].length - 1 : -1;
+    out.push({
+      key: m[1].trim(),
+      text: title
+        ? body
+            .slice(open + 1, closeOf(body, open) - 1)
+            .replace(/\s+/g, ' ')
+            .trim()
+        : '',
+      at: m.index,
+    });
+  }
+  const seen = new Set<string>();
+  return out.filter((e) => !seen.has(e.key) && seen.add(e.key)).sort((a, b) => a.at - b.at);
+}
+
+/**
  * The DOI an entry gives, as the bare `10.xxxx/...` a registry is asked for: TeX escapes and
  * braces taken away, a `doi:`, `DOI ` or doi.org address taken off the front, and trailing
  * punctuation off the end. With no `doi` field, a `url` on doi.org is used. Empty if none.

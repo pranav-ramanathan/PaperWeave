@@ -353,6 +353,16 @@ test('a thebibliography paper is ready, and a key it does not have is the one pr
   expect(wrong.problems[0].message).toContain('nokey');
 }, 240_000);
 
+test('a paper with a ready-made .bbl and no .bib has no missing citations', async () => {
+  const found = await verdict('Bbl only', {
+    'main.tex': doc('', 'Cite \\cite{k}.\n\\bibliographystyle{plain}\n\\bibliography{refs}'),
+    'main.bbl':
+      '\\begin{thebibliography}{1}\n\n\\bibitem{k}\nA.~One.\n\\newblock {\\em First}, 2001.\n\n\\end{thebibliography}\n',
+  });
+  expect(found.findings.filter((f) => f.kind === 'citation')).toEqual([]);
+  expect(found.ready).toBe(true);
+}, 240_000);
+
 test('files that come with the TeX installation do not stop a paper; one that is not there does', async () => {
   const ieee = await verdict('IEEE', {
     'main.tex': doc(

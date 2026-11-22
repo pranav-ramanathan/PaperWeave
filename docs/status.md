@@ -4713,3 +4713,22 @@ Found by a three-person walkthrough.
   LuaLaTeX in `compile.sandbox.test.ts` and a submit test in `submit.sandbox.test.ts`.
 - **Not done.** No line number (TeX gives none). Text meant to be shown but typed outside a node
   is only a warning.
+
+## A paper with a ready-made `.bbl` and no `.bib` had every citation called missing
+
+- **What was wrong.** An arXiv source often has `main.bbl` and no `.bib`. The import keeps the
+  `.bbl` and it builds, but the citation report read only `.bib` files and `\bibitem`s in `.tex`
+  files, so every `\cite` was "missing": the project page said the PDF shows a question mark
+  (false), the submit page had a warning for each citation, the insert-citation picker was empty,
+  and evidence could not be recorded ("The bibliography has no entry called k").
+- **Now** a paper with no `.bib` file at all reads its `.bbl` for keys: the root's own
+  (`main.tex` has `main.bbl`, in the same folder; with no root, every `.bbl`). Both a BibTeX
+  `thebibliography` and a biblatex `\entry` are read, each key once. A key a `.tex` `\bibitem`
+  already has is not added again. They show as entries with a place and a one-line description,
+  and evidence can be recorded for them. The import note now says "its entries can be cited, but
+  not changed or added to here". The `.bbl` is still not editable.
+- **Held by** unit tests in `bib.test.ts` and sandbox tests in `citations.sandbox.test.ts`,
+  `evidence.sandbox.test.ts`, `import.sandbox.test.ts` and `submit.sandbox.test.ts`.
+- **Not done.** A `]` inside a braced `\bibitem` label; a key BibTeX broke across lines with `%`;
+  a biblatex `.bbl` whose format version differs from the image's (a build error, separate); a DOI
+  lookup for `.bbl` entries.
