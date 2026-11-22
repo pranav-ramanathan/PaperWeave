@@ -40,6 +40,8 @@ export type Chart = {
   drawnAt: string | null;
   /** The data file is no longer the version this was drawn from. */
   stale: boolean;
+  /** Why it is stale: the data differs (also when the settings do), or only the settings do. */
+  changed: 'data' | 'settings' | null;
   /** While it waits to be drawn: when a drawing was last asked for on this paper. */
   waitingSince: string | null;
   /** It has been drawn, but a file of it is no longer in the paper: deleted, or the paper was
@@ -355,7 +357,15 @@ export async function listCharts(
                join files fp on fp.project_id = c.project_id and fp.path = 'charts/' || c.name || '.pdf'
                join files fg on fg.project_id = c.project_id and fg.path = 'charts/' || c.name || '.png'
                where d.project_id = c.project_id and d.name = c.name
-                 and d.pdf_digest = fp.digest and d.png_digest = fg.digest) as shown_from
+                 and d.pdf_digest = fp.digest and d.png_digest = fg.digest) as shown_from,
+            -- The same, of the drawings made with the settings the chart has now.
+            (select coalesce(array_agg(distinct d.record->'data'->>'sha256'), '{}')
+               from chart_draws d
+               join files fp on fp.project_id = c.project_id and fp.path = 'charts/' || c.name || '.pdf'
+               join files fg on fg.project_id = c.project_id and fg.path = 'charts/' || c.name || '.png'
+               where d.project_id = c.project_id and d.name = c.name
+                 and d.pdf_digest = fp.digest and d.png_digest = fg.digest
+                 and d.record->'chart' = c.spec) as shown_as
      from charts c left join files f on f.id = c.dataset_file_id
      where c.project_id = $1 order by c.name`,
     [projectId],
@@ -368,6 +378,14 @@ export async function listCharts(
         r.dataset_file_id,
         sha256(await currentBytes(pool, store, { ...r, id: r.dataset_file_id })),
       );
+    const now = versions.get(r.dataset_file_id);
+    // Judged by the files in the paper, which a restore can change without the chart row: any
+    // drawing of those exact files made from the data as it is now, with the settings as they
+    // are now, means they are current. With no such drawing on record, by the row of the last
+    // drawing.
+    const stale =
+      r.status === 'drawn' &&
+      (r.shown_from.length ? !r.shown_as.includes(now) : now !== r.drawn_digest);
     out.push({
       id: r.id,
       name: r.name,
@@ -378,14 +396,8 @@ export async function listCharts(
       problem: r.problem,
       leftOut: r.left_out,
       drawnAt: r.drawn_at?.toISOString() ?? null,
-      // Judged by the files in the paper, which a restore can change without the chart row: any
-      // drawing of those exact files made from the data as it is now means they are current.
-      // With no such drawing on record, by the row of the last drawing.
-      stale:
-        r.status === 'drawn' &&
-        (r.shown_from.length
-          ? !r.shown_from.includes(versions.get(r.dataset_file_id))
-          : versions.get(r.dataset_file_id) !== r.drawn_digest),
+      stale,
+      changed: !stale ? null : r.shown_from.includes(now) ? 'settings' : 'data',
       waitingSince: r.status === 'queued' ? (r.asked_at?.toISOString() ?? null) : null,
       missing: r.drawn_at !== null && r.kept < 2,
       alt: r.alt,

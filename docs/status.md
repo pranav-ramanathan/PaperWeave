@@ -3692,9 +3692,15 @@ as well as the pool. Test: `reviewdata.sandbox.test.ts` types between the cut an
 - **Held by** `charts.sandbox.test` (false fresh, false stale) and `submit.sandbox.test` (not
   ready after the restore). The false-fresh and false-ready tests and the false-stale one all
   failed on the old code.
-- **Not done: the chart's spec.** The same hole exists for a spec change, a redraw and a
-  restore. The message says "its data has changed", which does not fit, so the spec is not
-  compared; a restored drawing of an older spec still shows as fresh.
+- **The chart's spec: done.** The same hole existed for a spec change, a redraw and a restore.
+  `listCharts` now also collects `shown_as`, the data versions of those drawings whose
+  `record.chart` equals the chart's current `spec`. With a drawing on record for the files, the
+  chart is stale unless `shown_as` holds the data's current version. `Chart.changed` is
+  `'settings'` when the data matches but the settings do not, `'data'` otherwise (also when both
+  differ), `null` when fresh; the submission check, the paper's page and the chart's page word
+  it so. Two specs that draw the same bytes both match; A to B to A and drawn again is fresh.
+  Held by `charts.sandbox.test` and `submit.sandbox.test` (restore to a drawing of other
+  settings).
 
 ## A repeated label counts when TeX says it is defined twice
 
