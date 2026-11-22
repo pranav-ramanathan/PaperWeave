@@ -344,9 +344,10 @@ test('a heading is inserted from the toolbar, the keyboard and the menu, and tak
   await other.page.getByRole('button', { name: 'Join this paper' }).click();
   await expect(other.page.getByText('You are an editor')).toBeVisible();
   await page.getByRole('link', { name: 'main.tex' }).first().click();
-  await other.page.goto(page.url());
   const status = page.getByRole('region', { name: /^Editor for/ }).getByRole('status');
   await expect(status).toHaveText('All edits saved.');
+  await expect(page).toHaveURL(/\/files\//);
+  await other.page.goto(page.url());
   await expect(other.page.locator(VISUAL)).toContainText('Hello world here.');
 
   /** The lines of the source that have something on them. */
@@ -377,7 +378,7 @@ test('a heading is inserted from the toolbar, the keyboard and the menu, and tak
   await page.keyboard.type('Method');
   await page.keyboard.press('Enter');
   await expect(box).toBeHidden();
-  await expect(page.locator(`${VISUAL} h2`)).toHaveText('Method');
+  await expect(page.locator(`${VISUAL} h3`)).toHaveText('Method');
   await expect(page.locator(VISUAL)).toBeFocused();
   await page.keyboard.type('NEXT');
   await expect(status).toHaveText('All edits saved.');
@@ -386,20 +387,20 @@ test('a heading is inserted from the toolbar, the keyboard and the menu, and tak
     original[1],
     'Hello',
     '\\subsection{Method}',
-    'NEXTworld here.',
+    ' NEXTworld here.', // the space that followed the caret stays before the new paragraph's text
     original[3],
     original[4],
   ]);
   // A second person sees it.
-  await expect(other.page.locator(`${VISUAL} h2`)).toHaveText('Method');
+  await expect(other.page.locator(`${VISUAL} h3`)).toHaveText('Method');
 
   // Undo takes it back in one step: the typed text first, then the heading.
   await page.keyboard.press('ControlOrMeta+z');
   await page.keyboard.press('ControlOrMeta+z');
-  await expect(page.locator(`${VISUAL} h2`)).toHaveCount(0);
+  await expect(page.locator(`${VISUAL} h3`)).toHaveCount(0);
   await expect(status).toHaveText('All edits saved.');
   expect(await lines()).toEqual(original);
-  await expect(other.page.locator(`${VISUAL} h2`)).toHaveCount(0);
+  await expect(other.page.locator(`${VISUAL} h3`)).toHaveCount(0);
 
   // The keyboard: Alt+H, at the end of a paragraph; Escape puts it away and gives the caret back.
   await clickAfter(page, VISUAL, 'here.');
@@ -426,7 +427,7 @@ test('a heading is inserted from the toolbar, the keyboard and the menu, and tak
   await box.getByLabel('Title').fill('  Related \n  work  ');
   await page.keyboard.press('Enter');
   await expect(box).toBeHidden();
-  await expect(page.locator(`${VISUAL} h1`)).toHaveText('Related work');
+  await expect(page.locator(`${VISUAL} h2`)).toHaveText('Related work');
   await expect(status).toHaveText('All edits saved.');
   expect(await lines()).toEqual([
     original[0],
@@ -438,15 +439,15 @@ test('a heading is inserted from the toolbar, the keyboard and the menu, and tak
   ]);
 
   // The menu at a place in the text.
-  await clickAfter(page, VISUAL, 'Second');
-  await page.keyboard.press('Shift+F10');
+  const word = await caretAfter(page, 'Second');
+  await page.mouse.click(word.end, word.y, { button: 'right' });
   const menu = page.getByRole('menu', { name: 'At this place' });
   await menu.getByRole('menuitem', { name: 'Insert a heading…' }).click();
   await box.getByLabel('Level').selectOption('subsubsection');
   await box.getByLabel('Title').fill('Setup');
   await box.getByRole('button', { name: 'Insert' }).click();
   await expect(box).toBeHidden();
-  await expect(page.locator(`${VISUAL} h3`)).toHaveText('Setup');
+  await expect(page.locator(`${VISUAL} h4`)).toHaveText('Setup');
   await expect(status).toHaveText('All edits saved.');
   expect(await lines()).toEqual([
     original[0],
@@ -455,12 +456,12 @@ test('a heading is inserted from the toolbar, the keyboard and the menu, and tak
     '\\section{Related work}',
     'Second',
     '\\subsubsection{Setup}',
-    'paragraph.',
+    ' paragraph.',
     original[4],
   ]);
 
   // Not in a paragraph (here, in a heading): said so, and no window.
-  await page.locator(`${VISUAL} h1`).click();
+  await page.locator(`${VISUAL} h2`).click();
   await edit.getByRole('button', { name: 'Heading' }).click();
   await expect(page.getByText('Put the caret in a paragraph to add a heading.')).toBeVisible();
   await expect(box).toBeHidden();

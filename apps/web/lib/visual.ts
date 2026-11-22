@@ -651,7 +651,7 @@ export function createVisual(opts: {
    * Get ready to insert LaTeX where the caret is now. Returns the function that inserts it, by
    * way of the server, or null if the caret is not in running text.
    */
-  const insertion = (): ((latex: string) => Promise<CommandResult>) | null => {
+  const insertion = (skipSpace = false): ((latex: string) => Promise<CommandResult>) | null => {
     catchUp();
     const c = bridge.insertCommand(editor.state, '');
     if (!c) return null;
@@ -662,7 +662,15 @@ export function createVisual(opts: {
       // The caret goes just after what was inserted, so that typing carries on from there
       // rather than over a selection that now reaches across it. The place was named by the
       // character after it, which is now the character after the insertion.
-      const after = Y.createAbsolutePositionFromRelativePosition(c.to, opts.ytext.doc!)?.index;
+      const at = Y.createAbsolutePositionFromRelativePosition(c.to, opts.ytext.doc!)?.index;
+      // Text that begins with a space (what is left of a paragraph that a heading split) starts
+      // after it, not before: the space is between two blocks, and a caret there is read as the
+      // end of the block before.
+      let after = at;
+      if (skipSpace && after != null) {
+        const text = opts.ytext.toString();
+        while (after < text.length && /\s/.test(text[after])) after++;
+      }
       if (moves !== before)
         resume = null; // the person has gone elsewhere meanwhile
       else if (result !== 'conflict' && after != null) {
@@ -686,7 +694,7 @@ export function createVisual(opts: {
     // now, with the place; the level and the title are only known when the person is done.
     const probe = bridge.headingCommand(editor.state, 'section', 'x');
     const around = probe?.replacement.match(/^(\n*)\\section\{x\}(\n*)$/);
-    const put = around && insertion();
+    const put = around && insertion(true);
     if (!around || !put) return null;
     return (level, title) => put(`${around[1]}\\${level}{${title}}${around[2]}`);
   };
