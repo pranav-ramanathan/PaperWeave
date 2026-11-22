@@ -932,6 +932,24 @@ is printed without that field.` (once, though latexmk runs BibTeX again). The su
   Left unsurfaced as noise: `empty journal`, `entry type ... isn't style-file defined`.
 - Cached builds are redone (`TEX_TEXT` is now `utf8-biber-eps-glyphs-strings`).
 
+## `<`, `>` and `|` typed in the visual view printed as `¡`, `¿` and `—`
+
+- **Before:** `escape()` passed `<`, `>`, `|` through bare. pdfLaTeX's default (OT1) encoding
+  holds other glyphs in those slots, so "p < 0.05" typed in the text shipped as "p ¡ 0.05":
+  exit 0, no warning, ready to submit. (With `[T1]{fontenc}` and in XeLaTeX they were right.)
+- **Now:** `escape()` writes `\textless{}`, `\textgreater{}`, `\textbar{}`, which print the
+  right glyph in OT1, T1 and XeLaTeX. The parser reads them as one shown character (like
+  `\textbackslash{}`), so they show as `<` `>` `|` and Backspace removes each whole. Callers
+  (typing, paste, grammar replacements) only ever write into prose.
+- **Not fixed, not flagged:** a bare `<`, `>` or `|` already in a source (typed in the source
+  view, or imported) still builds wrong under pdfLaTeX without T1. Those bytes are never
+  rewritten and still show as themselves. TeX gives no signal, so nothing says so.
+- **Recommendation (not built):** a readiness warning for a bare `<`, `>` or `|` in prose
+  (the `prose()` segments, so not math, `\verb`, `\url`, code) when the class is pdfLaTeX and
+  the preamble loads no `fontenc` with T1 (`\usepackage[T1]{fontenc}`). It is cheap to find but
+  not reliable: a class or package may load T1 itself (e.g. through `lmodern`/`fontspec`-like
+  packages), so it would warn falsely. Worth doing only as a "may print wrongly" note.
+
 ## How long a large import takes
 
 - An import still runs inside its request. Measured at the most files a paper may hold

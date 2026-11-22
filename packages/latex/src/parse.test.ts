@@ -387,3 +387,20 @@ test('theorem-like names the common classes predefine hold prose', () => {
     ).toEqual(['raw', 'ws', 'para', 'ws', 'raw', 'ws']);
   }
 });
+
+test('escape writes < > | as commands that print the same in every font encoding', async () => {
+  const { escape } = await import('./escape.ts');
+  expect(escape('a < b > c | d')).toBe('a \\textless{} b \\textgreater{} c \\textbar{} d');
+});
+
+test('\\textless{}, \\textgreater{} and \\textbar{} are one shown character each', () => {
+  for (const [cmd, ch] of [
+    ['\\textless{}', '<'],
+    ['\\textgreater{}', '>'],
+    ['\\textbar{}', '|'],
+  ]) {
+    const p = parse(`a ${cmd} b\n`);
+    const pieces = p.blocks.flatMap((b) => (b.body.kind === 'para' ? b.body.pieces : []));
+    expect(pieces.filter((x) => x.k === 'esc').map((x) => x.ch)).toEqual([ch]);
+  }
+});
