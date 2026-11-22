@@ -614,6 +614,19 @@ Read this first. Update it in every pull request.
     shows raw in the visual view until a reload. The grammar check reads it on each check.
   - Proposals never set `contained`, so they run on the default set and are unchanged.
 
+## DOI lookups are limited, polite and bounded
+
+- **Found by** the security review: no limit on lookups, no contact address for the registry,
+  an unbounded answer, redirects followed.
+- **Now** `lookUpDoi` counts each ask in `doi_requests` (migration 0028) before making it:
+  30 per person per ten minutes, 500 per paper per day (`DOI_LOOKUPS_PER_USER`,
+  `DOI_LOOKUPS_PER_PROJECT`); past either: "Too many DOI lookups just now. Try again in a few
+  minutes.", nothing sent. The permission check still comes first. `CROSSREF_MAILTO`, when set,
+  goes in the User-Agent (`PaperWeave/0.1 (mailto:...)`); never logged or stored. The answer is
+  read to 1 MB (`outbound.ts`), redirects are not followed; the language checker got the same.
+- **Held by** `evidence.sandbox.test.ts`.
+- **Not done:** no UI change; rows of `doi_requests` are not pruned.
+
 ## Next
 
 Every item in `docs/plan.md` from the scaffold to Phase F has been built. Since then the work

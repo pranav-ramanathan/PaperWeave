@@ -8,6 +8,7 @@ import { authorize } from './authz.ts';
 import { type BlobStore, sha256 } from './blobs.ts';
 import type { Db } from './db.ts';
 import { AppError } from './errors.ts';
+import { boundedJson } from './outbound.ts';
 import { id } from './projects.ts';
 import { proseOf } from './labels.ts';
 import { loadUpdates, TEXT } from './sync.ts';
@@ -145,11 +146,15 @@ export async function checkGrammar(
         language: settings.language,
         disabledRules: disabled,
       }),
+      redirect: 'manual',
       signal: AbortSignal.timeout(20_000),
     }).catch(() => null);
     if (!res?.ok)
       throw new AppError('unavailable', 'The spelling and grammar checker did not answer.');
-    matches = ((await res.json()) as { matches: Match[] }).matches;
+    const body = (await boundedJson(res, 8_000_000)) as { matches?: Match[] } | null;
+    if (!Array.isArray(body?.matches))
+      throw new AppError('unavailable', 'The spelling and grammar checker did not answer.');
+    matches = body.matches;
     // shortcut: a few answers kept per process, the oldest dropped. Share them between
     // processes if checking ever shows up in timings.
     if (answers.size >= 32) answers.delete(answers.keys().next().value!);
