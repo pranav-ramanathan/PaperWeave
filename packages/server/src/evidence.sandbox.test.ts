@@ -550,3 +550,20 @@ test('an answer over 1 MB is not read, and a redirect is not followed', async ()
   expect(sent).toBe('unavailable');
   expect(init?.redirect).toBe('manual');
 });
+
+test('a braced text macro in a title is its text, so it is no difference from the registry', async () => {
+  const r = await lookup(
+    String.raw`@book{k, doi={10.1000/x}, author={Knuth, Donald}, year={1984}, title={The {\TeX}book}}`,
+    { title: ['The TeXbook'], author: [{ family: 'Knuth' }], issued: { 'date-parts': [[1984]] } },
+  );
+  expect(r.outcome).toBe('matches');
+  expect(r.comparison.find((c) => c.field === 'title')).toMatchObject({
+    entry: 'The TeXbook',
+    registry: 'The TeXbook',
+    same: true,
+  });
+  const accents = await lookup(String.raw`@book{k, doi={10.1000/x}, title={Sch{\"o}n \& \LaTeX}}`, {
+    title: ['Schön & LaTeX'],
+  });
+  expect(seen(accents).title).toBe(true);
+});
