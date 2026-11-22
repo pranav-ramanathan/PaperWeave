@@ -11,6 +11,7 @@ import {
   chartDraws,
   chartPng,
   chartPngDigest,
+  createFile,
   deleteFile,
   editFile,
   exportRevision,
@@ -416,7 +417,6 @@ test('charts keep to their paper, their name and the people who may change them'
   const id = await make('owner');
   expect(await code(make('owner'))).toBe('conflict');
   // A name whose files someone has already put in the paper.
-  const { createFile } = await import('@paperweave/server');
   await createFile(t.pool, store, users.owner.id, p.id, 'charts/mine.png', Buffer.from([1, 2]));
   expect(await code(make('owner', { name: 'mine' }))).toBe('conflict');
 
@@ -434,4 +434,23 @@ test('charts keep to their paper, their name and the people who may change them'
   expect(await charts(p)).toEqual([]);
   // Nothing of another paper's was left queued for the next test.
   while (await drawNext(t.pool, store, image));
+}, 120_000);
+
+test('a chart whose files would share a name with a file of the paper fails, and adds nothing', async () => {
+  const p = await paper();
+  await approve(p);
+  // A name with no extension is allowed, and `charts/` would then be a folder under it.
+  await createFile(t.pool, store, users.owner.id, p.id, 'charts', Buffer.from('x'));
+  await saveChart(t.pool, store, users.owner.id, p.id, {
+    ...LINE,
+    name: 'latency',
+    dataset: p.csv,
+  });
+  expect(await drawNext(t.pool, store, image)).toBe(true);
+  expect(await charts(p)).toMatchObject([
+    { status: 'failed', problem: 'A file and a folder cannot share the name "charts".' },
+  ]);
+  const paths = (await listFiles(t.pool, users.owner.id, p.id)).map((f) => f.path);
+  expect(paths.filter((x) => x.startsWith('charts/'))).toEqual([]);
+  expect(paths).toContain('charts');
 }, 120_000);
