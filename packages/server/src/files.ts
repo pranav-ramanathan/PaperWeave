@@ -117,6 +117,14 @@ export async function putFile(
   path: string,
   bytes: Uint8Array,
 ) {
+  // The same refusal as adding a file by hand: a file and a folder cannot share a name.
+  const clash = pathClash(
+    path,
+    (await db.query('select path from files where project_id = $1', [projectId])).rows.map(
+      (r) => r.path,
+    ),
+  );
+  if (clash) throw new AppError('invalid_input', clashMessage(clash));
   const digest = await store.put(bytes);
   const replaced = await db.query(
     'update files set digest = $3, size = $4 where project_id = $1 and path = $2 and eol is null',

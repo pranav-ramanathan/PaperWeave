@@ -3866,6 +3866,19 @@ Coming back online, the editor said "This paper was restored to an earlier revis
   that address carries a changing `n` and the `Result` is keyed on it. Tests: `keys.spec.ts` and
   the sandbox tests of the three server functions (all fail on the old code).
 
+## Charts and a file and folder under one name
+
+- **What was wrong.** `createFile` and `renameFile` refuse a file and a folder under one name,
+  but `putFile` (used by the chart worker) did not check. With a file such as
+  `charts/latency.pdf/notes.txt` in the paper, drawing the chart `latency` added
+  `charts/latency.pdf` beside it, and every build after that failed ("The build service could
+  not run this build") when the builder could not make the folder. A file named just `charts`
+  cannot be added (no known extension), so that exact case did not arise.
+- **What happens now.** `putFile` runs `pathClash` against the paper's live paths and throws the
+  same `AppError` as `createFile`; `drawNext` shows that text as the chart's problem and adds
+  no files.
+- **Test.** `charts.sandbox.test.ts` (fails on the old code).
+
 ## Decisions waiting on the owner
 
 See "What I need from you" in `docs/plan.md`. None blocks C1.
