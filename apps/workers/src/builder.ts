@@ -18,7 +18,7 @@ import { compile, type Compiler, IMAGE } from './compile.ts';
  * that left some out of the PDF said nothing.
  * 'utf8-biber-eps-glyphs-strings': an undefined @string abbreviation is reported now; a cached
  * good build that printed a reference without its journal said nothing.
- * 'utf8-biber-eps-glyphs-strings-forcedate': builds run with FORCE_SOURCE_DATE=1 now, so \today is
+ * 'utf8-biber-eps-glyphs-strings-forcedate-unicode': builds run with FORCE_SOURCE_DATE=1 now, so \today is
  * the revision's date. A PDF built before has the clock's date in it, and the manifest now
  * says FORCE_SOURCE_DATE=1, so it must not be reused as the result of that command.
  */

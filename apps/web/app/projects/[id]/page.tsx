@@ -161,7 +161,7 @@ async function Project({
     if (readonly === 'binary') return '';
     if (readonly === 'not-utf8') return 'Not UTF-8 text: kept as it is, cannot be edited here';
     if (readonly === 'mixed-newlines')
-      return 'Mixed line endings: kept as it is, cannot be edited here';
+      return 'Mixed line endings: upload the file again to edit it here';
     if (f?.sourceOnly) return 'Definitions: edited in source only';
     if (f?.visual) {
       const all = f.visual.editable + f.visual.raw;

@@ -803,3 +803,34 @@ test('an abbreviation warning does not hide that the bibliography failed', () =>
   });
   expect(out).toContainEqual(ABBR('refs.bib'));
 });
+
+test('an invisible character the font cannot set is named by its code, not printed', () => {
+  const log = [
+    './main.tex:5: LaTeX Error: Unicode character \u200b (U+200B)',
+    '               not set up for use with LaTeX.',
+  ].join('\n');
+  const out = diagnostics(log);
+  expect(out).toEqual([
+    {
+      severity: 'error',
+      file: 'main.tex',
+      line: 5,
+      message:
+        'An invisible character (U+200B) is in the text here, and pdfLaTeX stops at it. Delete it: the source view shows it as a red dot.',
+    },
+  ]);
+  expect(out[0].message).not.toContain('\u200b');
+});
+
+test('a visible character with no setup is named once, with its code', () => {
+  const log =
+    './main.tex:7: LaTeX Error: Unicode character \u2264 (U+2264)\n   not set up for use with LaTeX.';
+  expect(diagnostics(log)).toEqual([
+    {
+      severity: 'error',
+      file: 'main.tex',
+      line: 7,
+      message: 'pdfLaTeX has no character set up for \u2264 (U+2264).',
+    },
+  ]);
+});

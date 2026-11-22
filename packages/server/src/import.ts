@@ -276,6 +276,14 @@ export function describeImport(
     notes.push(
       `${eps.length === 1 ? `The picture ${eps[0]} is an EPS file` : `${eps.length} pictures are EPS files (${eps.slice(0, 3).join(', ')}${eps.length > 3 ? ', ...' : ''})`}, which ${compiler === 'xelatex' ? 'XeLaTeX cannot convert here: the build fails' : `${compiler === 'lualatex' ? 'LuaLaTeX' : 'pdfLaTeX'} cannot place here: the PDF has a box with the name instead`}. Convert ${eps.length === 1 ? 'it' : 'them'} to PDF.`,
     );
+  const mixed = [...meta]
+    .filter(([, d]) => d.editable && d.meta.mixed)
+    .map(([p]) => p)
+    .sort();
+  if (mixed.length)
+    notes.push(
+      `Line endings are mixed in ${mixed.slice(0, 10).join(', ')}${mixed.length > 10 ? `, and ${mixed.length - 10} more` : ''}: each is kept as it is until it is edited here, then written with one style.`,
+    );
   // The paper's own theorem environments are prose in the editor too: count them the same way.
   const set = new Set([...DEFAULT_TRANSPARENT, ...proseEnvs(texts, root)]);
   const files = entries

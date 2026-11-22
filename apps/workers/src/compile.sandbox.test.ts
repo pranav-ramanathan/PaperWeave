@@ -178,6 +178,41 @@ test('a " typed in the visual view stays a quote under German babel', async () =
   expect(text).not.toContain('\u00e4ber');
 });
 
+test.each(['pdflatex', 'xelatex', 'lualatex'] as const)(
+  'unusual spaces and invisible characters typed in the visual view build under %s',
+  async (engine) => {
+    const rep = replica('Sizes go here.\n');
+    const tb = textblocks(rep)[0];
+    expect(
+      rep.dispatch(rep.state.tr.insertText('10\u2009km\u202f! a\u200bb\u200ec', tb.start + 6)),
+    ).toBe(true);
+    const project = tmp();
+    writeFileSync(
+      join(project, 'main.tex'),
+      `\\documentclass{article}\n\\begin{document}\n${rep.src}\\end{document}\n`,
+    );
+    const out = tmp();
+    const r = await compile(project, 'main.tex', out, 60, engine);
+    expect(r.diagnostics.filter((d) => d.severity === 'error')).toEqual([]);
+    expect(r.diagnostics.filter((d) => /Characters not shown/.test(d.message))).toEqual([]);
+    expect(r.ok).toBe(true);
+  },
+);
+
+test('a raw zero-width character in the source fails pdflatex with a plain message', async () => {
+  const { r } = await buildSource(
+    '\\documentclass{article}\n\\begin{document}\nfine\nab\u200bcd\n\\end{document}\n',
+  );
+  expect(r.ok).toBe(false);
+  expect(r.diagnostics).toContainEqual({
+    severity: 'error',
+    file: 'main.tex',
+    line: 4,
+    message:
+      'An invisible character (U+200B) is in the text here, and pdfLaTeX stops at it. Delete it: the source view shows it as a red dot.',
+  });
+});
+
 // Packages that live in texlive-plain-generic, which texlive-latex-extra only recommends.
 test.each([
   ['ulem', '\\usepackage[normalem]{ulem}', '\\sout{x}'],

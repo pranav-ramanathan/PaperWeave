@@ -1997,6 +1997,57 @@ describe('< > | typed in the visual view', () => {
   });
 });
 
+describe('invisible and unusual space characters typed in the visual view', () => {
+  const SRC = 'Hello world.\n';
+  const ZW = '\u200b';
+
+  test('a thin or narrow space is written as \\, and the rest of the text as typed', () => {
+    const r = replica(SRC);
+    const tb = textblocks(r)[0];
+    expect(r.dispatch(r.state.tr.insertText('x\u202f!', tb.start + 6))).toBe(true);
+    r.check();
+    expect(r.src).toBe('Hello x\\,!world.\n');
+  });
+
+  test('a zero-width character alone changes nothing in the source or the document', () => {
+    const r = replica(SRC);
+    const tb = textblocks(r)[0];
+    r.dispatch(r.state.tr.insertText(ZW, tb.start + 6));
+    r.check();
+    expect(r.src).toBe(SRC);
+    expect(r.state.doc.textContent).not.toContain(ZW);
+  });
+
+  test('one typed right after a macro adds no {}', () => {
+    const r = replica('\\LaTeX is\n');
+    const tb = textblocks(r)[0];
+    r.dispatch(r.state.tr.insertText(ZW, tb.start + 1));
+    r.check();
+    expect(r.src).toBe('\\LaTeX is\n');
+  });
+
+  test('one typed over a selection deletes the selection', () => {
+    const r = replica(SRC);
+    const tb = textblocks(r)[0];
+    r.dispatch(r.state.tr.insertText(ZW, tb.start + 6, tb.start + 11));
+    r.check();
+    expect(r.src).toBe('Hello .\n');
+    expect(r.state.doc.textContent).not.toContain(ZW);
+  });
+
+  test('one typed in a just-opened phantom paragraph leaves the source alone', () => {
+    const r = replica('One.\n');
+    const first = textblocks(r)[0];
+    const tr = r.state.tr.split(first.start + first.size);
+    r.dispatch(tr.setSelection(TextSelection.near(tr.doc.resolve(first.start + first.size + 2))));
+    expect(r.bridge.model.phantom).not.toBeNull();
+    r.dispatch(r.state.tr.insertText(ZW, r.state.selection.head));
+    r.check();
+    expect(r.src).toBe('One.\n');
+    expect(r.state.doc.textContent).not.toContain(ZW);
+  });
+});
+
 describe('" typed in the visual view', () => {
   const SRC = 'We found p, see a b.\n';
 

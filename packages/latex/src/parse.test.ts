@@ -131,15 +131,17 @@ test('files export with the bytes they came in with', () => {
     const d = decodeFile(bytes);
     if (!d.editable) continue;
     expect(d.text.includes('\r'), path).toBe(false);
+    // A mixed file is stored as uploaded until edited; that is checked by the import export test.
+    if (d.meta.mixed) continue;
     expect(Buffer.from(encodeFile(d.text, d.meta)).equals(Buffer.from(bytes)), path).toBe(true);
   }
   expect(decodeFile(files['encodings/latin1.tex'])).toEqual({
     editable: false,
     reason: 'not-utf8',
   });
-  expect(decodeFile(files['encodings/mixed.tex'])).toEqual({
-    editable: false,
-    reason: 'mixed-newlines',
+  expect(decodeFile(files['encodings/mixed.tex'])).toMatchObject({
+    editable: true,
+    meta: { eol: 'lf', mixed: true },
   });
   expect(decodeFile(files['encodings/crlf.tex'])).toMatchObject({
     meta: { eol: 'crlf', bom: false },
@@ -408,6 +410,17 @@ test('\\textless{}, \\textgreater{} and \\textbar{} are one shown character each
 test('escape writes " as \\symbol{34}, which babel shorthands cannot change', async () => {
   const { escape } = await import('./escape.ts');
   expect(escape('say "hi"')).toBe('say \\symbol{34}hi\\symbol{34}');
+});
+
+test('escape maps unusual spaces and invisible characters, and leaves the safe ones', async () => {
+  const { escape } = await import('./escape.ts');
+  // thin and narrow spaces -> \,; wide spaces -> one space; zero-width and direction marks -> gone
+  expect(escape('10\u2009km\u202f!\u2002a\u200bb\u200e\u2060\ufeff\u2003c\u2028d\u2029e')).toBe(
+    '10\\,km\\,! ab c d e',
+  );
+  // These build in every engine, or mean something in other scripts: untouched.
+  expect(escape('a\u00adb\u200cc\u200dd\u3000e')).toBe('a\u00adb\u200cc\u200dd\u3000e');
+  expect(escape('\u00a0')).toBe('~');
 });
 
 test('\\symbol{34} is one shown character; other \\symbol{N} stay raw', () => {

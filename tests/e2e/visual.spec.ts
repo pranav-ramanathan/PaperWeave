@@ -322,6 +322,25 @@ test('something pasted into the visual view goes in as its words', async ({ brow
   await expect.poll(source).toContain('50\\% of R\\&D cost \\$5 for item\\_1 \\#2');
   await paste({ text: '50% & more\n\nand $x$ too' });
   await expect.poll(source).toContain('\\#250\\% \\& more\n\nand \\$x\\$ too');
+
+  // Unusual spaces and invisible characters would stop pdfLaTeX: thin ones become \\, and
+  // zero-width ones go, pasted or typed. A paragraph of nothing else is not kept.
+  const bad = /[\u202f\u2009\u200b\u200e]/;
+  await clickAfter(page, VISUAL, 'and $x$ too');
+  await paste({ text: 'Caf\u00e9\u202f! 10\u2009km zero\u200bwidth' });
+  await expect.poll(source).toContain('Caf\u00e9\\,! 10\\,km zerowidth');
+  await page.keyboard.insertText('a\u200bb');
+  await expect.poll(source).toContain('zerowidthab');
+  expect(await source()).not.toMatch(bad);
+  await paste({ text: 'One\u200b.\n\n\u200b\n\nTwo.' });
+  await expect(page.locator(VISUAL)).toContainText('Two.');
+  await expect(status(page)).toHaveText('All edits saved.');
+  await showSource(page);
+  const raw = (await page.locator(`${SOURCE} .cm-line`).allInnerTexts()).join('\n');
+  await view(page, 'Visual').click();
+  // One blank line between them reads as three newlines here; an empty paragraph would add two.
+  expect(raw).toMatch(/One\.\n{1,3}Two\./);
+  expect(raw).not.toMatch(bad);
 });
 
 test('something dropped on the visual view goes in as its words, and the source view takes no file', async ({

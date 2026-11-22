@@ -116,6 +116,39 @@ test('two people edit a file together, a reviewer reads along, and offline edits
     if (f.path !== 'sections/intro.tex') expect(bytes(f.path).equals(f.bytes), f.path).toBe(true);
 });
 
+test('the source view shows invisible characters and Backspace removes one', async ({
+  browser,
+}) => {
+  const owner = await person(browser, 'invisible-owner');
+  const page = owner.page;
+  const main = '\\documentclass{article}\n\\begin{document}\nHello world.\n\\end{document}\n';
+  const zip = join(mkdtempSync(join(tmpdir(), 'paperweave-e2e-')), `Invisible ${run}.zip`);
+  writeFileSync(zip, await writeZip([{ path: 'main.tex', bytes: Buffer.from(main) }]));
+  await page.goto('/sign-in');
+  await signIn(page, owner.email);
+  await page.getByLabel('Or import a ZIP of a LaTeX project').setInputFiles(zip);
+  await page.getByRole('button', { name: 'Import ZIP' }).click();
+  await page.getByRole('link', { name: 'main.tex' }).first().click();
+  await expect(status(page)).toHaveText('All edits saved.');
+  await showSource(page);
+  await expect(source(page)).toContainText('Hello world.');
+
+  await typeAtStart(page, 'Q');
+  await page.keyboard.press('Backspace');
+  await page.keyboard.insertText('x\u200by\u202fz');
+  const marks = source(page).locator('.cm-specialChar');
+  await expect(marks).toHaveCount(2);
+  await expect(marks.nth(0)).toHaveAttribute('title', 'Invisible character U+200B');
+  await expect(marks.nth(1)).toHaveAttribute('title', 'Invisible character U+202F');
+  // The caret is after z: move back to just after the first character and delete it.
+  await page.keyboard.press('ArrowLeft'); // before z
+  await page.keyboard.press('ArrowLeft'); // before U+202F
+  await page.keyboard.press('ArrowLeft'); // before y
+  await page.keyboard.press('Backspace'); // removes U+200B
+  await expect(marks).toHaveCount(1);
+  await expect(marks.first()).toHaveAttribute('title', 'Invisible character U+202F');
+});
+
 test('a file opens in the view its person last chose', async ({ browser }) => {
   test.setTimeout(180_000);
   const owner = await person(browser, 'view-owner');

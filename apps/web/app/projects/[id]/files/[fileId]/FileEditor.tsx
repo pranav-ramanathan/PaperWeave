@@ -2,7 +2,14 @@
 
 import { defaultKeymap } from '@codemirror/commands';
 import { Compartment, EditorState, StateEffect, StateField } from '@codemirror/state';
-import { Decoration, type DecorationSet, EditorView, keymap, lineNumbers } from '@codemirror/view';
+import {
+  Decoration,
+  type DecorationSet,
+  EditorView,
+  highlightSpecialChars,
+  keymap,
+  lineNumbers,
+} from '@codemirror/view';
 import { HocuspocusProvider } from '@hocuspocus/provider';
 import {
   type Command,
@@ -500,6 +507,20 @@ export default function FileEditor(props: {
             },
           }),
           lineNumbers(),
+          // Spaces and zero-width characters that pdfLaTeX stops at are shown as a red dot, with
+          // their code on hover. U+00A0, U+200C, U+200D and U+3000 build and are left alone.
+          highlightSpecialChars({
+            addSpecialChars: /[\u2000-\u200a\u202f\u205f\u202a-\u202c\u2060\u2068]/g,
+            render: (code, _desc, placeholder) => {
+              const span = document.createElement('span');
+              const name = `Invisible character U+${code.toString(16).toUpperCase().padStart(4, '0')}`;
+              span.className = 'cm-specialChar';
+              span.textContent = placeholder;
+              span.title = name;
+              span.setAttribute('aria-label', name);
+              return span;
+            },
+          }),
           EditorView.lineWrapping,
           EditorView.contentAttributes.of({ 'aria-label': `LaTeX source of ${props.path}` }),
           // Shut until the file has arrived. Typed into an editor still empty, words would
