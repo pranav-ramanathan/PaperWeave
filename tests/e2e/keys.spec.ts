@@ -659,3 +659,31 @@ test('Attach to the same words again keeps the keyboard and says what happened',
   expect(now.name).not.toBe('(nothing has the keyboard)');
   expect(now.region).toBe('Comments');
 });
+
+test('removing someone says so and keeps the keyboard', async ({ browser }) => {
+  test.setTimeout(180_000);
+  const page = await paper(browser, 'keys-remove');
+  const guest = await person(browser, 'keys-remove-guest');
+  await page.getByLabel('Their email address').fill(guest.email);
+  await page.getByLabel('Their email address').press('Enter');
+  await expect(page.getByRole('status')).toHaveText(`Invitation sent to ${guest.email}.`);
+  await guest.page.goto(await emailedLink(guest.email, '/invitations/'));
+  await signIn(guest.page, guest.email);
+  await guest.page.getByRole('button', { name: 'Join this paper' }).click();
+  await expect(guest.page.getByText('You are a')).toBeVisible();
+
+  // A role is changed first, so the address holds ?saved=1 when the guest is removed.
+  await page.goto(page.url().split('?')[0]);
+  await page.getByLabel(`Role of ${guest.email}`).selectOption('editor');
+  await tabTo(page, 'Change');
+  await page.keyboard.press('Enter');
+  await expect(page.getByRole('status')).toHaveText('Role changed.');
+  expect(page.url()).toContain('saved=1');
+
+  await tabTo(page, `Remove ${guest.email}`);
+  await page.keyboard.press('Enter');
+  await expect(page.getByRole('status')).toHaveText(`Removed ${guest.email} from this paper.`);
+  expect(page.url()).not.toContain('saved=1');
+  expect((await focused(page)).name).toBe(`Removed ${guest.email} from this paper.`);
+  await expect(page.getByRole('rowheader', { name: guest.email })).toHaveCount(0);
+});
