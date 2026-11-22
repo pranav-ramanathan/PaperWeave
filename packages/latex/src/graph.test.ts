@@ -1,5 +1,5 @@
 import { expect, test } from 'vitest';
-import { graphicsPaths, projectGraphicsPaths, includeGraph, includes } from './graph.ts';
+import { findRoot, graphicsPaths, projectGraphicsPaths, includeGraph, includes } from './graph.ts';
 import { labelIndex } from './labels.ts';
 
 test('\\graphicspath folders are read, and a comment hides them', () => {
@@ -284,4 +284,45 @@ test('a later \\graphicspath replaces an earlier one, in TeX order', () => {
   // A file read only in the body is not a preamble file.
   const f3 = { ...files, 'main.tex': PRE('\\input{late}', '\\graphicspath{{a/}}\n') };
   expect(projectGraphicsPaths(f3, 'main.tex')).toEqual(['a/']);
+});
+
+const BODY = '\\begin{document}\nHi.\n\\end{document}\n';
+const CLASS = '\\documentclass{article}\n\\usepackage{amsmath}\n';
+
+test('findRoot follows \\input and \\include in the preamble to the file with \\documentclass', () => {
+  const layouts: Record<string, Record<string, string>> = {
+    'input{setup}': { 'main.tex': `\\input{setup}\n${BODY}`, 'setup.tex': CLASS },
+    'input{setup.tex}': { 'main.tex': `\\input{setup.tex}\n${BODY}`, 'setup.tex': CLASS },
+    'input{tex/setup}': { 'main.tex': `\\input{tex/setup}\n${BODY}`, 'tex/setup.tex': CLASS },
+    'bare input': { 'main.tex': `\\input setup \n${BODY}`, 'setup.tex': CLASS },
+    'include{setup}': { 'main.tex': `\\include{setup}\n${BODY}`, 'setup.tex': CLASS },
+    'two levels': {
+      'main.tex': `\\input{pre}\n${BODY}`,
+      'pre.tex': '\\input{setup}\n',
+      'setup.tex': CLASS,
+    },
+    'setup opens with other preamble commands': {
+      'main.tex': `\\input{setup}\n${BODY}`,
+      'setup.tex': `\\RequirePackage{fix-cm}\n\\PassOptionsToPackage{svgnames}{xcolor}\n% a comment\n${CLASS}`,
+    },
+  };
+  for (const [name, files] of Object.entries(layouts))
+    expect(findRoot(files), name).toBe('main.tex');
+});
+
+test('findRoot refuses a class it cannot honestly reach', () => {
+  const none: Record<string, Record<string, string>> = {
+    dynamic: { 'main.tex': `\\input{\\dir/setup}\n${BODY}`, 'setup.tex': CLASS },
+    'after the body': {
+      'main.tex': `\\begin{document}\n\\input{setup}\n\\end{document}\n`,
+      'setup.tex': CLASS,
+    },
+    commented: { 'main.tex': `%\\input{setup}\n${BODY}`, 'setup.tex': CLASS },
+    cycle: {
+      'main.tex': `\\input{a}\n${BODY}`,
+      'a.tex': '\\input{b}',
+      'b.tex': '\\input{a}',
+    },
+  };
+  for (const [name, files] of Object.entries(none)) expect(findRoot(files), name).toBeNull();
 });

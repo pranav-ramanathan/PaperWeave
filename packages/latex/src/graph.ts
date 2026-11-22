@@ -134,11 +134,58 @@ export function includes(src: string): Include[] {
   return out.sort((a, b) => a.at - b.at || a.targetAt - b.targetAt);
 }
 
-/** The file that holds both \documentclass and \begin{document}. */
+const REACH_DEPTH = 8;
+const REACH_FILES = 50;
+const REACH_BYTES = 1_000_000;
+
+/**
+ * Whether `path` is a root: it has \\begin{document}, and a \\documentclass comes before it,
+ * either in the file or in a file its preamble `\\input`s or `\\include`s (read whole, and itself
+ * following further `\\input`s). The walk is bounded: each file once, 8 deep, 50 files, 1 MB.
+ * `all` is every path in the project.
+ */
+export function reachesClass(
+  files: Record<string, string>,
+  path: string,
+  all: ReadonlySet<string> = new Set(Object.keys(files)),
+): boolean {
+  const text = files[path];
+  if (text === undefined) return false;
+  const live = uncomment(text);
+  const body = live.indexOf('\\begin{document}');
+  if (body < 0) return false;
+  const head = live.slice(0, body);
+  if (head.includes('\\documentclass')) return true;
+  const dir = rootDir(path);
+  const seen = new Set<string>([path]);
+  let scanned = 0;
+  const walk = (src: string, base: string, depth: number): boolean => {
+    for (const inc of includes(src)) {
+      if (inc.dynamic || inc.kind !== 'input') continue;
+      const to =
+        (base ? resolveInclude(inc, dir + base, all) : undefined) ?? resolveInclude(inc, dir, all);
+      if (!to || seen.has(to) || seen.size > REACH_FILES) continue;
+      const t = files[to];
+      if (t === undefined) continue;
+      seen.add(to);
+      scanned += t.length;
+      if (scanned > REACH_BYTES) return false;
+      if (uncomment(t).includes('\\documentclass')) return true;
+      if (depth < REACH_DEPTH && walk(t, importBase(inc, base), depth + 1)) return true;
+    }
+    return false;
+  };
+  return walk(head, '', 1);
+}
+
+/** The file that has \\begin{document} with a \\documentclass before it, in it or in a file it reads. */
 export function findRoot(files: Record<string, string>): string | null {
-  const roots = Object.keys(files).filter(
+  const all = new Set(Object.keys(files));
+  const keys = Object.keys(files);
+  const direct = keys.filter(
     (p) => files[p].includes('\\documentclass') && files[p].includes('\\begin{document}'),
   );
+  const roots = direct.length ? direct : keys.filter((p) => reachesClass(files, p, all));
   return (
     roots.sort((a, b) => a.split('/').length - b.split('/').length || a.localeCompare(b))[0] ?? null
   );

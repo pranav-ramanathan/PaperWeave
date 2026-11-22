@@ -4443,3 +4443,22 @@ Found by a three-person walkthrough.
   not be reached with the keyboard (axe `scrollable-region-focusable`). It is now a named region
   ("Changes to main.tex") with a tab stop and a visible outline. `a11y.spec.ts` audits it with a
   line wider than the window; that failed before.
+
+## A `\documentclass` in an `\input`-ed file
+
+- **What was wrong.** Import refused a paper whose root was `\input{setup}` followed by
+  `\begin{document}`, with `\documentclass` in `setup.tex`, although TeX builds it (checked with
+  pdflatex, xelatex and lualatex for seven layouts: `\input{setup}`, `{setup.tex}`,
+  `{tex/setup}`, bare `\input setup`, `\include`, two levels, and a setup file that opens with
+  `\RequirePackage`, `\PassOptionsToPackage` and a comment).
+- **Now** `reachesClass` (`packages/latex/src/graph.ts`) accepts a file with `\begin{document}` whose
+  text before it, or a file it `\input`s or `\include`s there, has `\documentclass`. It is only a
+  second choice: archives with a file holding both words pick their root as before. `findRoot` and
+  the importer (`papers`, `describeImport`) use it; the Latin-1 probe does not. The walk reads each
+  file once, eight deep, 50 files, 1 MB. A dynamic `\input{\dir/x}`, an `\input` after the body, a
+  commented one and a cycle do not count. Every other part already followed preamble `\input`.
+- **Wording changed on purpose:** the refusal now reads "No file here has \begin{document} with a
+  \documentclass before it, in that file or in a file it \inputs." (`import.sandbox.test`,
+  `tests/e2e/import.spec.ts` follow).
+- **Held by** `graph.test` (seven layouts, four refusals), import and worker sandbox tests and a
+  browser test that imports the split ZIP and builds it.
