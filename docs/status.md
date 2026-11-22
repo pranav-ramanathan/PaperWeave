@@ -989,6 +989,14 @@ Figure~, ...`, with no warning and `check()` passing.
   not stand alone, puts only plain text on the clipboard and pastes as typed words. Pasting
   over a selection is two undo steps (the delete, then the insert). Custom clipboard types are
   tested only in Chromium. Clipboard contents are never logged.
+- **Guarded like typing.** Anything put in through the command path (this paste, the
+  several-paragraph paste and drop, and the other inserts from `insertion()`) went into the
+  source verbatim, so `[Optional] ` at the start of an item became its label, `so on\ldots`
+  before `then` gave `\ldotsthen`, and text after a `% comment` was swallowed. `fillCommand`
+  now adds what typing adds (`guard()`): `{}` before or after where a command name would
+  run on or take a `[`/`*`, and a line break after a comment. It is built in the queue, against
+  the text the earlier commands left. Not covered: the source-view paste (the source is
+  raw LaTeX there), and proposal and grammar replacements.
 
 ## How long a large import takes
 

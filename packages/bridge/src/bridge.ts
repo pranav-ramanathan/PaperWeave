@@ -15,7 +15,7 @@ import { type EditorState, Selection, TextSelection, type Transaction } from '@t
 import * as Y from 'yjs';
 import { pasteable } from './clipboard.ts';
 import { locate, model, type Model, projector, toSrc } from './project.ts';
-import { diff, type Edit, emphEdit, translate, type Translation } from './translate.ts';
+import { diff, type Edit, emphEdit, guard, translate, type Translation } from './translate.ts';
 
 export type Host = { getState(): EditorState; dispatch(tr: Transaction): void };
 
@@ -286,6 +286,21 @@ export class Bridge {
       expected: '',
       replacement,
     };
+  }
+
+  /**
+   * `c` (from insertCommand) with `latex` as its replacement, guarded as typed text is: `{}` before
+   * it where it would join a command name or become the argument of one (`[`, `*`), `{}` after it
+   * where the text that follows would, and a line break before it where the place is in a comment.
+   * Built against the text as it is now.
+   */
+  fillCommand(c: Command, latex: string): Command {
+    const at = Y.createAbsolutePositionFromRelativePosition(c.to, this.ytext.doc!)?.index;
+    if (at == null || !latex) return { ...c, replacement: latex };
+    const src = this.ytext.toString();
+    const lead = guard(src.slice(0, at), latex);
+    const trail = guard(src.slice(0, at) + lead + latex, src[at] ?? '');
+    return { ...c, replacement: lead + latex + trail };
   }
 
   /**

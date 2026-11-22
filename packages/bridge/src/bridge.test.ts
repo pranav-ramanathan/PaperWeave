@@ -2146,3 +2146,64 @@ describe('cut and paste of a stretch of source', () => {
       expect(pasteable(ok), ok).toBe(true);
   });
 });
+
+describe('text put in by a command is guarded as typed text is', () => {
+  /** Put `latex` where the caret is, through the command path, and return the source. */
+  const put = (src: string, at: (r: ReturnType<typeof replica>) => number, latex: string) => {
+    const r = replica(src);
+    r.select(at(r));
+    const c = r.bridge.fillCommand(r.bridge.insertCommand(r.state, '')!, latex);
+    expect(r.bridge.applyCommand(c)).toBe('applied');
+    r.check();
+    return r.src;
+  };
+  const start = (i: number) => (r: ReturnType<typeof replica>) => textblocks(r)[i].start;
+  const end = (i: number) => (r: ReturnType<typeof replica>) =>
+    textblocks(r)[i].start + textblocks(r)[i].size;
+  const LIST = (item: string) => `\\begin{itemize}\n\\item ${item}\n\\end{itemize}\n`;
+
+  test('a [ at the start of an item does not become its label', () => {
+    expect(put(LIST('Run it.'), start(0), '[Optional] ')).toBe(LIST('{}[Optional] Run it.'));
+  });
+
+  test('cut guarded text, paste at the start of another item', () => {
+    const src = `\\begin{itemize}\n\\item {}[Optional] Run it.\n\\item Stop.\n\\end{itemize}\n`;
+    const r = replica(src);
+    r.select(textblocks(r)[0].start, textblocks(r)[0].start + textblocks(r)[0].size);
+    const latex = r.bridge.sourceOf(r.state)!;
+    expect(latex).toContain('[Optional] Run it.');
+    expect(r.dispatch(r.state.tr.deleteSelection())).toBe(true);
+    r.select(textblocks(r)[1].start);
+    const c = r.bridge.fillCommand(r.bridge.insertCommand(r.state, '')!, latex);
+    expect(r.bridge.applyCommand(c)).toBe('applied');
+    r.check();
+    expect(r.src).toContain('\\item {}[Optional] Run it.Stop.');
+  });
+
+  test('paragraphs starting with [ at an item start', () => {
+    expect(put(LIST('Run it.'), start(0), '[1] First.\n\nSecond.')).toContain(
+      '\\item {}[1] First.',
+    );
+  });
+
+  test('a command name is not joined to the word after it, or before it', () => {
+    expect(put('Then go.\n', start(0), 'so on\\ldots')).toBe('so on\\ldots{}Then go.\n');
+    const after = put('A \\ldots\n', end(0), 'and');
+    expect(after).toBe('A \\ldots{}and\n');
+  });
+
+  test('text put after a comment starts on a new line', () => {
+    const r = replica('Para text % TODO check\n\nNext.\n');
+    r.select(end(0)(r));
+    const c = r.bridge.fillCommand(r.bridge.insertCommand(r.state, '')!, 'Pasted $x$.');
+    expect(r.bridge.applyCommand(c)).toBe('applied');
+    expect(r.src).toContain('% TODO check\nPasted $x$.');
+  });
+
+  test('plain words after a space are left as they are', () => {
+    expect(put('A b.\n', (r) => textblocks(r)[0].start + 2, 'word ')).toBe('A word b.\n');
+    expect(put('Figure x\n', (r) => textblocks(r)[0].start + 7, '~\\ref{a}')).toBe(
+      'Figure ~\\ref{a}x\n',
+    );
+  });
+});

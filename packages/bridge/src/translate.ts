@@ -189,7 +189,7 @@ function commentOpen(line: string) {
 }
 
 /** What must go between `tail` and `next` so that joining them does not change their meaning. */
-function guard(tail: string, next: string) {
+export function guard(tail: string, next: string) {
   const c = next[0] ?? '';
   // Anything placed after a comment on the same line would become part of the comment.
   const line = tail.slice(tail.lastIndexOf('\n') + 1);

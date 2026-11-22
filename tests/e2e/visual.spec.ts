@@ -1010,3 +1010,39 @@ test('cut and paste keep formulas, citations, references, footnotes and emphasis
     .poll(() => reviewer.page.evaluate(() => (window as unknown as { clip?: string }).clip))
     .toBe(sentence);
 });
+
+test('a [ pasted at the start of a list item does not become its label', async ({ browser }) => {
+  const { page, email } = await person(browser, 'vis-clip-guard');
+  await page.context().grantPermissions(['clipboard-read', 'clipboard-write'], {
+    origin: 'http://localhost:3100',
+  });
+  const main = [
+    '\\documentclass{article}',
+    '\\begin{document}',
+    '\\begin{itemize}',
+    '\\item {}[Optional] Run it.',
+    '\\item Stop.',
+    '\\end{itemize}',
+    '\\end{document}',
+    '',
+  ].join('\n');
+  const zip = join(mkdtempSync(join(tmpdir(), 'paperweave-e2e-')), `Guard ${run}.zip`);
+  writeFileSync(zip, await writeZip([{ path: 'main.tex', bytes: Buffer.from(main) }]));
+  await page.goto('/sign-in');
+  await signIn(page, email);
+  await page.getByLabel('Or import a ZIP of a LaTeX project').setInputFiles(zip);
+  await page.getByRole('button', { name: 'Import ZIP' }).click();
+  await page.getByRole('link', { name: 'main.tex' }).first().click();
+  await expect(status(page)).toHaveText('All edits saved.');
+  await expect(page.locator(VISUAL)).toContainText('Stop.');
+
+  // Cut the text of the first item (the {} stays behind); paste it at the start of the second.
+  await pick(page, VISUAL, '[Optional] Run it.');
+  await page.keyboard.press('ControlOrMeta+x');
+  await pick(page, VISUAL, 'Stop.');
+  await page.keyboard.press('ArrowLeft');
+  await page.keyboard.press('ControlOrMeta+v');
+  await expect(status(page)).toHaveText('All edits saved.');
+  await showSource(page);
+  await expect.poll(() => sourceText(page)).toContain('\\item {}[Optional] Run it.Stop.');
+});

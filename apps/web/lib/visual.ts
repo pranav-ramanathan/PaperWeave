@@ -745,7 +745,15 @@ export function createVisual(opts: {
     resume = { from: editor.state.selection.from, to: editor.state.selection.to, acted };
     return async (latex) => {
       const before = moves;
-      const result = await run({ ...c, key: crypto.randomUUID(), replacement: latex });
+      // Guarded as typed text is, against the text as the earlier commands left it.
+      let sent = latex;
+      const result = await inOrder(() => {
+        const filled = bridge.fillCommand({ ...c, key: crypto.randomUUID() }, latex);
+        sent = filled.replacement;
+        return opts.run(filled);
+      });
+      const lead = sent.indexOf(latex);
+      const trail = sent.length - lead - latex.length;
       // The caret goes just after what was inserted, so that typing carries on from there
       // rather than over a selection that now reaches across it. The place was named by the
       // character after it, which is now the character after the insertion.
@@ -758,7 +766,8 @@ export function createVisual(opts: {
         const text = opts.ytext.toString();
         while (after < text.length && /\s/.test(text[after])) after++;
       }
-      if (caretIn && after != null) after -= latex.length - caretIn(latex);
+      // `after` is past what was inserted, guard after it included; the caret goes before that.
+      if (after != null) after -= caretIn ? sent.length - lead - caretIn(latex) : trail;
       if (moves !== before)
         resume = null; // the person has gone elsewhere meanwhile
       else if (result !== 'conflict' && after != null) {
@@ -847,6 +856,8 @@ export function createVisual(opts: {
    */
   const takeSource = (latex: string): boolean => {
     const { view } = editor;
+    // The selection as the screen has it: a key pressed a moment ago may not have reached the editor.
+    catchUp();
     if (!view.state.selection.empty) {
       view.dispatch(view.state.tr.deleteSelection().scrollIntoView());
       // Refused (it spans structure the visual view cannot express): nothing was changed.
