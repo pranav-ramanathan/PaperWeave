@@ -231,7 +231,7 @@ const THEBIB =
   '\\begin{thebibliography}{9}\n\\bibitem{a} A. One. First. 2001.\n\\bibitem[Two(2002)]{b} B. Two. Second. 2002.\n\\end{thebibliography}';
 
 /** Import a paper, build it as it is, and say what the checks make of it. */
-async function verdict(name: string, files: Record<string, string>) {
+async function verdict(name: string, files: Record<string, string | Buffer>) {
   const zip = await writeZip(
     Object.entries(files).map(([path, text]) => ({ path, bytes: Buffer.from(text) })),
   );
@@ -383,6 +383,31 @@ test('files that come with the TeX installation do not stop a paper; one that is
   const absent = await verdict('Absent', { 'main.tex': doc('', 'Hi \\input{nosuchfile}') });
   expect(absent.ready).toBe(false);
   expect(absent.text.join('\n')).toContain('nosuchfile');
+}, 240_000);
+
+const DOT = Buffer.from(
+  'iVBORw0KGgoAAAANSUhEUgAAAAgAAAAICAAAAADhZOFXAAAAFklEQVR4nGP4DwUMSAwGBgYGQgw0XQC54i/RD0GiIwAAAABJRU5ErkJggg==',
+  'base64',
+);
+
+test('a picture found through a \\graphicspath set in a read preamble file or a package is not missing', async () => {
+  const body = 'Hi \\includegraphics[width=1cm]{dot}';
+  const viaInput = await verdict('GraphicsInput', {
+    'main.tex': doc('\\usepackage{graphicx}\n\\input{preamble}', body),
+    'preamble.tex': '\\graphicspath{{figures/}}\n',
+    'figures/dot.png': DOT,
+  });
+  expect(viaInput.text).toEqual([]);
+  expect(viaInput.ready).toBe(true);
+  expect(viaInput.findings.filter((f) => f.kind === 'file')).toEqual([]);
+  const viaSty = await verdict('GraphicsSty', {
+    'main.tex': doc('\\usepackage{graphicx}\n\\usepackage{local}', body),
+    'local.sty': '\\ProvidesPackage{local}\n\\graphicspath{{figures/}}\n',
+    'figures/dot.png': DOT,
+  });
+  expect(viaSty.text).toEqual([]);
+  expect(viaSty.ready).toBe(true);
+  expect(viaSty.findings.filter((f) => f.kind === 'file')).toEqual([]);
 }, 240_000);
 
 test('a label made by a package or a macro does not stop a paper', async () => {

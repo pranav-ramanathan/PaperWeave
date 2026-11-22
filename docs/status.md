@@ -1984,8 +1984,9 @@ update` held the paper's file rows for **189.6 s** (until the proxy was cut; it 
 - **Now** every rename of a file shows what would change first, and when it sees no line naming
   the file it says that a package, class, bibliography style, listing or data file can be named
   in ways it does not read, and to check the paper still builds (`renameAction`, the rename
-  page). `\graphicspath` is read wherever pictures are found and named
-  (`graphicsPaths`, `resolveVia` in `packages/latex/src/graph.ts`; `renamePlan`, `picture` in
+  page). `\graphicspath` is read wherever pictures are found and named, wherever the paper sets
+  it: in the root, in a preamble file it `\input`s or in a project `.sty` or `.cls` it loads, the
+  last setting in TeX's order winning (`projectGraphicsPaths`, `resolveVia` in `packages/latex/src/graph.ts`; `renamePlan`, `picture` in
   `packages/server/src/files.ts`). `\hyperref[…]`, `\fref`, `\Fref`, `\zcref` and `\zcpageref` are
   read as references, by the rename and by the paper's list of references.
   The ways a paper names its own packages, class, bibliography style, listings, included PDFs,

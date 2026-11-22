@@ -1,5 +1,5 @@
 import { expect, test } from 'vitest';
-import { graphicsPaths, includeGraph, includes } from './graph.ts';
+import { graphicsPaths, projectGraphicsPaths, includeGraph, includes } from './graph.ts';
 import { labelIndex } from './labels.ts';
 
 test('\\graphicspath folders are read, and a comment hides them', () => {
@@ -240,4 +240,48 @@ test('the sub* forms are flagged', () => {
   const src =
     '\\import{a}{b}\\subimport{a}{b}\\inputfrom{a}{b}\\subinputfrom{a}{b}\\includefrom{a}{b}\\subincludefrom{a}{b}';
   expect(includes(src).map((i) => i.import!.sub)).toEqual([false, true, false, true, false, true]);
+});
+
+const PRE = (body: string, pre = '') =>
+  `\\documentclass{article}\n${pre}\\begin{document}\n${body}\n`;
+
+test('a \\graphicspath in an \\input preamble file is followed', () => {
+  const files = {
+    'main.tex': PRE('\\includegraphics{plot}', '\\input{preamble}\n'),
+    'preamble.tex': '\\graphicspath{{figures/}}\n',
+  };
+  const g = includeGraph(files, 'main.tex', [...Object.keys(files), 'figures/plot.pdf']);
+  expect(g.edges).toContainEqual({ from: 'main.tex', to: 'figures/plot.pdf', kind: 'graphics' });
+  expect(g.missing).toEqual([]);
+});
+
+test('a \\graphicspath in a project .sty is followed, relative to the root folder', () => {
+  const files = {
+    'paper/main.tex': PRE('\\includegraphics{plot}', '\\usepackage{local}\n'),
+    'paper/local.sty': '\\graphicspath{{figures/}}\n',
+  };
+  const g = includeGraph(files, 'paper/main.tex', [
+    ...Object.keys(files),
+    'paper/figures/plot.pdf',
+  ]);
+  expect(g.missing).toEqual([]);
+  expect(g.edges).toContainEqual({
+    from: 'paper/main.tex',
+    to: 'paper/figures/plot.pdf',
+    kind: 'graphics',
+  });
+});
+
+test('a later \\graphicspath replaces an earlier one, in TeX order', () => {
+  const files = {
+    'main.tex': PRE('', '\\graphicspath{{a/}}\n\\input{p}\n\\graphicspath{{c/}}\n'),
+    'p.tex': '\\graphicspath{{b/}}\n',
+    'late.tex': '\\graphicspath{{z/}}\n',
+  };
+  expect(projectGraphicsPaths(files, 'main.tex')).toEqual(['c/']);
+  const f2 = { ...files, 'main.tex': PRE('', '\\graphicspath{{a/}}\n\\input{p}\n') };
+  expect(projectGraphicsPaths(f2, 'main.tex')).toEqual(['b/']);
+  // A file read only in the body is not a preamble file.
+  const f3 = { ...files, 'main.tex': PRE('\\input{late}', '\\graphicspath{{a/}}\n') };
+  expect(projectGraphicsPaths(f3, 'main.tex')).toEqual(['a/']);
 });

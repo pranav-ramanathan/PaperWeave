@@ -157,15 +157,62 @@ export const norm = (path: string) => {
 export const rootDir = (root: string) =>
   root.includes('/') ? root.slice(0, root.lastIndexOf('/') + 1) : '';
 
-/** The folders `\\graphicspath{{a/}{b/}}` names, as written: `['a/', 'b/']`. Pass the root file's text. */
-export function graphicsPaths(rootText: string): string[] {
-  const out: string[] = [];
-  for (const m of uncomment(rootText).matchAll(/\\graphicspath\s*\{((?:\s*\{[^{}]*\})*)\s*\}/g))
-    for (const g of m[1].matchAll(/\{([^{}]*)\}/g)) {
-      const folder = g[1].trim();
-      if (folder) out.push(folder);
+const GRAPHICSPATH = /\\graphicspath\s*\{((?:\s*\{[^{}]*\})*)\s*\}/g;
+
+const folders = (list: string) =>
+  [...list.matchAll(/\{([^{}]*)\}/g)].map((g) => g[1].trim()).filter(Boolean);
+
+/**
+ * The folders `\\graphicspath{{a/}{b/}}` names, as written: `['a/', 'b/']`. In one text a later
+ * `\\graphicspath` replaces an earlier one, as in TeX. For a whole paper use `projectGraphicsPaths`.
+ */
+export function graphicsPaths(text: string): string[] {
+  const all = [...uncomment(text).matchAll(GRAPHICSPATH)];
+  return all.length ? folders(all[all.length - 1][1]) : [];
+}
+
+/**
+ * The `\\graphicspath` folders in force for the paper's pictures: set in the root's preamble, in
+ * the files it `\\input`s or `\\include`s there and in the project's own `.sty` and `.cls` it loads,
+ * read in TeX's order, the last setting replacing the ones before it. A setting in the body of the
+ * root file is added to those, as it always has been. `all` is every path in the project.
+ */
+export function projectGraphicsPaths(
+  files: Record<string, string>,
+  root: string,
+  all: ReadonlySet<string> = new Set(Object.keys(files)),
+): string[] {
+  const rootText = files[root];
+  if (rootText === undefined) return [];
+  const dir = rootDir(root);
+  const begins = uncomment(rootText).indexOf('\\begin{document}');
+  const head = begins < 0 ? rootText : rootText.slice(0, begins);
+  let current: string[] = [];
+  const seen = new Set<string>([root]);
+  const read = (text: string, base: string) => {
+    const events: { at: number; run: () => void }[] = [];
+    for (const m of uncomment(text).matchAll(GRAPHICSPATH))
+      events.push({ at: m.index, run: () => (current = folders(m[1])) });
+    for (const inc of includes(text)) {
+      if (inc.dynamic || (inc.kind !== 'input' && inc.kind !== 'support')) continue;
+      events.push({
+        at: inc.at,
+        run: () => {
+          const to =
+            (base ? resolveInclude(inc, dir + base, all) : undefined) ??
+            resolveInclude(inc, dir, all);
+          if (!to || seen.has(to)) return;
+          if (inc.kind === 'support' && !/\.(sty|cls)$/i.test(to)) return;
+          seen.add(to);
+          read(files[to] ?? '', importBase(inc, base));
+        },
+      });
     }
-  return out;
+    events.sort((a, b) => a.at - b.at).forEach((e) => e.run());
+  };
+  read(head, '');
+  if (begins >= 0) current = [...current, ...graphicsPaths(rootText.slice(begins))];
+  return current;
 }
 
 /**
@@ -226,15 +273,19 @@ export type Graph = {
   base: Record<string, string>;
 };
 
-/** `files` maps every project path to its text; `paths` lists all paths, binary ones included. */
+/**
+ * `files` maps every project path to its text; `paths` lists all paths, binary ones included.
+ * `via` is the paper's `\\graphicspath` folders when `files` lacks the `.sty` and `.cls` files
+ * that may set them: pass `projectGraphicsPaths` of a map that has them.
+ */
 export function includeGraph(
   files: Record<string, string>,
   root: string,
   paths: string[] = Object.keys(files),
+  via: string[] = projectGraphicsPaths(files, root, new Set(paths)),
 ): Graph {
   const all = new Set(paths);
   const dir = rootDir(root);
-  const via = graphicsPaths(files[root] ?? '');
   const g: Graph = {
     order: [],
     preamble: [],

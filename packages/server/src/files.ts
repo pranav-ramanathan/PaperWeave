@@ -1,7 +1,6 @@
 // Adding and removing a paper's files, and choosing its root.
 import {
   decodeFile,
-  graphicsPaths,
   includeGraph,
   includes,
   type Include,
@@ -19,6 +18,7 @@ import { id } from './projects.ts';
 import {
   applySplices,
   changesDigest,
+  graphicsFolders,
   listChanges,
   type RenameProposal,
   type Splice,
@@ -283,14 +283,11 @@ async function renamePlan(
   // TeX resolves every path against the root file's directory.
   const rootFile = files.find((f) => f.root);
   const dir = rootDir(rootFile?.path ?? '');
-  const via = graphicsPaths(rootFile?.text ?? '');
+  const texts = Object.fromEntries(files.map((f) => [f.path, f.text]));
+  const via = await graphicsFolders(db, store, projectId, rootFile?.path ?? '', paths, lock);
   const ext = (path: string) => /\.[^./]+$/.exec(path)?.[0] ?? '';
   const splices = new Map<string, Splice[]>();
-  const { base } = includeGraph(
-    Object.fromEntries(files.map((f) => [f.path, f.text])),
-    rootFile?.path ?? '',
-    [...paths],
-  );
+  const { base } = includeGraph(texts, rootFile?.path ?? '', [...paths]);
   for (const file of files) {
     const hits: Splice[] = [];
     const inBase = base[file.path] ?? '';
@@ -429,7 +426,13 @@ export async function pictureDigest(
     { kind: 'graphics', target, dynamic: /[\\#]/.test(target), at: 0, targetAt: 0 },
     dir,
     new Set<string>(rows.map((f) => f.path)),
-    graphicsPaths(rootFile?.text ?? ''),
+    await graphicsFolders(
+      db,
+      store,
+      projectId,
+      rootFile?.path ?? '',
+      rows.map((f) => f.path),
+    ),
   )?.path;
   // A PDF cannot be shown as it is. A drawn chart has a PNG of the same name beside it: that is
   // shown in its place.
