@@ -31,6 +31,16 @@ export default function Language(props: {
   const told = useRef(props.onFindings);
   told.current = props.onFindings;
   const url = `/projects/${projectId}/grammar`;
+  const heading = useRef<HTMLHeadingElement>(null);
+  const section = useRef<HTMLElement>(null);
+  const [moved, setMoved] = useState(0);
+  // A finding that was dealt with is gone, and the button the keyboard was on with it. The
+  // keyboard goes to the next finding, or to the heading if none is left. Pointer use, which
+  // leaves the focus elsewhere (in the editor), is not disturbed.
+  useEffect(() => {
+    if (!moved || document.activeElement !== document.body) return;
+    (section.current?.querySelector<HTMLElement>('li button') ?? heading.current)?.focus();
+  }, [moved]);
 
   const check = useCallback(async () => {
     // A little over the server's own 20 seconds for the checker.
@@ -90,8 +100,13 @@ export default function Language(props: {
       if (done) {
         drop((x) => x === f);
         count(f.kind, 'changed');
+        setMoved((n) => n + 1);
       }
-      return setNote(done ? '' : 'That text has changed. It will be checked again in a moment.');
+      return setNote(
+        done
+          ? `Changed “${f.words}” to “${replacement}”.`
+          : 'That text has changed. It will be checked again in a moment.',
+      );
     }
     const wrong = await post(`/projects/${projectId}/proposals`, {
       file: fileId,
@@ -103,13 +118,16 @@ export default function Language(props: {
     if (!wrong) {
       drop((x) => x === f);
       count(f.kind, 'proposed');
+      setMoved((n) => n + 1);
     }
     setNote(wrong ?? `Proposed changing “${f.words}” to “${replacement}”.`);
   };
 
   return (
-    <section className="threads" id="language" aria-label="Spelling and grammar">
-      <h2>Spelling and grammar</h2>
+    <section ref={section} className="threads" id="language" aria-label="Spelling and grammar">
+      <h2 ref={heading} tabIndex={-1}>
+        Spelling and grammar
+      </h2>
       {off && <p className="note">{off}</p>}
       <p className="note" aria-live="polite">
         {note}
@@ -142,7 +160,10 @@ export default function Language(props: {
                     type="button"
                     onClick={async () => {
                       const wrong = await post(url, { word: f.words, kind: f.kind });
-                      if (!wrong) drop((x) => x.kind === 'spelling' && x.words === f.words);
+                      if (!wrong) {
+                        drop((x) => x.kind === 'spelling' && x.words === f.words);
+                        setMoved((n) => n + 1);
+                      }
                       setNote(wrong ?? `“${f.words}” is now one of the paper's own words.`);
                     }}
                   >
@@ -154,7 +175,10 @@ export default function Language(props: {
                     type="button"
                     onClick={async () => {
                       const wrong = await post(url, { rule: f.rule, kind: f.kind });
-                      if (!wrong) drop((x) => x.rule === f.rule);
+                      if (!wrong) {
+                        drop((x) => x.rule === f.rule);
+                        setMoved((n) => n + 1);
+                      }
                       setNote(
                         wrong ??
                           'That rule is off for this paper. It can be switched on again on the paper’s page.',

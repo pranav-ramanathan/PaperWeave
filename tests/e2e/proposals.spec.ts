@@ -131,6 +131,10 @@ test('a reviewer proposes a change; the owner accepts it, undoes that, and rejec
   await expect(proposal(owner.page)).toContainText('Out of date.', { timeout: 15_000 });
   await expect(proposal(owner.page)).toContainText('It now reads: for-ty');
   await expect(proposal(owner.page).getByRole('button', { name: 'Accept' })).toBeDisabled();
+  // The disabled Accept is described by the note that says why.
+  await expect(
+    proposal(owner.page).getByRole('button', { name: 'Accept' }),
+  ).toHaveAccessibleDescription(/Out of date\. The text has changed/);
   await expect(proposal(reviewer.page)).toContainText('Out of date.', { timeout: 15_000 });
   await proposal(reviewer.page).getByRole('button', { name: 'Change the proposal' }).click();
   await proposal(reviewer.page).getByLabel('Replace it with').fill('thirty-five');

@@ -210,6 +210,7 @@ div.pw-frozen strong {
   overflow: auto;
 }
 .pw-block button {
+  min-height: 24px;
   font-family: system-ui, sans-serif;
   font-size: 0.85em;
 }
@@ -277,12 +278,16 @@ div.pw-frozen strong {
 }
 .page label {
   display: grid;
+  grid-template-columns: minmax(0, 1fr);
+  min-width: 0;
+  max-width: 100%;
   gap: 0.25rem;
   font-weight: 600;
 }
 .page input,
 .page select,
 .page button {
+  max-width: 100%;
   font: inherit;
   padding: 0.35rem 0.6rem;
   border: 1px solid var(--line);
@@ -592,6 +597,8 @@ button[aria-disabled='true'] {
   display: inline-block;
 }
 .page summary {
+  min-height: 24px;
+  display: inline-block;
   cursor: pointer;
   color: var(--accent);
 }

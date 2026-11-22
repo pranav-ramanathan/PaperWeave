@@ -254,13 +254,13 @@ export default function Proposals(props: {
           {p.status === 'dismissed' && 'Withdrawn by its author.'}
         </p>
         {p.status === 'open' && p.placeLost && (
-          <p className="note">
+          <p className="note" id={`stale-${p.id}`}>
             <strong>Out of date.</strong> The place this was to be added at is no longer in the
             file. Make a new proposal.
           </p>
         )}
         {p.status === 'open' && p.stale && !p.placeLost && (
-          <p className="note">
+          <p className="note" id={`stale-${p.id}`}>
             <strong>Out of date.</strong> The text has changed since this was proposed. It now
             reads: <q>{p.now || '(nothing)'}</q>. It cannot be accepted as it is.
           </p>
@@ -312,7 +312,12 @@ export default function Proposals(props: {
             )}
             {p.status === 'open' && canDecide && (
               <>
-                <button type="button" disabled={p.stale} onClick={() => act(p, 'accept')}>
+                <button
+                  type="button"
+                  disabled={p.stale}
+                  aria-describedby={p.stale ? `stale-${p.id}` : undefined}
+                  onClick={() => act(p, 'accept')}
+                >
                   Accept
                 </button>
                 <button type="button" onClick={() => act(p, 'reject')}>

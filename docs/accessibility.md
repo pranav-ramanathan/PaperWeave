@@ -173,6 +173,21 @@ the keyboard (`insert.spec`).
 - On a window 320 pixels wide a long formula made the preview in the equation window scroll
   sideways with no way to reach it from the keyboard. It is now a named group that takes the
   keyboard, with a visible outline.
+- Taking a spelling or grammar finding with the keyboard ("Change to", "It is a word of this
+  paper", "Do not check this in this paper", a reviewer's "Propose") removed the finding and
+  left the keyboard on the page body (2.4.3), and "Change to" said nothing (4.1.3). The keyboard
+  now goes to the next finding's first button, or to the panel's heading when none is left. Only
+  when it had been lost: a click in the editor is not disturbed. The note says what was done
+  ("Changed “recieve” to “receive”."). The words are shown on the page only, never logged.
+- A reply sent with Enter on a "Mention" checkbox left the keyboard on the page body, because the
+  list of people closes after a send (2.4.3). The keyboard now goes to the reply's text box.
+- On a window 320 pixels wide the chart page scrolled sideways when a column heading was long,
+  because the select for a column was as wide as its longest choice (1.4.10). Selects on the
+  pages are now at most as wide as their container.
+- Two controls were under 24 pixels tall (2.5.8): "Rename" and "Edit in source". Both are now at
+  least 24 pixels tall.
+- A proposal's Accept, disabled because the proposal is out of date, now names the "Out of
+  date" note as its description (4.1.2), so a screen reader says why it cannot be used.
 
 ## Walked with the keyboard alone, from sign-in to the revision's downloads
 
