@@ -25,6 +25,7 @@ import { yCollab, yUndoManagerKeymap } from 'y-codemirror.next';
 import * as Y from 'yjs';
 import { setBibliography } from '../../../../../lib/bibliography';
 import { pageNonce } from '../../../../../lib/nonce';
+import { atRisk, LEAVE, leavesPage } from '../../../../../lib/leaving';
 import { onShow, showInPdf } from '../../../../../lib/pdfsync';
 import { createVisual, type Visual } from '../../../../../lib/visual';
 import type { LanguageFinding, Proposal, Thread } from '@paperweave/server';
@@ -189,13 +190,16 @@ export default function FileEditor(props: {
   >(async () => false);
   const markThreads = useRef(() => {});
   const router = useRouter();
+  /** Whether leaving this page now is fine, or the person agreed to lose what is unsaved. */
+  const mayLeave = useRef<() => boolean>(() => true);
   // A double-click in the PDF asks for a line: of this file, or of another one of the paper.
   useEffect(
     () =>
       onShow('source', (place) =>
         place.fileId === fileId
           ? jump.current(place.line)
-          : router.push(`/projects/${projectId}/files/${place.fileId}?line=${place.line}`),
+          : mayLeave.current() &&
+            router.push(`/projects/${projectId}/files/${place.fileId}?line=${place.line}`),
       ),
     [fileId, projectId, router],
   );
@@ -419,11 +423,18 @@ export default function FileEditor(props: {
     // was not there yet and failed, and the library took that for a failed attempt to connect.
     // A second later it dropped the connection, which was working, and made another. Whatever
     // the server answered in that moment went nowhere.
-    provider.on('authenticated', () => update({ connected: true }));
+    let connectedNow = false;
+    provider.on('authenticated', () => {
+      connectedNow = true;
+      update({ connected: true });
+    });
     provider.on('status', ({ status }: { status: string }) => {
       // "Connected" is said when the socket opens, before the ticket has been fetched and the
       // server has accepted it: that is `authenticated`, below.
-      if (status !== 'connected') update({ connected: false });
+      if (status !== 'connected') {
+        connectedNow = false;
+        update({ connected: false });
+      }
       // The library ignores a request to connect made while a disconnect is still closing,
       // and then stays down. So whenever the connection has closed and this tab should be
       // connected, and the library is not going to try by itself, ask again.
@@ -434,10 +445,14 @@ export default function FileEditor(props: {
     // Whether this person's changes are saved is asked of the server, not inferred: "do you hold
     // every insert and delete I have made?". The sync library's own count of confirmations
     // reaches zero too early after a reconnect.
+    let lastChange = 0;
     const saving = watchSaved(doc, {
       send: (question) => provider.sendStateless(question),
       ready: () => provider.synced,
-      say: (unsaved) => update({ unsaved }),
+      say: (unsaved) => {
+        if (unsaved) lastChange = Date.now();
+        update({ unsaved });
+      },
     });
     /** The paper's newest restore when this tab last connected, and one found since, if held. */
     let restoreSeen: number | null = null;
@@ -802,8 +817,35 @@ export default function FileEditor(props: {
 
     // Closing the tab with edits the server has not confirmed would lose them.
     let discarding = false;
+    // A link or a jump to another file does not reach beforeunload: the page is swapped in the
+    // browser and this editor, with the only copy of what the server lacks, is thrown away.
+    let agreed = 0;
+    const risky = () =>
+      !discarding &&
+      atRisk({
+        unsaved: saving.unsaved,
+        connected: connectedNow,
+        sinceChange: Date.now() - lastChange,
+      });
+    mayLeave.current = () => {
+      if (!risky()) return true;
+      if (!window.confirm(LEAVE(props.path))) return false;
+      agreed = Date.now();
+      return true;
+    };
+    const onClick = (e: MouseEvent) => {
+      const a = (e.target as Element | null)?.closest?.('a[href]') as HTMLAnchorElement | null;
+      if (!a || e.defaultPrevented) return;
+      const link = { href: a.href, target: a.target, download: a.hasAttribute('download') };
+      if (leavesPage(e, link, location.href) && !mayLeave.current()) {
+        e.preventDefault();
+        e.stopPropagation();
+      }
+    };
+    window.addEventListener('click', onClick, true);
     const warn = (e: BeforeUnloadEvent) => {
-      if (saving.unsaved && !discarding) e.preventDefault();
+      // Not again straight after the person has said to leave.
+      if (saving.unsaved && !discarding && Date.now() - agreed > 10_000) e.preventDefault();
     };
     window.addEventListener('beforeunload', warn);
     // An open socket can sit silent for a long time after the network goes. When the browser
@@ -811,6 +853,7 @@ export default function FileEditor(props: {
     const socket = provider.configuration.websocketProvider;
     const offline = () => {
       wantOpen = false;
+      connectedNow = false;
       // Said at once. With the network gone the socket can take many seconds to report that it
       // has closed, and until then the status would go on saying everything is saved.
       update({ connected: false });
@@ -826,6 +869,8 @@ export default function FileEditor(props: {
       window.removeEventListener('offline', offline);
       window.removeEventListener('online', online);
       window.removeEventListener('beforeunload', warn);
+      window.removeEventListener('click', onClick, true);
+      mayLeave.current = () => true;
       // A stretch still waiting to be marked has no view to be marked in.
       markThreads.current = () => {};
       for (const t of pending) {

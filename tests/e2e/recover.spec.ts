@@ -949,3 +949,80 @@ test('deleting one file does not stop another that was typed in offline from bei
   await showSource(owner.page);
   await expect(source(owner.page)).toContainText('% main typed offline');
 });
+
+// The sync service is away (not the browser's network, so a link still opens the next page in
+// the app) and a person has typed. Opening another page would drop it without a word.
+async function typedWhileSyncIsAway(browser: Parameters<typeof person>[0], tag: string) {
+  const { editor, paper } = await sharedPaper(browser, tag, [
+    { path: 'main.tex', text: MAIN },
+    { path: 'body.tex', text: 'Body text.\n' },
+  ]);
+  const page = editor.page;
+  let up = true;
+  const open = new Set<{ close: () => unknown }>();
+  await page.routeWebSocket(/:4100/, (ws) => {
+    if (!up) return ws.close();
+    open.add(ws);
+    ws.connectToServer();
+  });
+  await page.goto(paper);
+  await page.getByRole('link', { name: 'main.tex' }).first().click();
+  await showSource(page);
+  await expect(status(page)).toHaveText('All edits saved.');
+  up = false;
+  for (const ws of open) await ws.close();
+  await expect(status(page)).toContainText('Offline.');
+  await typeAtStart(page, '% typed with sync away\n');
+  await expect(status(page)).toContainText('Your edits are waiting to be saved.');
+  const bodyLink = page.getByRole('navigation', { name: 'Files' }).getByRole('link', {
+    name: 'body.tex',
+  });
+  return { page, paper, bodyLink, back: () => (up = true) };
+}
+
+test('words typed while the sync service is away are not dropped by opening another file', async ({
+  browser,
+}) => {
+  const { page, bodyLink, back } = await typedWhileSyncIsAway(browser, 'rec-leave-stay');
+  const url = page.url();
+  let asked = 0;
+  page.once('dialog', (d) => {
+    asked++;
+    expect(d.message()).toContain('has not been saved yet');
+    void d.dismiss();
+  });
+  await bodyLink.click();
+  await expect.poll(() => asked).toBe(1);
+  expect(page.url()).toBe(url);
+  await expect(source(page)).toContainText('% typed with sync away');
+
+  // Once the service is back and has the edit, the same click asks nothing.
+  back();
+  await expect(status(page)).toHaveText('All edits saved.', { timeout: 20_000 });
+  page.on('dialog', (d) => {
+    void d.dismiss();
+    throw new Error(`unexpected dialog: ${d.message()}`);
+  });
+  await bodyLink.click();
+  await page.waitForURL((u) => u.href !== url);
+  await page
+    .getByRole('navigation', { name: 'Files' })
+    .getByRole('link', { name: 'main.tex' })
+    .click();
+  await showSource(page);
+  await expect(source(page)).toContainText('% typed with sync away');
+});
+
+test('agreeing to leave with edits the sync service has not confirmed leaves once, asking once', async ({
+  browser,
+}) => {
+  const { page } = await typedWhileSyncIsAway(browser, 'rec-leave-go');
+  let asked = 0;
+  page.on('dialog', (d) => {
+    asked++;
+    void d.accept();
+  });
+  await page.getByRole('link', { name: 'Paper overview' }).click();
+  await expect(page).toHaveURL(/\/projects\/[^/]+\/?(\?.*)?$/);
+  expect(asked).toBe(1);
+});

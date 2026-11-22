@@ -4316,6 +4316,8 @@ One more, found since:
 - Unsynced edits live in the browser tab's memory. Closing the tab while offline loses them; the
   browser warns first. Keeping them on the device (IndexedDB) would survive that, at the cost of
   leaving manuscript text on shared computers: an owner decision, not yet made.
+- A link or a PDF jump to another page asks first when the open file has edits the sync service
+  has not confirmed (`lib/leaving.ts`); `beforeunload` alone does not cover in-app navigation.
 - Names shown for other people in a file come from each client and are not verified.
 - One sync server to a database. Everything typed or done over the live connection reaches
   other editors through the one sync server that took it, which holds each open file in its
@@ -4752,3 +4754,19 @@ Found by a three-person walkthrough.
   `files.sandbox.test.ts`.
 - **Not done.** No warning on the submit check that an active `\includeonly` leaves chapters out
   of the PDF.
+
+## Opening another page no longer drops edits the sync service has not confirmed
+
+- **What was wrong.** The only guard on unsaved edits was the browser's `beforeunload`, which does
+  not fire on a client-side navigation. With the web app answering but the sync service away
+  (restarting, WebSockets blocked, reconnecting after a wake, signed out), clicking another file,
+  "Paper overview", or double-clicking PDF text from another file unmounted the editor and
+  destroyed the only copy of what was typed, with no warning.
+- **Now** such a click, or a PDF jump to another file, asks "What you typed in the file has not
+  been saved yet... Leave anyway?" when the file has unconfirmed edits and the tab is either not
+  connected or the last change was over 2 seconds ago. Plain clicks only: new-tab links,
+  ctrl/cmd/middle clicks, `#text` and links to the open file never ask. Agreeing does not also
+  bring up the browser's own prompt. "Discard my edits" never asks.
+- **Held by** unit tests in `apps/web/lib/leaving.test.ts` and two tests in
+  `tests/e2e/recover.spec.ts`.
+- **Not done.** Back/Forward cannot be cancelled and still drops unsaved edits silently.
