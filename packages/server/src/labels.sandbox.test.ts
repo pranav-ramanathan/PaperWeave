@@ -6,7 +6,7 @@ import { importZip, listFiles } from './import.ts';
 import { labelIndex } from '@paperweave/latex';
 import { readZip } from './archive.ts';
 import { exportZip } from './import.ts';
-import { labelReport, proposeLabelRename, renameLabel } from './labels.ts';
+import { labelReport, paperProse, proposeLabelRename, renameLabel } from './labels.ts';
 import { acceptInvitation, invite } from './projects.ts';
 import { editFile } from './sync.ts';
 import { TEST_ENV, testDb } from './testing.ts';
@@ -208,4 +208,39 @@ test('hyperref, fref, Fref and zcref references follow a renamed label', async (
   expect((await texts(project.id))['main.tex']).toBe(
     '\\documentclass{article}\n\\begin{document}\n\\section{A}\\label{sec:b}\n\\hyperref[sec:b]{x} \\fref{sec:b} \\Fref{sec:b} \\zcref{sec:b}\n',
   );
+});
+
+test("paperProse reads the root's preamble and the project's own packages, and only for members", async () => {
+  const zip = await writeZip(
+    Object.entries({
+      'main.tex': [
+        '\\documentclass{article}',
+        '\\usepackage{local}',
+        '\\newtheorem{observation}{Observation}',
+        '% \\newtheorem{ghost}{Ghost}',
+        '\\begin{document}',
+        '\\newtheorem{late}{Late}',
+        '\\end{document}',
+        '',
+      ].join('\n'),
+      'local.sty': '\\newtheorem{fact}{Fact}\n\\declaretheorem{axiom}\n',
+      'unused.sty': '\\newtheorem{unused}{Unused}\n',
+    }).map(([path, text]) => ({ path, bytes: Buffer.from(text) })),
+  );
+  const [project] = await importZip(t.pool, store, owner.id, zip, 'Prose');
+  expect(await paperProse(t.pool, store, owner.id, project.id)).toEqual([
+    'axiom',
+    'fact',
+    'observation',
+  ]);
+  // It follows the text as it is now, as the macros do.
+  const files = await listFiles(t.pool, owner.id, project.id);
+  const sty = files.find((f) => f.path === 'local.sty')!;
+  await editFile(t.pool, store, sty.id, owner.id, (text) =>
+    text.insert(0, '\\newtheorem{notice}{N}\n'),
+  );
+  expect(await paperProse(t.pool, store, owner.id, project.id)).toContain('notice');
+  await expect(paperProse(t.pool, store, outsider.id, project.id)).rejects.toMatchObject({
+    code: 'not_found',
+  });
 });

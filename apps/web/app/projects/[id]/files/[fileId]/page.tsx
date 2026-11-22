@@ -7,6 +7,7 @@ import {
   modelProcessing,
   openFile,
   paperMacros,
+  paperProse,
 } from '@paperweave/server';
 import Link from '../../../../Go';
 import { notFound } from 'next/navigation';
@@ -36,13 +37,14 @@ async function FilePage({
     openFile(db(), user.id, fileId),
     importReport(db(), user.id, id),
     paperMacros(db(), blobs(), user.id, id),
+    paperProse(db(), blobs(), user.id, id),
     listMembers(db(), user.id, id),
     modelProcessing(db(), user.id, id),
   ]).catch((err) => {
     if (err instanceof AppError && err.code !== 'permission_denied') notFound();
     throw err;
   });
-  const [project, files, file, report, macros, members, canReview] = loaded;
+  const [project, files, file, report, macros, prose, members, canReview] = loaded;
   // A file ID from another paper must not open under this paper's address.
   if (file.projectId !== project.id) notFound();
   return (
@@ -82,6 +84,7 @@ async function FilePage({
           fileId={fileId}
           visual={/\.(tex|ltx)$/i.test(file.path)}
           macros={macros}
+          prose={prose}
           sourceOnly={!!report?.files.find((f) => f.path === file.path)?.sourceOnly}
           path={file.path}
           canWrite={file.canWrite}

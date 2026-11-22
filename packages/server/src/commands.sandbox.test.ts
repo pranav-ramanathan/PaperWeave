@@ -373,3 +373,60 @@ test('a command that would cut an emoji in two is refused, and changes nothing',
   expect(await rows(p.main)).toBe(was);
   expect((await open(p.main)).toString()).toBe(now);
 });
+
+test("a contained command inside a paper's own theorem environment is checked with the names it carries", async () => {
+  const zip = await writeZip([
+    {
+      path: 'main.tex',
+      bytes: Buffer.from(
+        '\\documentclass{article}\n\\newtheorem{observation}{Observation}\n\\begin{document}\n\n' +
+          '\\begin{observation}\nWords \\cite{a} here.\n\\end{observation}\n\nAfter.\n',
+      ),
+    },
+  ]);
+  const [project] = await importZip(t.pool, store, owner.id, zip, 'Own theorem');
+  const file = (await listFiles(t.pool, owner.id, project.id))[0].id;
+  const edit = async (replacement: string, extra: Partial<Command> = {}) => ({
+    ...replace(await open(file), '\\cite{a}', replacement),
+    contained: true,
+    ...extra,
+  });
+  // The editor that made the command held the name; the server uses the command's own set.
+  const none = await edit('\\cite{b}');
+  expect((await runCommand(t.pool, store, owner.id, file, none)).result).toBe('conflict');
+  const named = await edit('\\cite{b}', { prose: ['observation'] });
+  expect((await runCommand(t.pool, store, owner.id, file, named)).result).toBe('applied');
+  expect((await open(file)).toString()).toContain('Words \\cite{b} here.');
+  // The name does not make a spill acceptable.
+  const spill = { ...replace(await open(file), '\\cite{b}', '\\cite{c}\n\nnew'), contained: true };
+  expect(
+    (await runCommand(t.pool, store, owner.id, file, { ...spill, prose: ['observation'] })).result,
+  ).toBe('conflict');
+  // Names that are not environments of prose, or too many, are refused as malformed.
+  const again = { ...replace(await open(file), '\\cite{b}', '\\cite{d}'), contained: true };
+  for (const prose of [['verbatim'], ['align*'], ['a{b'], [7], 'observation', ['x'.repeat(33)]])
+    expect(
+      await code(
+        runCommand(t.pool, store, owner.id, file, { ...again, key: randomUUID(), prose } as never),
+      ),
+    ).toBe('invalid_input');
+  const many = Array.from(
+    { length: 65 },
+    (_, i) =>
+      'e' + String.fromCharCode(97 + (i % 26)) + String.fromCharCode(97 + Math.floor(i / 26)),
+  );
+  expect(
+    await code(
+      runCommand(t.pool, store, owner.id, file, { ...again, key: randomUUID(), prose: many }),
+    ),
+  ).toBe('invalid_input');
+  expect(
+    await code(
+      runCommand(t.pool, store, owner.id, file, {
+        ...again,
+        key: randomUUID(),
+        prose: many.slice(0, 64),
+      }),
+    ),
+  ).toBe('ok');
+});

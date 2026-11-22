@@ -1,6 +1,13 @@
 // Structural edits: replace one stretch of a file's text, but only if it still reads as the
 // author saw it. Typing merges; a command either lands exactly as meant or not at all.
-import { containedNear, HALF, inPair } from '@paperweave/latex';
+import {
+  containedNear,
+  DEFAULT_TRANSPARENT,
+  HALF,
+  inPair,
+  MAX_PROSE_ENVS,
+  validEnv,
+} from '@paperweave/latex';
 import type pg from 'pg';
 import * as Y from 'yjs';
 import type { BlobStore } from './blobs.ts';
@@ -26,6 +33,11 @@ export type Command = {
    * replacement that was safe for its author run into the text beside it.
    */
   contained?: boolean;
+  /**
+   * With `contained`: names beyond the default that the paper's own text treats as prose
+   * environments (`\\newtheorem{observation}`). The check uses them as the author's editor did.
+   */
+  prose?: string[];
 };
 export type CommandResult =
   /** `update` is the edit as a Yjs update, so its author can apply it as their own (and undo it). */
@@ -44,6 +56,11 @@ function check(input: unknown): Command & { at: [Y.RelativePosition, Y.RelativeP
     throw bad('its text is missing');
   if (c.contained !== undefined && typeof c.contained !== 'boolean')
     throw bad('its flag is invalid');
+  if (
+    c.prose !== undefined &&
+    !(Array.isArray(c.prose) && c.prose.length <= MAX_PROSE_ENVS && c.prose.every(validEnv))
+  )
+    throw bad('its environment names are invalid');
   if (c.expected.length > MAX_TEXT || c.replacement.length > MAX_TEXT) throw bad('it is too large');
   // Stored text has LF line ends only; the file's own style is put back on export.
   if (c.replacement.includes('\r')) throw bad('it has a carriage return');
@@ -148,7 +165,19 @@ export async function runCommand(
       return { result: 'conflict', text: now };
     // Parses a window around the edit, not the file: the whole file is too slow inside the row
     // lock, and too large to parse at MAX_FILE_TEXT. A window past its cap is refused.
-    if (c.contained && !containedNear(now, from, to - from, c.replacement))
+    // The set is the command's own, not one the server looks up: containment is a correctness
+    // guard, not a permission (a writer can already type any bytes through Yjs), and the set
+    // the author's editor used is the one that makes both sides agree by construction.
+    if (
+      c.contained &&
+      !containedNear(
+        now,
+        from,
+        to - from,
+        c.replacement,
+        c.prose?.length ? new Set([...DEFAULT_TRANSPARENT, ...c.prose]) : DEFAULT_TRANSPARENT,
+      )
+    )
       return { result: 'conflict', text: now };
     if (
       opts.exactPlace &&

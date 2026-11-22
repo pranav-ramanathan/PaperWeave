@@ -27,6 +27,12 @@ export type Command = {
   replacement: string;
   /** The replacement of one inline atom: refused if it would spill into the text around it. */
   contained?: boolean;
+  /**
+   * With `contained`: the environments beyond the default that the paper's text counts as prose
+   * (its own `\\newtheorem` names). The check reads the text around the atom with this set, as the
+   * editor that built the command did.
+   */
+  prose?: string[];
 };
 export type CommandResult = 'applied' | 'duplicate' | 'conflict';
 
@@ -366,8 +372,14 @@ export class Bridge {
     // agree that nothing around the atom moved.
     return contained(old, reparse(old, text), from, to - from, replacement.length) &&
       contained(old, parse(text, old.transparent), from, to - from, replacement.length)
-      ? { ...c, key: crypto.randomUUID(), replacement, contained: true }
+      ? { ...c, key: crypto.randomUUID(), replacement, contained: true, ...this.proseOf() }
       : 'spills';
+  }
+
+  /** The model's own transparent names beyond the default, for a command to carry. */
+  private proseOf(): { prose?: string[] } {
+    const extra = [...this.model.parsed.transparent].filter((n) => !DEFAULT_TRANSPARENT.has(n));
+    return extra.length ? { prose: extra.sort() } : {};
   }
 
   /**
@@ -395,8 +407,17 @@ export class Bridge {
         if (item !== null && Y.isDeleted(deleted, item)) return 'conflict';
       }
     }
-    // shortcut: same check as runCommand's, with the default transparent set.
-    if (c.contained && !containedNear(this.ytext.toString(), from, to - from, c.replacement))
+    // shortcut: same check as runCommand's, with the set the model holds.
+    if (
+      c.contained &&
+      !containedNear(
+        this.ytext.toString(),
+        from,
+        to - from,
+        c.replacement,
+        this.model.parsed.transparent,
+      )
+    )
       return 'conflict';
     this.seen.add(c.key);
     this.splice([{ from, to, insert: c.replacement }]);
