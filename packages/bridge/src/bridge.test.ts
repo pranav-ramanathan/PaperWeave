@@ -1892,3 +1892,50 @@ test('undo restores every byte of a deletion or type-over across items', () => {
     expect(r.src).toBe(L3);
   }
 });
+
+describe('< > | typed in the visual view', () => {
+  const SRC = 'We found p, see a b.\n';
+
+  test('are written as commands, show as themselves, and Backspace removes each whole', () => {
+    for (const [ch, cmd] of [
+      ['<', '\\textless{}'],
+      ['>', '\\textgreater{}'],
+      ['|', '\\textbar{}'],
+    ]) {
+      const r = replica(SRC);
+      const tb = textblocks(r)[0];
+      expect(r.dispatch(r.state.tr.insertText(ch + ' ', tb.start + 9))).toBe(true);
+      r.check();
+      expect(r.src).toBe(`We found ${cmd} p, see a b.\n`);
+      expect(shown(r)).toBe(`We found ${ch} p, see a b.`);
+      // Backspace over the character takes the whole command.
+      const at = textblocks(r)[0].start + 9; // the character after "We found "
+      expect(r.dispatch(r.state.tr.delete(at, at + 1))).toBe(true);
+      r.check();
+      expect(r.src).toBe('We found  p, see a b.\n');
+    }
+  });
+
+  test('two replicas typing them converge', () => {
+    const r = replica(SRC);
+    const { b, merge } = peer(r);
+    expect(r.dispatch(r.state.tr.insertText('<', textblocks(r)[0].start + 3))).toBe(true);
+    expect(b.dispatch(b.state.tr.insertText('|', textblocks(b)[0].start + 14))).toBe(true);
+    merge();
+    Y.applyUpdate(b.ydoc, Y.encodeStateAsUpdate(r.ydoc));
+    expect(b.src).toBe(r.src);
+    expect(r.src).toContain('\\textless{}');
+    expect(r.src).toContain('\\textbar{}');
+    r.check();
+    b.check();
+  });
+
+  test('a bare one already in the source shows as itself and its bytes are not touched', () => {
+    const src = 'We found p < 0.05 and n > 30, see a | b.\n';
+    const r = replica(src);
+    expect(shown(r)).toBe('We found p < 0.05 and n > 30, see a | b.');
+    expect(r.dispatch(r.state.tr.insertText('X', textblocks(r)[0].start))).toBe(true);
+    expect(r.src).toBe('X' + src);
+    r.check();
+  });
+});

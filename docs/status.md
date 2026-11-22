@@ -60,6 +60,13 @@ Read this first. Update it in every pull request.
   - The PDF is stamped with the time its revision was cut, so the exported ZIP rebuilt elsewhere
     with the command in `paperweave-toolchain.json` gives the same bytes. A test does exactly
     that for all three templates.
+  - The command also sets `FORCE_SOURCE_DATE=1`, which makes pdfTeX and XeTeX take `\today`
+    from that same time (LuaTeX already did). So `\today` is the UTC date of the moment the
+    revision was cut; a revision whose build was reused from an earlier identical one (same
+    files, same image) shows the date of that first revision, as its manifest says. Not the
+    time of the build or of the rebuild, and not the reader's timezone.
+    The same setting also makes `\pdffilemoddate` and packages that print a file's modification
+    date (`filemod`, `currfile`) report that time instead of the file's own.
   - Restore applies the difference as new edits through `editFile`, so people with the file open
     see it at once, and records a new revision. Nothing is erased.
   - Comparing two revisions shows changed lines, renames, additions and removals.
@@ -924,6 +931,24 @@ is printed without that field.` (once, though latexmk runs BibTeX again). The su
   flagged (Biber reads files in order: one listed after its use is, and does lose the field).
   Left unsurfaced as noise: `empty journal`, `entry type ... isn't style-file defined`.
 - Cached builds are redone (`TEX_TEXT` is now `utf8-biber-eps-glyphs-strings`).
+
+## `<`, `>` and `|` typed in the visual view printed as `¡`, `¿` and `—`
+
+- **Before:** `escape()` passed `<`, `>`, `|` through bare. pdfLaTeX's default (OT1) encoding
+  holds other glyphs in those slots, so "p < 0.05" typed in the text shipped as "p ¡ 0.05":
+  exit 0, no warning, ready to submit. (With `[T1]{fontenc}` and in XeLaTeX they were right.)
+- **Now:** `escape()` writes `\textless{}`, `\textgreater{}`, `\textbar{}`, which print the
+  right glyph in OT1, T1 and XeLaTeX. The parser reads them as one shown character (like
+  `\textbackslash{}`), so they show as `<` `>` `|` and Backspace removes each whole. Callers
+  (typing, paste, grammar replacements) only ever write into prose.
+- **Not fixed, not flagged:** a bare `<`, `>` or `|` already in a source (typed in the source
+  view, or imported) still builds wrong under pdfLaTeX without T1. Those bytes are never
+  rewritten and still show as themselves. TeX gives no signal, so nothing says so.
+- **Recommendation (not built):** a readiness warning for a bare `<`, `>` or `|` in prose
+  (the `prose()` segments, so not math, `\verb`, `\url`, code) when the class is pdfLaTeX and
+  the preamble loads no `fontenc` with T1 (`\usepackage[T1]{fontenc}`). It is cheap to find but
+  not reliable: a class or package may load T1 itself (e.g. through `lmodern`/`fontspec`-like
+  packages), so it would warn falsely. Worth doing only as a "may print wrongly" note.
 
 ## How long a large import takes
 

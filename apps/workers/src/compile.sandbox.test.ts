@@ -659,3 +659,17 @@ test.each(['bibtex', 'biber'] as const)(
   },
   180_000,
 );
+
+test.each(['pdflatex', 'xelatex', 'lualatex'] as const)(
+  '%s takes \\today from the epoch',
+  async (compiler) => {
+    const src = tmp();
+    writeFileSync(
+      join(src, 'main.tex'),
+      '\\documentclass{article}\n\\begin{document}\n\\typeout{TODAY=\\today=}Text.\n\\end{document}\n',
+    );
+    const r = await compile(src, 'main.tex', tmp(), 60, compiler, 1700000000);
+    expect(r.ok, r.log.slice(-600)).toBe(true);
+    expect(r.log).toContain('TODAY=November 14, 2023=');
+  },
+);

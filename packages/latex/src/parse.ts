@@ -63,6 +63,9 @@ const TEXT_ESC: Record<string, string> = {
   textbackslash: '\\',
   textasciitilde: '~',
   textasciicircum: '^',
+  textless: '<',
+  textgreater: '>',
+  textbar: '|',
 };
 const ESC_SYM = new Set(['%', '&', '$', '#', '_', '{', '}', ' ']);
 const SPECIAL = new Set(['\\', '{', '}', '$', '%', '~', '&', '#', '^', '_', ' ', '\t', '\n']);

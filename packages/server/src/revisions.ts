@@ -499,7 +499,7 @@ async function revisionEntries(
         image: built?.image ?? null,
         // PDF timestamps are set from this, so a rebuild gives the same bytes.
         sourceDateEpoch: epoch,
-        command: `SOURCE_DATE_EPOCH=${epoch} latexmk -norc -cd ${engine} -no-shell-escape -bibtex-cond -interaction=nonstopmode -e '${LATEXMK_RULES}' ${shellPath(revision.root)}`,
+        command: `SOURCE_DATE_EPOCH=${epoch} FORCE_SOURCE_DATE=1 latexmk -norc -cd ${engine} -no-shell-escape -bibtex-cond -interaction=nonstopmode -e '${LATEXMK_RULES}' ${shellPath(revision.root)}`,
         files: Object.fromEntries(shared.map((f) => [f.path, `sha256:${f.digest}`])),
         charts,
         // Data files left out of this archive on purpose: their authors keep them back.

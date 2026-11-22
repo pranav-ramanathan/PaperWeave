@@ -136,6 +136,60 @@ A \\gls{qubit} and \\gls{nmr}.
   expect(text).toContain('nuclear magnetic resonance');
 });
 
+/** Build the paper's revision in the app, export it, and run the manifest command as written. */
+async function rebuildsInZones(projectId: string, label: string) {
+  const revision = await saveRevision(t.pool, store, owner.id, projectId, 'Submission');
+  await requestBuild(t.pool, owner.id, projectId, { revisionId: revision.id });
+  expect(await buildNext(t.pool, store, image)).toBe(true);
+  const pdf = await revisionPdf(t.pool, store, owner.id, projectId, revision.id);
+  const dir = mkdtempSync(join(tmpdir(), `paperweave-${label}-`));
+  const { zip } = await exportRevision(t.pool, store, owner.id, projectId, revision.id, true);
+  writeFileSync(join(dir, 'x.zip'), zip);
+  execFileSync('unzip', ['-q', join(dir, 'x.zip'), '-d', join(dir, 'src')]);
+  const manifest = JSON.parse(readFileSync(join(dir, 'src/paperweave-toolchain.json'), 'utf8'));
+  const hashes: string[] = [];
+  // 26 hours apart: at any hour, at least one of these zones is on another calendar day than
+  // the app's build.
+  for (const tz of ['XXX-14', 'XXX+12']) {
+    const run = await sandbox(
+      join(dir, 'src'),
+      ['sh', '-c', manifest.command],
+      120,
+      { TZ: tz },
+      '',
+    );
+    expect(run.code, run.output.slice(-500)).toBe(0);
+    hashes.push(sha256(readFileSync(join(dir, 'src', manifest.root.replace(/\.tex$/, '.pdf')))));
+  }
+  return { hashes, app: sha256(pdf) };
+}
+
+test('a paper that prints \\today rebuilds to the same PDF in any timezone', async () => {
+  const tex = `\\documentclass{article}
+\\title{A title}
+\\author{An Author}
+\\begin{document}
+\\maketitle
+Some text.
+\\end{document}
+`;
+  const [project] = await importZip(
+    t.pool,
+    store,
+    owner.id,
+    await writeZip([{ path: 'main.tex', bytes: Buffer.from(tex) }]),
+    'Today',
+  );
+  const r = await rebuildsInZones(project.id, 'today');
+  expect(r.hashes).toEqual([r.app, r.app]);
+});
+
+test('an elsarticle paper rebuilds to the same PDF in any timezone', async () => {
+  const p = await paper('real-elsevier');
+  const r = await rebuildsInZones(p.id, 'elsevier');
+  expect(r.hashes).toEqual([r.app, r.app]);
+});
+
 test('a revision saved with the text of one already built rebuilds to the same PDF outside the app', async () => {
   const p = await paper('article-basic');
   await requestBuild(t.pool, owner.id, p.id);

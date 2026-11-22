@@ -514,7 +514,9 @@ export async function compile(
         ...['-file-line-error', '-synctex=1', `./${dashed ? name : root}`],
       ],
       seconds,
-      Number.isInteger(epoch) ? { SOURCE_DATE_EPOCH: String(epoch) } : {},
+      // FORCE_SOURCE_DATE: without it pdfTeX and XeTeX use the epoch for the PDF's metadata but
+      // still read \today (\year, \month, \day) from the clock; LuaTeX takes it from the epoch.
+      Number.isInteger(epoch) ? { SOURCE_DATE_EPOCH: String(epoch), FORCE_SOURCE_DATE: '1' } : {},
       dashed && dir ? `/${dir}` : '',
     );
     const base = root.replace(/\.tex$/i, '');
