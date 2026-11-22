@@ -66,12 +66,19 @@ const TEXT_ESC: Record<string, string> = {
 };
 const ESC_SYM = new Set(['%', '&', '$', '#', '_', '{', '}', ' ']);
 const SPECIAL = new Set(['\\', '{', '}', '$', '%', '~', '&', '#', '^', '_', ' ', '\t', '\n']);
-const MATH_ENV = new Set(
+export const MATH_ENV: ReadonlySet<string> = new Set(
   ['equation', 'align', 'gather', 'multline', 'eqnarray', 'displaymath', 'flalign', 'alignat']
     .flatMap((n) => [n, n + '*'])
     .concat('math'),
 );
-const VERBATIM = new Set(['verbatim', 'verbatim*', 'lstlisting', 'minted', 'Verbatim', 'comment']);
+export const VERBATIM: ReadonlySet<string> = new Set([
+  'verbatim',
+  'verbatim*',
+  'lstlisting',
+  'minted',
+  'Verbatim',
+  'comment',
+]);
 /** Environments whose body is ordinary prose: only their \begin and \end lines are raw. */
 export const DEFAULT_TRANSPARENT: ReadonlySet<string> = new Set([
   ...['abstract', 'quote', 'quotation', 'center', 'flushleft', 'flushright', 'appendices'],
