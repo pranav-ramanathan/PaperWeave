@@ -14,6 +14,8 @@ fails when it no longer matches them.
 | Fixture `fixtures/real-tikz` | `article` | 2 | pdflatex | BibTeX | 24% | none |
 | Fixture `fixtures/real-acm` | `acmart` | 1 | pdflatex | BibTeX | 38% | none |
 | Fixture `fixtures/real-xelatex` | `article` | 2 | xelatex | BibTeX | 72% | none |
+| Fixture `fixtures/real-elsevier` | `elsarticle` | 1 | pdflatex | BibTeX | 58% | none |
+| Fixture `fixtures/real-llncs` | `llncs` | 1 | pdflatex | BibTeX | 65% | none |
 | Template "Article" | `article` | 1 | pdflatex | BibTeX | 81% | none |
 | Template "IEEE conference paper" | `IEEEtran` | 4 | pdflatex | BibTeX | 43% | none |
 | Template "AMS article" | `amsart` | 1 | pdflatex | BibTeX | 66% | none |
@@ -57,6 +59,12 @@ to their source. Measured on the `real-*` fixtures and on small samples:
 - `tikzpicture`, `pgfplots` axes, `lstlisting`, `algorithm`, `figure` and `table` (the caption of
   a figure or table is edited through its own control, the first of several in `subfigure`s),
   `CCSXML`, `\ccsdesc`, `\keywords`, `teaserfigure` and the title block of `acmart`.
+- `\title`, `\author`, `\affiliation`, `\address`, `\ead`, `\institute` and the `\begin` and
+  `\end` lines of `frontmatter`, `abstract` and `keyword`: one raw block each. The abstract,
+  the keywords and an acknowledgments section between them are ordinary paragraphs.
+- An environment a paper declares with `\newtheorem` that is not one of `theorem`, `lemma`,
+  `claim` and the other names the editor knows: shown whole as a raw block, and not counted
+  as editable above.
 - `\subfile`, `\import`, `\include` and `\input` lines, and a subfile's own preamble.
 - A citation or a reference is shown in place with its source as its title; it is changed as
   LaTeX in the same box (a double click or Enter opens it, as it does a formula).

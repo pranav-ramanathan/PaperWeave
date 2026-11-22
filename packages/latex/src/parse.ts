@@ -77,12 +77,13 @@ export const DEFAULT_TRANSPARENT: ReadonlySet<string> = new Set([
   ...['abstract', 'quote', 'quotation', 'center', 'flushleft', 'flushright', 'appendices'],
   ...['IEEEkeywords', 'keywords', 'proof', 'theorem', 'lemma', 'corollary', 'proposition'],
   ...['definition', 'remark', 'example', 'sloppypar', 'multicols', 'multicols*'],
+  // Publisher front matter and acknowledgments (elsarticle, IEEEtran).
+  ...['frontmatter', 'keyword', 'acknowledgments', 'acknowledgements', 'acknowledgment'],
+  ...['acknowledgement', 'acks', 'IEEEproof'],
+  // Theorem-like environments llncs predefines (acmart adds conjecture).
+  ...['claim', 'conjecture', 'property', 'problem', 'exercise', 'question', 'solution'],
+  ...['note', 'case'],
 ]);
-
-/** Environments declared with \newtheorem hold prose too. */
-export function theoremEnvs(src: string): string[] {
-  return [...src.matchAll(/\\newtheorem\*?\{([^{}]+)\}/g)].map((m) => m[1]);
-}
 
 export const HARD =
   /\\(?:part|chapter|(?:sub){0,2}section|(?:sub)?paragraph)(?![a-zA-Z])|\\end\{document\}/g;

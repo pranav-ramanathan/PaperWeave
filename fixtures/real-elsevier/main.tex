@@ -1,0 +1,55 @@
+% Synthetic fixture: an Elsevier journal article.
+\documentclass[preprint,12pt]{elsarticle}
+\usepackage{amsmath}
+
+\journal{Journal of Example Studies}
+
+\begin{document}
+
+\begin{frontmatter}
+
+\title{Sparse Sampling for Slow Rivers}
+
+\author[a]{Maren Olsen}
+\ead{maren@example.org}
+\author[b]{Dev Anand}
+
+\affiliation[a]{organization={Example Institute},
+  city={Bergen},
+  country={Norway}}
+\affiliation[b]{organization={Example University},
+  city={Pune},
+  country={India}}
+
+\begin{abstract}
+River gauges are read far more often than the water changes. We pick the
+readings that matter and show that a tenth of them recover the same
+flow curve.
+\end{abstract}
+
+\begin{keyword}
+hydrology \sep sampling \sep sensors
+\end{keyword}
+
+\end{frontmatter}
+
+\section{Introduction}
+Gauges report every minute, yet daily flow moves slowly \cite{lindqvist19}.
+We ask which readings can be dropped.
+
+\section{Method}
+Let $q(t)$ be the flow. We keep a reading when
+\begin{equation}
+  |q(t)-q(t_0)| > \epsilon .
+\end{equation}
+
+\section{Results}
+Keeping a tenth of the readings gives the same curve to within noise.
+
+\section*{Acknowledgments}
+We thank the station crews for their patience.
+
+\bibliographystyle{elsarticle-num}
+\bibliography{refs}
+
+\end{document}

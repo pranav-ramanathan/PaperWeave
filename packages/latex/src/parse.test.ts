@@ -350,3 +350,40 @@ test('an empty list item keeps only the spaces on its line in pre; the rest is p
     JSON.stringify(parse(tail).blocks),
   );
 });
+
+test('a publisher front matter keeps its abstract and keywords as prose around raw title and author lines', () => {
+  const src = texts['real-elsevier/main.tex'];
+  const blocks = parse(src).blocks.map((b) => b.body);
+  const raws = blocks.flatMap((b) => (b.kind === 'raw' ? [b.label] : []));
+  // Each metadata command is a block of its own, and the environments' own lines are raw.
+  expect(raws).toEqual(expect.arrayContaining(['frontmatter', 'title', 'author', 'affiliation']));
+  expect(raws.filter((l) => l === 'author')).toHaveLength(2);
+  expect(raws).toContain('abstract');
+  expect(raws).toContain('keyword');
+  expect(raws.filter((l) => l === 'end')).toHaveLength(3);
+  const paras = blocks.flatMap((b) => (b.kind === 'para' ? [b.text] : []));
+  expect(paras.some((t) => t.startsWith('River gauges are read'))).toBe(true);
+  expect(paras).toContain('hydrology \\sep sampling \\sep sensors');
+  expect(paras.some((t) => t.startsWith('We thank the station crews'))).toBe(true);
+  // Typing in the abstract: the incremental parse is the full parse.
+  const at = src.indexOf('pick the') + 5;
+  const typed = src.slice(0, at) + 'carefully ' + src.slice(at);
+  expect(JSON.stringify(reparse(parse(src), typed).blocks)).toBe(
+    JSON.stringify(parse(typed).blocks),
+  );
+  // And most of the sample is now text, where it was one raw block.
+  const c = coverage(parse(src));
+  expect(c.editable / (c.editable + c.raw)).toBeGreaterThan(0.5);
+});
+
+test('theorem-like names the common classes predefine hold prose', () => {
+  for (const env of ['claim', 'conjecture', 'property', 'question', 'solution', 'case', 'acks']) {
+    const blocks = parse(`\\begin{${env}}\nSome words here.\n\\end{${env}}\n`).blocks.map(
+      (b) => b.body,
+    );
+    expect(
+      blocks.map((b) => b.kind),
+      env,
+    ).toEqual(['raw', 'ws', 'para', 'ws', 'raw', 'ws']);
+  }
+});

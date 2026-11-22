@@ -146,3 +146,17 @@ test('a display formula rewritten to another display formula is contained; one m
   ).toBe(false);
   expect(containedNear(src, from, was, '\\begin{equation}\ny = 2\n\\end{equation}')).toBe(true);
 });
+
+test('containedNear accepts a window that starts inside a publisher front matter', () => {
+  const para = 'Some words \\cite{a} here.';
+  // Small: the window holds the begin line. Large: it opens in the middle of the front matter.
+  for (const n of [1, 300]) {
+    const pad = Array(n).fill(para).join('\n\n');
+    const src = `\\begin{frontmatter}\n\n\\title{T}\n\n${pad}\n\n\\begin{abstract}\n${pad}\n\\end{abstract}\n\n\\end{frontmatter}\n\nBody.\n`;
+    const from = src.lastIndexOf('\\cite{a}');
+    expect(containedNear(src, from, 8, '\\citep{a}'), `${n}`).toBe(true);
+    expect(containedNear(src, from, 8, '\\cite{a'), `${n}`).toBe(false);
+    const first = src.indexOf('\\cite{a}');
+    expect(containedNear(src, first, 8, '\\citep{a}'), `${n}`).toBe(true);
+  }
+});

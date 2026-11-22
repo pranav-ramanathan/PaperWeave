@@ -52,24 +52,29 @@ test.each(['article-basic', 'ieee-multifile', 'ams-multifile'])(
 
 // Papers written the way real ones are: the packages they load, the root and compiler found
 // from the files alone, and a build with no errors and no citation or reference left undefined.
-test.each(['real-natbib', 'real-biblatex-subfiles', 'real-tikz', 'real-acm', 'real-xelatex'])(
-  '%s builds with the root and compiler an import finds',
-  async (name) => {
-    const entries = Object.entries(fixtureFiles(join(FIXTURES, name))).map(([path, bytes]) => ({
-      path: path.slice(name.length + 1),
-      bytes,
-    }));
-    const { report } = describeImport(entries);
-    const out = tmp();
-    const r = await compile(join(FIXTURES, name), report.root!, out, 120, report.compiler);
-    expect(r.diagnostics.filter((d) => d.severity === 'error')).toEqual([]);
-    expect(r.ok).toBe(true);
-    expect(readFileSync(join(out, r.pdf!)).subarray(0, 5).toString()).toBe('%PDF-');
-    expect(
-      r.diagnostics.filter((d) => /(?:Citation|Reference) .* undefined/.test(d.message)),
-    ).toEqual([]);
-  },
-);
+test.each([
+  'real-natbib',
+  'real-biblatex-subfiles',
+  'real-tikz',
+  'real-acm',
+  'real-xelatex',
+  'real-elsevier',
+  'real-llncs',
+])('%s builds with the root and compiler an import finds', async (name) => {
+  const entries = Object.entries(fixtureFiles(join(FIXTURES, name))).map(([path, bytes]) => ({
+    path: path.slice(name.length + 1),
+    bytes,
+  }));
+  const { report } = describeImport(entries);
+  const out = tmp();
+  const r = await compile(join(FIXTURES, name), report.root!, out, 120, report.compiler);
+  expect(r.diagnostics.filter((d) => d.severity === 'error')).toEqual([]);
+  expect(r.ok).toBe(true);
+  expect(readFileSync(join(out, r.pdf!)).subarray(0, 5).toString()).toBe('%PDF-');
+  expect(
+    r.diagnostics.filter((d) => /(?:Citation|Reference) .* undefined/.test(d.message)),
+  ).toEqual([]);
+});
 
 // Fonts and languages papers commonly load without extra packages.
 const buildSource = async (tex: string) => {

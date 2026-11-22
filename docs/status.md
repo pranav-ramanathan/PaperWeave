@@ -580,6 +580,21 @@ Read this first. Update it in every pull request.
   - `packages/bridge`: projection to a ProseMirror document, visual edits as source splices.
   - `apps/web`: `/spike`, two authors with a source and a visual editor each.
   - `apps/workers`: sandboxed compile (`src/compile.ts`, CLI in `src/cli.ts`).
+- **Publisher front matter, acknowledgments and common theorem names are prose in the visual
+  view.** `DEFAULT_TRANSPARENT` (`packages/latex/src/parse.ts`) gained `frontmatter`, `keyword`,
+  `acknowledgments`/`acknowledgements`/`acknowledgment`/`acknowledgement`, `acks`, `IEEEproof`,
+  and `claim`, `conjecture`, `property`, `problem`, `exercise`, `question`, `solution`, `note`,
+  `case` (all defined by `llncs.cls`; `conjecture` also by `acmart.cls`; `IEEEproof` by
+  `IEEEtran.cls`). `assumption` was left out: none of llncs, acmart or IEEEtran defines it, and
+  `svjour3.cls` is not in the TeX image. An `elsarticle` skeleton was one raw block; now each of
+  `\title`, `\author`, `\affiliation` is a raw block and the abstract, keywords and
+  acknowledgments are paragraphs (`fixtures/real-elsevier` 32% to 58%, `fixtures/real-llncs`
+  56% to 65%, in `docs/import-matrix.md`; both build in `compile.sandbox.test.ts`).
+  - The editor, the bridge's containment check and the server's check all read this one default
+    (`parse` and `containedNear` default to it), so they agree.
+  - The import report no longer adds a paper's own `\newtheorem` environments to that set. The
+    live editor is never given a per-paper set, so those bodies show as raw there and the report
+    was claiming more than could be typed into. Giving the editor the per-paper set is not done.
 
 ## Next
 
