@@ -206,6 +206,86 @@ const breakBefore = (src: string, at: number) =>
 const breakAfter = (src: string, at: number) =>
   at >= src.length || /^[ \t]*\n[ \t]*(\n|$)/.test(src.slice(at, at + 200));
 
+const hasBlank = (ws: string) => /\n[ \t]*\n/.test(ws);
+const TOP_WHOLE = /^\\begin\{([^{}]+)\}[\s\S]*\\end\{([^{}]+)\}$/;
+
+/**
+ * Deleting exactly one top-level block takes its source and one stretch of the whitespace beside
+ * it: the one after, unless that alone holds the blank line between paragraphs (then the one
+ * before), and at the end of the file the one before. So no blank line is lost or gained, and
+ * a stretch left with more than one blank line is cut back to one.
+ */
+function removeBlock(
+  m: Model,
+  before: PMNode,
+  after: PMNode,
+  a: number,
+  endA: number,
+  endB: number,
+  hint?: { from: number; to: number; size: number },
+): Translation | null {
+  if (endB !== a) return null;
+  // Two equal blocks side by side cannot be told apart by comparing documents: the editor knows.
+  if (hint && !hint.size && before.resolve(hint.from).depth === 0) {
+    a = hint.from;
+    endA = hint.to;
+  }
+  const $a = before.resolve(a);
+  const node = $a.nodeAfter;
+  if ($a.depth !== 0 || !node || endA !== a + node.nodeSize) return null;
+  if (!before.copy(before.content.cut(0, a).append(before.content.cut(endA))).eq(after))
+    return null;
+  const i = $a.index(0);
+  const ph = m.phantom;
+  if (ph && i === ph.index) return null;
+  const k = ph && i > ph.index ? i - 1 : i;
+  const blk = m.blocks[k];
+  const body = blk?.body;
+  if (!body) return null;
+  let ok = false;
+  const name = node.type.name;
+  if (name === 'math_block') ok = body.kind === 'math' && body.text === node.attrs.src;
+  else if (name === 'raw_block' && body.kind === 'raw' && body.text === node.attrs.src) {
+    const w = TOP_WHOLE.exec(body.text);
+    ok = w
+      ? w[1] === w[2] &&
+        w[1] === body.label &&
+        w[1] !== 'document' &&
+        !m.parsed.transparent.has(w[1])
+      : body.label === 'label' && /^\\label\{[^{}]*\}$/.test(body.text);
+  } else if (name === 'heading') ok = body.kind === 'heading' && !node.content.size;
+  else if (name === 'list')
+    ok = body.kind === 'list' && node.childCount === 1 && !node.child(0).content.size;
+  if (!ok) return null;
+  const src = m.parsed.src;
+  const s = blk.start;
+  const e = s + body.text.length;
+  const prev = m.blocks[k - 1];
+  const next = m.blocks[k + 1];
+  const prevEnd = prev ? prev.start + prev.body.text.length : 0;
+  const nextStart = next ? next.start : src.length;
+  const useBefore =
+    !!prev && (!next || (hasBlank(src.slice(e, nextStart)) && !hasBlank(src.slice(prevEnd, s))));
+  let from = useBefore ? prevEnd : s;
+  let to = useBefore ? e : nextStart;
+  // The stretch that stays can hold more than one blank line (an equation put in the middle of
+  // a break leaves `\n` on one side and `\n\n\n` on the other). Line breaks beyond one blank
+  // line go too, if the stretch removed had a line break of its own: they were made around the block.
+  const kept = useBefore ? src.slice(e, nextStart) : src.slice(prevEnd, s);
+  const gone = useBefore ? src.slice(prevEnd, s) : src.slice(e, nextStart);
+  const excess = (kept.match(/\n/g)?.length ?? 0) - 2;
+  if (excess > 0 && gone.includes('\n')) {
+    if (useBefore && /^\n+$/.test(src.slice(e, e + excess))) to += excess;
+    else if (!useBefore && /^\n+$/.test(src.slice(s - excess, s))) from -= excess;
+  }
+  const insert = guard(src.slice(0, from), src[to] ?? '');
+  // A just-opened empty paragraph further down moves up with the block that went.
+  return {
+    edits: [{ from, to, insert }],
+    phantom: ph && { ...ph, index: ph.index - (i < ph.index ? 1 : 0) },
+  };
+}
+
 /**
  * Work out the source edits for a change to the visual document, or null if the change is not one
  * the visual editor can express (the caller then refuses it and points the author to source mode).
@@ -425,6 +505,11 @@ export function translate(
       phantom: m.phantom,
     };
   }
+
+  // Deleting one whole block: a formula, a figure or table (any \begin{L}...\end{L}), a lone
+  // \label, an empty heading or a list of one empty item. Anything else is refused.
+  const gone = removeBlock(m, before, after, a, endA, endB, hint);
+  if (gone) return gone;
 
   // Typing, deleting or replacing text inside one text block.
   if (!$a.parent.isTextblock || !$a.sameParent($endA)) return null;

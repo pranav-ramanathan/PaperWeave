@@ -105,6 +105,26 @@ export type Op = {
   accepted: boolean;
 };
 
+/** Delete one top-level block (a formula, a figure, an empty heading, ...) as the editor would. */
+function dropBlock(rep: Replica, pick: number): Op | null {
+  const nodes: { pos: number; size: number }[] = [];
+  rep.state.doc.forEach((n, pos) => {
+    const t = n.type.name;
+    if (t === 'math_block' || t === 'raw_block' || t === 'heading' || t === 'list')
+      nodes.push({ pos, size: n.nodeSize });
+  });
+  if (!nodes.length) return null;
+  const { pos, size } = nodes[pick % nodes.length];
+  const blocks = rep.bridge.model.blocks;
+  const k = rep.state.doc.resolve(pos).index(0);
+  const prev = blocks[k - 1];
+  const end = blocks[k].start + blocks[k].body.text.length;
+  const lo = prev ? prev.start + prev.body.text.length : 0;
+  const hi = blocks[k + 1]?.start ?? rep.src.length;
+  const accepted = rep.dispatch(rep.state.tr.delete(pos, pos + size));
+  return { what: 'drop', lo, hi: Math.max(hi, end), accepted, whole: false };
+}
+
 let serial = 0;
 /** One random visual edit, applied through the bridge. Null if there was nothing to edit. */
 export function visualOp(r: Rng, rep: Replica, only?: 'ins'): Op | null {
@@ -175,7 +195,10 @@ export function visualOp(r: Rng, rep: Replica, only?: 'ins'): Op | null {
   } else {
     // Enter over a selected stretch of one paragraph.
     what = 'xenter';
-    if (rep.bridge.model.phantom || !tb.para || tb.size < 1) return null;
+    if (rep.bridge.model.phantom) return null;
+    // Where Enter has nothing to work on, a block is deleted instead. It is picked without the
+    // generator, so that a seed still draws what it always drew.
+    if (!tb.para || tb.size < 1) return dropBlock(rep, pos);
     const o = r.int(tb.size);
     const n = 1 + r.int(Math.min(4, tb.size - o));
     const from = tb.start + o;
