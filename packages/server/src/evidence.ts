@@ -279,11 +279,14 @@ export async function recordEvidence(
 /** Take an evidence check away: its author may, and so may anyone who can edit the paper. */
 export async function removeEvidence(db: Db, userId: string, projectId: string, checkId: string) {
   const role = await authorize(db, userId, id(projectId), 'comment.write');
-  const { rowCount } = await db.query(
-    `delete from evidence_checks where id = $1 and project_id = $2 and (checked_by = $3 or $4)`,
+  const { rows } = await db.query(
+    `delete from evidence_checks where id = $1 and project_id = $2 and (checked_by = $3 or $4)
+     returning key`,
     [id(checkId), projectId, userId, can(role, 'file.write')],
   );
-  if (!rowCount) throw new AppError('not_found', 'No such check, or it is not yours to remove.');
+  if (!rows[0]) throw new AppError('not_found', 'No such check, or it is not yours to remove.');
+  // Said back so a page can name the citation the check was of.
+  return { key: rows[0].key as string };
 }
 
 /** For each key: the newest lookup of its DOI, and the evidence checks made of it. */

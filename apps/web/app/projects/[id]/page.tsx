@@ -66,6 +66,9 @@ async function Project({
     invited?: string;
     cancelled?: string;
     removed?: string;
+    unchecked?: string;
+    n?: string;
+    chartRemoved?: string;
     saved?: string;
     revision?: string;
     restored?: string;
@@ -277,6 +280,16 @@ async function Project({
       {query.checked && (
         <Result>
           Recorded an evidence check for <code>{query.checked}</code>.
+        </Result>
+      )}
+      {query.unchecked && (
+        <Result key={query.n}>
+          Removed a check of <code>{query.unchecked}</code>.
+        </Result>
+      )}
+      {query.chartRemoved && (
+        <Result>
+          Removed the chart <code>{query.chartRemoved}</code>.
         </Result>
       )}
       {query.moved && (
