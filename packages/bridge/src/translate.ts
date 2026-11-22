@@ -7,7 +7,12 @@ import { locate, markKey, type Model, type Phantom, width } from './project.ts';
 
 /** Replace source [from, to) with insert. A list is sorted and never overlaps. */
 export type Edit = { from: number; to: number; insert: string };
-export type Translation = { edits: Edit[]; phantom: Phantom | null };
+export type Translation = {
+  edits: Edit[];
+  phantom: Phantom | null;
+  /** The caret is to be put in the phantom paragraph once the edits are in (leaving a list). */
+  leave?: boolean;
+};
 
 // An odd run of backslashes then letters is a control word; an even run is a line break.
 const AFTER_WORD = /(^|[^\\])(\\\\)*\\[a-zA-Z]+$/;
@@ -282,8 +287,29 @@ export function translate(
     }
     if (c && split?.eq(after)) {
       const $c = before.resolve(c);
-      // Enter in an empty item does nothing: the new item is taken away again.
-      if (!$c.parent.content.size) return { edits: [], phantom: m.phantom };
+      if (!$c.parent.content.size) {
+        // Enter in the empty last item of a list of two or more takes that \item away (as
+        // Backspace at its start does) and leaves the caret in a new paragraph after the list.
+        // The new paragraph is anchored to the list's end as it is now; the bridge moves the
+        // anchor along with the edit. Any other empty item does nothing.
+        const list = $c.node(1);
+        const last = $c.index(1) === list.childCount - 1;
+        if (!m.phantom && list.type.name === 'list' && last && list.childCount > 1) {
+          const x = locate(m, before, $c.before(2) - 1);
+          const y = locate(m, before, c);
+          const blk = m.blocks[$c.index(0)];
+          if (x && y && x.block >= 0 && y.block === x.block && blk) {
+            const from = x.base + [...x.pieces].reverse().find((p) => p.k !== 'post')!.e;
+            const to = y.base + y.pieces[0].e;
+            return {
+              edits: [{ from, to, insert: guard(src.slice(0, from), src[to] ?? '') }],
+              phantom: { index: $c.index(0) + 1, srcPos: blk.start + blk.body.text.length },
+              leave: true,
+            };
+          }
+        }
+        return { edits: [], phantom: m.phantom };
+      }
       const spot = locate(m, before, c)!;
       const g = gapFor(spot.pieces, spot.off, '');
       if (spot.block < 0 || !g) return null;

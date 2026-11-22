@@ -392,7 +392,7 @@ test('the toolbar is one Tab stop, and the arrow keys move along it', async ({ b
   test.setTimeout(180_000);
   const page = await paper(browser, 'keys-toolbar', true);
   const bar = page.getByRole('toolbar', { name: 'Editor tools' });
-  await expect(bar.getByRole('button')).toHaveCount(12);
+  await expect(bar.getByRole('button')).toHaveCount(14);
   await expect(bar.locator('button[tabindex="0"]')).toHaveCount(1);
 
   await tabTo(page, 'Visual');
@@ -408,7 +408,7 @@ test('the toolbar is one Tab stop, and the arrow keys move along it', async ({ b
   expect(await press('End')).toBe('Show in PDF');
   expect(await press('ArrowRight')).toBe('Visual');
   expect(await press('ArrowLeft')).toBe('Show in PDF');
-  expect(await press('ArrowLeft')).toBe('Heading');
+  expect(await press('ArrowLeft')).toBe('Numbered list');
   expect(await press('Home')).toBe('Visual');
 
   // The stop is the button that was left.

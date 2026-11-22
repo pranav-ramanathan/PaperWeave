@@ -134,7 +134,17 @@ export function createVisual(opts: {
     apply: (replacement: string) => Promise<CommandResult | 'spills'>,
   ): void;
   /** The person asked, from the keyboard, to insert a reference, a citation or an equation. */
-  ask?(what: 'reference' | 'citation' | 'equation' | 'figure' | 'table' | 'heading'): void;
+  ask?(
+    what:
+      | 'reference'
+      | 'citation'
+      | 'equation'
+      | 'figure'
+      | 'table'
+      | 'heading'
+      | 'bulleted'
+      | 'numbered',
+  ): void;
   /**
    * The person asked for the menu of things to do here: a right click, or the menu key. `x`
    * and `y` are where on the page; `edit` is set when it was asked for on a formula or an
@@ -651,7 +661,11 @@ export function createVisual(opts: {
    * Get ready to insert LaTeX where the caret is now. Returns the function that inserts it, by
    * way of the server, or null if the caret is not in running text.
    */
-  const insertion = (skipSpace = false): ((latex: string) => Promise<CommandResult>) | null => {
+  const insertion = (
+    skipSpace = false,
+    /** Where in the inserted text the caret goes, if not at its end. */
+    caretIn?: (latex: string) => number,
+  ): ((latex: string) => Promise<CommandResult>) | null => {
     catchUp();
     const c = bridge.insertCommand(editor.state, '');
     if (!c) return null;
@@ -671,6 +685,7 @@ export function createVisual(opts: {
         const text = opts.ytext.toString();
         while (after < text.length && /\s/.test(text[after])) after++;
       }
+      if (caretIn && after != null) after -= latex.length - caretIn(latex);
       if (moves !== before)
         resume = null; // the person has gone elsewhere meanwhile
       else if (result !== 'conflict' && after != null) {
@@ -697,6 +712,18 @@ export function createVisual(opts: {
     const put = around && insertion(true);
     if (!around || !put) return null;
     return (level, title) => put(`${around[1]}\\${level}{${title}}${around[2]}`);
+  };
+  /**
+   * Get ready to insert an empty list of one item where the caret is, which splits its paragraph.
+   * Returns the function that inserts it, or null if the caret is not in a paragraph. The caret
+   * ends up in the item, just after `\item `.
+   */
+  const list = (ordered: boolean): (() => Promise<CommandResult>) | null => {
+    catchUp();
+    const probe = bridge.listCommand(editor.state, ordered);
+    const put = probe && insertion(false, (latex) => latex.indexOf('\\item ') + '\\item '.length);
+    if (!probe || !put) return null;
+    return () => put(probe.replacement);
   };
   /**
    * Put text that was pasted or dropped where the caret is, as its words, as if typed: a
@@ -861,10 +888,12 @@ export function createVisual(opts: {
             (transaction.selectionSet || transaction.docChanged) &&
             editor.view.hasFocus()
           ) {
-            const { anchor, head } = transaction.selection;
+            // The state now, not the transaction's: applying it can have changed the document
+            // under it (leaving a list), and the bridge's model is that of the document now.
+            const { doc, selection } = editor.state;
             opts.moved?.(
-              toSrc(bridge.model, transaction.doc, anchor, -1),
-              toSrc(bridge.model, transaction.doc, head, -1),
+              toSrc(bridge.model, doc, selection.anchor, -1),
+              toSrc(bridge.model, doc, selection.head, -1),
             );
           }
         },
@@ -901,6 +930,8 @@ export function createVisual(opts: {
           'Alt-g': () => (opts.ask && opts.editable ? (opts.ask('figure'), true) : false),
           'Alt-t': () => (opts.ask && opts.editable ? (opts.ask('table'), true) : false),
           'Alt-h': () => (opts.ask && opts.editable ? (opts.ask('heading'), true) : false),
+          'Alt-l': () => (opts.ask && opts.editable ? (opts.ask('bulleted'), true) : false),
+          'Alt-n': () => (opts.ask && opts.editable ? (opts.ask('numbered'), true) : false),
           // Enter on a selected formula, or inline atom, opens it for editing.
           Enter: ({ editor: e }) => {
             const { selection } = e.state;
@@ -1020,6 +1051,7 @@ export function createVisual(opts: {
     emph,
     insertion,
     heading,
+    list,
     /** Put the keyboard back in the visual view, with the caret where it should be. */
     focus() {
       const kept = resume;

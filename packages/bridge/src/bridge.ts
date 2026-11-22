@@ -46,6 +46,8 @@ export class Bridge {
   private host: Host | null = null;
   private pending = new WeakMap<Transaction, Translation>();
   private seen = new Set<string>();
+  /** Set while a change that leaves a list is drawn: the caret goes to the phantom paragraph. */
+  private leaving = false;
   private observer = () => this.sync();
   private project: (m: Model) => PMNode;
   readonly ytext: Y.Text;
@@ -109,11 +111,19 @@ export class Bridge {
     // A just-opened empty paragraph lasts only while the caret is in it.
     let phantom = t ? t.phantom : this.model.phantom;
     const $head = tr.doc.resolve(tr.selection.head);
-    if (phantom && ($head.depth !== 1 || $head.index(0) !== phantom.index)) phantom = null;
+    if (phantom && !t?.leave && ($head.depth !== 1 || $head.index(0) !== phantom.index))
+      phantom = null;
     const dropped = phantom !== this.model.phantom;
     this.model.phantom = phantom;
-    if (t?.edits.length) this.splice(t.edits);
-    else if (t || dropped) this.sync();
+    // Leaving a list: the caret was in the \item that is gone. The same transaction that draws
+    // the change puts it in the paragraph after the list (see sync).
+    this.leaving = !!t?.leave;
+    try {
+      if (t?.edits.length) this.splice(t.edits);
+      else if (t || dropped) this.sync();
+    } finally {
+      this.leaving = false;
+    }
   };
 
   private splice(edits: Edit[]) {
@@ -183,6 +193,12 @@ export class Bridge {
         if (near) tr.setSelection(near);
       }
     }
+    if (this.leaving && phantom) {
+      let at = 0;
+      for (let i = 0; i < phantom.index; i++) at += tr.doc.child(i).nodeSize;
+      if (tr.doc.child(phantom.index).type.name === 'paragraph')
+        tr.setSelection(TextSelection.create(tr.doc, at + 1));
+    }
     this.host.dispatch(tr.setMeta('projection', true).setMeta('addToHistory', false));
   }
 
@@ -227,6 +243,20 @@ export class Bridge {
   }
 
   /**
+   * How many line breaks (0 to 2) a block put at `i` still needs before and after it to be
+   * set apart by blank lines. Blank lines already there count: at the start or the end of a
+   * paragraph they usually are; the start of the file needs none.
+   */
+  private padding(src: string, i: number): [number, number] {
+    let before = 0;
+    while (before < 2 && src[i - 1 - before] === '\n') before++;
+    let after = 0;
+    while (after < 2 && src[i + after] === '\n') after++;
+    if (i === 0) before = 2;
+    return [2 - before, 2 - after];
+  }
+
+  /**
    * Build the command that inserts a sectioning command, with `title` as its argument, where the
    * caret is, or null if the caret is not in an ordinary paragraph (a list item, a heading, a
    * caption or other raw LaTeX, the preamble and a paragraph not yet in the source are all
@@ -243,14 +273,25 @@ export class Bridge {
     if (!spot || spot.block < 0 || this.model.blocks[spot.block].body.kind !== 'para') return null;
     const src = this.model.parsed.src;
     const i = toSrc(this.model, state.doc, state.selection.to, -1);
-    // Blank lines already there count: at the start or the end of a paragraph they usually are.
-    let before = 0;
-    while (before < 2 && src[i - 1 - before] === '\n') before++;
-    let after = 0;
-    while (after < 2 && src[i + after] === '\n') after++;
-    // The start of the file needs no blank line before it.
-    if (i === 0) before = 2;
-    const latex = '\n'.repeat(2 - before) + `\\${level}{${title}}` + '\n'.repeat(2 - after);
+    const [before, after] = this.padding(src, i);
+    const latex = '\n'.repeat(before) + `\\${level}{${title}}` + '\n'.repeat(after);
+    return this.insertCommand(state, latex);
+  }
+
+  /**
+   * Build the command that inserts an empty bulleted (or, `ordered`, numbered) list of one item
+   * where the caret is, or null where headingCommand refuses (only an ordinary paragraph takes
+   * one). It is put in blank lines on both sides as a heading is. The caller puts the caret
+   * after `\item `, inside the empty item.
+   */
+  listCommand(state: EditorState, ordered: boolean): Command | null {
+    const spot = locate(this.model, state.doc, state.selection.to);
+    if (!spot || spot.block < 0 || this.model.blocks[spot.block].body.kind !== 'para') return null;
+    const i = toSrc(this.model, state.doc, state.selection.to, -1);
+    const [before, after] = this.padding(this.model.parsed.src, i);
+    const env = ordered ? 'enumerate' : 'itemize';
+    const latex =
+      '\n'.repeat(before) + `\\begin{${env}}\n\\item \n\\end{${env}}` + '\n'.repeat(after);
     return this.insertCommand(state, latex);
   }
 
