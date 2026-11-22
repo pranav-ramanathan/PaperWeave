@@ -203,6 +203,14 @@ export default function BuildPane({
             ),
         )
       : [];
+  // A build that worked but left something out of the PDF: a box with a name where an EPS
+  // picture should be, or characters the font has no glyph for.
+  const notShown =
+    latest && latest.status !== 'failed' && latest.status !== 'queued'
+      ? latest.diagnostics.filter(
+          (d) => d.severity === 'warning' && /^(?:Picture|Characters) not shown: /.test(d.message),
+        )
+      : [];
   const place = (d: { file?: string; line?: number }) => (
     <code>
       {d.file}
@@ -260,6 +268,22 @@ export default function BuildPane({
             ))}
           </ul>
           {loose.length > 10 && <p>and {loose.length - 10} more: see the paper&apos;s page.</p>}
+        </>
+      )}
+      {notShown.length > 0 && (
+        <>
+          <p>Built, but some things are not in the PDF:</p>
+          <ul className="diagnostics" aria-label="Not in the PDF">
+            {notShown.slice(0, 10).map((d, i) => (
+              <li key={i}>
+                {d.message.startsWith('Characters') && d.file && <>{place(d)} </>}
+                {d.message.replace(/^Picture not shown: /, '')}
+              </li>
+            ))}
+          </ul>
+          {notShown.length > 10 && (
+            <p>and {notShown.length - 10} more: see the paper&apos;s page.</p>
+          )}
         </>
       )}
       {latest && latest.status !== 'queued' && (

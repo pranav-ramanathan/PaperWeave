@@ -37,6 +37,10 @@ export type Submission = {
 // The summary lines ("There were undefined references") name no key and match none of these.
 const UNDEFINED = /^(Citation|Reference|Hyper reference) [`'](.+?)' (?:on page \S+ )?undefined/;
 const MULTIPLY = /^Label [`'](.+?)' multiply defined/;
+/** The worker's warning for an EPS picture the PDF has a box for: the paper is not done. */
+const PICTURE = /^Picture not shown: /;
+/** The worker's warning for characters the font lacks: the PDF leaves them out. */
+const MISSING = /^Characters not shown: /;
 const NOT_FOUND = /[`'](.+?)' not found/;
 /** Whether a file TeX could not find ("nosuchfile.tex") is the one a command named ("nosuchfile"). */
 const namesTarget = (found: string, target: string) => {
@@ -314,6 +318,12 @@ async function checksOf(
         const kind = named[1] === 'Citation' ? 'citation' : 'label';
         const key = named.at(-1)!.replace(/@cref$/, '');
         if (!reported.has(`${kind}:${key}`)) problem(kind, d.message, where);
+        continue;
+      }
+      // The PDF has a box where the picture should be, or lacks characters, though the build
+      // said nothing is wrong.
+      if (fresh && (PICTURE.test(d.message) || MISSING.test(d.message))) {
+        problem('file', d.message, where);
         continue;
       }
       if (d.severity === 'error') problem('compiler', d.message, where);

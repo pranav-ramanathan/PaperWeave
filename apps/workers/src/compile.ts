@@ -99,6 +99,11 @@ const ERROR = /^(?:\.\/)?([^:\n]+?\.\w+):(\d+): (.+)$/gm;
 // and spaces, "(hyperref)        removing ...", and the line number is often on the last.
 const WARNING =
   /^(?:LaTeX(?: Font)?|Package \S+|Class \S+) Warning: (.+(?:\n\([A-Za-z0-9@-]+\)[ \t]+.*)*)$/gm;
+// A character the font has no glyph for: TeX goes on and leaves it out of the PDF. XeTeX and
+// LuaTeX write "There is no 王 (U+738B) in font [lmroman12-regular]:mapping=tex-text;!"; pdfTeX
+// has no code: "There is no ^^e9 in font cmr10!" (or the raw byte of the font slot).
+const MISSING =
+  /^Missing character: There is no (.+?)(?: \(U\+([0-9A-Fa-f]{4,6})\))? in font (.+)!$/gm;
 const CONTINUED = /\n\([A-Za-z0-9@-]+\)[ \t]+/g;
 
 /** TeX announcing that it gave up; the cause is the entry before it. */
@@ -116,6 +121,24 @@ function place(dir: string, file: string): string | undefined {
     if (depth < 0) return undefined;
   }
   return norm(dir + file);
+}
+
+/**
+ * The EPS pictures a build read, as project paths, from latexmk's .fls ("INPUT ./figs//a.eps",
+ * one line per file opened, a name with spaces as it is). `dir` is the root file's folder. A
+ * picture is left out when the build also read its "-eps-converted-to.pdf", the PDF that
+ * epstopdf makes (here, or a paper ships it ready-made): that one is placed, not a box.
+ */
+export function epsPictures(fls: string, dir = ''): string[] {
+  const opened = new Set<string>();
+  for (const line of fls.split(/\r?\n/))
+    if (line.startsWith('INPUT ') && !line.startsWith('INPUT /')) {
+      const path = place(dir, line.slice(6));
+      if (path) opened.add(path);
+    }
+  return [...opened].filter(
+    (p) => /\.eps$/i.test(p) && !opened.has(p.replace(/\.eps$/i, '') + '-eps-converted-to.pdf'),
+  );
 }
 
 /**
@@ -259,6 +282,20 @@ export function diagnostics(log: string, output = '', dir = ''): Diagnostic[] {
       severity: 'error',
       message: 'The glossary could not be made. The build log has the details.',
     });
+  // XeLaTeX has no way to read EPS without Ghostscript, which the image does not have: the
+  // driver says so on latexmk's output only, and the build fails with nothing else to point to.
+  for (const m of (output + '\n' + log).matchAll(
+    /^xdvipdfmx:warning: Image format conversion for "(.+?\.eps)" failed/gim,
+  )) {
+    const path = place(dir, m[1]);
+    const d: Diagnostic = {
+      severity: 'error',
+      // As the driver wrote it: placed in the project with the rest, below.
+      ...(path ? { file: m[1] } : {}),
+      message: `${path ?? m[1]} is an EPS file, which XeLaTeX cannot convert here. Convert it to PDF.`,
+    };
+    if (!out.some((e) => e.message === d.message)) out.push(d);
+  }
   // An error in a file that is not the author's is not placed in it.
   for (let i = 0; i < out.length; i++) {
     const { file, message } = out[i];
@@ -293,7 +330,56 @@ export function diagnostics(log: string, output = '', dir = ''): Diagnostic[] {
     // The same warning is written once for each pass over the paper.
     if (!out.some((d) => JSON.stringify(d) === JSON.stringify(warning))) out.push(warning);
   }
+  // A character the font lacks is left out of the PDF without a word in the paper's warnings.
+  // Whichever file TeX was reading when it came to the character gets the one warning.
+  // LuaTeX writes these when it ships a page out, not when it reads the text: the file on the
+  // stack then is whichever was open at the page break, so no file is named for it.
+  const typeset = !/^This is Lua/m.test(log);
+  const lost = new Map<string | undefined, { chars: string[]; fonts: string[] }>();
+  for (const m of log.matchAll(MISSING)) {
+    const code = m[2]
+      ? parseInt(m[2], 16)
+      : /^\^\^([0-9a-f]{2})$/.exec(m[1])
+        ? parseInt(m[1].slice(2), 16)
+        : [...m[1]].length === 1
+          ? m[1].codePointAt(0)!
+          : undefined;
+    if (code === undefined) continue;
+    const char = String.fromCodePoint(code);
+    // One that cannot be seen on the page (or is not a character at all) is named by its code.
+    const shown =
+      /^[\p{C}\p{Z}\p{M}]$/u.test(char) || code === 0xfffd
+        ? `U+${code.toString(16).toUpperCase().padStart(4, '0')}`
+        : char;
+    const font = fontName(m[3]);
+    const file = typeset ? reading(m.index) : undefined;
+    const entry = lost.get(file) ?? { chars: [], fonts: [] };
+    lost.set(file, entry);
+    if (!entry.chars.includes(shown)) entry.chars.push(shown);
+    if (!entry.fonts.includes(font)) entry.fonts.push(font);
+  }
+  for (const [file, { chars, fonts }] of lost) {
+    const list =
+      chars.slice(0, 12).join(' ') + (chars.length > 12 ? ` and ${chars.length - 12} more` : '');
+    const warning = {
+      severity: 'warning' as const,
+      message: `Characters not shown: ${list} ${chars.length === 1 ? 'is' : 'are'} not in the font (${fonts[0]}${fonts.length > 1 ? ' and others' : ''}); the PDF leaves ${chars.length === 1 ? 'it' : 'them'} out.`,
+      ...(file ? { file } : {}),
+    };
+    if (!out.some((d) => JSON.stringify(d) === JSON.stringify(warning))) out.push(warning);
+  }
   return out;
+}
+
+/** A font as the log names it: "[lmroman12-regular]:mapping=tex-text;" or "cmr10" or "Name/OT:..." */
+function fontName(spec: string): string {
+  const path = /^\[(.*?)\]/.exec(spec)?.[1];
+  if (path)
+    return path
+      .split('/')
+      .at(-1)!
+      .replace(/\.\w+$/, '');
+  return spec.split(':')[0].split('/')[0].trim();
 }
 
 /** "Runaway argument?" and the next line say how an unfinished argument began. */
@@ -325,7 +411,9 @@ function readingAt(log: string, dir: string): (offset: number) => string | undef
   for (const text of log.split('\n')) {
     // The line after an over- or underfull box is the paragraph's text; "l.12 ..." is the
     // line an error stopped at.
-    const skip = quoted || /^l\.\d+ /.test(text);
+    // A line "(fontspec)    this)." goes on with a message begun on the line before, whose "("
+    // was dropped at its line's end; its ")" is not the end of a file.
+    const skip = quoted || /^l\.\d+ /.test(text) || /^\([A-Za-z0-9@-]+\)[ \t]/.test(text);
     quoted = /^(?:Over|Under)full \\[hv]box/.test(text);
     for (let i = 0; !skip && i < text.length; i++) {
       if (text[i] === '(') {
@@ -421,11 +509,23 @@ export async function compile(
           aux += texText(readFileSync(join(dir, e.name))) + '\n';
     };
     if (pdf) gather(work);
+    const found = diagnostics(log, run.output, rootDir(root));
+    // pdfTeX and LuaTeX place EPS through epstopdf, which needs shell escape; without it the
+    // picture is silently drawn as a box with its name, and the log says nothing. XeLaTeX
+    // fails instead, and diagnostics() has said so.
+    const fls = join(work, base + '.fls');
+    if (pdf && compiler !== 'xelatex' && existsSync(fls))
+      for (const f of epsPictures(texText(readFileSync(fls)), rootDir(root)))
+        found.push({
+          severity: 'warning',
+          file: f,
+          message: `Picture not shown: ${f} is an EPS file, which ${compiler === 'lualatex' ? 'LuaLaTeX' : 'pdfLaTeX'} cannot place here; the PDF has a box with its name. Convert it to PDF.`,
+        });
     return {
       ok: !!pdf,
       // `timeout -s KILL` reports 137.
       timedOut: run.code === 137,
-      diagnostics: diagnostics(log, run.output, rootDir(root)),
+      diagnostics: found,
       log,
       pdf,
       synctex: pdf && keep('.synctex.gz'),

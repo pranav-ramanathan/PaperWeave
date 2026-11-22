@@ -12,8 +12,12 @@ import { compile, type Compiler, IMAGE } from './compile.ts';
  * Part of every cache key. Builds cached before diagnostics and labels were read as UTF-8 hold
  * garbled file names and keys; bump this when what is read from TeX's output changes.
  * 'utf8-biber': Biber's errors are read now, so a cached failed build lacks its .bib and line.
+ * 'utf8-biber-eps': an EPS picture is reported now; a cached good build with a box where one
+ * should be said nothing, and a failed XeLaTeX build did not name the file.
+ * 'utf8-biber-eps-glyphs': characters the font lacks are reported now; a cached good build
+ * that left some out of the PDF said nothing.
  */
-const TEX_TEXT = 'utf8-biber';
+const TEX_TEXT = 'utf8-biber-eps-glyphs';
 
 /** The toolchain image's content ID: part of every cache key, so a new image rebuilds everything. */
 export const imageId = () =>

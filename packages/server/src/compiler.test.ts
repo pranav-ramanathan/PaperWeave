@@ -66,3 +66,29 @@ test('the magic comment wins', () => {
     'pdflatex',
   );
 });
+
+const notes = (files: Record<string, string>) =>
+  describeImport(Object.entries(files).map(([path, t]) => ({ path, bytes: Buffer.from(t) }))).report
+    .notes;
+const pic = (name: string) => doc('\\usepackage{graphicx}', `\\includegraphics{${name}}`);
+
+test('an EPS picture is noted, by what the compiler does with it', () => {
+  expect(notes({ 'main.tex': pic('figs/a.eps'), 'figs/a.eps': '%!PS' }).join('\n')).toContain(
+    'The picture figs/a.eps is an EPS file, which pdfLaTeX cannot place here: the PDF has a box with the name instead. Convert it to PDF.',
+  );
+  expect(
+    notes({
+      'main.tex': doc('\\usepackage{fontspec}\\usepackage{graphicx}', '\\includegraphics{a.eps}'),
+      'a.eps': '%!PS',
+    }).join('\n'),
+  ).toContain('XeLaTeX cannot convert here: the build fails');
+});
+
+test('no EPS note without an EPS picture, or when its PDF conversion ships with the paper', () => {
+  expect(notes({ 'main.tex': pic('a.pdf'), 'a.pdf': '%PDF' }).join('\n')).not.toMatch(/EPS/);
+  expect(
+    notes({ 'main.tex': pic('a.eps'), 'a.eps': '%!PS', 'a-eps-converted-to.pdf': '%PDF' }).join(
+      '\n',
+    ),
+  ).not.toMatch(/EPS/);
+});

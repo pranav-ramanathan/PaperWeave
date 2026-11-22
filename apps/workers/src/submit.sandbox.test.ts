@@ -27,6 +27,7 @@ import {
 } from '@paperweave/server';
 import { afterAll, beforeAll, expect, test } from 'vitest';
 import { TEST_ENV, testDb } from '../../../packages/server/src/testing.ts';
+import { FIXTURES, fixtureFiles } from '../../../packages/latex/src/testutil.ts';
 import { buildNext, imageId } from './builder.ts';
 import { drawNext } from './charts.ts';
 
@@ -673,3 +674,49 @@ test('with cleveref, a label TeX defines twice is one problem, not two', async (
   expect(found.ready).toBe(false);
   expect(labelsOf(found, 'problem')).toHaveLength(1);
 }, 240_000);
+
+test('a paper built with an EPS picture in it is not ready, and the problem is in the file', async () => {
+  const v = await verdict('Eps paper', {
+    'main.tex': doc('\\usepackage{graphicx}', '\\includegraphics{figs/a.eps}'),
+    'figs/a.eps':
+      '%!PS-Adobe-3.0 EPSF-3.0\n%%BoundingBox: 0 0 10 10\n0 0 10 10 rectfill\nshowpage\n',
+  });
+  expect(v.ready).toBe(false);
+  expect(v.problems).toContainEqual(
+    expect.objectContaining({
+      kind: 'file',
+      path: 'figs/a.eps',
+      message: expect.stringMatching(/^Picture not shown: figs\/a\.eps is an EPS file/),
+    }),
+  );
+}, 300_000);
+
+test('a paper whose font lacks characters is not ready, and the problem is in the file', async () => {
+  const v = await verdict('Glyphs paper', {
+    'main.tex': doc('\\usepackage{fontspec}', '\\input{sec}'),
+    'sec.tex': '5 μm and x ≤ 3 and a ≠ b.\n',
+  });
+  expect(v.ready).toBe(false);
+  expect(v.problems).toContainEqual(
+    expect.objectContaining({
+      kind: 'file',
+      path: 'sec.tex',
+      message: expect.stringMatching(/^Characters not shown: μ ≤ ≠ are not in the font/),
+    }),
+  );
+}, 300_000);
+
+test('the XeLaTeX paper of the fixtures is still ready', async () => {
+  const dir = join(FIXTURES, 'real-xelatex');
+  const v = await verdict(
+    'Xelatex fixture',
+    Object.fromEntries(
+      Object.entries(fixtureFiles(dir)).map(([p, b]) => [
+        p.slice('real-xelatex/'.length),
+        Buffer.from(b),
+      ]),
+    ),
+  );
+  expect(v.problems.map((p) => p.message)).toEqual([]);
+  expect(v.ready).toBe(true);
+}, 300_000);

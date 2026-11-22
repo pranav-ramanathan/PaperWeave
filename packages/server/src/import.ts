@@ -243,6 +243,16 @@ export function describeImport(
     notes.push(
       'The project uses a package that runs external programs (shell escape). That is turned off, so those parts will not build.',
     );
+  // EPS needs Ghostscript (XeLaTeX) or shell escape (pdfLaTeX, LuaLaTeX); the build has neither.
+  // A paper that ships the PDF epstopdf makes, "fig-eps-converted-to.pdf", is fine.
+  const compiler = compilerFor(texts, root, graph);
+  const eps = [...new Set(graph.edges.map((e) => e.to))].filter(
+    (p) => /\.eps$/i.test(p) && !paths.includes(p.replace(/\.eps$/i, '') + '-eps-converted-to.pdf'),
+  );
+  if (eps.length)
+    notes.push(
+      `${eps.length === 1 ? `The picture ${eps[0]} is an EPS file` : `${eps.length} pictures are EPS files (${eps.slice(0, 3).join(', ')}${eps.length > 3 ? ', ...' : ''})`}, which ${compiler === 'xelatex' ? 'XeLaTeX cannot convert here: the build fails' : `${compiler === 'lualatex' ? 'LuaLaTeX' : 'pdfLaTeX'} cannot place here: the PDF has a box with the name instead`}. Convert ${eps.length === 1 ? 'it' : 'them'} to PDF.`,
+    );
   // The paper's own theorem environments are prose in the editor too: count them the same way.
   const set = new Set([...DEFAULT_TRANSPARENT, ...proseEnvs(texts, root)]);
   const files = entries
@@ -261,7 +271,7 @@ export function describeImport(
     report: {
       root,
       otherRoots: candidates.slice(1),
-      compiler: compilerFor(texts, root, graph),
+      compiler,
       files,
       skipped,
       missing: graph.missing,
