@@ -669,8 +669,19 @@ function parseInto(
       for (;;) {
         if (src[k + 5] === '[') return null;
         const s = wsEnd(k + 5);
-        const pieces: Piece[] = [{ k: 'pre', s: pre - i, e: s - i, marks: [] }];
-        const stop = inline(s, i, 0, [], pieces, true);
+        const pieces: Piece[] = [];
+        // An empty item keeps only the spaces on its own line in `pre`; the line break and the
+        // indentation of the next \item are `post`, so text typed in it lands before them.
+        const empty = cmdAt(s, 'item') || !!envAt(s, 'end');
+        let sp = k + 5;
+        while (isS(src[sp])) sp++;
+        const e = empty ? sp : s;
+        pieces.push({ k: 'pre', s: pre - i, e: e - i, marks: [] });
+        let stop: number;
+        if (empty) {
+          if (s > e) pieces.push({ k: 'post', s: e - i, e: s - i, marks: [] });
+          stop = s;
+        } else stop = inline(s, i, 0, [], pieces, true);
         items.push({ pieces });
         if (cmdAt(stop, 'item')) {
           k = pre = stop;

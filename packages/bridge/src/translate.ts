@@ -2,6 +2,7 @@
 // characters an edit touched and replaces exactly those.
 import { escape, type Piece } from '@paperweave/latex';
 import type { Node as PMNode } from '@tiptap/pm/model';
+import { Transform } from '@tiptap/pm/transform';
 import { locate, markKey, type Model, type Phantom, width } from './project.ts';
 
 /** Replace source [from, to) with insert. A list is sorted and never overlaps. */
@@ -258,6 +259,67 @@ export function translate(
     return (
       g && { edits: abs(spot.base, [{ from: g.at, to: g.at, insert: '\n\n' }]), phantom: m.phantom }
     );
+  }
+
+  // Enter inside a list item: a new \item opens at the caret, in the same indentation.
+  const item = (n: PMNode | null | undefined) => n?.type.name === 'list_item';
+  if (endA === a && endB === a + 2 && ($a.depth === 1 || $a.depth === 2)) {
+    // The same document comes from Enter at the end of an item and at the start of the next, and
+    // the comparison puts the change at the second. Take the end of the item before.
+    const c =
+      $a.depth === 1
+        ? $a.parent.type.name === 'list' && $a.index() > 0 && a - 1
+        : item($a.parent) && $a.parentOffset === 0 && $a.index(1) > 0
+          ? a - 2
+          : item($a.parent) && $a.parentOffset > 0 && a;
+    let split: PMNode | null = null;
+    if (c) {
+      try {
+        split = new Transform(before).split(c).doc;
+      } catch {
+        split = null;
+      }
+    }
+    if (c && split?.eq(after)) {
+      const $c = before.resolve(c);
+      // Enter in an empty item does nothing: the new item is taken away again.
+      if (!$c.parent.content.size) return { edits: [], phantom: m.phantom };
+      const spot = locate(m, before, c)!;
+      const g = gapFor(spot.pieces, spot.off, '');
+      if (spot.block < 0 || !g) return null;
+      // The indentation of this item's \item: the spaces between its line start and the word.
+      const at = spot.text.lastIndexOf('\\item', spot.pieces[0].e - 1);
+      const lead = spot.text.slice(spot.text.lastIndexOf('\n', at - 1) + 1, at);
+      const indent = /^[ \t]*$/.test(lead) ? lead : '';
+      return {
+        edits: abs(spot.base, [{ from: g.at, to: g.at, insert: `\n${indent}\\item ` }]),
+        phantom: m.phantom,
+      };
+    }
+  }
+
+  // Backspace at the start of a list item after the first: it joins the item before.
+  if (
+    endB === a &&
+    endA === a + 2 &&
+    $a.depth === 2 &&
+    $endA.depth === 2 &&
+    !$a.sameParent($endA) &&
+    item($a.parent) &&
+    item($endA.parent) &&
+    !$endA.parentOffset &&
+    $a.parentOffset === $a.parent.content.size &&
+    $a.index(0) === $endA.index(0) &&
+    $a.index(1) + 1 === $endA.index(1)
+  ) {
+    const x = locate(m, before, a)!;
+    const y = locate(m, before, endA)!;
+    const from = x.base + [...x.pieces].reverse().find((p) => p.k !== 'post')!.e;
+    const to = y.base + y.pieces[0].e;
+    return {
+      edits: [{ from, to, insert: guard(src.slice(0, from), src[to] ?? '') }],
+      phantom: m.phantom,
+    };
   }
 
   // Backspace at the start of a paragraph: it joins the one before.
