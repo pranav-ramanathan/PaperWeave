@@ -875,6 +875,14 @@ export default function FileEditor(props: {
               <button type="button" onClick={() => live.current?.visual?.emph()}>
                 Emphasise
               </button>
+              <button
+                type="button"
+                onClick={() => live.current?.visual?.bold()}
+                aria-keyshortcuts="Control+B Meta+B"
+                title="Ctrl+B"
+              >
+                Bold
+              </button>
               <button type="button" onClick={() => live.current?.undo.undo()}>
                 Undo
               </button>

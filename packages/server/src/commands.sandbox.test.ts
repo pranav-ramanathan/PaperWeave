@@ -82,6 +82,20 @@ test('a command replaces its stretch and nothing else', async () => {
   expect(await stored(p.id)).toBe(MAIN.replace('beta', '\\emph{beta}'));
 });
 
+test('a \\textbf command wraps its stretch, and the one that takes it off restores the bytes', async () => {
+  const p = await paper();
+  const on = replace(await open(p.main), 'beta', '\\textbf{beta}');
+  expect(await runCommand(t.pool, store, owner.id, p.main, on)).toMatchObject({
+    result: 'applied',
+  });
+  expect(await stored(p.id)).toBe(MAIN.replace('beta', '\\textbf{beta}'));
+  const off = replace(await open(p.main), '\\textbf{beta}', 'beta');
+  expect(await runCommand(t.pool, store, owner.id, p.main, off)).toMatchObject({
+    result: 'applied',
+  });
+  expect(await stored(p.id)).toBe(MAIN);
+});
+
 test('a command follows its text when others edit elsewhere', async () => {
   const p = await paper();
   const c = replace(await open(p.main), 'gamma', 'delta');

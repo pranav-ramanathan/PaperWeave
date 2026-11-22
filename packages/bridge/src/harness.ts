@@ -151,7 +151,8 @@ export function visualOp(r: Rng, rep: Replica, only?: 'ins'): Op | null {
     what = 'emph';
     hi = spot.base + unit(spot.pieces, off + len)[1];
     rep.select(pos, pos + len);
-    const c = rep.bridge.emphCommand(rep.state);
+    // Either mark, chosen without the generator so that a seed replays the edits it always did.
+    const c = rep.bridge.markCommand(rep.state, pos % 2 ? 'emph' : 'textbf');
     accepted = !!c && rep.bridge.applyCommand(c) === 'applied';
   } else if (roll < 140) {
     // Delete, or type over, a selection that runs from one paragraph into a later one.

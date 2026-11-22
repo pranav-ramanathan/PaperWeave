@@ -204,11 +204,16 @@ export class Bridge {
 
   /** Build the command that toggles emphasis on the selection, or null if it does not nest. */
   emphCommand(state: EditorState): Command | null {
+    return this.markCommand(state, 'emph');
+  }
+
+  /** The same for \\textbf (or \\emph): a mark around the selection that is not it is left alone. */
+  markCommand(state: EditorState, mark: 'emph' | 'textbf'): Command | null {
     const { from, to } = state.selection;
     const x = locate(this.model, state.doc, from);
     const y = locate(this.model, state.doc, to);
     if (!x || !y || x.block < 0 || x.contentStart !== y.contentStart || from === to) return null;
-    const e = emphEdit(x.text, x.pieces, x.off, y.off);
+    const e = emphEdit(x.text, x.pieces, x.off, y.off, mark);
     if (!e) return null;
     const rel = (i: number) => Y.createRelativePositionFromTypeIndex(this.ytext, x.base + i);
     return {

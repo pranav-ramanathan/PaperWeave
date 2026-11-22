@@ -26,7 +26,7 @@ Where this stands, what holds it there, and what nobody has checked yet.
   and the first page a new person sees. No failures.
 - **The keys that insert in the visual view**: Alt+R (reference), Alt+C (citation), Alt+= (equation),
   Alt+G (figure), Alt+T (table), Alt+H (heading), Alt+L (bulleted list) and Alt+N (numbered
-  list), Ctrl+I (emphasis) and Shift+F10 (the menu at
+  list), Ctrl+I (emphasis), Ctrl+B (bold) and Shift+F10 (the menu at
   the caret). Each toolbar button names its key in `aria-keyshortcuts`. The heading window opens
   on its Title, Enter inserts, Escape closes it and gives the caret back, a refusal is read from
   its alert, and axe passes with the window open and a refusal showing (`insert.spec`).
@@ -152,7 +152,7 @@ client would. The paper was `fixtures/ieee-multifile`, a second person was invit
 - **Works.** Asking for a sign-in link (the email field is the third Tab stop); importing a ZIP
   (Space on the file field opens the browser's chooser; "Import ZIP" is the next Tab);
   inviting (the role is changed with the arrow keys); joining from the invitation; opening a
-  file from the list; typing in both views; emphasis by Ctrl+I and by the "Emphasise" button
+  file from the list; typing in both views; emphasis and bold by Ctrl+I, Ctrl+B and by the "Emphasise" and "Bold" buttons
   (the button keeps the keyboard and the selection); a reference, a citation, an equation and a
   table from Alt+R, Alt+C, Alt+= and Alt+T, each closed with Enter on Insert or with Escape,
   and the keyboard back in the text afterwards; the menu "At this place" from Shift+F10, opened
@@ -190,7 +190,7 @@ client would. The paper was `fixtures/ieee-multifile`, a second person was invit
     open it; they now do.
 - **Not changed.**
   - The visual view has no way to make or change a heading, by any means (the toolbar has
-    Emphasise, Undo, Redo and the insert buttons). A heading is typed in the source view. This
+    Emphasise, Bold, Undo, Redo and the insert buttons). A heading is typed in the source view. This
     is a feature, not a fix.
   - Pressing Alt+T within about a tenth of a second of closing the table window with Escape did
     not open it once; slower, it did. Not reproduced since.

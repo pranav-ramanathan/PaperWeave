@@ -460,10 +460,17 @@ export function translate(
 }
 
 /**
- * Source range and replacement for wrapping the display range in \emph{...}, or for removing the
- * \emph that exactly encloses it. Null if the range does not nest cleanly.
+ * Source range and replacement for wrapping the display range in \emph{...} (or \textbf{...}), or
+ * for removing the one that exactly encloses it, even with other groups in between: toggling
+ * \emph off \emph{\textbf{x}} leaves \textbf{x}. Null if the range does not nest cleanly.
  */
-export function emphEdit(text: string, pieces: Piece[], off: number, offEnd: number): Edit | null {
+export function emphEdit(
+  text: string,
+  pieces: Piece[],
+  off: number,
+  offEnd: number,
+  mark: 'emph' | 'textbf' = 'emph',
+): Edit | null {
   let d = 0;
   let first = -1;
   let last = -1;
@@ -492,10 +499,13 @@ export function emphEdit(text: string, pieces: Piece[], off: number, offEnd: num
     if (pieces[i].k === 'close' && --depth < 0) return null;
   }
   if (depth) return null;
-  const open = pieces[first - 1];
-  const close = pieces[last + 1];
   const whole = from === pieces[first].s && to === pieces[last].e;
-  if (whole && open?.k === 'open' && open.mark === 'emph' && close?.k === 'close')
-    return { from: open.s, to: close.e, insert: text.slice(from, to) };
-  return { from, to, insert: `\\emph{${text.slice(from, to)}}` };
+  for (let j = 0; whole; j++) {
+    const open = pieces[first - 1 - j];
+    const close = pieces[last + 1 + j];
+    if (open?.k !== 'open' || close?.k !== 'close') break;
+    if (open.mark === mark)
+      return { from: open.s, to: close.e, insert: text.slice(open.e, close.s) };
+  }
+  return { from, to, insert: `\\${mark}{${text.slice(from, to)}}` };
 }
