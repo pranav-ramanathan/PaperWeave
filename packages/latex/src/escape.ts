@@ -9,10 +9,12 @@ const ESCAPE: Record<string, string> = {
   '<': '\\textless{}',
   '>': '\\textgreater{}',
   '|': '\\textbar{}',
+  // babel (German, Dutch, Spanish...) makes " a shorthand that swallows the next letter.
+  '"': '\\symbol{34}',
   [NBSP]: '~',
   '\n': ' ',
   '\r': ' ',
   '\t': ' ',
 };
 for (const c of '%&$#_{}') ESCAPE[c] = '\\' + c;
-export const escape = (s: string) => s.replace(/[\\~^<>|\xa0\n\r\t%&$#_{}]/g, (c) => ESCAPE[c]);
+export const escape = (s: string) => s.replace(/[\\~^<>|"\xa0\n\r\t%&$#_{}]/g, (c) => ESCAPE[c]);

@@ -201,14 +201,22 @@ test('a replacement comes back as LaTeX source, and a word that is not a glossar
           offset: at,
           length: 4,
           message: 'm',
-          replacements: [{ value: '50% of R&D' }, { value: 'a_b {c} $d #e' }],
+          replacements: [
+            { value: '50% of R&D' },
+            { value: 'a_b {c} $d #e' },
+            { value: 'say "hi"' },
+          ],
           rule: { id: 'FAKE', category: { id: 'STYLE' } },
         },
       ],
     })) as unknown as typeof fetch;
   const [fake] = await checkGrammar(t.pool, store, users.owner.id, q.id, q.file, { url, fetcher });
   expect(fake.words).toBe('half');
-  expect(fake.replacements).toEqual(['50\\% of R\\&D', 'a\\_b \\{c\\} \\$d \\#e']);
+  expect(fake.replacements).toEqual([
+    '50\\% of R\\&D',
+    'a\\_b \\{c\\} \\$d \\#e',
+    'say \\symbol{34}hi\\symbol{34}',
+  ]);
 });
 
 test('a finding is counted by those who may do what it counts, and on their own papers', async () => {
