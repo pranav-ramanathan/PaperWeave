@@ -908,6 +908,23 @@ the PDF leaves them out.` (up to 12 distinct characters; invisible ones as `U+20
   fonts were added to the image.
 - Cached builds are redone (`TEX_TEXT` is now `utf8-biber-eps-glyphs`).
 
+## An undefined BibTeX/Biber abbreviation dropped a field
+
+- **Before:** `journal = cvpr` (an unquoted abbreviation no `@string` defines) built green and
+  the reference was printed without its journal. BibTeX (`plain`) wrote `Warning--string name
+"cvpr" is undefined` and, on the next line, `--line 4 of file refs.bib`, then `Warning--empty
+journal in he16`; Biber wrote `WARN - BibTeX subsystem: <temp copy>, line 4, warning: undefined
+macro "cvpr"`. Both exit 0, the `.bbl` has no journal, and `diagnostics()` matched neither
+  (the BibTeX reader wants `---line N` on the same line; the Biber reader took only `ERROR - `).
+- **Now (detected, not fixed):** `diagnostics()` gives one warning on the `.bib` and line,
+  `Abbreviation not defined: "cvpr" is used in refs.bib but no @string defines it; the reference
+is printed without that field.` (once, though latexmk runs BibTeX again). The submission check
+  makes it a `file` problem and the build pane lists it under "Built, but some things are not in
+  the PDF". An abbreviation defined in another `.bib` of `\bibliography{strings,refs}` is not
+  flagged (Biber reads files in order: one listed after its use is, and does lose the field).
+  Left unsurfaced as noise: `empty journal`, `entry type ... isn't style-file defined`.
+- Cached builds are redone (`TEX_TEXT` is now `utf8-biber-eps-glyphs-strings`).
+
 ## How long a large import takes
 
 - An import still runs inside its request. Measured at the most files a paper may hold

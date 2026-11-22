@@ -187,6 +187,25 @@ export function diagnostics(log: string, output = '', dir = ''): Diagnostic[] {
     };
     if (!out.some((e) => JSON.stringify(e) === JSON.stringify(d))) out.push(d);
   }
+  // An abbreviation no @string defines (journal = cvpr): both tools go on and print the
+  // reference without the field, exit 0. BibTeX says "Warning--string name "cvpr" is undefined"
+  // and, on the next line, "--line 4 of file refs.bib" (once per run, so latexmk repeats it);
+  // Biber says "WARN - BibTeX subsystem: <temp copy>, line 4, warning: undefined macro "cvpr"".
+  // Collected here and added after the check below, which counts only what failed. The other
+  // warnings ("empty journal in he16", "entry type ... isn't style-file defined") are noise.
+  const abbreviations: Diagnostic[] = [];
+  const abbreviation = (name: string, file: string | undefined, line: number) => {
+    const d: Diagnostic = {
+      severity: 'warning',
+      ...(file ? { file, line } : {}),
+      message: `Abbreviation not defined: "${name}" is used in ${file ?? 'a .bib file'} but no @string defines it; the reference is printed without that field.`,
+    };
+    if (!abbreviations.some((e) => JSON.stringify(e) === JSON.stringify(d))) abbreviations.push(d);
+  };
+  for (const m of output.matchAll(
+    /^Warning--string name "(.+?)" is undefined\r?\n--line (\d+) of file (?:\.\/)?(.+?\.bib)\r?$/gm,
+  ))
+    abbreviation(m[1], m[3], Number(m[2]));
   // The rest of what BibTeX says is about the files it was given, not a place in one.
   const bibtex = (re: RegExp, say: (found: string) => string) => {
     for (const m of output.matchAll(re)) {
@@ -227,10 +246,17 @@ export function diagnostics(log: string, output = '', dir = ''): Diagnostic[] {
     if (!out.some((e) => JSON.stringify(e) === JSON.stringify(d))) out.push(d);
   };
   for (const m of output.matchAll(
-    /^(?:INFO - Found BibTeX data source '(.+)'|ERROR - (.+?))\r?$/gm,
+    /^(?:INFO - Found BibTeX data source '(.+)'|ERROR - (.+?)|WARN - (.+?))\r?$/gm,
   )) {
     if (m[1] !== undefined) {
       source = m[1].replace(/^\.\//, '');
+      continue;
+    }
+    if (m[3] !== undefined) {
+      const macro = /^BibTeX subsystem: \S+, line (\d+), warning: undefined macro "(.+?)"$/.exec(
+        m[3],
+      );
+      if (macro) abbreviation(macro[2], source, Number(macro[1]));
       continue;
     }
     const syntax =
@@ -275,6 +301,7 @@ export function diagnostics(log: string, output = '', dir = ''): Diagnostic[] {
       severity: 'error',
       message: 'The bibliography could not be made. The build log has the details.',
     });
+  out.push(...abbreviations);
   // A custom-dependency rule (makeglossaries, or makeindex for nomencl) failed: latexmk says so
   // in its summary, and whatever the tool said went to its own .glg or .nlg file, not the TeX log.
   if (/^Collected error summary[^\n]*\n(?:[ \t]+.*\n)*?[ \t]+cusdep\b/m.test(output))

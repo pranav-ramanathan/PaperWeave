@@ -722,3 +722,84 @@ test('a message that goes on after its line, "(fontspec)  this).", does not end 
   ].join('\n');
   expect(diagnostics(log).map((d) => d.file)).toEqual(['main.tex']);
 });
+
+// What latexmk wrote when BibTeX and Biber were run for real on `journal = cvpr` with no
+// @string for it. Both exit 0 and print the reference without the journal.
+// The message names the .bib as the tool did; the file is placed in the project.
+const ABBR = (file?: string, line = 4) => ({
+  severity: 'warning',
+  ...(file ? { file, line } : {}),
+  message: `Abbreviation not defined: "cvpr" is used in ${file?.split('/').at(-1) ?? 'a .bib file'} but no @string defines it; the reference is printed without that field.`,
+});
+const BIBTEX_PASS = [
+  'Running \'bibtex  "main.aux"\'',
+  'This is BibTeX, Version 0.99d (TeX Live 2022/Debian)',
+  'The top-level auxiliary file: main.aux',
+  'The style file: plain.bst',
+  'Database file #1: refs.bib',
+  'Warning--string name "cvpr" is undefined',
+  '--line 4 of file refs.bib',
+  'Warning--empty journal in he16',
+  '(There were 2 warnings)',
+].join('\n');
+const BIBER_WARN = [
+  "INFO - Looking for bibtex file 'refs.bib' for section 0",
+  "INFO - Found BibTeX data source 'refs.bib'",
+  'WARN - BibTeX subsystem: /tmp/biber_tmp_m_q8/8fe4c9854184545302f21ebf0d47516c_14.utf8, line 4, warning: undefined macro "cvpr"',
+  'INFO - WARNINGS: 1',
+  'Biber warning: [175] Biber.pm:130> WARN - BibTeX subsystem: /tmp/biber_tmp_m_q8/8fe4c9854184545302f21ebf0d47516c_14.utf8, line 4, warning: undefined macro "cvpr"',
+].join('\n');
+
+test('an abbreviation BibTeX does not know is a warning on the .bib and its line, once', () => {
+  expect(diagnostics('(./main.tex)', BIBTEX_PASS)).toEqual([ABBR('refs.bib')]);
+  // latexmk runs BibTeX again after the next pass: still one.
+  expect(diagnostics('(./main.tex)', `${BIBTEX_PASS}\n\n${BIBTEX_PASS}`)).toEqual([
+    ABBR('refs.bib'),
+  ]);
+  expect(diagnostics('', BIBTEX_PASS, 'paper/')).toEqual([ABBR('paper/refs.bib')]);
+  expect(
+    diagnostics(
+      '',
+      BIBTEX_PASS.replace('--line 4 of file refs.bib', '--line 4 of file ./refs.bib'),
+    ),
+  ).toEqual([ABBR('refs.bib')]);
+});
+
+test('an undefined macro Biber reports is the same warning, once, in the .bib it was reading', () => {
+  expect(diagnostics('(./main.tex)', BIBER_WARN)).toEqual([ABBR('refs.bib')]);
+  expect(diagnostics('', `${BIBER_WARN}\n${BIBER_WARN}`)).toEqual([ABBR('refs.bib')]);
+  expect(diagnostics('', BIBER_WARN, 'paper/')).toEqual([ABBR('paper/refs.bib')]);
+  const second = [
+    "INFO - Found BibTeX data source 'strings.bib'",
+    "INFO - Found BibTeX data source 'more.bib'",
+    BIBER_WARN.split('\n')[2],
+  ].join('\n');
+  expect(diagnostics('', second)).toEqual([ABBR('more.bib')]);
+});
+
+test('other BibTeX and Biber warnings are left alone', () => {
+  const noise = [
+    'Warning--empty journal in he16',
+    'Warning--entry type for "x" isn\'t style-file defined',
+    '--line 9 of file refs.bib',
+    'WARN - Duplicate entry key',
+    "INFO - Found BibTeX data source 'refs.bib'",
+  ].join('\n');
+  expect(diagnostics('(./main.tex)', noise)).toEqual([]);
+});
+
+test('an abbreviation warning does not hide that the bibliography failed', () => {
+  const out = diagnostics(
+    '',
+    [
+      BIBTEX_PASS,
+      'Collected error summary (may duplicate other messages):',
+      "  bibtex main: Bibtex errors: See file 'main.blg'",
+    ].join('\n'),
+  );
+  expect(out).toContainEqual({
+    severity: 'error',
+    message: 'The bibliography could not be made. The build log has the details.',
+  });
+  expect(out).toContainEqual(ABBR('refs.bib'));
+});
