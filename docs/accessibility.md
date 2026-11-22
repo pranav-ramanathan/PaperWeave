@@ -36,6 +36,10 @@ Where this stands, what holds it there, and what nobody has checked yet.
   there: the differences between two revisions, the lines a file rename or a label rename
   would change, an invitation and one that is no longer valid, a chart whose files have gone,
   and the first page a new person sees. No failures.
+  - The audit with a line long enough to scroll the differences found `scrollable-region-focusable`
+    (serious): the `<pre class="diff">` scrolled but could not be focused. It is now
+    `role="region"` named "Changes to <file>" with `tabIndex={0}` and a visible focus outline,
+    like `Wide`; `tests/e2e/a11y.spec.ts` holds it.
 - **The keys that insert in the visual view**: Alt+R (reference), Alt+C (citation), Alt+= (equation),
   Alt+G (figure), Alt+T (table), Alt+H (heading), Alt+L (bulleted list) and Alt+N (numbered
   list), Ctrl+I (emphasis), Ctrl+B (bold) and Shift+F10 (the menu at

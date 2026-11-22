@@ -58,8 +58,25 @@ test('an entry is described the way a person would cite it', () => {
   expect(describeEntry(shapiro)).toBe('Shapiro et al. 2011. Conflict-Free Replicated Data Types');
   expect(describeEntry(bare)).toBe('bare');
   expect(plainText('Nuno Pregui{\\c{c}}a, Erd\\H{o}s \\& Sch\\"{o}n, pp.~386--400')).toBe(
-    'Nuno Preguica, Erdos & Schon, pp. 386–400',
+    'Nuno Preguiça, Erdős & Schön, pp. 386–400',
   );
+});
+
+test('text macros in a field become their text', () => {
+  expect(plainText('The {\\TeX}book')).toBe('The TeXbook');
+  expect(plainText('\\TeX{} and \\LaTeX, \\LaTeXe, \\BibTeX')).toBe(
+    'TeX and LaTeX, LaTeX2e, BibTeX',
+  );
+  expect(
+    plainText("{\\\"u}ber, M\\\"uller, Fran\\c{c}ois, Gro\\ss{}e, \\'{e}t\\'e, \\'{\\i}"),
+  ).toBe('über, Müller, François, Große, été, í');
+  expect(plainText(String.raw`{\o}re, \aa ngstr{\"o}m, {\l}\'od\'z, \v{S}koda`)).toBe(
+    'øre, ångström, łódź, Škoda',
+  );
+  expect(plainText('Fish \\& Chips,~1--2')).toBe('Fish & Chips, 1–2');
+  // An unknown macro keeps its braced text, or goes alone; what follows it stays.
+  expect(plainText('\\emph{Deep} \\foo learning \\url{x.org}')).toBe('Deep learning x.org');
+  expect(plainText('\\unknown')).toBe('');
 });
 
 test('citations are found with their keys, in every common form', () => {

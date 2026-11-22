@@ -102,23 +102,69 @@ const LIGATURES: Record<string, string> = {
   l: 'ł',
   L: 'Ł',
   i: 'i',
+  j: 'j',
+  dh: 'ð',
+  DH: 'Ð',
+  th: 'þ',
+  TH: 'Þ',
+  // The logos and a few names TeX writes with a macro.
+  TeX: 'TeX',
+  LaTeX: 'LaTeX',
+  LaTeXe: 'LaTeX2e',
+  BibTeX: 'BibTeX',
+  XeTeX: 'XeTeX',
+  LuaTeX: 'LuaTeX',
+  ldots: '…',
+  dots: '…',
+  textendash: '–',
+  textemdash: '—',
 };
+
+/** An accent command and the combining mark it puts on the letter after it. */
+const ACCENTS: Record<string, string> = {
+  '`': '̀',
+  "'": '́',
+  '^': '̂',
+  '~': '̃',
+  '=': '̄',
+  u: '̆',
+  '.': '̇',
+  '"': '̈',
+  r: '̊',
+  H: '̋',
+  v: '̌',
+  d: '̣',
+  c: '̧',
+  k: '̨',
+  b: '̱',
+  t: '',
+};
+const accented = (accent: string, letter: string) =>
+  (letter.replace(/^\\/, '') + ACCENTS[accent]).normalize('NFC');
 
 /** A field's text as a person reads it: TeX accents, commands and braces taken away. */
 export function plainText(tex: string) {
-  return tex
-    .replace(/\\[`'^"~=.uvHtcdbkr]\s*\{?\s*\\?([a-zA-Z])\}?/g, '$1')
-    .replace(/\\([&%$#_])/g, '$1')
-    .replace(
-      /\\(oe|OE|ae|AE|aa|AA|ss|[oOlLi])(?![a-zA-Z])\s*(?:\{\})?/g,
-      (_, c: string) => LIGATURES[c],
-    )
-    .replace(/\\[a-zA-Z]+\s*/g, '')
-    .replace(/[{}]/g, '')
-    .replace(/~/g, ' ')
-    .replace(/--+/g, '–')
-    .replace(/\s+/g, ' ')
-    .trim();
+  return (
+    tex
+      // \"o, \"{o}, \'{\i}: a symbol accent, then a letter, bare or braced.
+      .replace(/\\([`'^"~=.])\s*(?:\{\s*(\\[ij]|[a-zA-Z])\s*\}|(\\[ij]|[a-zA-Z]))/g, (_, a, l, m) =>
+        accented(a, l ?? m),
+      )
+      // \c{c}, \c c, \H{o}, \v{s}: a letter accent needs its braces or a space.
+      .replace(/\\([uvHtcdbkr])(?:\s*\{\s*(\\[ij]|[a-zA-Z])\s*\}|\s+([a-zA-Z]))/g, (_, a, l, m) =>
+        accented(a, l ?? m),
+      )
+      .replace(/\\([&%$#_])/g, '$1')
+      .replace(/\\([a-zA-Z]+)(?![a-zA-Z])\s*(?:\{\})?/g, (all, name: string) =>
+        // A name that is not known is dropped; whatever follows it stays.
+        Object.hasOwn(LIGATURES, name) ? LIGATURES[name]! : '',
+      )
+      .replace(/[{}]/g, '')
+      .replace(/~/g, ' ')
+      .replace(/--+/g, '–')
+      .replace(/\s+/g, ' ')
+      .trim()
+  );
 }
 
 /** One line that says what an entry is: "Shapiro et al. 2011. Conflict-Free Replicated Data Types". */

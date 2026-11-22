@@ -262,7 +262,7 @@ test('the main pages can be read in a narrow window without scrolling sideways',
   await page.locator('.editor .cm-content').click();
   await page.keyboard.press('ControlOrMeta+End');
   await page.keyboard.type(
-    '% a line long enough that it would not fit across a narrow window without wrapping or scrolling\n',
+    `% ${'a line long enough that it would not fit across a narrow window without scrolling, '.repeat(6)}\n`,
   );
   await expect(page.getByRole('region', { name: /^Editor for/ }).getByRole('status')).toHaveText(
     'All edits saved.',
@@ -272,7 +272,13 @@ test('the main pages can be read in a narrow window without scrolling sideways',
   await page.getByRole('button', { name: 'Save revision' }).click();
   await page.getByRole('link', { name: 'Changes since 1' }).click();
   await expect(page.getByRole('heading', { name: 'Revision 1 to revision 2' })).toBeVisible();
+  // A line wider than the window makes the difference scroll sideways: that needs a tab stop.
+  expect(await page.locator('.diff').evaluate((e) => e.scrollWidth > e.clientWidth)).toBe(true);
   await look('differences between revisions');
+  await audit(page, 'differences between revisions, a long line');
+  const changes = page.getByRole('region', { name: 'Changes to refs.bib' });
+  await changes.focus();
+  await expect(changes).toBeFocused();
   await page.goto(`${paper}/submit`);
   await expect(page.getByRole('heading', { name: /before submitting/ })).toBeVisible();
   await look('checks before submitting');
