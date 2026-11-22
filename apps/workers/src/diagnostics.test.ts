@@ -481,3 +481,84 @@ test('a custom-dependency rule that failed says the glossary could not be made',
     },
   ]);
 });
+
+// What latexmk and Biber 2.18 wrote when run for real on a small broken biblatex paper.
+const BIBER_RUN = (...lines: string[]) =>
+  [
+    'Running \'biber  "main.bcf"\'',
+    'INFO - This is Biber 2.18',
+    "INFO - Reading 'main.bcf'",
+    "INFO - Looking for bibtex file 'refs.bib' for section 0",
+    "INFO - Found BibTeX data source 'refs.bib'",
+    ...lines,
+    'INFO - ERRORS: 1',
+    'Latexmk: Errors, so I did not complete making targets',
+    'Collected error summary (may duplicate other messages):',
+    "  biber main: Biber errors: See file 'main.blg'",
+  ].join('\n');
+const TMP = '/tmp/biber_tmp_5NHt/8fe4c9854184545302f21ebf0d47516c_13.utf8';
+const SYNTAX = `ERROR - BibTeX subsystem: ${TMP}, line 12, syntax error: found "publisher", expected end of entry ("}" or ")") (skipping to next "@")`;
+
+test("Biber's syntax error names the .bib and its line, and the generic line is not added", () => {
+  const output = BIBER_RUN(SYNTAX, `Biber error: [222] Utils.pm:399> ${SYNTAX}`);
+  const d = diagnostics('', output);
+  expect(d).toEqual([
+    {
+      severity: 'error',
+      file: 'refs.bib',
+      line: 12,
+      message: 'Biber: found "publisher", expected end of entry ("}" or ")").',
+    },
+  ]);
+  expect(diagnostics('', output, 'paper/')[0].file).toBe('paper/refs.bib');
+});
+
+test('an error in the second of two .bib files is placed in the second', () => {
+  const output = [
+    "INFO - Found BibTeX data source 'refs.bib'",
+    "INFO - Looking for bibtex file 'more.bib' for section 0",
+    "INFO - Found BibTeX data source 'more.bib'",
+    `ERROR - BibTeX subsystem: ${TMP}, line 8, syntax error: found "oops", expected end of entry ("}" or ")") (skipping to next "@")`,
+  ].join('\n');
+  expect(diagnostics('', output)).toEqual([
+    expect.objectContaining({
+      file: 'more.bib',
+      line: 8,
+      message: expect.stringMatching(/^Biber: /),
+    }),
+  ]);
+});
+
+test('Biber could not find a .bib file', () => {
+  const direct =
+    "INFO - Looking for bibtex file 'nope.bib' for section 0\nERROR - Cannot find 'nope.bib'!";
+  expect(diagnostics('', direct)).toEqual([
+    {
+      severity: 'error',
+      file: 'nope.bib',
+      message: 'Biber could not find the bibliography file nope.bib.',
+    },
+  ]);
+  // latexmk does not run biber at all, and says it in its own words, once per pass.
+  const latexmk = [
+    'Latexmk: Bibliography file(s) form .bcf file:',
+    '  nope.bib',
+    'Bib file(s) not found in search path:',
+    '  nope.bib',
+    "Latexmk: I WON'T RUN 'biber main' because I don't find the following files:",
+    '  nope.bib',
+  ].join('\n');
+  expect(diagnostics('', `${latexmk}\n${latexmk}`)).toEqual([
+    {
+      severity: 'error',
+      file: 'nope.bib',
+      message: 'Biber could not find the bibliography file nope.bib.',
+    },
+  ]);
+});
+
+test('another Biber error is said without a file', () => {
+  expect(diagnostics('', 'ERROR - Cannot open bcf file')).toEqual([
+    { severity: 'error', message: 'Biber: Cannot open bcf file.' },
+  ]);
+});

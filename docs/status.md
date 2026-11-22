@@ -1878,7 +1878,8 @@ update` held the paper's file rows for **189.6 s** (until the proxy was cut; it 
 - **Not changed:** a list left open is reported at the end of the paper, with the line but not
   the file it was opened in. A mistake inside a command is placed where the command is used. A
   missing package or file is given its file but not its line. A package of TeX's own is named
-  without the line that loads it. Biber's errors are not read. The lists are not links to the
+  without the line that loads it. Biber's errors are read from latexmk's output, with the .bib and its line (a .bib that
+  is not there has no line); biber's own log, main.blg, is still not the build log shown. The lists are not links to the
   lines. BibTeX's own words are not in the build log a person can open.
 - **How it was made.** Planned by one agent, probed and written by others, checked here.
 

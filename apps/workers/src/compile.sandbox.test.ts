@@ -345,6 +345,28 @@ test('a .bib with a missing comma fails the build and names the .bib and its lin
   );
 });
 
+test('a .bib that biber cannot read fails the build and names the .bib and its line', async () => {
+  const project = tmp();
+  cpSync(join(FIXTURES, 'real-biblatex-subfiles'), project, { recursive: true });
+  const bib = join(project, 'refs.bib');
+  writeFileSync(
+    bib,
+    readFileSync(bib, 'utf8').replace(
+      'title     = {Water and the Protected Crop},',
+      'title     = {Water and the Protected Crop}',
+    ),
+  );
+  const r = await compile(project, 'main.tex', tmp());
+  expect(r.ok).toBe(false);
+  // The line is the .bib's own: biber's copy of it has the same lines.
+  expect(r.diagnostics).toContainEqual(
+    expect.objectContaining({ severity: 'error', file: 'refs.bib', line: 12 }),
+  );
+  expect(r.diagnostics.map((d) => d.message)).not.toContain(
+    'The bibliography could not be made. The build log has the details.',
+  );
+});
+
 test('a bare & in a .bib title is not reported in the .bbl', async () => {
   const project = tmp();
   cpSync(join(FIXTURES, 'ieee-multifile'), project, { recursive: true });

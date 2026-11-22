@@ -11,8 +11,9 @@ import { compile, type Compiler, IMAGE } from './compile.ts';
 /**
  * Part of every cache key. Builds cached before diagnostics and labels were read as UTF-8 hold
  * garbled file names and keys; bump this when what is read from TeX's output changes.
+ * 'utf8-biber': Biber's errors are read now, so a cached failed build lacks its .bib and line.
  */
-const TEX_TEXT = 'utf8';
+const TEX_TEXT = 'utf8-biber';
 
 /** The toolchain image's content ID: part of every cache key, so a new image rebuilds everything. */
 export const imageId = () =>
