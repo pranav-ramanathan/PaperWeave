@@ -109,6 +109,40 @@ async function readTexFiles(
   return files;
 }
 
+/**
+ * The text of the .bbl a paper with no .bib file came with: the root's own (`main.tex` has
+ * `main.bbl`, as \\jobname.bbl), or with no root, every one. A .bbl is generated, so it is
+ * not in the editable files and is read as it was stored.
+ */
+export function bblFiles(pool: Db, store: BlobStore, projectId: string) {
+  return remembered(pool, ['bbl', projectId], async () => {
+    const { rows } = await pool.query(
+      `select f.id, f.path, f.digest, (select r.path from files r where r.id = p.root_file_id) as root_path
+       from files f join projects p on p.id = f.project_id
+       where f.project_id = $1 and f.path ~* '\\.bbl$'
+         and not exists (select 1 from files b where b.project_id = f.project_id and b.path ~* '\\.bib$')
+       order by f.path`,
+      [projectId],
+    );
+    const wanted = rows[0]?.root_path
+      ? `${String(rows[0].root_path).replace(/\.(tex|ltx)$/i, '')}.bbl`
+      : null;
+    const files: { id: string; path: string; text: string }[] = [];
+    for (const f of rows) {
+      if (wanted && f.path !== wanted) continue;
+      const bytes = await store.get(f.digest);
+      if (!bytes) throw new Error(`blob ${f.digest} is missing`);
+      const decoded = decodeFile(bytes);
+      files.push({
+        id: f.id,
+        path: f.path,
+        text: decoded.editable ? decoded.text : Buffer.from(bytes).toString('latin1'),
+      });
+    }
+    return files;
+  });
+}
+
 export async function labelReport(
   pool: pg.Pool,
   store: BlobStore,

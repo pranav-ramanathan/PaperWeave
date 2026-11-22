@@ -2,13 +2,20 @@
 // whether an entry's details are right (a DOI lookup), and whether the source supports a
 // particular claim the paper makes (a person's judgement, about one quoted claim).
 import { createHash } from 'node:crypto';
-import { type BibEntry, bibEntries, bibItems, cleanDoi, plainText } from '@paperweave/latex';
+import {
+  type BibEntry,
+  bblEntries,
+  bibEntries,
+  bibItems,
+  cleanDoi,
+  plainText,
+} from '@paperweave/latex';
 import type pg from 'pg';
 import { authorize, can } from './authz.ts';
 import type { BlobStore } from './blobs.ts';
 import type { Db } from './db.ts';
 import { AppError } from './errors.ts';
-import { texFiles } from './labels.ts';
+import { bblFiles, texFiles } from './labels.ts';
 import { boundedJson, redirected } from './outbound.ts';
 import { id } from './projects.ts';
 
@@ -143,6 +150,18 @@ async function entriesByKey(db: Db, store: BlobStore, projectId: string) {
           key: i.key,
           type: 'bibitem',
           fields: { title: i.text },
+          at: i.at,
+          end: i.at,
+          keyAt: i.at,
+        });
+  // A paper with no .bib came with its .bbl: its entries can be cited and checked too.
+  for (const file of await bblFiles(db, store, projectId))
+    for (const i of bblEntries(file.text))
+      if (!out.has(i.key))
+        out.set(i.key, {
+          key: i.key,
+          type: 'bibitem',
+          fields: { title: plainText(i.text) },
           at: i.at,
           end: i.at,
           keyAt: i.at,

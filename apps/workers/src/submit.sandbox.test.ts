@@ -353,6 +353,16 @@ test('a thebibliography paper is ready, and a key it does not have is the one pr
   expect(wrong.problems[0].message).toContain('nokey');
 }, 240_000);
 
+test('a paper with a ready-made .bbl and no .bib has no missing citations', async () => {
+  const found = await verdict('Bbl only', {
+    'main.tex': doc('', 'Cite \\cite{k}.\n\\bibliographystyle{plain}\n\\bibliography{refs}'),
+    'main.bbl':
+      '\\begin{thebibliography}{1}\n\n\\bibitem{k}\nA.~One.\n\\newblock {\\em First}, 2001.\n\n\\end{thebibliography}\n',
+  });
+  expect(found.findings.filter((f) => f.kind === 'citation')).toEqual([]);
+  expect(found.ready).toBe(true);
+}, 240_000);
+
 test('files that come with the TeX installation do not stop a paper; one that is not there does', async () => {
   const ieee = await verdict('IEEE', {
     'main.tex': doc(
@@ -702,6 +712,26 @@ test('a paper whose font lacks characters is not ready, and the problem is in th
       kind: 'file',
       path: 'sec.tex',
       message: expect.stringMatching(/^Characters not shown: μ ≤ ≠ are not in the font/),
+    }),
+  );
+}, 300_000);
+
+test('a stray character in a TikZ picture is worth a look, and the paper is ready', async () => {
+  const v = await verdict('Tikz paper', {
+    'main.tex': doc(
+      '\\usepackage{tikz}',
+      '\\begin{tikzpicture}\\draw (0,0) -- (1,1);;\\end{tikzpicture}',
+    ),
+  });
+  expect(v.problems).toEqual([]);
+  expect(v.ready).toBe(true);
+  expect(v.revisionId).not.toBeNull();
+  expect(v.findings).toContainEqual(
+    expect.objectContaining({
+      level: 'warning',
+      kind: 'compiler',
+      path: 'main.tex',
+      message: expect.stringMatching(/^Stray character in a picture: ;/),
     }),
   );
 }, 300_000);

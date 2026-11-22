@@ -99,11 +99,13 @@ const ERROR = /^(?:\.\/)?([^:\n]+?\.\w+):(\d+): (.+)$/gm;
 // and spaces, "(hyperref)        removing ...", and the line number is often on the last.
 const WARNING =
   /^(?:LaTeX(?: Font)?|Package \S+|Class \S+) Warning: (.+(?:\n\([A-Za-z0-9@-]+\)[ \t]+.*)*)$/gm;
-// A character the font has no glyph for: TeX goes on and leaves it out of the PDF. XeTeX and
-// LuaTeX write "There is no 王 (U+738B) in font [lmroman12-regular]:mapping=tex-text;!"; pdfTeX
-// has no code: "There is no ^^e9 in font cmr10!" (or the raw byte of the font slot).
+// A character the font has no glyph for: TeX goes on and leaves it out of the PDF. LuaTeX
+// writes "There is no 王 (U+738B) in font [lmroman12-regular]:mapping=tex-text;!", XeTeX
+// "There is no 王 ("738B) in font ...!"; pdfTeX has no code: "There is no ^^e9 in font cmr10!"
+// (or the raw byte of the font slot). In "nullfont", which TikZ uses for text outside a node,
+// it is a stray character in a picture, not a missing glyph.
 const MISSING =
-  /^Missing character: There is no (.+?)(?: \(U\+([0-9A-Fa-f]{4,6})\))? in font (.+)!$/gm;
+  /^Missing character: There is no (.+?)(?: \((?:U\+([0-9A-Fa-f]{4,6})|"([0-9A-Fa-f]{1,6}))\))? in font (.+)!$/gm;
 const CONTINUED = /\n\([A-Za-z0-9@-]+\)[ \t]+/g;
 
 /** TeX announcing that it gave up; the cause is the entry before it. */
@@ -381,9 +383,11 @@ export function diagnostics(log: string, output = '', dir = ''): Diagnostic[] {
   // stack then is whichever was open at the page break, so no file is named for it.
   const typeset = !/^This is Lua/m.test(log);
   const lost = new Map<string | undefined, { chars: string[]; fonts: string[] }>();
+  const stray = new Map<string | undefined, string[]>();
   for (const m of log.matchAll(MISSING)) {
-    const code = m[2]
-      ? parseInt(m[2], 16)
+    const hex = m[2] ?? m[3];
+    const code = hex
+      ? parseInt(hex, 16)
       : /^\^\^([0-9a-f]{2})$/.exec(m[1])
         ? parseInt(m[1].slice(2), 16)
         : [...m[1]].length === 1
@@ -396,8 +400,14 @@ export function diagnostics(log: string, output = '', dir = ''): Diagnostic[] {
       /^[\p{C}\p{Z}\p{M}]$/u.test(char) || code === 0xfffd
         ? `U+${code.toString(16).toUpperCase().padStart(4, '0')}`
         : char;
-    const font = fontName(m[3]);
+    const font = fontName(m[4]);
     const file = typeset ? reading(m.index) : undefined;
+    if (font === 'nullfont') {
+      const chars = stray.get(file) ?? [];
+      stray.set(file, chars);
+      if (!chars.includes(shown)) chars.push(shown);
+      continue;
+    }
     const entry = lost.get(file) ?? { chars: [], fonts: [] };
     lost.set(file, entry);
     if (!entry.chars.includes(shown)) entry.chars.push(shown);
@@ -409,6 +419,19 @@ export function diagnostics(log: string, output = '', dir = ''): Diagnostic[] {
     const warning = {
       severity: 'warning' as const,
       message: `Characters not shown: ${list} ${chars.length === 1 ? 'is' : 'are'} not in the font (${fonts[0]}${fonts.length > 1 ? ' and others' : ''}); the PDF leaves ${chars.length === 1 ? 'it' : 'them'} out.`,
+      ...(file ? { file } : {}),
+    };
+    if (!out.some((d) => JSON.stringify(d) === JSON.stringify(warning))) out.push(warning);
+  }
+  // Text outside a node in a TikZ picture is set in nullfont and thrown away. Its own warning:
+  // the paper is fine, so it must not start with "Characters not shown: " (that refuses a submit).
+  for (const [file, chars] of stray) {
+    const list =
+      chars.slice(0, 12).join(' ') + (chars.length > 12 ? ` and ${chars.length - 12} more` : '');
+    const one = chars.length === 1;
+    const warning = {
+      severity: 'warning' as const,
+      message: `Stray character${one ? '' : 's'} in a picture: ${list} ${one ? 'is' : 'are'} typed where TikZ draws no text (outside a node), so the PDF does not show ${one ? 'it' : 'them'}. Delete ${one ? 'it' : 'them'}, or put ${one ? 'it' : 'them'} in a node.`,
       ...(file ? { file } : {}),
     };
     if (!out.some((d) => JSON.stringify(d) === JSON.stringify(warning))) out.push(warning);

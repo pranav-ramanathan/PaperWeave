@@ -114,3 +114,98 @@ test('\\bibitem entries are entries: known keys with a place and a one-line desc
   expect(report.missing.map((m) => m.key)).toEqual(['ghost']);
   expect(report.duplicates).toEqual([]);
 });
+
+// A paper that came with its .bbl and no .bib: the .bbl is its bibliography.
+const BBL_BIBTEX =
+  '\\begin{thebibliography}{2}\n\n\\bibitem[One(2001)]{k}\nA.~One.\n\\newblock {\\em First}, 2001.\n\n\\bibitem[Two(2002)]{two}\nB.~Two.\n\\newblock Second, 2002.\n\n\\end{thebibliography}\n';
+const BBL_BIBLATEX = [
+  '\\refsection{0}',
+  '  \\datalist[entry]{nty/global//global/global}',
+  '    \\entry{k}{book}{}',
+  '      \\field{title}{A Book}',
+  '    \\endentry',
+  '    \\entry{two}{book}{}',
+  '      \\field{title}{Another}',
+  '    \\endentry',
+  '  \\enddatalist',
+  '\\endrefsection',
+  '',
+].join('\n');
+const MAIN = (cites: string) =>
+  `\\documentclass{article}\n\\begin{document}\n${cites}\n\\bibliography{refs}\n\\end{document}\n`;
+const importFiles = async (files: Record<string, string>, name: string) => {
+  const zip = await writeZip(
+    Object.entries(files).map(([path, text]) => ({ path, bytes: Buffer.from(text) })),
+  );
+  return (await importZip(t.pool, store, owner.id, zip, name))[0];
+};
+
+test('a paper with a .bbl and no .bib has the .bbl for its bibliography', async () => {
+  const project = await importFiles(
+    { 'main.tex': MAIN('\\cite{k}, \\cite{two} and \\cite{ghost}.'), 'main.bbl': BBL_BIBTEX },
+    'Bbl only',
+  );
+  const report = await citationReport(t.pool, store, owner.id, project.id);
+  expect(report.entries.map((e) => `${e.path}:${e.line} ${e.type} ${e.key} | ${e.cited}`)).toEqual([
+    'main.bbl:3 bibitem k | true',
+    'main.bbl:7 bibitem two | true',
+  ]);
+  expect(report.entries[0].description).toContain('First');
+  expect(report.missing.map((m) => m.key)).toEqual(['ghost']);
+  expect(report.duplicates).toEqual([]);
+});
+
+test('a biblatex .bbl does the same', async () => {
+  const project = await importFiles(
+    { 'main.tex': MAIN('\\cite{k} and \\cite{two}.'), 'main.bbl': BBL_BIBLATEX },
+    'Biblatex bbl',
+  );
+  const report = await citationReport(t.pool, store, owner.id, project.id);
+  expect(report.entries.map((e) => `${e.key} | ${e.description}`)).toEqual([
+    'k | A Book',
+    'two | Another',
+  ]);
+  expect(report.missing).toEqual([]);
+});
+
+test("only the root's own .bbl is read, wherever the root is", async () => {
+  const project = await importFiles(
+    {
+      'src/main.tex': MAIN('\\cite{k} and \\cite{stray}.'),
+      'src/main.bbl': BBL_BIBTEX,
+      'old.bbl': BBL_BIBTEX.replace('{k}', '{stray}'),
+    },
+    'Folder root',
+  );
+  const report = await citationReport(t.pool, store, owner.id, project.id);
+  expect(report.missing.map((m) => m.key)).toEqual(['stray']);
+});
+
+// Guard: passes without the .bbl being read, and must go on passing with it.
+test('an inline thebibliography wins over a .bbl with the same keys, with no duplicates', async () => {
+  const main = MAIN('\\cite{k}.').replace(
+    '\\bibliography{refs}',
+    '\\begin{thebibliography}{1}\n\\bibitem{k} Inline.\n\\end{thebibliography}',
+  );
+  const project = await importFiles({ 'main.tex': main, 'main.bbl': BBL_BIBTEX }, 'Inline and bbl');
+  const report = await citationReport(t.pool, store, owner.id, project.id);
+  expect(report.entries.filter((e) => e.key === 'k').map((e) => e.path)).toEqual(['main.tex']);
+  expect(report.duplicates).toEqual([]);
+});
+
+// Guard, as above.
+test('a .bbl is ignored when the paper has a .bib', async () => {
+  const project = await importFiles(
+    { 'main.tex': MAIN('\\cite{k} and \\cite{extra}.'), 'refs.bib': '@misc{k, title={T}}\n' },
+    'Bib then bbl',
+  );
+  // The import would drop the .bbl, and a new file cannot be named .bbl: put the row in directly.
+  const bytes = Buffer.from(BBL_BIBTEX.replace('{two}', '{extra}'));
+  await t.pool.query(
+    "insert into files (project_id, path, digest, size, readonly_reason) values ($1, 'main.bbl', $2, $3, 'build output')",
+    [project.id, await store.put(bytes), bytes.length],
+  );
+  const report = await citationReport(t.pool, store, owner.id, project.id);
+  expect(report.missing.map((m) => m.key)).toEqual(['extra']);
+  expect(report.duplicates).toEqual([]);
+});
