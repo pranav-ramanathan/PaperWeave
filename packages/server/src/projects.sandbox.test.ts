@@ -295,9 +295,12 @@ test('only the owner manages people, and the owner cannot be displaced', async (
   expect(await code(removeMember(t.pool, users.editor.id, project, users.viewer.id))).toBe(
     'permission_denied',
   );
-  // An invitation to someone already in the project never changes their role.
-  const { token } = await invite(t.pool, users.owner.id, project, 'owner@example.org', 'viewer');
-  expect((await acceptInvitation(t.pool, users.owner.id, token)).role).toBe('owner');
+  // The owner's own address is not invited, and a link held for it never changes the role.
+  expect(await code(invite(t.pool, users.owner.id, project, 'owner@example.org', 'viewer'))).toBe(
+    'conflict',
+  );
+  await heldLink(project, 'owner@example.org', 'held-owner');
+  expect((await acceptInvitation(t.pool, users.owner.id, 'held-owner')).role).toBe('owner');
 });
 
 test('a changed role and a removal take effect at once', async () => {
@@ -370,11 +373,43 @@ test('a spare invitation does not raise a lowered role', async () => {
   const first = await invite(t.pool, users.owner.id, paper, b.email, 'editor');
   await acceptInvitation(t.pool, b.id, first.token);
   await setRole(t.pool, users.owner.id, paper, b.id, 'viewer');
-  const spare = await invite(t.pool, users.owner.id, paper, b.email, 'editor');
-  await acceptInvitation(t.pool, b.id, spare.token);
+  await heldLink(paper, b.email, 'held-spare');
+  await acceptInvitation(t.pool, b.id, 'held-spare');
   expect(
     (await listMembers(t.pool, users.owner.id, paper)).find((m) => m.userId === b.id)?.role,
   ).toBe('viewer');
+});
+
+test('someone already on the paper is not invited again; the owner is pointed to the role control', async () => {
+  const b = await t.signIn('member-again@example.org');
+  const paper = (await createProject(t.pool, users.owner.id, 'Again')).id;
+  const first = await invite(t.pool, users.owner.id, paper, b.email, 'reviewer');
+  await acceptInvitation(t.pool, b.id, first.token);
+  await expect(
+    invite(t.pool, users.owner.id, paper, 'MEMBER-Again@Example.org', 'editor'),
+  ).rejects.toMatchObject({
+    code: 'conflict',
+    message:
+      'member-again@example.org is already on this paper as a reviewer. To change that, choose a role beside their address under People and press Change.',
+  });
+  expect(await listInvitations(t.pool, users.owner.id, paper)).toEqual([]);
+  const n = await t.pool.query('select count(*)::int as n from invitations where project_id = $1', [
+    paper,
+  ]);
+  expect(n.rows[0].n).toBe(1);
+  const role = async () =>
+    (await listMembers(t.pool, users.owner.id, paper)).find((m) => m.userId === b.id)?.role;
+  expect(await role()).toBe('reviewer');
+  await expect(
+    invite(t.pool, users.owner.id, paper, users.owner.email, 'viewer'),
+  ).rejects.toMatchObject({
+    code: 'conflict',
+    message: 'That is your own address: you are already on this paper as its owner.',
+  });
+  await setRole(t.pool, users.owner.id, paper, b.id, 'editor');
+  expect(await role()).toBe('editor');
+  await removeMember(t.pool, users.owner.id, paper, b.id);
+  expect(await code(invite(t.pool, users.owner.id, paper, b.email, 'viewer'))).toBe('ok');
 });
 
 test('pending invitations can be listed and cancelled by those who may invite', async () => {

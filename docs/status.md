@@ -4646,3 +4646,16 @@ Found by a three-person walkthrough.
 - **Not done.** A caption or cell with a worded comment or a blank line is read-only in the visual
   view (edit it in the source). Bare `%` line-enders and line breaks inside a part are not kept when
   the part is changed. `\verb|%|` in a cell is taken for a comment.
+
+## Inviting someone already on the paper
+
+- **What was wrong.** "Send invitation" accepted the address of someone already on the paper, the
+  owner's own included, stored it and emailed a link that promised a role it could not give: the
+  recipient was told "This invitation does not change that".
+- **Now** `invite()` refuses an address that is already a member (matched without regard to
+  case), stores nothing and sends no email. The page's alert names their current role and points
+  to the role control under People ("Change"). Someone removed can still be invited again.
+  Accepting is unchanged: an old link never changes the role of someone already in.
+- **Held by** `projects.sandbox.test.ts` and a Playwright test in `projects.spec.ts`.
+- **Not done.** The invitation page's "already on this paper" answer is now only a defence for
+  old links, and has no browser test.

@@ -488,7 +488,7 @@ test('the owner sees pending invitations and cancels one', async ({ browser }) =
   await expect(guest.page.getByRole('heading', { name: 'not valid any more' })).toBeVisible();
 });
 
-test('an invitation tells someone already on the paper that it changes nothing', async ({
+test('inviting someone already on the paper is refused and points to their role', async ({
   browser,
 }) => {
   const owner = await person(browser, 'member-owner');
@@ -498,7 +498,6 @@ test('an invitation tells someone already on the paper that it changes nothing',
   await owner.page.getByLabel('Name of a new paper').fill(`Already ${run}`);
   await owner.page.getByRole('button', { name: 'Create paper' }).click();
   await expect(owner.page.getByRole('heading', { name: `Already ${run}` })).toBeVisible();
-  const paper = owner.page.url();
 
   await owner.page.getByLabel('Their email address').fill(guest.email);
   await owner.page.getByLabel('Their role').selectOption('viewer');
@@ -514,28 +513,33 @@ test('an invitation tells someone already on the paper that it changes nothing',
   await owner.page.getByLabel('Their email address').fill(guest.email);
   await owner.page.getByLabel('Their role').selectOption('editor');
   await owner.page.getByRole('button', { name: 'Send invitation' }).click();
-  await expect(owner.page.getByRole('status')).toContainText('Invitation sent');
-  // The mail catcher lists both emails: the link to open is the one that is not the first.
-  let secondLink = firstLink;
-  await expect(async () => {
-    const found = await (
-      await fetch(`${MAIL}/api/v1/search?query=${encodeURIComponent(`to:${guest.email}`)}`)
-    ).json();
-    for (const m of found.messages ?? []) {
-      const { Text } = await (await fetch(`${MAIL}/api/v1/message/${m.ID}`)).json();
-      const link = /https?:\/\/\S+\/invitations\/\S+/.exec(Text as string)?.[0];
-      if (link && link !== firstLink) secondLink = link;
-    }
-    expect(secondLink).not.toBe(firstLink);
-  }).toPass();
-  await guest.page.goto(secondLink);
-  await expect(guest.page.locator('main')).toContainText(
-    'You are already on this paper as a viewer. This invitation does not change that: ask the owner to change your role.',
+  await expect(
+    owner.page.getByRole('alert').filter({ hasText: 'already on this paper' }),
+  ).toHaveText(
+    `${guest.email} is already on this paper as a viewer. To change that, choose a role beside their address under People and press Change.`,
   );
-  await expect(guest.page.getByRole('button', { name: 'Join this paper' })).toHaveCount(0);
-  await audit(guest.page, 'an invitation to someone already on the paper');
-  await guest.page.getByRole('link', { name: 'Open the paper' }).click();
-  await expect(guest.page).toHaveURL(paper);
+  await expect(owner.page.getByRole('heading', { name: 'Invited, not yet joined' })).toHaveCount(0);
+  // No second email: the one invitation sent is the only one with a link.
+  const found = await (
+    await fetch(`${MAIL}/api/v1/search?query=${encodeURIComponent(`to:${guest.email}`)}`)
+  ).json();
+  let withLink = 0;
+  for (const m of found.messages ?? []) {
+    const { Text } = await (await fetch(`${MAIL}/api/v1/message/${m.ID}`)).json();
+    if (/\/invitations\//.test(Text as string)) withLink++;
+  }
+  expect(withLink).toBe(1);
+  await audit(owner.page, 'a refused invitation to someone already on the paper');
+
+  // The pointer works: the role control under People.
+  await owner.page.getByLabel(`Role of ${guest.email}`).selectOption('editor');
+  await owner.page
+    .getByRole('row', { name: guest.email })
+    .getByRole('button', { name: 'Change' })
+    .click();
+  await expect(owner.page.getByRole('status')).toContainText('Role changed');
+  await guest.page.reload();
+  await expect(guest.page.getByText('You are an editor')).toBeVisible();
 });
 
 test('a sign-in form whose request is never answered gives up, says so and can be used again', async ({

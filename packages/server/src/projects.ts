@@ -156,6 +156,22 @@ export async function invite(
     throw new AppError('invalid_input', 'That is not an email address.');
   if (role !== 'editor' && role !== 'reviewer' && role !== 'viewer')
     throw new AppError('invalid_input', 'Invite someone as an editor, a reviewer or a viewer.');
+  const address = email.toLowerCase();
+  // Someone already on the paper is not invited: the email would promise a role the link cannot give. Roles change under People.
+  const member = (
+    await db.query(
+      `select m.role from project_members m join "user" u on u.id = m.user_id
+       where m.project_id = $1 and lower(u.email) = $2`,
+      [projectId, address],
+    )
+  ).rows[0];
+  if (member)
+    throw new AppError(
+      'conflict',
+      member.role === 'owner'
+        ? 'That is your own address: you are already on this paper as its owner.'
+        : `${address} is already on this paper as ${member.role === 'editor' ? 'an' : 'a'} ${member.role}. To change that, choose a role beside their address under People and press Change.`,
+    );
   // Each invitation is an email to an address its sender chose. Without a limit, anyone with
   // an account could have the service write to any number of strangers.
   const sent = await db.query(
@@ -170,7 +186,6 @@ export async function invite(
   // And an address is not written to more than a burst, then one an hour, whoever sends: nobody
   // can use the service to fill a stranger's inbox, even with many accounts. Counted from the
   // invitations, which stay as rows when cancelled or replaced. Then the service as a whole.
-  const address = email.toLowerCase();
   const earlier = (
     await db.query(
       `select extract(epoch from created_at)::float8 as at, extract(epoch from now())::float8 as now
@@ -321,7 +336,7 @@ export async function acceptInvitation(
         'permission_denied',
         'This invitation was sent to a different email address.',
       );
-    // Someone already in the project keeps their role: an invitation never demotes or replaces an owner.
+    // Someone already in the project keeps their role: a link made before they joined never raises, lowers or replaces it.
     await db.query(
       'insert into project_members (project_id, user_id, role) values ($1, $2, $3) on conflict do nothing',
       [inv.project_id, userId, inv.role],
