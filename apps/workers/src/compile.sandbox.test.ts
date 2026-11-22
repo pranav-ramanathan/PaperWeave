@@ -13,7 +13,14 @@ import {
 import { tmpdir } from 'node:os';
 import { gunzipSync } from 'node:zlib';
 import { dirname, join } from 'node:path';
-import { encodeFile, findRoot, includeGraph, parseSyncTeX, toPdf } from '@paperweave/latex';
+import {
+  encodeFile,
+  findRoot,
+  includeGraph,
+  parseSyncTeX,
+  texText,
+  toPdf,
+} from '@paperweave/latex';
 import { expect, test } from 'vitest';
 import { fixtures, replica, visualOp } from '../../../packages/bridge/src/harness.ts';
 import { describeImport } from '@paperweave/server';
@@ -391,7 +398,7 @@ test('a paper whose root is in a folder builds, with the paths of the project', 
   expect(ok.diagnostics.filter((d) => d.severity === 'error')).toEqual([]);
   expect(ok.ok).toBe(true);
   expect(readFileSync(join(out, ok.pdf!)).subarray(0, 5).toString()).toBe('%PDF-');
-  const sync = parseSyncTeX(gunzipSync(readFileSync(join(out, ok.synctex!))).toString('latin1'));
+  const sync = parseSyncTeX(texText(gunzipSync(readFileSync(join(out, ok.synctex!)))));
   expect(sync.inputs).toContain('paper/sections/intro.tex');
   expect(sync.inputs).toContain('shared/macros.tex');
   expect(toPdf(sync, 'paper/sections/intro.tex', 8)).toMatchObject({ page: 1 });

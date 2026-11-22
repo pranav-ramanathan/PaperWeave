@@ -853,6 +853,19 @@ Built after the security review, which had it as its second open item.
   ends on: before, a package's two-line warning lost its line, and font warnings were not
   reported at all. The same warning written once per pass over the paper is shown once.
 
+## What TeX writes is UTF-8, not Latin-1
+
+- **Before:** the log, `.aux` and SyncTeX were read as Latin-1, so a file, label or citation key
+  with an accent or CJK came out garbled: its diagnostic found no file, `\ref` showed `??` in the
+  visual view, a defined reference got a false "LaTeX resolved it" warning, and source and PDF
+  jumps failed for that file.
+- **Now:** all three are read with `texText` (`packages/latex/src/encoding.ts`): UTF-8, and a
+  byte that is not part of a valid sequence is its own Latin-1 character. pdflatex, xelatex and
+  lualatex all echo the sources' bytes as they are (no `^^` escapes, no `\IeC` in labels or
+  keys), checked against the real image. The log is stored as it is and served as UTF-8.
+- Builds cached before this hold garbled diagnostics and labels, so the cache key carries a
+  `TEX_TEXT` salt (`builder.ts`): each paper rebuilds once. Earlier build records are not rewritten.
+
 ## How long a large import takes
 
 - An import still runs inside its request. Measured at the most files a paper may hold

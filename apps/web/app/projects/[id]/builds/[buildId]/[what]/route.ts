@@ -5,7 +5,7 @@ import { currentUser, db, sendBlob } from '../../../../../../lib/server';
 // Vercel stops the function after this many seconds. Reading one PDF or log from the store.
 export const maxDuration = 60;
 
-const TYPES = { pdf: 'application/pdf', log: 'text/plain; charset=latin1' } as const;
+const TYPES = { pdf: 'application/pdf', log: 'text/plain; charset=utf-8' } as const;
 
 export async function GET(
   request: Request,

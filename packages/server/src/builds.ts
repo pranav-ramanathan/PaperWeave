@@ -8,7 +8,14 @@ import { id } from './projects.ts';
 import { currentBytes } from './sync.ts';
 import { carryLine, diffLines } from './textdiff.ts';
 import { gunzipSync } from 'node:zlib';
-import { decodeFile, parseSyncTeX, type SyncTeX, toPdf, toSource } from '@paperweave/latex';
+import {
+  decodeFile,
+  parseSyncTeX,
+  type SyncTeX,
+  texText,
+  toPdf,
+  toSource,
+} from '@paperweave/latex';
 
 export const BUILDS_PER_HOUR = 120;
 
@@ -281,7 +288,7 @@ async function syncOf(
   if (!sync) {
     const bytes = await store.get(digest);
     if (!bytes) throw new AppError('not_found', 'That build has nothing to go by.');
-    sync = parseSyncTeX(gunzipSync(bytes).toString('latin1'));
+    sync = parseSyncTeX(texText(gunzipSync(bytes)));
     // shortcut: a handful of builds kept per process, the oldest dropped; share them between
     // processes if reading them ever shows up in timings.
     if (read.size >= 8) read.delete(read.keys().next().value!);

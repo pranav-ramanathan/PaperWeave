@@ -33,6 +33,7 @@ import {
 import pg from 'pg';
 import { afterAll, beforeAll, expect, test } from 'vitest';
 import * as Y from 'yjs';
+import { texText } from '../../../packages/latex/src/encoding.ts';
 import { labelIndex } from '../../../packages/latex/src/labels.ts';
 import { parseSyncTeX } from '../../../packages/latex/src/synctex.ts';
 import { FIXTURES } from '../../../packages/latex/src/testutil.ts';
@@ -493,9 +494,7 @@ test('a point in the PDF and a line of the text are carried across the edits mad
   const from = (page: number, x: number, y: number) =>
     pdfToSource(t.pool, store, owner.id, project, b.id, page, x, y);
   const sync = parseSyncTeX(
-    gunzipSync(await buildOutput(t.pool, store, owner.id, project, b.id, 'synctex')).toString(
-      'latin1',
-    ),
+    texText(gunzipSync(await buildOutput(t.pool, store, owner.id, project, b.id, 'synctex'))),
   );
   const built = await text(intro.id);
   const click = (p: { x: number; y: number; height: number }) =>
@@ -656,6 +655,49 @@ test.each(['my paper.tex', 'résumé (v2).tex'])(
     expect(text).toContain('A Book');
     expect((await importReport(t.pool, owner.id, project.id))!.root).toBe(root);
   },
+);
+
+// What TeX writes is the bytes of the sources it echoes: UTF-8 names and keys must come back whole.
+test.each(['pdflatex', 'xelatex', 'lualatex'] as const)(
+  'a file, label and citation with accents are found again in the log, labels and SyncTeX (%s)',
+  async (compiler) => {
+    const body = (extra: string) => ({
+      'main.tex': tex(
+        `\\section{A}\\label{sec:intro}\n\\input{sections/méthode}\nSee \\ref{sec:méthode}, \\cite{müller2020}.\n\\bibliographystyle{plain}\n\\bibliography{refs}`,
+        compiler === 'pdflatex' ? '\\usepackage[T1]{fontenc}' : '',
+      ),
+      'sections/méthode.tex': `\\section{Méthode}\\label{sec:méthode}\nWords.\n${extra}`,
+      'refs.bib':
+        '@book{müller2020, author={A. Müller}, title={A Book}, publisher={P}, year=2020}\n',
+    });
+    const broken = await importAndBuild(body('\\nosuchmacro'), 'Accents broken');
+    await setCompiler(t.pool, owner.id, broken.project.id, compiler);
+    const bad = await build(broken.project.id);
+    expect(bad.status).toBe('failed');
+    expect(bad.diagnostics[0]).toMatchObject({
+      severity: 'error',
+      file: 'sections/méthode.tex',
+      line: 3,
+    });
+
+    const good = await importAndBuild(body(''), 'Accents good');
+    await setCompiler(t.pool, owner.id, good.project.id, compiler);
+    const built = await build(good.project.id);
+    expect(built).toMatchObject({ status: 'succeeded', hasPdf: true });
+    const labels = await buildLabels(t.pool, owner.id, good.project.id, built.id);
+    expect(labels['sec:méthode']).toMatchObject({ number: '2' });
+    const file = (await listFiles(t.pool, owner.id, good.project.id)).find(
+      (f) => f.path === 'sections/méthode.tex',
+    )!;
+    expect(
+      await sourceToPdf(t.pool, store, owner.id, good.project.id, built.id, file.id, 2),
+    ).toMatchObject({ page: 1 });
+    const log = Buffer.from(
+      await buildOutput(t.pool, store, owner.id, good.project.id, built.id, 'log'),
+    );
+    expect(log.toString('utf8')).toContain('sections/méthode.tex');
+  },
+  240_000,
 );
 
 test('a root whose name begins with a dash is a path to latexmk, not an option', async () => {

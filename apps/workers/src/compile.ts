@@ -15,7 +15,7 @@ import {
 } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { LATEXMK_RULES, auxLabels, norm, rootDir } from '@paperweave/latex';
+import { LATEXMK_RULES, auxLabels, norm, rootDir, texText } from '@paperweave/latex';
 
 export const IMAGE = process.env.PAPERWEAVE_TEX_IMAGE ?? 'paperweave-tex';
 /** The image's unprivileged user. */
@@ -356,7 +356,7 @@ export async function compile(
     );
     const base = root.replace(/\.tex$/i, '');
     const logPath = join(work, base + '.log');
-    const log = existsSync(logPath) ? readFileSync(logPath, 'latin1') : run.output;
+    const log = existsSync(logPath) ? texText(readFileSync(logPath)) : run.output;
     mkdirSync(out, { recursive: true });
     const keep = (ext: string) => {
       if (!existsSync(join(work, base + ext))) return undefined;
@@ -370,7 +370,7 @@ export async function compile(
       for (const e of readdirSync(dir, { withFileTypes: true }))
         if (e.isDirectory()) gather(join(dir, e.name));
         else if (e.name.endsWith('.aux') && aux.length < 4_000_000)
-          aux += readFileSync(join(dir, e.name), 'latin1') + '\n';
+          aux += texText(readFileSync(join(dir, e.name))) + '\n';
     };
     if (pdf) gather(work);
     return {
