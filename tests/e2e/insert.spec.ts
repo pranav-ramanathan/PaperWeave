@@ -748,3 +748,74 @@ test('an equation, a heading, a list and a figure are removed from the visual vi
   await expect(status).toHaveText('All edits saved.');
   expect(await bytes()).toBe(main);
 });
+
+test('the menu at a place stays inside the window, near its bottom edge and in a small one', async ({
+  browser,
+}) => {
+  test.setTimeout(150_000);
+  const { page, email } = await person(browser, 'insert-edge');
+  const zip = join(mkdtempSync(join(tmpdir(), 'paperweave-e2e-')), `Edge ${run}.zip`);
+  const paragraphs = Array.from({ length: 40 }, (_, i) => `Paragraph number${i} ends here.`);
+  const main = `\\documentclass{article}\n\\begin{document}\n${paragraphs.join('\n\n')}\n\\end{document}\n`;
+  writeFileSync(zip, await writeZip([{ path: 'main.tex', bytes: Buffer.from(main) }]));
+  await page.goto('/sign-in');
+  await signIn(page, email);
+  await page.getByLabel('Or import a ZIP of a LaTeX project').setInputFiles(zip);
+  await page.getByRole('button', { name: 'Import ZIP' }).click();
+  await page.getByRole('link', { name: 'main.tex' }).first().click();
+  await expect(page.getByRole('region', { name: /^Editor for/ }).getByRole('status')).toHaveText(
+    'All edits saved.',
+  );
+  const menu = page.getByRole('menu', { name: 'At this place' });
+  const inside = async () => {
+    const view = page.viewportSize()!;
+    const items = menu.getByRole('menuitem');
+    await expect(items.first()).toBeVisible();
+    for (const item of await items.all()) {
+      const b = (await item.boundingBox())!;
+      expect(b.y).toBeGreaterThanOrEqual(0);
+      expect(b.x).toBeGreaterThanOrEqual(0);
+      expect(b.y + b.height).toBeLessThanOrEqual(view.height);
+      expect(b.x + b.width).toBeLessThanOrEqual(view.width);
+    }
+  };
+  for (const size of [
+    { width: 1280, height: 720 },
+    { width: 320, height: 480 },
+  ]) {
+    await page.setViewportSize(size);
+    // The last paragraph is scrolled to the bottom edge of the window.
+    const word = 'number39';
+    await page.evaluate(
+      ([sel, w]) => {
+        const walker = document.createTreeWalker(
+          document.querySelector(sel)!,
+          NodeFilter.SHOW_TEXT,
+        );
+        for (let n = walker.nextNode(); n; n = walker.nextNode())
+          if (n.textContent!.includes(w)) n.parentElement!.scrollIntoView({ block: 'end' });
+      },
+      [VISUAL, word] as const,
+    );
+    await caretAfter(page, word);
+    await page.evaluate(() => window.scrollTo(0, document.documentElement.scrollHeight));
+    // From the keyboard: at the caret, and with the keyboard on an item that can be seen.
+    await page.keyboard.press('Shift+F10');
+    await expect(menu).toBeVisible();
+    await expect(menu.getByRole('menuitem').first()).toBeFocused();
+    await inside();
+    await page.keyboard.press('Escape');
+    await expect(menu).toBeHidden();
+    // From a right click on the last line, at the right-hand end of the text.
+    const last = (await page.locator(`${VISUAL} p`, { hasText: word }).boundingBox())!;
+    await page.mouse.click(
+      Math.min(last.x + last.width - 4, size.width - 4),
+      Math.min(last.y + last.height - 4, size.height - 4),
+      { button: 'right' },
+    );
+    await expect(menu).toBeVisible();
+    await inside();
+    await page.keyboard.press('Escape');
+    await expect(menu).toBeHidden();
+  }
+});

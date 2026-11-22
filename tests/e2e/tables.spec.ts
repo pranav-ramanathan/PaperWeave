@@ -128,6 +128,13 @@ test('a table cell and a caption are edited in place, byte for byte', async ({ b
   await expect(table.getByRole('button', { name: /^Caption:/ })).toHaveText(
     'Edits checked, by template',
   );
+  // Enter on a part that has not changed puts nothing in, and leaves the keyboard on its button.
+  await cell(2, 1).click();
+  await page.keyboard.press('Enter');
+  await expect(cell(2, 1)).toBeFocused();
+  await table.getByRole('button', { name: /^Caption:/ }).click();
+  await page.keyboard.press('Enter');
+  await expect(table.getByRole('button', { name: /^Caption:/ })).toBeFocused();
   // And a figure's, in another file.
   await page.getByRole('link', { name: 'sections/results.tex' }).click();
   // The other tab chose the source view, which this browser now opens files in.

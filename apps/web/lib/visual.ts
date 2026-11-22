@@ -155,7 +155,7 @@ export function createVisual(opts: {
    * and `y` are where on the page; `edit` is set when it was asked for on a formula or an
    * inline atom: `name` says which, and `run` opens it.
    */
-  menu?(at: { x: number; y: number; edit?: { name: string; run(): void } }): void;
+  menu?(at: { x: number; y: number; top: number; edit?: { name: string; run(): void } }): void;
   /** The person's caret moved, or the text changed under it, while the editor had focus (source offsets). */
   moved?(anchor: number, head: number): void;
   /** Other people's carets, as source offsets, computed fresh on each call. */
@@ -415,7 +415,8 @@ export function createVisual(opts: {
     const button = el('button', 'pw-part', shown(span.text) || empty);
     button.type = 'button';
     button.classList.toggle('pw-missing', !!absent && !span.text);
-    button.setAttribute('aria-label', `${name}: ${shown(span.text) || 'none'}. Edit`);
+    // The name holds the words that are shown, so that voice control can say them.
+    button.setAttribute('aria-label', `${name}: ${shown(span.text) || empty}. Edit`);
     button.onclick = () => {
       const pos = getPos() ?? 0;
       const input = el('input', 'pw-part');
@@ -431,7 +432,11 @@ export function createVisual(opts: {
       };
       const apply = async () => {
         const text = input.value.trim();
-        if (text === span.text) return leave();
+        if (text === span.text) {
+          leave();
+          button.focus();
+          return;
+        }
         const problem = allowed(text);
         if (problem) return say(problem);
         const change = absent ? absent.edit(text) : { ...span, insert: text };
@@ -461,8 +466,11 @@ export function createVisual(opts: {
         }
       };
       input.onkeydown = (e) => {
-        if (e.key === 'Enter') void apply();
-        else if (e.key === 'Escape') {
+        if (e.key === 'Enter') {
+          // Not also pressed on the button that the keyboard may be handed to.
+          e.preventDefault();
+          void apply();
+        } else if (e.key === 'Escape') {
           leave();
           button.focus();
         }
@@ -1154,8 +1162,8 @@ export function createVisual(opts: {
     const keyboard = event.button !== 2;
     const caret = editor.view.coordsAtPos(editor.state.selection.from);
     const at = keyboard
-      ? { x: caret.left, y: caret.bottom }
-      : { x: event.clientX, y: event.clientY };
+      ? { x: caret.left, y: caret.bottom, top: caret.top }
+      : { x: event.clientX, y: event.clientY, top: event.clientY };
     const hit = keyboard ? null : editor.view.posAtCoords({ left: at.x, top: at.y });
     // A click on a formula lands inside it (`inside`) or just beside it.
     const pos = hit ? (hit.inside >= 0 ? hit.inside : hit.pos) : editor.state.selection.from;

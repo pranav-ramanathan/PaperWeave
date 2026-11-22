@@ -159,6 +159,20 @@ the keyboard (`insert.spec`).
   or thread moves into a list that is closed), and the result was not said anywhere.
 - The window for an equation opened with the keyboard on "In the line", so the formula typed
   after Alt+= went nowhere (a space would have changed the choice). It now opens on the LaTeX field.
+- The menu "At this place" opened off the bottom of the window when the caret was on the last
+  line: its top was at the caret, its items below the edge, and the keyboard was on one nobody
+  could see (2.4.7). In a window 480 pixels high it was taller than the window. It now measures
+  itself before taking the keyboard, opens above the caret if it does not fit below, stays
+  inside the window sideways, and scrolls inside itself if the window is shorter than it.
+- A picture with no description had a button whose name ("Description of dot.png: none. Edit")
+  did not contain the words it shows ("None yet. Add one."), so a voice-control user could not
+  say what they saw (2.5.3). The name of the buttons for a cell, a caption and a description
+  now holds the words shown.
+- Enter on a cell, a caption or a description that had not been changed closed the field and
+  left the keyboard on the page body (2.4.3). It now returns to the button, as Escape does.
+- On a window 320 pixels wide a long formula made the preview in the equation window scroll
+  sideways with no way to reach it from the keyboard. It is now a named group that takes the
+  keyboard, with a visible outline.
 
 ## Walked with the keyboard alone, from sign-in to the revision's downloads
 

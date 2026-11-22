@@ -5,7 +5,7 @@ import { mkdtempSync, readFileSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { readZip, writeZip } from '../../packages/server/src/archive';
-import { clickAfter, person, run, showSource, signIn } from './helpers';
+import { audit, clickAfter, person, run, showSource, signIn } from './helpers';
 
 // A small valid PNG: a black square on white.
 const PNG = Buffer.from(
@@ -67,6 +67,11 @@ test('a figure shows its picture, and is given a description in place', async ({
   await expect(described).toHaveText('None yet. Add one.');
   await expect(described).toHaveClass(/pw-missing/);
   await expect(picture).toHaveAttribute('alt', '');
+  await audit(page, 'a figure with no description');
+  // Enter with nothing typed puts nothing in, and leaves the keyboard on the button.
+  await described.click();
+  await page.keyboard.press('Enter');
+  await expect(described).toBeFocused();
 
   // Characters LaTeX would read as something else are refused, with the reason.
   await described.click();
