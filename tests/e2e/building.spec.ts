@@ -232,7 +232,7 @@ test('the PDF is behind only when the paper has changed, and is built once for e
   await expect(buildStatus(page)).toHaveText('The PDF is up to date.', { timeout: 30_000 });
   const before = asked.length;
   await other.reload();
-  await other.getByRole('button', { name: /^Build the PDF for revision/ }).click();
+  await other.getByRole('button', { name: /^Build PDF for revision/ }).click();
   await expect.poll(() => asked.length, { timeout: 30_000 }).toBeGreaterThan(before);
   await expect(buildStatus(page)).toHaveText('The PDF is up to date.', { timeout: 30_000 });
   await expect(build(page)).not.toContainText('before the latest edits');
@@ -392,7 +392,7 @@ test('a paper whose root file is in a folder builds', async ({ browser }) => {
     .setInputFiles(await fixtureZip('Folder', 'paper/'));
   await page.getByRole('button', { name: 'Import ZIP' }).click();
   // The paper's own \input{sections/intro} and \bibliography{refs} are read from paper/.
-  await page.getByRole('button', { name: 'Make paper/main.tex the root file' }).click();
+  await page.getByRole('button', { name: 'Make root file paper/main.tex' }).click();
   await expect(page.getByRole('row', { name: /paper\/main\.tex/ })).toContainText('Root file');
   await page.getByRole('link', { name: 'paper/sections/intro.tex' }).click();
   await expect(buildStatus(page)).toHaveText('The PDF is up to date.', { timeout: 60_000 });

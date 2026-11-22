@@ -16,7 +16,8 @@ Where this stands, what holds it there, and what nobody has checked yet.
 `tests/e2e/a11y.spec.ts` runs in CI with the other browser tests.
 
 - **An automated audit** (axe, WCAG 2.1 A and AA rules) of the sign-in page, the list of papers, a
-  paper's page, a data file's page, the new-chart page, the checks before submitting, and the
+  paper's page, a paper's page with a revision that has no PDF, a data file's page, the new-chart
+  page, the checks before submitting, and the
   editor in both views with a spelling finding, a thread, a proposed change and the PDF showing,
   a comment being changed and the question before one is deleted (`threads.spec`),
   and the page for an address that leads nowhere. No failures.
@@ -163,7 +164,7 @@ client would. The paper was `fixtures/ieee-multifile`, a second person was invit
   and the keyboard back in the text afterwards; the menu "At this place" from Shift+F10, opened
   at the caret with its first item focused, closed with Escape; switching views (the keyboard
   moves into the editor that is shown); "Compile now" (the status says "The PDF is up to date.");
-  saving a named revision; "Build the PDF for revision N"; the revision's "ZIP" and "PDF" links
+  saving a named revision; "Build PDF for revision N"; the revision's "ZIP" and "PDF" links
   (both download: `attachment`, named `<paper> rN.zip` and `.pdf`).
 - **Dialogs** are native and modal: Tab goes round the window and through the browser's own
   controls (nothing has the page's focus for one press) and back. The table window's caption
@@ -172,7 +173,7 @@ client would. The paper was `fixtures/ieee-multifile`, a second person was invit
 - **Fixed above:** the keyboard in the comment, proposal and equation forms; the keyboard after
   they are sent or put away; resolving a thread and deciding a proposal.
 - **Fixed after this walk.**
-  - The result of a form that posts (Send invitation, Save revision, Build the PDF for a
+  - The result of a form that posts (Send invitation, Save revision, Build PDF for a
     revision, Restore, Role changed, Import on the list of papers) is a line that takes the
     keyboard when it appears or says something new, so the next Tab goes on from the form that
     was sent. The revision, role and invitation results sit directly under the heading of their

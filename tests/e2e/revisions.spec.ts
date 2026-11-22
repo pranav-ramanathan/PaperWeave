@@ -49,7 +49,7 @@ test('save a revision, build and download it, compare, restore and rename', asyn
   await page.getByLabel('Name for the paper as it is now').fill('As uploaded');
   await page.getByRole('button', { name: 'Save revision' }).click();
   await expect(page.getByRole('status')).toHaveText('Saved as revision 1.');
-  await page.getByRole('button', { name: 'Build the PDF for revision 1' }).click();
+  await page.getByRole('button', { name: 'Build PDF for revision 1' }).click();
   const first = page.getByRole('row', { name: /1\. As uploaded/ });
   await expect(async () => {
     await page.goto(paper);

@@ -287,7 +287,7 @@ test("a paper's page: a section is reached from the top, and the result of a for
   await expect(page.getByRole('status')).toHaveText('Saved as revision 2.');
   expect((await focused(page)).name).toBe('Saved as revision 2.');
 
-  await tabTo(page, 'Build the PDF for revision 1');
+  await tabTo(page, 'Build PDF for revision 1');
   await page.keyboard.press('Enter');
   await expect(page.getByRole('status')).toContainText('Building the PDF');
   expect((await focused(page)).name).toMatch(/^Building the PDF/);

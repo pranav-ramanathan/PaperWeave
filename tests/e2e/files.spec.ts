@@ -122,10 +122,10 @@ test('a paper is started from nothing, and a deleted file comes back by restorin
   await expect(main.getByRole('button', { name: /^Delete/ })).toHaveCount(0);
   // Started blank and written since: the page says how large it is now, not "0 B".
   await expect(main.getByRole('cell').first()).toHaveText(/^[1-9]\d* B$/);
-  await intro.getByRole('button', { name: 'Make sections/intro.tex the root file' }).click();
+  await intro.getByRole('button', { name: 'Make root file sections/intro.tex' }).click();
   await expect(page.getByRole('status')).toHaveText('Root file changed.');
   await expect(intro).toContainText('Root file');
-  await main.getByRole('button', { name: 'Make paper.tex the root file' }).click();
+  await main.getByRole('button', { name: 'Make root file paper.tex' }).click();
   await expect(main).toContainText('Root file');
 
   // Someone has the file open in another tab when it is deleted.

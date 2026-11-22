@@ -395,7 +395,7 @@ async function Project({
                       {f.path === project.root && 'Root file '}
                       {canWrite && f.path !== project.root && !f.readonly && TEX.test(f.path) && (
                         <form action={rootAction.bind(null, id, f.id)} className="inline">
-                          <Once type="submit" aria-label={`Make ${f.path} the root file`}>
+                          <Once type="submit" aria-label={`Make root file ${f.path}`}>
                             Make root
                           </Once>
                         </form>
@@ -674,7 +674,10 @@ async function Project({
                                   className="inline"
                                 >
                                   {' '}
-                                  <Once type="submit" aria-label={`Look up the DOI of ${e.key}`}>
+                                  <Once
+                                    type="submit"
+                                    aria-label={`${looked ? 'Look up again' : 'Look up DOI'} for ${e.key}`}
+                                  >
                                     {looked ? 'Look up again' : 'Look up DOI'}
                                   </Once>
                                 </form>
@@ -1032,7 +1035,7 @@ async function Project({
                     ) : (
                       can(project.role, 'build.run') && (
                         <form action={buildRevisionAction.bind(null, id, r.id)} className="inline">
-                          <Once type="submit" aria-label={`Build the PDF for revision ${r.number}`}>
+                          <Once type="submit" aria-label={`Build PDF for revision ${r.number}`}>
                             Build PDF
                           </Once>
                         </form>
