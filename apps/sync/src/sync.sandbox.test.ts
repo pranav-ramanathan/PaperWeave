@@ -361,6 +361,9 @@ test('a role lowered while the file is still being read is in force when it open
 
 test('a sign-in that ends while the file is still being read closes the connection', async () => {
   const { file } = await paper();
+  // This person has signed in several times in this file; one address is only sent so many
+  // links in a burst, so the record of them is cleared (the limit is tested in auth.sandbox.test.ts).
+  await t.pool.query('delete from sign_in_links');
   await t.signIn(users.second.email);
   const [id]: string[] = (
     await t.pool.query(

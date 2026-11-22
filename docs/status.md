@@ -627,6 +627,23 @@ Read this first. Update it in every pull request.
 - **Held by** `evidence.sandbox.test.ts`.
 - **Not done:** no UI change; rows of `doi_requests` are not pruned.
 
+## Upload addresses carry a size and are counted
+
+- **Found by** the planner: one account got 300 size-less addresses, three 120 MB PUTs passed a
+  100 MB limit, and the bytes sat in `tmp/` until dropped by hand.
+- **Now** `startUpload` requires a whole `size` within the limit for ZIP or file and signs it as
+  `content-length`; each address is recorded in `upload_addresses` (migration 0030): 10 untaken
+  per person, 2 GiB declared per hour (`UPLOADS_OUTSTANDING_PER_USER`,
+  `UPLOAD_BYTES_PER_USER_HOUR`); a key is taken once. The worker's sweep removes untaken uploads
+  half an hour old (was a day; schedule unchanged) and forgets records a day old. `DirectUpload`
+  already sent the size.
+- **Store check:** SeaweedFS with an identity refuses a different length (403). The compose
+  store has none and takes any length, so there only the take-time size check holds.
+- **Held by** `uploads.sandbox.test.ts` (changed: size-less addresses are refused; a second take
+  now says "not found", not "did not arrive") and `uploading.spec.ts`.
+- **Not done:** a second PUT to an address before the take replaces the object (same length);
+  concurrent requests may pass the count together by a few.
+
 ## Next
 
 Every item in `docs/plan.md` from the scaffold to Phase F has been built. Since then the work
@@ -4337,3 +4354,24 @@ http-equiv="refresh" content="2">`: a reload every 2 seconds that restarts a scr
   server's own paths.
 - **Held by** `auth.test.ts` (including a property over random strings), `auth.sandbox.test.ts`
   and `projects.spec` (signed in, and the emailed page with a tab in `next`).
+
+## Sign-in limits that cannot be turned against people
+
+- **Found by** the planner, with the real handler in production mode: ten requests by others
+  locked an address out for most of each hour; with no `x-forwarded-for` everyone shared one
+  bucket per path; a spoofed single-value `x-forwarded-for` bought a bucket each; a forwarded
+  confirm link signed a person in as someone else without saying whose it was.
+- **Now** `maySendSignInLink` (`packages/server/src/auth.ts`): per address a bucket of three
+  links filling one per six minutes (refusal: "A sign-in link was sent to this address a few
+  minutes ago. Use the newest email, or try again in a few minutes."), and an hourly cap on all
+  sign-in emails, `SIGN_IN_EMAILS_PER_HOUR` (default 500). Both are decided under one database
+  lock. By-client limiting of the library is on only with `TRUSTED_IP_HEADER`, kept in the
+  database (`rateLimit` table, made by the library's migration), and skips a request without a
+  usable single address. Migration `0029` indexes the hourly count.
+- **The confirm page** shows "This signs you in as R…@example.org" (`signInLinkAddress`, read
+  only), and the button is described by it.
+- **Tests:** the e2e server trusts `x-forwarded-for` (`TRUSTED_IP_HEADER` in
+  `playwright.config.ts`) so each test person is a client of their own; the "ten arrive" test is
+  now "three arrive, nine are told a link was sent" (changed on purpose for the new rule).
+- **Not done:** the by-client limit is off in a deployment that sets no header; the owner picks
+  hosting and proxy (`docs/settings.md`).

@@ -9,7 +9,7 @@ export async function POST(request: Request) {
   const user = await currentUser();
   if (!user) return new Response('Sign in first.', { status: 401 });
   const asked = await readJson(request);
-  const size = typeof asked?.size === 'number' ? asked.size : undefined;
+  const size = asked?.size;
   try {
     const what =
       asked?.kind === 'zip'

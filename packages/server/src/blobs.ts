@@ -21,10 +21,11 @@ export type BlobStore = {
   ): Promise<string>;
   /**
    * An address the browser may PUT one file to, once, for a few minutes, and the key it is
-   * stored under until it is taken. With `size` the address accepts only a body of exactly that
-   * length. The object is private: only a signed address reads it.
+   * stored under until it is taken. The address accepts only a body of exactly `size` bytes: the
+   * length is one of the signed headers, so a store that checks signatures refuses another. The
+   * object is private: only a signed address reads it.
    */
-  uploadUrl(userId: string, size?: number): Promise<{ key: string; url: string }>;
+  uploadUrl(userId: string, size: number): Promise<{ key: string; url: string }>;
   /** The size of an object put through `uploadUrl`, or null if nothing was put. */
   uploadSize(key: string): Promise<number | null>;
   /** The bytes of an object put through `uploadUrl`. */
@@ -166,8 +167,8 @@ export function blobStore(env: Record<string, string | undefined> = process.env)
       await bucketReady();
       if (!/^[0-9a-f-]{36}$/.test(userId)) throw new Error('not a user id');
       const key = `tmp/${userId}/${randomUUID()}`;
-      const headers: Record<string, string> =
-        size === undefined ? {} : { 'content-length': String(size) };
+      if (!Number.isInteger(size) || size < 1) throw new Error('not a size');
+      const headers = { 'content-length': String(size) };
       return { key, url: await signed(`${publicBucket}/${key}`, 'PUT', 600, {}, headers) };
     },
     uploadSize: (key) => head(uploadKey(key)),

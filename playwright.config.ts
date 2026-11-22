@@ -10,6 +10,8 @@ const services = {
   S3_BUCKET: 'paperweave',
   S3_ACCESS_KEY: 'dev',
   S3_SECRET_KEY: 'dev',
+  // Tests stand in for a proxy: each person sends an address of their own in this header.
+  TRUSTED_IP_HEADER: 'x-forwarded-for',
   // A stand-in for the DOI registry, started by the test that needs one.
   CROSSREF_URL: 'http://127.0.0.1:4391',
   GRAMMAR_URL: 'http://127.0.0.1:8010',

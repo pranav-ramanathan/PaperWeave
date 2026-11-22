@@ -2,7 +2,7 @@
 // Needs the services in infra/compose.yaml.
 import { expect, type Page, test } from '@playwright/test';
 import { randomBytes } from 'node:crypto';
-import { mkdtempSync, writeFileSync } from 'node:fs';
+import { mkdtempSync, statSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { writeZip } from '../../packages/server/src/archive';
@@ -51,6 +51,27 @@ test('a large upload says it is uploading', async ({ browser }) => {
   // Bytes are going, so the page is not "waiting for the server".
   await expect(page.locator('#waiting')).toHaveText('');
   await expect(page.getByRole('heading', { name })).toBeVisible();
+});
+
+test('a large upload asks for an address of its own size, and one without a size is refused', async ({
+  browser,
+}) => {
+  test.setTimeout(120_000);
+  const page = await signedIn(browser, 'uploadsize');
+  const name = `Sized ${run}`;
+  const zip = await bigZip(name);
+  const asked = page.waitForRequest('**/api/uploads');
+  await importZip(page, zip);
+  const body = (await asked).postDataJSON() as { kind: string; size: number };
+  expect(body.kind).toBe('zip');
+  expect(body.size).toBe(statSync(zip).size);
+  // Put in the store and imported, end to end.
+  await expect(page.getByRole('heading', { name })).toBeVisible();
+  // An address without a size, or over the limit, is not given.
+  const post = (data: object) =>
+    page.request.post('/api/uploads', { data, headers: { origin: new URL(page.url()).origin } });
+  expect((await post({ kind: 'zip' })).status()).toBe(400);
+  expect((await post({ kind: 'zip', size: 1e12 })).status()).toBe(400);
 });
 
 test("an upload that does not reach the store, or is not started, says so in the page's words", async ({

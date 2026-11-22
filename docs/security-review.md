@@ -26,6 +26,43 @@ What it found is fixed in the same change, or listed under "Open" with what to d
 
 ## Found and fixed
 
+- **Sign-in limits could be turned against people and walked around.** Four faults, shown with
+  the real handler in production mode. (1) Ten sign-in requests for an address, from any
+  clients, refused the owner's own request for most of the hour, because ten per hour were
+  counted for the address whoever asked and a link lives 15 minutes. Now one address gets a
+  burst of three, then one every six minutes, so whoever is refused has a live link at most six
+  minutes old, and there is an hourly cap on all sign-in emails (`SIGN_IN_EMAILS_PER_HOUR`,
+  default 500, its own message). (2) With no `x-forwarded-for`, the library put every request in
+  one shared bucket per path: five anonymous requests in a minute and an unrelated person was
+  refused. (3) A single-value `x-forwarded-for` was believed as sent, so 40 spoofed addresses
+  got 40 emails to one address. Now no address is read from a request unless an operator names
+  the header their proxy sets (`TRUSTED_IP_HEADER`); without it the library's by-client limit
+  is off (no shared bucket, nothing to spoof), with it the count is kept in the database and a
+  request without a usable address is not counted. (4) Login CSRF: `/sign-in/confirm?token=` named
+  no account, so an attacker's own link, forwarded, would sign a person in as the attacker. The
+  page now says which address it signs in (first letter and domain, since anyone holding the
+  link can open the page), read without using the token up. Held by `auth.sandbox.test.ts` and
+  `projects.spec`. **Not covered:** a person who has the link and the page open is still signed
+  in as whoever it names if they press the button without reading.
+
+- **One account could fill the store through upload addresses.** `/api/uploads` took a size only
+  if the browser offered one, and `startUpload` signed only `host` otherwise. One new account
+  got 300 such addresses; three PUTs of 120 MB each returned 200 against a 100 MB ZIP limit,
+  and the 360 MB stayed in `tmp/` until dropped by hand (an address is good for ten minutes and
+  could be used again; the sweep ran for objects a day old). Now: `startUpload` requires a
+  whole `size` of at least 1 and within the limit for that kind (ZIP or file), and signs it as
+  `content-length`, so a store that checks signatures refuses another length. Verified with
+  SeaweedFS started with an identity: a PUT of 1001 bytes to an address signed for 1000 is
+  refused (403), 1000 is taken. The store in `infra/compose.yaml` has no identities and checks
+  no signature, so there it takes any length; the test for the refusal runs only against a
+  store that has them (`S3_ENDPOINT`), and an always-run test holds that the length is among
+  the signed headers. Each address is recorded (`upload_addresses`, migration 0030): at most 10
+  not taken in ten minutes and 2 GiB of declared bytes in an hour per person
+  (`UPLOADS_OUTSTANDING_PER_USER`, `UPLOAD_BYTES_PER_USER_HOUR`), and a key is taken once. The
+  sweep now removes untaken uploads half an hour after they were put. Not prevented: a second
+  PUT to the same address before the take replaces the object (same length only); two requests
+  at the very same moment may pass the count together, by a few. Held by
+  `uploads.sandbox.test.ts` and `uploading.spec`.
 - **Sign-in could send people to another site.** `safePath` only refused a second slash and a
   backslash, so `/<TAB>/evil.example` passed; browsers drop tab, newline and return from an
   address, so it became `//evil.example`. Both the sign-in page (when already signed in) and the

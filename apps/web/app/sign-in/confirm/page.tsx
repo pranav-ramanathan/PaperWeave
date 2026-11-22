@@ -1,6 +1,7 @@
 import { redirect } from 'next/navigation';
 import Once from '../../Once';
-import { safePath } from '../../../lib/server';
+import { signInLinkAddress } from '@paperweave/server';
+import { auth, safePath } from '../../../lib/server';
 import { confirmSignInAction } from './actions';
 
 export const dynamic = 'force-dynamic';
@@ -18,14 +19,24 @@ export default async function Confirm({
   const { token, next } = await searchParams;
   const to = safePath(next);
   if (!token) redirect(`/sign-in?link=used&next=${encodeURIComponent(to)}`);
+  // Read only: this page must not use the token up. Whose link it is, so that someone sent
+  // another person's link cannot sign a person in as them without seeing whose it is.
+  const who = await signInLinkAddress(auth(), token).catch(() => null);
   return (
     <main className="page narrow">
       <h1>Sign in to PaperWeave</h1>
-      <p>Press the button to finish signing in on this device.</p>
+      {who ? (
+        <p id="who">
+          This signs you in as <strong>{who}</strong>. If that is not your address, do not press the
+          button.
+        </p>
+      ) : (
+        <p>Press the button to finish signing in on this device.</p>
+      )}
       <form action={confirmSignInAction}>
         <input type="hidden" name="token" value={token} />
         <input type="hidden" name="next" value={to} />
-        <Once type="submit" autoFocus>
+        <Once type="submit" autoFocus aria-describedby={who ? 'who' : undefined}>
           Sign in
         </Once>
       </form>

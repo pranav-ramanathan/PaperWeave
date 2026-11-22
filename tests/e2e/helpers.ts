@@ -151,8 +151,10 @@ export async function person(browser: Browser, who: string) {
     running = test.info().testId;
     await Promise.all(opened.splice(0).map((context) => context.close()));
   }
-  // Sign-in is rate-limited per client address (five links a minute). Each person in a test is
-  // a different client, so each gets an address of their own, as a proxy in front would report.
+  // Sign-in is rate-limited per client address (five links a minute) where the server trusts a
+  // header for it. The test server does (TRUSTED_IP_HEADER in playwright.config.ts), and each
+  // person in a test is a different client with an address of their own, as a proxy in front
+  // would report.
   const ip = `10.${Math.floor(Math.random() * 250)}.${Math.floor(Math.random() * 250)}.${++people}`;
   const context = await browser.newContext({ extraHTTPHeaders: { 'x-forwarded-for': ip } });
   refusals(context);
