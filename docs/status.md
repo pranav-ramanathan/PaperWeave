@@ -60,6 +60,13 @@ Read this first. Update it in every pull request.
   - The PDF is stamped with the time its revision was cut, so the exported ZIP rebuilt elsewhere
     with the command in `paperweave-toolchain.json` gives the same bytes. A test does exactly
     that for all three templates.
+  - The command also sets `FORCE_SOURCE_DATE=1`, which makes pdfTeX and XeTeX take `\today`
+    from that same time (LuaTeX already did). So `\today` is the UTC date of the moment the
+    revision was cut; a revision whose build was reused from an earlier identical one (same
+    files, same image) shows the date of that first revision, as its manifest says. Not the
+    time of the build or of the rebuild, and not the reader's timezone.
+    The same setting also makes `\pdffilemoddate` and packages that print a file's modification
+    date (`filemod`, `currfile`) report that time instead of the file's own.
   - Restore applies the difference as new edits through `editFile`, so people with the file open
     see it at once, and records a new revision. Nothing is erased.
   - Comparing two revisions shows changed lines, renames, additions and removals.
