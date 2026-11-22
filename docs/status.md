@@ -515,8 +515,16 @@ Read this first. Update it in every pull request.
     them. Accepted over decided is the useful-suggestion rate.
   - Labels are template names and statuses. Nothing of any paper is on the page; a test seeds
     a secret and holds that.
-  - Not counted: spelling suggestions taken with one click by someone who may edit (they are
-    edits, not proposals). Dashboards and alerts are still the owner's to choose.
+  - What became of the grammar checker's findings, by kind (spelling, grammar, style) and
+    outcome: `changed` (one click by someone who may edit), `proposed` (a reviewer's click),
+    `word` (made one of the paper's own words), `rule_off` (the rule switched off). Table
+    `grammar_outcomes`, migration 0027, summed across papers as
+    `paperweave_grammar_suggestions{kind,outcome}`. Only the names are kept, never the words or
+    the rule. The useful rate is `changed / (changed + word + rule_off)`; `proposed` is left out
+    because the reviewer's proposal is decided in the proposals counts.
+  - Reviewer grammar proposals still show as `origin = 'person'` in the proposals metric.
+    `origin` is left alone because it travels in the review-data export.
+  - Dashboards and alerts are still the owner's to choose.
 - **F1: accessibility.** `docs/accessibility.md` says what is held by tests, what was found and
   fixed, and what nobody has checked (a real screen reader is the largest gap).
   - `tests/e2e/a11y.spec.ts`: an automated audit (axe, WCAG 2.1 A and AA) of seven pages

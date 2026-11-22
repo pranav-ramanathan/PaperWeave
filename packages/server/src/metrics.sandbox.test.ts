@@ -4,7 +4,7 @@ import * as Y from 'yjs';
 import { writeZip } from './archive.ts';
 import { blobStore } from './blobs.ts';
 import { exportZip, importZip, listFiles } from './import.ts';
-import { productMetrics } from './metrics.ts';
+import { productMetrics, recordGrammarOutcome } from './metrics.ts';
 import { acceptInvitation, createProject, invite } from './projects.ts';
 import { acceptProposal, closeProposal, propose } from './proposals.ts';
 import { compactFile, editFile, loadUpdates, TEXT } from './sync.ts';
@@ -31,6 +31,7 @@ test('how papers fare is counted, by how they began, and says nothing of what th
     edited: 0,
     twoAuthors: 0,
     proposals: [],
+    grammar: [],
   });
 
   await createProject(t.pool, owner.id, 'Empty');
@@ -85,7 +86,21 @@ test('how papers fare is counted, by how they began, and says nothing of what th
       { origin: 'person', status: 'accepted', count: 1 },
       { origin: 'person', status: 'rejected', count: 1 },
     ],
+    grammar: [
+      { kind: 'grammar', outcome: 'rule_off', count: 1 },
+      { kind: 'spelling', outcome: 'changed', count: 2 },
+      { kind: 'spelling', outcome: 'proposed', count: 1 },
+      { kind: 'spelling', outcome: 'word', count: 1 },
+    ],
   };
+  // Findings taken up, summed across papers; the words and the rule are never stored.
+  const grammar = (who: string, project: string, kind: string, outcome: string) =>
+    recordGrammarOutcome(t.pool, who, project, kind, outcome);
+  await grammar(owner.id, imported.id, 'spelling', 'changed');
+  await grammar(editor.id, imported.id, 'spelling', 'changed');
+  await grammar(owner.id, alone.id, 'spelling', 'word');
+  await grammar(owner.id, alone.id, 'grammar', 'rule_off');
+  await grammar(editor.id, imported.id, 'spelling', 'proposed');
   expect(await productMetrics(t.pool)).toEqual(want);
   // Compacting a file's log forgets who wrote each edit, but not that two people wrote here.
   expect(await compactFile(t.pool, shared)).toBeGreaterThan(0);
@@ -96,4 +111,37 @@ test('how papers fare is counted, by how they began, and says nothing of what th
   expect(await productMetrics(t.pool)).toEqual(want);
   // Counts and names of templates and states: nothing of any paper.
   expect(JSON.stringify(await productMetrics(t.pool))).not.toMatch(/secret|sentence|Imported/);
+});
+
+test('a finding of the grammar checker is counted by kind and outcome, and no other way', async () => {
+  const { id } = await createProject(t.pool, owner.id, 'Counted');
+  const code = (p: Promise<unknown>) =>
+    p.then(
+      () => 'ok',
+      (e) => e.code,
+    );
+  const before = (await productMetrics(t.pool)).grammar;
+  expect(await code(recordGrammarOutcome(t.pool, owner.id, id, 'style', 'changed'))).toBe('ok');
+  expect(await code(recordGrammarOutcome(t.pool, owner.id, id, 'style', 'changed'))).toBe('ok');
+  const row = (await t.pool.query('select * from grammar_outcomes where project_id = $1', [id]))
+    .rows;
+  expect(row).toEqual([{ project_id: id, kind: 'style', outcome: 'changed', count: 2 }]);
+  expect((await productMetrics(t.pool)).grammar).not.toEqual(before);
+  for (const [kind, outcome] of [
+    ['typo', 'changed'],
+    ['style', 'ignored'],
+    [undefined, 'changed'],
+    ['style', { $ne: 1 }],
+  ])
+    expect(await code(recordGrammarOutcome(t.pool, owner.id, id, kind, outcome))).toBe(
+      'invalid_input',
+    );
+  expect(
+    (
+      await t.pool.query(
+        'select sum(count)::int as n from grammar_outcomes where project_id = $1',
+        [id],
+      )
+    ).rows[0].n,
+  ).toBe(2);
 });

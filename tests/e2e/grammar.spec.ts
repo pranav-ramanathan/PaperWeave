@@ -6,6 +6,7 @@ import { mkdtempSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { writeZip } from '../../packages/server/src/archive';
+import { connect } from '../../packages/server/src/db';
 import { pdfText } from '../../packages/server/src/pdftext';
 import { emailedLink, person, run, showSource, showVisual, signIn } from './helpers';
 
@@ -18,6 +19,25 @@ const MAIN = [
   '\\end{document}',
   '',
 ].join('\n');
+/** What has been counted for a paper: the kind, the outcome and how often, and nothing else. */
+async function counted(paperUrl: string) {
+  const pool = connect(
+    process.env.DATABASE_URL ?? 'postgres://paperweave:paperweave@localhost:5432/paperweave',
+  );
+  try {
+    const projectId = paperUrl.split('/projects/')[1].split(/[/?#]/)[0];
+    return (
+      await pool.query(
+        'select kind, outcome, count::int from grammar_outcomes where project_id = $1 order by 1, 2',
+        [projectId],
+      )
+    ).rows;
+  } finally {
+    await pool.end();
+  }
+}
+const counts = (page: Page) =>
+  page.waitForResponse((r) => r.url().endsWith('/grammar') && r.request().method() === 'POST');
 const VISUAL = '.editor .visual .ProseMirror';
 const panel = (page: Page) => page.getByRole('region', { name: 'Spelling and grammar' });
 const finding = (page: Page, name: string | RegExp) => panel(page).getByRole('article', { name });
@@ -48,9 +68,11 @@ test('findings are shown in the prose, taken up, silenced, and proposed by a rev
   // The reviewer reads the findings and can only propose: the paper does not change.
   await reviewer.page.getByRole('link', { name: 'main.tex' }).first().click();
   await expect(finding(reviewer.page, 'Spelling: “sentense”')).toBeVisible({ timeout: 30_000 });
+  const proposedCount = counts(reviewer.page);
   await finding(reviewer.page, 'Spelling: “sentense”')
     .getByRole('button', { name: 'Propose “sentence”' })
     .click();
+  expect((await proposedCount).ok()).toBe(true);
   await expect(panel(reviewer.page)).toContainText('Proposed changing “sentense” to “sentence”.');
   await expect(
     reviewer.page
@@ -72,23 +94,38 @@ test('findings are shown in the prose, taken up, silenced, and proposed by a rev
   await expect(panel(owner.page)).not.toContainText('colour');
 
   // One click makes the change, and the finding goes.
+  const changedCount = counts(owner.page);
   await finding(owner.page, 'Spelling: “sentense”')
     .getByRole('button', { name: 'Change to “sentence”' })
     .click();
+  expect((await changedCount).ok()).toBe(true);
   await expect(owner.page.locator(VISUAL)).toContainText('The sentence is short.');
   await expect(finding(owner.page, 'Spelling: “sentense”')).toHaveCount(0);
   // A name is made one of the paper's own words; a rule is switched off for the paper.
+  const wordCount = counts(owner.page);
   await finding(owner.page, 'Spelling: “Weavely”')
     .getByRole('button', { name: 'It is a word of this paper' })
     .click();
+  expect((await wordCount).ok()).toBe(true);
   await expect(finding(owner.page, 'Spelling: “Weavely”')).toHaveCount(0);
+  const ruleCount = counts(owner.page);
   await finding(owner.page, /“We we”/)
     .getByRole('button', { name: 'Do not check this in this paper' })
     .click();
+  expect((await ruleCount).ok()).toBe(true);
   await expect(panel(owner.page).getByText('Nothing found in this file.')).toBeVisible({
     timeout: 15_000,
   });
   await expect(owner.page.locator(`${VISUAL} .finding-mark`)).toHaveCount(0);
+  // Each was counted, by kind and outcome only (the change was the owner's second request).
+  await expect
+    .poll(() => counted(paper))
+    .toEqual([
+      { kind: 'grammar', outcome: 'rule_off', count: 1 },
+      { kind: 'spelling', outcome: 'changed', count: 1 },
+      { kind: 'spelling', outcome: 'proposed', count: 1 },
+      { kind: 'spelling', outcome: 'word', count: 1 },
+    ]);
 
   // The paper's page holds both, and the choice of spelling. American English finds "colour".
   await owner.page.goto(paper);

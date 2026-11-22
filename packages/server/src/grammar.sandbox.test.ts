@@ -5,6 +5,7 @@ import { writeZip } from './archive.ts';
 import { blobStore } from './blobs.ts';
 import { checkGrammar, languageSettings, setLanguageSettings } from './grammar.ts';
 import { importZip, listFiles } from './import.ts';
+import { recordGrammarOutcome } from './metrics.ts';
 import { acceptInvitation, invite } from './projects.ts';
 import { loadUpdates, TEXT } from './sync.ts';
 import { TEST_ENV, testDb } from './testing.ts';
@@ -208,4 +209,34 @@ test('a replacement comes back as LaTeX source, and a word that is not a glossar
   const [fake] = await checkGrammar(t.pool, store, users.owner.id, q.id, q.file, { url, fetcher });
   expect(fake.words).toBe('half');
   expect(fake.replacements).toEqual(['50\\% of R\\&D', 'a\\_b \\{c\\} \\$d \\#e']);
+});
+
+test('a finding is counted by those who may do what it counts, and on their own papers', async () => {
+  const p = await paper();
+  const other = await paper();
+  const count = (who: keyof typeof users, project: { id: string }, outcome: string) =>
+    code(recordGrammarOutcome(t.pool, users[who].id, project.id, 'grammar', outcome));
+  // Changing the text, a word and a rule are the owner's; proposing is also the reviewer's.
+  for (const outcome of ['changed', 'word', 'rule_off']) {
+    expect(await count('owner', p, outcome)).toBe('ok');
+    expect(await count('reviewer', p, outcome)).toBe('permission_denied');
+    expect(await count('viewer', p, outcome)).toBe('permission_denied');
+    expect(await count('outsider', p, outcome)).toBe('not_found');
+  }
+  expect(await count('owner', p, 'proposed')).toBe('ok');
+  expect(await count('reviewer', p, 'proposed')).toBe('ok');
+  expect(await count('viewer', p, 'proposed')).toBe('permission_denied');
+  expect(await count('outsider', p, 'proposed')).toBe('not_found');
+  // Counted on its own paper only.
+  const sum = async (project: { id: string }) =>
+    (
+      await t.pool.query(
+        'select coalesce(sum(count), 0)::int as n from grammar_outcomes where project_id = $1',
+        [project.id],
+      )
+    ).rows[0].n;
+  expect(await sum(p)).toBe(5);
+  expect(await sum(other)).toBe(0);
+  expect(await count('reviewer', other, 'proposed')).toBe('ok');
+  expect(await sum(other)).toBe(1);
 });

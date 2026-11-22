@@ -1,7 +1,10 @@
 // How papers fare, in counts: where they started, whether they were downloaded, whether more
 // than one person wrote them, and what became of the changes that were proposed. Nothing here
 // reads a paper's text.
+import { authorize } from './authz.ts';
 import type { Db } from './db.ts';
+import { AppError } from './errors.ts';
+import { id } from './projects.ts';
 
 export type ProductMetrics = {
   /** By how a paper began: a template's name, `imported`, or `empty`. */
@@ -11,7 +14,38 @@ export type ProductMetrics = {
   twoAuthors: number;
   /** Proposed changes by where they came from and what became of them. */
   proposals: { origin: string; status: string; count: number }[];
+  /** What became of the grammar checker's findings, by kind, summed across papers. */
+  grammar: { kind: string; outcome: string; count: number }[];
 };
+
+export const GRAMMAR_KINDS = ['spelling', 'grammar', 'style'] as const;
+export const GRAMMAR_OUTCOMES = ['changed', 'proposed', 'word', 'rule_off'] as const;
+
+/**
+ * Note what was done with a finding of the grammar checker. Only the kind and the outcome are
+ * kept: never the words, and never the rule.
+ */
+export async function recordGrammarOutcome(
+  db: Db,
+  userId: string,
+  projectId: string,
+  kind: unknown,
+  outcome: unknown,
+): Promise<void> {
+  if (!GRAMMAR_KINDS.includes(kind as never) || !GRAMMAR_OUTCOMES.includes(outcome as never))
+    throw new AppError('invalid_input', 'Name a kind and an outcome of a finding.');
+  await authorize(
+    db,
+    userId,
+    id(projectId),
+    outcome === 'proposed' ? 'proposal.create' : 'file.write',
+  );
+  await db.query(
+    `insert into grammar_outcomes (project_id, kind, outcome, count) values ($1, $2, $3, 1)
+     on conflict (project_id, kind, outcome) do update set count = grammar_outcomes.count + 1`,
+    [id(projectId), kind, outcome],
+  );
+}
 
 /** Note that a paper was downloaded. */
 export const recordDownload = (db: Db, projectId: string, kind: 'zip' | 'pdf') =>
@@ -49,5 +83,11 @@ export async function productMetrics(db: Db): Promise<ProductMetrics> {
       `select origin, status, count(*)::int as count from proposals group by 1, 2 order by 1, 2`,
     )
   ).rows;
-  return { papers, ...authors, proposals };
+  const grammar = (
+    await db.query(
+      `select kind, outcome, sum(count)::int as count from grammar_outcomes
+       group by 1, 2 order by 1, 2`,
+    )
+  ).rows;
+  return { papers, ...authors, proposals, grammar };
 }

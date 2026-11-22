@@ -88,6 +88,14 @@ export async function metricsText(pool: pg.Pool, counts: Counts, open: number) {
       p.count,
       `{origin="${p.origin}",status="${p.status}"}`,
     );
+  for (const g of product.grammar)
+    put(
+      'paperweave_grammar_suggestions',
+      'gauge',
+      'Grammar checker findings, by kind and what was done with them.',
+      g.count,
+      `{kind="${g.kind}",outcome="${g.outcome}"}`,
+    );
   return lines.join('\n') + '\n';
 }
 

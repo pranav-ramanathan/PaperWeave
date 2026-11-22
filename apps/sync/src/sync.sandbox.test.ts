@@ -14,6 +14,7 @@ import {
   listFiles,
   listRevisions,
   readZip,
+  recordGrammarOutcome,
   removeMember,
   requestBuild,
   restoreRevision,
@@ -939,6 +940,7 @@ test('the metrics page gives counts to whoever holds the token, and nothing to a
   const reviewer = client(users.reviewer, file);
   await saved(owner, reviewer);
   const before = await read();
+  await recordGrammarOutcome(t.pool, users.owner.id, project, 'grammar', 'rule_off');
   owner.text.insert(0, 'COUNTED-NOT-QUOTED ');
   await saved(owner);
   reviewer.text.insert(0, 'refused ');
@@ -964,6 +966,9 @@ test('the metrics page gives counts to whoever holds the token, and nothing to a
   expect(after('paperweave_papers{origin="imported"}')).toBeGreaterThanOrEqual(1);
   expect(after('paperweave_papers_edited')).toBeGreaterThanOrEqual(1);
   expect(after.text).toMatch(/^# TYPE paperweave_papers_two_authors gauge$/m);
+  // What became of the grammar checker's findings: a count by kind and outcome.
+  expect(after.text).toMatch(/^# TYPE paperweave_grammar_suggestions gauge$/m);
+  expect(after('paperweave_grammar_suggestions{kind="grammar",outcome="rule_off"}')).toBe(1);
   // Counts only: nothing anyone typed is on the page.
   expect(after.text).not.toContain('COUNTED');
   expect(after.text).toMatch(/^# TYPE paperweave_sync_edits_saved_total counter$/m);

@@ -1,9 +1,12 @@
 // The spelling and grammar findings of a file (GET ?file=<id>), and two quick changes to how
-// the paper is checked (POST): {word} makes a word the paper's own, {rule} switches a rule off.
+// the paper is checked (POST): {word} makes a word the paper's own, {rule} switches a rule off,
+// each with the finding's {kind} to count it. {used: kind, outcome: 'changed' | 'proposed'} only
+// counts a finding taken up in the editor or proposed by a reviewer.
 import {
   AppError,
   checkGrammar,
   languageSettings,
+  recordGrammarOutcome,
   setLanguageSettings,
   withScope,
 } from '@paperweave/server';
@@ -37,12 +40,26 @@ export async function POST(request: Request, { params }: Params) {
   const { id } = await params;
   try {
     const input = await readJson(request);
+    if (typeof input?.used === 'string') {
+      if (input.outcome !== 'changed' && input.outcome !== 'proposed')
+        throw new AppError('invalid_input', 'Say whether it was changed or proposed.');
+      await recordGrammarOutcome(db(), user.id, id, input.used, input.outcome);
+      return Response.json({ ok: true });
+    }
     const now = await languageSettings(db(), user.id, id);
-    if (typeof input?.word === 'string')
+    if (input?.kind !== undefined && !['spelling', 'grammar', 'style'].includes(input.kind))
+      throw new AppError('invalid_input', 'The kind is spelling, grammar or style.');
+    let outcome: 'word' | 'rule_off';
+    if (typeof input?.word === 'string') {
       await setLanguageSettings(db(), user.id, id, { glossary: [...now.glossary, input.word] });
-    else if (typeof input?.rule === 'string')
+      outcome = 'word';
+    } else if (typeof input?.rule === 'string') {
       await setLanguageSettings(db(), user.id, id, { off: [...now.off, input.rule] });
-    else throw new AppError('invalid_input', 'Name a word or a rule.');
+      outcome = 'rule_off';
+    } else throw new AppError('invalid_input', 'Name a word or a rule.');
+    // The change is made; a count that fails changes nothing about it.
+    if (input.kind !== undefined)
+      await recordGrammarOutcome(db(), user.id, id, input.kind, outcome).catch(() => {});
     return Response.json({ ok: true });
   } catch (err) {
     return failed(err);
