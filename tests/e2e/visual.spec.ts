@@ -30,27 +30,33 @@ const PNG =
   'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mP8z8BQDwAEhQGAhKmMIQAAAABJRU5ErkJggg==';
 const selected = (page: Page) => page.evaluate(() => getSelection()!.toString());
 
-/** Double-click a word in an editor, as a person would to select it. */
+/**
+ * Select a word in an editor. The selection is made on the word's own text, not by clicking
+ * where it was last drawn: the page lays itself out again as status lines and previews arrive,
+ * and a click aimed at old coordinates can land on something else.
+ */
 async function pick(page: Page, within: string, word: string) {
-  const at = await page.evaluate(
+  const found = await page.evaluate(
     ([sel, w]) => {
-      const walker = document.createTreeWalker(document.querySelector(sel)!, NodeFilter.SHOW_TEXT);
+      const host = document.querySelector<HTMLElement>(sel)!;
+      const walker = document.createTreeWalker(host, NodeFilter.SHOW_TEXT);
       for (let n = walker.nextNode(); n; n = walker.nextNode()) {
         const i = n.textContent!.indexOf(w);
         if (i < 0) continue;
-        n.parentElement!.scrollIntoView({ block: 'center' });
+        host.focus();
         const range = document.createRange();
         range.setStart(n, i);
         range.setEnd(n, i + w.length);
-        const r = range.getBoundingClientRect();
-        return { x: r.x + r.width / 2, y: r.y + r.height / 2 };
+        getSelection()!.removeAllRanges();
+        getSelection()!.addRange(range);
+        return true;
       }
-      return null;
+      return false;
     },
     [within, word] as const,
   );
-  if (!at) throw new Error(`"${word}" is not shown in ${within}`);
-  await page.mouse.dblclick(at.x, at.y);
+  if (!found) throw new Error(`"${word}" is not shown in ${within}`);
+  await expect(page.locator(within)).toBeFocused();
   await expect.poll(() => selected(page)).toBe(word);
 }
 /** Type just after a word. */
