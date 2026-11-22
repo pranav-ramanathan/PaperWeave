@@ -1,5 +1,5 @@
 import { expect, test } from 'vitest';
-import { describeImport, summarizeImport } from './import.ts';
+import { describeImport, papers, summarizeImport } from './import.ts';
 
 const doc = (pre: string, body = 'Hi.') =>
   `\\documentclass{article}\n${pre}\n\\begin{document}\n${body}\n\\end{document}\n`;
@@ -112,4 +112,26 @@ test('files LaTeX cannot name are listed, sorted, and ordinary ones are not', ()
     { path: 'figs/b.png', bytes: Buffer.from([0, 1]) },
   ]);
   expect(report.unnamable).toEqual(['figs/a#1.png', 'my{dir}/x.tex']);
+});
+
+test('a main file with one CRLF among LF lines is a paper, and the report says its line endings are mixed', () => {
+  const main = Buffer.from(doc('', 'One.\r\nTwo.'));
+  const bib = Buffer.from('@book{a, title={T}}\n');
+  const found = papers(
+    [
+      { path: 'main.tex', bytes: main },
+      { path: 'refs.bib', bytes: bib },
+    ],
+    [],
+  );
+  expect(found).toHaveLength(1);
+  const { report } = describeImport([
+    { path: 'main.tex', bytes: main },
+    { path: 'refs.bib', bytes: bib },
+  ]);
+  expect(report.root).toBe('main.tex');
+  expect(report.files.find((f) => f.path === 'main.tex')!.readonly).toBeUndefined();
+  expect(report.notes.join('\n')).toContain('Line endings are mixed in main.tex:');
+  const plain = describeImport([{ path: 'main.tex', bytes: Buffer.from(doc('')) }]).report;
+  expect(plain.notes.join('\n')).not.toMatch(/Line endings are mixed/);
 });

@@ -131,15 +131,17 @@ test('files export with the bytes they came in with', () => {
     const d = decodeFile(bytes);
     if (!d.editable) continue;
     expect(d.text.includes('\r'), path).toBe(false);
+    // A mixed file is stored as uploaded until edited; that is checked by the import export test.
+    if (d.meta.mixed) continue;
     expect(Buffer.from(encodeFile(d.text, d.meta)).equals(Buffer.from(bytes)), path).toBe(true);
   }
   expect(decodeFile(files['encodings/latin1.tex'])).toEqual({
     editable: false,
     reason: 'not-utf8',
   });
-  expect(decodeFile(files['encodings/mixed.tex'])).toEqual({
-    editable: false,
-    reason: 'mixed-newlines',
+  expect(decodeFile(files['encodings/mixed.tex'])).toMatchObject({
+    editable: true,
+    meta: { eol: 'lf', mixed: true },
   });
   expect(decodeFile(files['encodings/crlf.tex'])).toMatchObject({
     meta: { eol: 'crlf', bom: false },

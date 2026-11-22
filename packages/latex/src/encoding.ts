@@ -1,10 +1,12 @@
 // Files keep their bytes. Buffers hold LF with no BOM because editors count a line break as one
 // position; the original newline style and BOM are put back on export.
 
-export type FileMeta = { eol: 'lf' | 'crlf'; bom: boolean };
+// `mixed` is set only when the file had more than one newline style. The text is then LF and `eol`
+// is the commoner style (a tie, or all lone CR, gives 'lf'): storage keeps the original bytes
+// until the first edit, and from then on the file is written in that one style.
+export type FileMeta = { eol: 'lf' | 'crlf'; bom: boolean; mixed?: true };
 export type Decoded =
-  | { editable: true; text: string; meta: FileMeta }
-  | { editable: false; reason: 'not-utf8' | 'mixed-newlines' };
+  { editable: true; text: string; meta: FileMeta } | { editable: false; reason: 'not-utf8' };
 
 export function decodeFile(bytes: Uint8Array): Decoded {
   let text: string;
@@ -20,8 +22,14 @@ export function decodeFile(bytes: Uint8Array): Decoded {
   const crlf = text.split('\r\n').length - 1;
   const cr = text.split('\r').length - 1;
   const lf = text.split('\n').length - 1;
-  if (cr !== crlf || (crlf > 0 && crlf !== lf))
-    return { editable: false, reason: 'mixed-newlines' };
+  const loneCr = cr - crlf;
+  const loneLf = lf - crlf;
+  if (loneCr > 0 || (crlf > 0 && loneLf > 0))
+    return {
+      editable: true,
+      text: text.replace(/\r\n?/g, '\n'),
+      meta: { eol: crlf > loneLf + loneCr ? 'crlf' : 'lf', bom, mixed: true },
+    };
   return {
     editable: true,
     text: crlf ? text.replaceAll('\r\n', '\n') : text,

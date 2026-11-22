@@ -4559,3 +4559,21 @@ Found by a three-person walkthrough.
   Cached builds are redone (`TEX_TEXT` gains `-unicode`).
 - **Not fixed:** characters already in a source or an imported file are never rewritten; the
   source view now shows them and the error names the line.
+
+## A file with mixed line endings can be edited
+
+- **What was wrong.** One stray CRLF (or lone CR) in an otherwise LF file made `decodeFile` call the
+  whole file uneditable. A ZIP whose `main.tex` had one CRLF was refused with "No file here has
+  \begin{document}...", a chapter or `.bib` imported but could never be edited, commented on or
+  proposed against, and an Excel-style CSV (CRLF rows, LF inside a quoted cell) was refused as "not
+  UTF-8 text".
+- **Now** such a file is editable (`FileMeta.mixed`, set only when true). Its stored bytes stay as
+  uploaded until someone edits it; from the first edit it is written with its commoner line ending
+  (a tie, or all lone CR, gives LF). The import report has a note naming the files (first 10, "and N
+  more"). A restore of such a file is not taken as "the revision's bytes" (`revisions.ts`), so the
+  next automatic cut does not make a spurious revision. Rows imported before this stay read-only
+  (the file list says to upload the file again); no migration.
+- **Held by** `encoding.test`, `parse.test`, `compiler.test`, and sandbox tests in `import`,
+  `data` and `revisions`. The byte-for-byte export of every encoding fixture is unchanged.
+- **Not done.** A mixed file typed in and taken back (more than one change, same text) exports
+  uniform bytes and so makes one new revision.

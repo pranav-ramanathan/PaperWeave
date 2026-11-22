@@ -829,7 +829,11 @@ export async function restoreRevision(
           if (had.update) {
             appends.push({ fileId: file.id, update: had.update });
             // The restored file is the revision's bytes, if they are what its row would encode.
-            if (decoded.meta.eol === file.eol && decoded.meta.bom === !!file.bom)
+            if (
+              decoded.meta.eol === file.eol &&
+              decoded.meta.bom === !!file.bom &&
+              !decoded.meta.mixed
+            )
               restored.push({ fileId: file.id, digest: target.digest, size: bytes.length });
           }
           continue;

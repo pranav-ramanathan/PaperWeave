@@ -20,6 +20,7 @@ import {
   renameFile,
   lastRestore,
   restoreEdits,
+  cutRevision,
   restoreRevision,
   revisionPdf,
   saveRevision,
@@ -702,4 +703,20 @@ test('typing in the moment before a restore holds is not lost, and that file alo
     [kept.id, typed],
   );
   expect(Buffer.from((await store.get(rows[0].digest))!).toString()).toBe('Q' + changed(3));
+});
+
+test('restoring a file with mixed line endings records the restore, and the next automatic cut finds nothing new', async () => {
+  const mixed = 'one\r\ntwo\nthree\nfour\n';
+  const p = await lines({ 'main.tex': PMAIN, 'x.tex': mixed });
+  const x = p.ids['x.tex'];
+  const a = await saveRevision(t.pool, store, owner.id, p.id, 'A');
+  await replace(x, 'three', 'THREE');
+  await restoreRevision(t.pool, store, owner.id, p.id, a.id);
+  const restored = await lastRestore(t.pool, owner.id, x);
+  const cut = await cutRevision(t.pool, store, owner.id, p.id);
+  expect(cut.number).toBe(restored);
+  const out = (await readZip(await exportZip(t.pool, store, owner.id, p.id))).entries.find(
+    (e) => e.path === 'x.tex',
+  )!;
+  expect(Buffer.from(out.bytes).toString()).toBe('one\ntwo\nthree\nfour\n');
 });

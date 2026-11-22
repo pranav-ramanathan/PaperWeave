@@ -6,6 +6,7 @@ import { blobStore } from './blobs.ts';
 import { approveDataset, datasetProposal, datasetTable, listDatasets } from './data.ts';
 import { exportZip, importReport, importZip, listFiles } from './import.ts';
 import { acceptInvitation, invite } from './projects.ts';
+import { createFile } from './files.ts';
 import { renameFile } from './revisions.ts';
 import { editFile, loadUpdates, TEXT } from './sync.ts';
 import { startThread } from './threads.ts';
@@ -222,4 +223,23 @@ test('comments and proposals on held data stay out of the review ZIP, by file, n
   // Released, it goes with the file.
   await approve(true);
   expect((await review()).joined).toContain('Is this row right?');
+});
+
+test('a CSV with CRLF rows and an LF inside a quoted cell is read and approved', async () => {
+  const p = await paper();
+  const id = await createFile(
+    t.pool,
+    store,
+    users.owner.id,
+    p.id,
+    'cells.csv',
+    Buffer.from('site,note\r\nA,"two\nlines"\r\nB,x\r\n'),
+  );
+  const seen = await datasetProposal(t.pool, store, users.owner.id, p.id, id);
+  expect(seen.guess.rows).toBe(2);
+  await approveDataset(t.pool, store, users.owner.id, p.id, id, {
+    version: seen.version,
+    columns: seen.guess.columns.map((c) => ({ name: c.name, type: c.type, unit: c.unit })),
+    missing: seen.guess.missing,
+  });
 });

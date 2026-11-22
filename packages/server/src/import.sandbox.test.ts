@@ -11,6 +11,7 @@ import { blobStore } from './blobs.ts';
 import { exportRevision, listRevisions, saveRevision } from './revisions.ts';
 import { exportZip, importReport, importZip, listFiles } from './import.ts';
 import { createFile, setRootFile } from './files.ts';
+import { editFile } from './sync.ts';
 import { acceptInvitation, createProject, invite, listProjects, getProject } from './projects.ts';
 import { TEST_ENV, testDb } from './testing.ts';
 
@@ -142,7 +143,7 @@ test('the report says what is visual, what is source-only and what was left out'
   expect(file('sections/intro.tex')!.visual!.editable).toBeGreaterThan(500);
   expect(file('refs.bib')).toEqual({ path: 'refs.bib' });
   expect(file('enc/latin1.tex')).toEqual({ path: 'enc/latin1.tex', readonly: 'not-utf8' });
-  expect(file('enc/mixed.tex')).toEqual({ path: 'enc/mixed.tex', readonly: 'mixed-newlines' });
+  expect(file('enc/mixed.tex')).toEqual({ path: 'enc/mixed.tex' });
   expect(report.skipped).toEqual([
     { path: 'My Paper/latexmkrc', reason: 'build script, never run' },
     { path: 'My Paper/main.aux', reason: 'build output, made again on compile' },
@@ -700,4 +701,36 @@ test('a file LaTeX cannot name imports, and the stored report lists it', async (
   ]);
   expect(paths).toContain('figs/result#1.png');
   expect(report.unnamable).toEqual(['figs/result#1.png']);
+});
+
+test('a paper whose main file has one CRLF among LF lines imports, exports as uploaded, and is written with one style once edited', async () => {
+  const main = Buffer.from(
+    '\\documentclass{article}\n\\begin{document}\nOne.\r\nTwo.\n\\end{document}\n',
+  );
+  const made = await importZip(
+    t.pool,
+    store,
+    owner.id,
+    await writeZip([{ path: 'main.tex', bytes: main }]),
+    'Mixed',
+  );
+  const id = made[0].id;
+  const row = (
+    await t.pool.query('select id, eol, readonly_reason from files where project_id = $1', [id])
+  ).rows[0];
+  expect(row.eol).toBe('lf');
+  expect(row.readonly_reason).toBeNull();
+  const out = async () =>
+    Buffer.from(
+      (await readZip(await exportZip(t.pool, store, owner.id, id))).entries.find(
+        (e) => e.path === 'main.tex',
+      )!.bytes,
+    );
+  expect((await out()).equals(main)).toBe(true);
+  await editFile(t.pool, store, row.id, owner.id, (text) =>
+    text.insert(text.toString().indexOf('One.'), 'Zero. '),
+  );
+  const after = (await out()).toString();
+  expect(after).not.toContain('\r');
+  expect(after).toContain('Zero. One.\nTwo.');
 });
