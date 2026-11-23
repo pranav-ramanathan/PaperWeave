@@ -615,7 +615,14 @@ function parseInto(
         i = j;
       } else if (c === '%') {
         // The newline stays outside the comment so it still separates words and paragraphs.
-        const j = eol(i);
+        // Comment lines that follow one another are one note, as they are between paragraphs.
+        let j = eol(i);
+        for (;;) {
+          let k = j + 1;
+          while (isS(src[k])) k++;
+          if (k >= n || src[k] !== '%') break;
+          j = eol(k);
+        }
         push('atom', i, j, { type: 'raw' });
         i = j;
       } else if (c === '\\') {

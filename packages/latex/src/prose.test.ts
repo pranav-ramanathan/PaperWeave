@@ -317,3 +317,15 @@ test('words in an old font group are prose, its braces are not', () => {
   expect(kindOf(src, '}')).toBe('hard');
   expect(proseIn('A {\\tt code} word.', 'code')).toBe(false);
 });
+
+test('a comment in a sentence says nothing', () => {
+  expect(read('We show that\n% old claim\nthe result holds.')).toBe(
+    'We show that the result holds.\n\n',
+  );
+  expect(read('We use it. % why\nThen more.')).toBe('We use it. Then more.\n\n');
+  expect(read('A long word%\n continues.')).toBe('A long wordcontinues.\n\n');
+  const src = 'We show that\n% old claim\nthe result holds.';
+  expect(kindOf(src, 'old claim')).toBe('hard');
+  expect(proseIn(src, 'old claim')).toBe(false);
+  expect(proseIn(src, 'result')).toBe(true);
+});
