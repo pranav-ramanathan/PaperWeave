@@ -161,3 +161,78 @@ test('every colour of a chart can be made out against the white it is printed on
   expect(new Set(CHART_COLOURS).size).toBe(8);
   for (const colour of CHART_COLOURS) expect(onWhite(colour), colour).toBeGreaterThanOrEqual(3);
 });
+
+const yearColumns: Column[] = [
+  { name: 'year', type: 'number', unit: '' },
+  { name: 'acc', type: 'number', unit: '%' },
+  { name: 'model', type: 'text', unit: '' },
+  { name: 'day', type: 'date', unit: '' },
+];
+const yearRows = [2019, 2020, 2021, 2022].flatMap((year, i) => [
+  [year, 60 + i, 'a', `2024-03-0${i + 1}`],
+  [year, 70 + i, 'b', `2024-03-0${i + 1}`],
+]);
+const years = { columns: yearColumns, rows: yearRows };
+const spec = (kind: string, x: string, extra: Record<string, unknown> = {}) =>
+  checkChart({ ...base, kind, x, y: 'acc', ...extra }, yearColumns);
+
+test('bars over numbers or dates are side by side, never stacked', () => {
+  const byYear = draw(spec('bar', 'year', { series: 'model' }), years);
+  expect(byYear.encoding.x.type).toBe('ordinal');
+  expect(byYear.encoding.xOffset).toBeDefined();
+  expect('sort' in byYear.encoding.x).toBe(false);
+  expect(byYear.data.values.map((v) => v.x).slice(0, 2)).toEqual([2019, 2019]);
+
+  const byDay = draw(spec('bar', 'day', { series: 'model' }), years);
+  expect(byDay.encoding.x.type).toBe('ordinal');
+  expect(byDay.encoding.xOffset).toBeDefined();
+  expect('scale' in byDay.encoding.x).toBe(false);
+  expect('sort' in byDay.encoding.x).toBe(false);
+  expect(byDay.data.values.map((v) => v.x).slice(0, 2)).toEqual(['2024-03-01', '2024-03-01']);
+
+  // Names stay in the order of the file.
+  const bySite = draw(
+    checkChart({ ...base, kind: 'bar', x: 'site', y: 'writers', combine: 'sum' }, columns),
+  );
+  expect(bySite.encoding.x).toMatchObject({ type: 'nominal', sort: null });
+});
+
+test('a numeric axis starts where the data does', () => {
+  for (const kind of ['scatter', 'line']) {
+    const { encoding } = draw(spec(kind, 'year'), years);
+    expect(encoding.x.scale, kind).toEqual({ zero: false });
+    expect(encoding.x.axis, kind).toMatchObject({ tickMinStep: 1 });
+    expect((encoding.x.axis as Record<string, unknown>).labelExpr, kind).toBeDefined();
+  }
+  const fractions = draw(spec('scatter', 'year'), {
+    columns: yearColumns,
+    rows: [
+      [0.1, 1, 'a', null],
+      [0.25, 2, 'a', null],
+    ],
+  });
+  expect(fractions.encoding.x.axis).not.toHaveProperty('tickMinStep');
+  const big = draw(spec('scatter', 'year'), {
+    columns: yearColumns,
+    rows: [
+      [2019, 1, 'a', null],
+      [10000, 2, 'a', null],
+    ],
+  });
+  expect(big.encoding.x.axis).not.toHaveProperty('labelExpr');
+});
+
+test('whole days get no hours', () => {
+  const dated = (rows: (string | number | null)[][]) =>
+    draw(spec('line', 'day'), { columns: yearColumns, rows });
+  const days = dated([
+    [1, 1, 'a', '2024-03-01'],
+    [2, 2, 'a', '2024-03-02'],
+  ]);
+  expect(days.encoding.x.axis).toMatchObject({ tickMinStep: 86400000 });
+  const hours = dated([
+    [1, 1, 'a', '2024-03-01'],
+    [2, 2, 'a', '2024-03-02 12:30'],
+  ]);
+  expect(hours.encoding.x.axis ?? {}).not.toHaveProperty('tickMinStep');
+});

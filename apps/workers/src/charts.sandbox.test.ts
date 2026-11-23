@@ -496,3 +496,48 @@ test('a chart whose files would share a name with a folder of the paper fails, a
     paths.filter((x) => x.startsWith('charts/') && x !== 'charts/latency.pdf/notes.txt'),
   ).toEqual([]);
 }, 120_000);
+
+test('a grouped bar over a year column is drawn, and drawn again to the same bytes', async () => {
+  const zip = await writeZip([
+    { path: 'main.tex', bytes: Buffer.from(MAIN) },
+    {
+      path: 'data/years.csv',
+      bytes: Buffer.from('year,acc,model\n2019,60,a\n2019,70,b\n2020,62,a\n2020,72,b\n'),
+    },
+  ]);
+  const [project] = await importZip(t.pool, store, users.owner.id, zip, 'Years');
+  const csv = (await listFiles(t.pool, users.owner.id, project.id)).find((f) =>
+    f.path.endsWith('.csv'),
+  )!.id;
+  const { version } = await import('@paperweave/server').then((s) =>
+    s.datasetProposal(t.pool, store, users.owner.id, project.id, csv),
+  );
+  await approveDataset(t.pool, store, users.owner.id, project.id, csv, {
+    version,
+    columns: [
+      { name: 'year', type: 'number', unit: '' },
+      { name: 'acc', type: 'number', unit: '%' },
+      { name: 'model', type: 'text', unit: '' },
+    ],
+    missing: [],
+    exported: true,
+  });
+  const input = { kind: 'bar', x: 'year', y: 'acc', series: 'model', name: 'years', dataset: csv };
+  const id = await saveChart(t.pool, store, users.owner.id, project.id, input);
+  expect(await drawNext(t.pool, store, image)).toBe(true);
+  const files = async () =>
+    (await readZip(await exportZip(t.pool, store, users.owner.id, project.id))).entries;
+  expect(await listCharts(t.pool, store, users.owner.id, project.id)).toMatchObject([
+    { status: 'drawn' },
+  ]);
+  const first = await files();
+  const bytes = (list: typeof first, path: string) =>
+    Buffer.from(list.find((f) => f.path === path)!.bytes);
+  expect(bytes(first, 'charts/years.pdf').subarray(0, 5).toString()).toBe('%PDF-');
+  expect(bytes(first, 'charts/years.png').subarray(1, 4).toString()).toBe('PNG');
+  await saveChart(t.pool, store, users.owner.id, project.id, { ...input, id });
+  expect(await drawNext(t.pool, store, image)).toBe(true);
+  const second = await files();
+  for (const path of ['charts/years.pdf', 'charts/years.png'])
+    expect(bytes(second, path)).toEqual(bytes(first, path));
+}, 120_000);
