@@ -46,6 +46,16 @@ const HEAD: Record<string, number> = {
   subparagraph: 5,
 };
 const STYLE = new Set(['emph', 'textbf', 'textit', 'texttt']);
+/** Font switches written inside a group, `{\em word}`, and the style each one gives its group. */
+const SWITCH: Record<string, Mark> = {
+  em: 'emph',
+  it: 'textit',
+  itshape: 'textit',
+  bf: 'textbf',
+  bfseries: 'textbf',
+  tt: 'texttt',
+  ttfamily: 'texttt',
+};
 // The same commands labels.ts indexes, so that every reference it counts is a ref or cite atom here.
 // \hyperref[key]{text} is left out: its key is in the brackets and its braces hold prose.
 const REF = new Set([...REFS].filter((n) => n !== 'hyperref'));
@@ -121,6 +131,8 @@ const LIST_LENGTH = new RegExp(
   String.raw`(?:\\setlength\s*(?:\{${LEN_NAME}\}|${LEN_NAME})\s*\{[^{}%\n]*\}|${LEN_NAME}\s*=?\s*-?[\d.]+\s*(?:pt|em|ex|mm|cm|in|bp|sp|pc))`,
   'y',
 );
+/** A command with nothing after its name: it may be a declaration, which lasts to the end of its group. */
+const BARE = /^\\[a-zA-Z@]+\*?$/;
 const ENV = /\{([^{}\\%\n]+)\}/y;
 const DOC = '\\begin{document}';
 /** How a tie (~) is shown: a non-breaking space. */
@@ -540,6 +552,26 @@ function parseInto(
     return src[k] === '{' ? group(k) : -1;
   };
 
+  /**
+   * A group that opens with a font switch, `{\em `, at the brace at i: its style and where its
+   * text starts, after the spaces and the one line break TeX skips behind a command name.
+   */
+  const switchAt = (i: number): { mark: Mark; end: number } | null => {
+    if (src[i + 1] !== '\\' || !isL(src[i + 2])) return null;
+    const j = word(i + 1);
+    const name = src.slice(i + 2, j);
+    if (!Object.hasOwn(SWITCH, name)) return null;
+    // `{\em{}` is how the bridge keeps a typed letter out of the name.
+    if (src.startsWith('{}', j)) return { mark: SWITCH[name], end: j + 2 };
+    let k = j;
+    while (isS(src[k])) k++;
+    if (src[k] === '\n' && !blankAt(k)) {
+      k++;
+      while (isS(src[k])) k++;
+    }
+    return { mark: SWITCH[name], end: k };
+  };
+
   /** Parse inline content from i. Returns where it stopped; b0 is the block start. */
   const inline = (
     i: number,
@@ -703,6 +735,37 @@ function parseInto(
           push('esc', i, a.end + 1, { ch: a.ch });
           i = a.end + 1;
           continue;
+        }
+        const sw = switchAt(i);
+        if (sw) {
+          const inner: Piece[] = [];
+          let close = -1;
+          try {
+            close = inline(sw.end, b0, depth + 1, [...marks, sw.mark], inner, list);
+          } catch (err) {
+            // Whatever is wrong inside, the group is what it was before: one piece of LaTeX.
+            if (err !== ABORT && !(err instanceof Unbalanced)) throw err;
+          }
+          // A bare command inside may be a declaration (\small) that the braces keep in: such a
+          // group stays whole, so no visual edit can take its braces away and let it out.
+          const plain =
+            close >= 0 &&
+            inner.some((q) => q.k === 'text' || q.k === 'esc') &&
+            !inner.some(
+              (q) =>
+                q.k === 'atom' &&
+                q.type !== 'math' &&
+                q.type !== 'ref' &&
+                q.type !== 'cite' &&
+                BARE.test(src.slice(q.s + b0, q.e + b0)),
+            );
+          if (plain) {
+            push('open', i, sw.end, { mark: sw.mark });
+            out.push(...inner);
+            push('close', close, close + 1, { mark: sw.mark });
+            i = close + 1;
+            continue;
+          }
         }
         const g = group(i);
         if (g < 0) throw new Unbalanced('hard', 'unclosed {');

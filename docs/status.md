@@ -3659,7 +3659,7 @@ had an error or a warning shown.
   `newtxtext`, `newtxmath`, `libertine`, `inconsolata`; `acmart` warns and builds without them.
 
 **Design limits measured** (valid, stored correctly, build; shown raw and edited in the source
-view; recorded in `docs/import-matrix.md`, nothing built for them): `\footnote{}`, `{\bf ..}`,
+view; recorded in `docs/import-matrix.md`, nothing built for them): `\footnote{}`, `{\sc ..}`,
 `\textsc{}`, `\SI`, `\qty`, `\num`, `\url`, `\href` and `\foreignlanguage` are one raw atom each
 (`\textbf` and `\emph` are editable); `description`, a list with `\item[label]`, and a list with a
 list inside it are one raw block each; `tikzpicture`, pgfplots, `lstlisting`, `algorithm`,
@@ -3679,7 +3679,7 @@ selected splits the paragraph there, as it does for any selected thing. Prose ed
 
 ## Inline atoms opened from the visual view
 
-A citation, a reference, a footnote, `\url`, `\href`, `\textsc`, `{\bf ..}`, `\SI` or any other
+A citation, a reference, a footnote, `\url`, `\href`, `\textsc`, `{\sc ..}`, `\SI` or any other
 raw inline LaTeX is opened by a double click, by Enter when it is selected, or from the context menu
 ("Edit citation…", "Edit reference…", "Edit footnote…", "Edit LaTeX…"). The formula box opens on its
 source with no preview; Apply replaces exactly that atom's bytes through the server's command path
@@ -5750,3 +5750,29 @@ forgotten \endgroup`. `\emph{R & D}`, `\textsc{a_b}` and `\mbox{#1}` failed the 
   say. An option on the line after `\begin`, and `\small` or other commands before the first
   `\item`, stay raw. Deleting a list's only empty item removes its option and head comments with
   it. Nested lists, `\item[..]`, `description` and display maths in items stay raw blocks.
+
+## `{\em ..}`, `{\it ..}`, `{\bf ..}` and `{\tt ..}` are styled text in the visual view
+
+- **What was wrong.** Old font-switch groups in prose were one raw atom each. In the 17-paper
+  corpus that was 446 dashed chips in 7 papers (`{\em` 346, `{\tt` 48, `{\it` 43, `{\bf` 9),
+  inside 226 of 1,685 text blocks: the words could not be typed into, and the grammar check read
+  them as "Dummy".
+- **Now** a group that opens with `\em`, `\it`, `\itshape`, `\bf`, `\bfseries`, `\tt` or
+  `\ttfamily` is read like `\emph{}`, `\textit{}`, `\textbf{}` or `\texttt{}`: the opening
+  (`{\em `, with the spaces and the one line break TeX skips, or `{\em{}`) and the closing `}` are
+  bytes the editor keeps, and the words between them are text with that style. On the corpus 435
+  of the 446 groups become ordinary styled text; raw chips in prose fall from 1,657 to 1,236 and
+  text blocks holding a chip from 601 to 416. Typing lands inside the braces, deleting all of a
+  group's words removes exactly `{\em ..}`, and turning the group's own style off leaves exactly
+  its words. A generated-edit run over the corpus (41,172 accepted edits on 42 documents) changed
+  no byte outside its range.
+- **Held by** parse tests (each switch name, the line break, `{\em{}`, nesting, heading and list
+  item, tiling, eight guards that stay raw, `{\em cost $5}` staying a paragraph), a prose test
+  (the words are prose, the braces and `{\tt ..}` are not), bridge tests (typing, deleting and
+  unstyling change only their own bytes; a 300-seed generated-edit run) and a browser test in
+  `visual.spec.ts` that also runs the accessibility check.
+- **Not done.** `{\sc ..}`, `{\sl ..}`, `{\small ..}` and a group holding a bare command
+  (`{\bf \bert}`, which may be a declaration) stay raw chips. `{\bf {\it x}}` shows bold italic
+  where LaTeX prints italic only. A space typed first in a group is eaten, as TeX eats it.
+  Emphasis or Bold on part of a group nests `\emph{}` inside it. Nested lists, `\item[..]` and
+  `description` stay raw blocks.

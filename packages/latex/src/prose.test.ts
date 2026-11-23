@@ -309,3 +309,11 @@ test('a comment between \\begin{itemize} and the first item is not prose', () =>
   expect(kindOf(src, 'Newword')).toBe('text');
   expect(read(src)).not.toContain('Oldd');
 });
+
+test('words in an old font group are prose, its braces are not', () => {
+  const src = 'A {\\em mispelt} word.';
+  expect(kindOf(src, 'mispelt')).toBe('text');
+  expect(kindOf(src, '{\\em ')).toBe('hard');
+  expect(kindOf(src, '}')).toBe('hard');
+  expect(proseIn('A {\\tt code} word.', 'code')).toBe(false);
+});
