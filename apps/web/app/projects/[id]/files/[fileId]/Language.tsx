@@ -159,12 +159,12 @@ export default function Language(props: {
                   <button
                     type="button"
                     onClick={async () => {
-                      const wrong = await post(url, { word: f.words, kind: f.kind });
+                      const wrong = await post(url, { word: f.reads, kind: f.kind });
                       if (!wrong) {
-                        drop((x) => x.kind === 'spelling' && x.words === f.words);
+                        drop((x) => x.kind === 'spelling' && x.reads === f.reads);
                         setMoved((n) => n + 1);
                       }
-                      setNote(wrong ?? `“${f.words}” is now one of the paper's own words.`);
+                      setNote(wrong ?? `“${f.reads}” is now one of the paper's own words.`);
                     }}
                   >
                     It is a word of this paper

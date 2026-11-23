@@ -14,6 +14,8 @@ export type Segment = {
    * commands and their arguments, code, comments, the preamble.
    */
   kind: 'text' | 'soft' | 'hard';
+  /** Soft only: what the checker reads in its place (a space, `á`, `%`). */
+  as?: string;
 };
 
 /** A word that reads as a noun, so that a sentence with a formula in it is still a sentence. */
@@ -30,7 +32,7 @@ export function prose(src: string, transparent: ReadonlySet<string> = DEFAULT_TR
     if (to <= from) return;
     const part = src.slice(from, to);
     annotation.push(kind === 'text' ? { text: part } : { markup: part, interpretAs: as ?? '' });
-    segments.push({ from, to, kind });
+    segments.push(kind === 'soft' ? { from, to, kind, as: as ?? '' } : { from, to, kind });
     read = (read + (kind === 'text' ? part : (as ?? ''))).slice(-8);
   };
   const noun = () => (/\ban\s*$/i.test(read) ? VOWEL_NOUN : NOUN);
@@ -93,4 +95,18 @@ export function inProse(segments: Segment[], from: number, to: number): boolean 
     if (s.kind === 'text') text = true;
   }
   return text;
+}
+
+/**
+ * The stretch [from, to) as the checker read it: prose as written, an escaped character or
+ * accent as its character, a line break as a space. For a stretch that is `inProse`.
+ */
+export function readAs(src: string, segments: Segment[], from: number, to: number): string {
+  let out = '';
+  for (const s of segments) {
+    if (s.to <= from || s.from >= to) continue;
+    if (s.kind === 'text') out += src.slice(Math.max(s.from, from), Math.min(s.to, to));
+    else if (s.kind === 'soft') out += s.as ?? '';
+  }
+  return out;
 }

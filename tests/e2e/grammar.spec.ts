@@ -233,3 +233,45 @@ test('a check that gets no answer says so and keeps the findings and their marks
   await showVisual(owner.page);
   await expect(owner.page.locator(`${VISUAL} .finding-mark`)).toHaveCount(3);
 });
+
+test("a name with a TeX accent is made one of the paper's own words", async ({ browser }) => {
+  test.setTimeout(120_000);
+  const owner = await person(browser, 'grammar-accent');
+  const main = [
+    '\\documentclass{article}',
+    '\\begin{document}',
+    'The H\\"older bound is short.',
+    '\\end{document}',
+    '',
+  ].join('\n');
+  const zip = join(mkdtempSync(join(tmpdir(), 'paperweave-e2e-')), `Accent ${run}.zip`);
+  writeFileSync(zip, await writeZip([{ path: 'main.tex', bytes: Buffer.from(main) }]));
+  await owner.page.goto('/sign-in');
+  await signIn(owner.page, owner.email);
+  await owner.page.getByLabel('Or import a ZIP of a LaTeX project').setInputFiles(zip);
+  await owner.page.getByRole('button', { name: 'Import ZIP' }).click();
+  await expect(owner.page.getByRole('heading', { name: 'Language' })).toBeVisible();
+  const paper = owner.page.url();
+  await owner.page.getByRole('link', { name: 'main.tex' }).first().click();
+  const f = finding(owner.page, /“H\\"older”/);
+  await expect(f).toBeVisible({ timeout: 30_000 });
+  const added = counts(owner.page);
+  await f.getByRole('button', { name: 'It is a word of this paper' }).click();
+  expect((await added).ok()).toBe(true);
+  await expect(panel(owner.page)).toContainText(
+    "\u201cH\u00f6lder\u201d is now one of the paper's own words.",
+  );
+  await expect(finding(owner.page, /H/)).toHaveCount(0);
+  // A fresh check of the file, on opening it again, finds nothing either.
+  const again = owner.page.waitForResponse(
+    (r) => r.url().includes('/grammar?file=') && r.request().method() === 'GET',
+    { timeout: 60_000 },
+  );
+  await owner.page.reload();
+  await again;
+  await expect(panel(owner.page).getByText('Nothing found in this file.')).toBeVisible({
+    timeout: 30_000,
+  });
+  await owner.page.goto(paper);
+  await expect(owner.page.getByLabel(/The paper.s own words/)).toHaveValue('H\u00f6lder');
+});

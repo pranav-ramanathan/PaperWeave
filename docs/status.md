@@ -5087,3 +5087,17 @@ Found by a three-person walkthrough.
   `main.tex` and nothing missing).
 - **Not done.** A ZIP whose every name starts with `./` was already imported correctly (the common
   folder is stripped); this only matters for mixed or doubled-slash names.
+
+## Names written with TeX accents can be dismissed as paper words
+
+- **What was wrong.** `Kov\'a\v{c}` and `H\"older` were sent to the checker as "Kováč" and
+  "Hölder" and flagged, but the glossary and "It is a word of this paper" used the source text,
+  which the glossary's word rule can never hold. The finding could not be dismissed.
+- **Now** `readAs` (`packages/latex/src/prose.ts`) gives a stretch as the checker read it (accents
+  and escapes as their characters, a line break as a space), and each finding carries it as
+  `reads`. A spelling finding is matched against the glossary by `reads` (NFC, case-insensitive)
+  or by its source, and is addable when `reads` fits. `words` stays the source, as the text of the
+  change. The panel adds and drops by `reads`, so the UTF-8 and TeX spellings go together.
+- **Held by** `prose.test`, the grammar sandbox test (real checker) and `grammar.spec`.
+- **Not done.** The panel still quotes the source form (`Kov\'a\v{c}`). Accents that stay raw
+  (`\' e`, `\t`, `\d`, `Gro\ss e`) are never checked, as before.

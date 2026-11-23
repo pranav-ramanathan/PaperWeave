@@ -293,3 +293,27 @@ test('checks answered from what is kept are not counted, and the limit applies t
   await t.pool.query("update grammar_requests set created_at = now() - interval '2 minutes'");
   expect(await ask('viewer', 2, r)).toBe('ok');
 });
+
+test('a name written with TeX accents is matched and offered as the checker read it', async () => {
+  const p = await paper(
+    wrap('The H\\"older bound of Kov\\\'a\\v{c} and Kov\u00e1\u010d holds, a sentense.'),
+  );
+  const found = await check(p, 'owner');
+  expect(found.find((f) => f.words === 'H\\"older')).toMatchObject({
+    kind: 'spelling',
+    reads: 'H\u00f6lder',
+    addable: true,
+  });
+  expect(found.find((f) => f.words === "Kov\\'a\\v{c}")).toMatchObject({
+    reads: 'Kov\u00e1\u010d',
+    addable: true,
+  });
+  await setLanguageSettings(t.pool, users.owner.id, p.id, {
+    glossary: ['h\u00f6lder', 'Kov\u00e1\u010d'],
+  });
+  const after = (await check(p, 'owner')).map((f) => f.words);
+  expect(after).not.toContain('H\\"older');
+  expect(after).not.toContain("Kov\\'a\\v{c}");
+  expect(after).not.toContain('Kov\u00e1\u010d');
+  expect(after).toContain('sentense');
+});
