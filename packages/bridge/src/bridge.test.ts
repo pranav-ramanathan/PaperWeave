@@ -1,4 +1,4 @@
-import { floatParts } from '../../latex/src/floats.ts';
+import { atomProblem, floatParts } from '../../latex/src/floats.ts';
 import { fragment, rng, soup } from '../../latex/src/testutil.ts';
 import { NodeSelection, TextSelection } from '@tiptap/pm/state';
 import { describe, expect, test } from 'vitest';
@@ -2884,4 +2884,23 @@ describe('an equation typed into the Insert window', () => {
     const elsewhere = a.bridge.insertCommand(a.state, '')!;
     expect(b.bridge.formulaCommand(elsewhere, '$a$')).toBe('conflict');
   });
+});
+
+test('every inline atom of every fixture passes the atom window text check', () => {
+  let count = 0;
+  for (const [path, text] of Object.entries(fixtures)) {
+    if (!path.endsWith('.tex')) continue;
+    for (const a of inlineAtoms(replica(text))) {
+      expect([path, a.src, atomProblem(a.src, '')]).toEqual([path, a.src, null]);
+      count++;
+    }
+  }
+  expect(count).toBeGreaterThan(20);
+});
+
+test('the bridge itself still accepts a footnote with an underscore', () => {
+  // The web check, not the bridge, refuses it, so the formula box is unaffected.
+  const r = replica('A\\footnote{Old note} b.\n');
+  const { out } = rewrite(r, '\\footnote{Old note}', '\\footnote{a_b}');
+  expect(typeof out).toBe('object');
 });

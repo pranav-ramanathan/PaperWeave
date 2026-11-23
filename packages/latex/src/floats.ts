@@ -315,6 +315,9 @@ const TEXT_COMMANDS = new Set(
  * argument of a command this does not know are not looked at.
  */
 export function stray(text: string): '_' | '^' | '#' | '$' | null {
+  return marks(text, false) as '_' | '^' | '#' | '$' | null;
+}
+function marks(text: string, amp: boolean): '_' | '^' | '#' | '$' | '&' | null {
   if (/\\(?:verb|lstinline|mintinline|path)(?![a-zA-Z])/.test(text)) return null;
   // One entry per open group: whether maths was on when it opened.
   const groups: { maths: boolean; text: boolean }[] = [];
@@ -399,13 +402,14 @@ export function stray(text: string): '_' | '^' | '#' | '$' | null {
         i++;
       }
     } else if (c === '#') return '#';
+    else if (c === '&' && amp) return '&';
     else if ((c === '_' || c === '^') && !maths) return c;
   }
   return maths ? '$' : null;
 }
 
 /** What to tell someone whose text holds a mark `stray` found. Never quotes what they typed. */
-export function strayAdvice(kind: '_' | '^' | '#' | '$'): string {
+export function strayAdvice(kind: '_' | '^' | '#' | '$' | '&'): string {
   switch (kind) {
     case '_':
       return 'An underscore outside a formula stops the build. Write \\_ for an underscore, or put the formula between $ signs.';
@@ -415,7 +419,35 @@ export function strayAdvice(kind: '_' | '^' | '#' | '$'): string {
       return 'A # stops the build. Write \\# for the sign.';
     case '$':
       return 'A $ starts a formula, and this one does not end. Write \\$ for a dollar sign.';
+    case '&':
+      return 'An & outside a table stops the build. Write \\& for the sign.';
   }
+}
+
+const ENV_ADVICE =
+  'A \\begin here has no matching \\end, or the other way round. Close it inside this text, or make the change in the source.';
+
+/** The first thing in `t` that would stop the build: a mark, or an environment left unbalanced. */
+function find(t: string): '_' | '^' | '#' | '$' | '&' | 'env' | null {
+  const hit = marks(t, !t.includes('\\begin{'));
+  if (hit) return hit;
+  if (/\\(?:verb|lstinline|mintinline|path)(?![a-zA-Z])/.test(t)) return null;
+  const open: string[] = [];
+  for (const m of t.matchAll(/\\(begin|end)\s*\{([^{}]*)\}/g)) {
+    if (m[1] === 'begin') open.push(m[2]);
+    else if (open.pop() !== m[2]) return 'env';
+  }
+  return open.length ? 'env' : null;
+}
+
+/**
+ * What to tell someone whose new text for an atom (a footnote, a text command) would stop the
+ * build, or null. Text that already had the problem is not held to it. Never quotes the text.
+ */
+export function atomProblem(text: string, was: string): string | null {
+  const kind = find(text);
+  if (!kind || find(was)) return null;
+  return kind === 'env' ? ENV_ADVICE : strayAdvice(kind);
 }
 
 export type TableOp =
