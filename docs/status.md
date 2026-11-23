@@ -5205,8 +5205,27 @@ closed: ...` (outermost first, at most 10). The log does not name the file: with
   against the real checker (`grammar.sandbox.test.ts`: lower-case items in both kinds of list are
   left alone, a lower-case sentence is not, a repeated word in an item is still found); both
   failed before the change. The grammar benchmark is unchanged.
-- **Not done.** `description` lists (`\item[Term]`) and nested lists are still not checked at all
-  (the whole environment is one raw block). A lower-case continuation paragraph straight after a
+- **Not done.** A lower-case continuation paragraph straight after a
   list whose last item ends in `.` is still flagged. Side effect: the repeated-beginning rule no
   longer spans items, and `\item this are wrong.` now gives one finding (the plural verb after
   "this") instead of two.
+
+## Description and nested lists in the grammar check
+
+- **What was wrong.** The parser keeps a list raw when an item has an option (`\item[Term]`),
+  when the environment has an argument (`\begin{enumerate}[label=...]`) or when an item holds a
+  nested environment, a blank line or a display formula. A `description` list is always raw. The
+  grammar check read each of these as one hard break, so a misspelling in them gave no finding.
+- **Now** the grammar check reads such a list from the inside: the opening and closing lines are
+  hard, each `\item` reads as a bullet, and the text of an item and of a list nested in it is
+  prose. The whole `\item[Term]` is hard; a plain term reads as `• Term:`, so the item after it is
+  not taken for the start of a sentence. Code and display formulas inside an item stay hard.
+  Only `prose.ts` changed; the parser, the visual editor and the bridge are as before.
+- **Held by** a unit test on the reading of description, nested and optioned lists
+  (`prose.test.ts`) and a test against the real checker (`grammar.sandbox.test.ts`: a misspelling
+  and a repeated word in description and nested items are found at their exact place, the term and
+  a listing are not, the fix leaves the rest of the line byte-exact); both failed before.
+- **Not done.** The visual editor still shows these lists as one raw block, so a finding in one
+  is in the Language panel (and its replacement applies to the source) but has no underline
+  there, and "show" puts the caret before the block. The term itself is never checked.
+  `enumerate*` and custom list environments are unchanged.

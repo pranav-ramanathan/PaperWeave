@@ -371,3 +371,51 @@ test('a list item may start in lower case; a sentence may not', async () => {
   // Other mistakes in an item are still found.
   expect(found.some((f) => f.words.includes('the the'))).toBe(true);
 });
+
+test('mistakes in a description list and in a nested list are found', async () => {
+  const src = wrap(
+    [
+      '\\begin{description}',
+      '\\item[Parser] reads teh source.',
+      '\\item[Teh recieve] A fine thing.',
+      '\\item[Nested] A list follows.',
+      '  \\begin{itemize}',
+      '  \\item we saw the the result.',
+      '  \\end{itemize}',
+      '\\item[Code] Listing follows.',
+      '\\begin{verbatim}',
+      'teh',
+      '\\end{verbatim}',
+      '\\end{description}',
+    ].join('\n'),
+  );
+  const p = await paper(src, false);
+  const found = await check(p, 'owner');
+  const doc = new Y.Doc();
+  for (const u of await loadUpdates(t.pool, store, p.file)) Y.applyUpdate(doc, u);
+  const text = doc.getText(TEXT).toString();
+  const at = (b64: string) =>
+    Y.createAbsolutePositionFromRelativePosition(
+      Y.decodeRelativePosition(Buffer.from(b64, 'base64')),
+      doc,
+    )!.index;
+  const teh = found.find((f) => f.words === 'teh');
+  expect(teh).toBeDefined();
+  const [from, to] = [at(teh!.from), at(teh!.to)];
+  expect(text.slice(from, to)).toBe('teh');
+  expect(text.slice(from - 20, to + 8)).toBe('\\item[Parser] reads teh source.');
+  expect(found.some((f) => f.words.includes('the the'))).toBe(true);
+  // Nothing in a term, in the listing, or on the word after the term.
+  for (const f of found) {
+    expect(f.words).not.toMatch(/recieve/i);
+    expect(at(f.from)).not.toBe(text.indexOf('teh\n\\end{verbatim}'));
+    expect(at(f.from)).not.toBe(text.indexOf('Teh recieve'));
+  }
+  expect(found.some((f) => f.rule === 'UPPERCASE_SENTENCE_START' && f.words === 'reads')).toBe(
+    false,
+  );
+  // Taking the suggestion changes only the word.
+  const fix = teh!.replacements.find((r) => r === 'the');
+  expect(fix).toBe('the');
+  expect(text.slice(0, from) + fix + text.slice(to)).toContain('\\item[Parser] reads the source.');
+});

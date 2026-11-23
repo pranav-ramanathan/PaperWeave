@@ -202,3 +202,69 @@ test('a list item reads as a bulleted line', () => {
     }
   }
 });
+
+test('a description list and a list inside an item read as bulleted lines', () => {
+  const desc = [
+    '\\begin{document}',
+    '\\begin{description}',
+    '\\item[Parser] reads teh source.',
+    '\\item[\\textbf{Speed}] fast',
+    '\\end{description}',
+    '\\end{document}',
+    '',
+  ].join('\n');
+  const text = read(desc);
+  expect(text).toContain('• Parser: reads teh source.');
+  expect(text).toContain('• fast');
+  expect(kindOf(desc, 'teh')).toBe('text');
+  const { segments } = prose(desc);
+  const term = desc.indexOf('\\item[Parser]');
+  for (const s of segments.filter((s) => s.from < term + 13 && s.to > term))
+    expect(s.kind).toBe('hard');
+  expect(inProse(segments, desc.indexOf('Parser'), desc.indexOf('Parser') + 6)).toBe(false);
+
+  // A list inside an item, a second paragraph in an item, and options after the environment.
+  const nested = [
+    '\\begin{document}',
+    '\\begin{itemize}',
+    '\\item Outerr word',
+    '  \\begin{itemize}',
+    '  \\item innerr word.',
+    '  \\end{itemize}',
+    '\\item First para.',
+    '',
+    '  Secondd para.',
+    '\\end{itemize}',
+    '\\begin{enumerate}[label=(\\alph*)]',
+    '\\item Enumm word.',
+    '\\end{enumerate}',
+    '\\end{document}',
+    '',
+  ].join('\n');
+  for (const w of ['Outerr', 'innerr', 'Secondd', 'Enumm'])
+    expect(kindOf(nested, w), w).toBe('text');
+  expect(kindOf(nested, 'label=')).toBe('hard');
+  expect(read(nested)).not.toContain('label=');
+});
+
+test('code and a formula in an item, and a stray item, are not prose', () => {
+  const src = [
+    '\\begin{document}',
+    '\\begin{description}',
+    '\\item[Code] Words here.',
+    '\\begin{verbatim}',
+    'listingword',
+    '\\end{verbatim}',
+    '$$ displayword $$',
+    '\\end{description}',
+    '\\end{document}',
+    '',
+  ].join('\n');
+  expect(kindOf(src, 'listingword')).toBe('hard');
+  expect(kindOf(src, 'displayword')).toBe('hard');
+  const stray = '\\begin{document}\n\\item[x] Some words.\n\\end{document}\n';
+  expect(read(stray)).not.toContain('•');
+  // A plain list reads as it did.
+  const plain = '\\begin{itemize}\n\\item A one.\n\\item b two.\n\\end{itemize}\n';
+  expect(read(plain)).toBe('• A one.\n\n• b two.\n\n ');
+});
