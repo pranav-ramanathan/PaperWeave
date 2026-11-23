@@ -40,9 +40,12 @@ import { compile, type Compiler, IMAGE } from './compile.ts';
  * failed build keeps the sentence about "an entry of a .bib file".
  * '...-minted': a paper that loads minted gets one error that says what to do; a cached failed
  * build keeps the five minted errors.
+ * '...-nobib': a paper that names a .bib it does not have, with no .bbl, builds with [?] for its
+ * citations and says what is missing; a cached failed build keeps "The bibliography could not
+ * be made."
  */
 const TEX_TEXT =
-  'utf8-biber-eps-glyphs-strings-forcedate-unicode-nullfont-csname-bbl-ended-unclosed-group-bibentry-minted';
+  'utf8-biber-eps-glyphs-strings-forcedate-unicode-nullfont-csname-bbl-ended-unclosed-group-bibentry-minted-nobib';
 
 /** The toolchain image's content ID: part of every cache key, so a new image rebuilds everything. */
 export const imageId = () =>

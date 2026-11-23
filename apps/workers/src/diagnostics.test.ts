@@ -597,6 +597,71 @@ test('Biber could not find a .bib file', () => {
   ]);
 });
 
+// latexmk's words when a .bib is not there, and ours when the build put an empty .bbl in its place.
+const STUB = 'PaperWeave: no main.bbl, an empty one stands in.';
+const WONT_BIBTEX = (...files: string[]) =>
+  [
+    "Latexmk: I WON'T RUN 'bibtex main' because I don't find the following files:",
+    ...files.map((f) => `  ${f}`),
+    "Latexmk: applying rule 'bibtex main'...",
+  ].join('\n');
+const NOT_MADE = (f: string) => ({
+  severity: 'warning',
+  message: `Bibliography not made: ${f} is not among the paper's files, so the PDF has [?] for citations to its entries. Add the file, or correct its name in \\bibliography or \\addbibresource.`,
+});
+
+test('a .bib that is not there, and no .bbl: said as a warning on a build that worked', () => {
+  const output = [STUB, WONT_BIBTEX('refs.bib'), STUB, WONT_BIBTEX('refs.bib')].join('\n');
+  expect(diagnostics('', output)).toEqual([NOT_MADE('refs.bib')]);
+  // Two files, each said once.
+  const two = [
+    STUB,
+    WONT_BIBTEX('strings.bib', 'refs.bib'),
+    WONT_BIBTEX('strings.bib', 'refs.bib'),
+  ];
+  expect(diagnostics('', two.join('\n'))).toEqual([NOT_MADE('strings.bib'), NOT_MADE('refs.bib')]);
+  // A root in a folder: the file is named as the project has it.
+  expect(diagnostics('', [STUB, WONT_BIBTEX('../refs.bib')].join('\n'), 'paper/')).toEqual([
+    NOT_MADE('refs.bib'),
+  ]);
+  expect(diagnostics('', [STUB, WONT_BIBTEX('./refs.bib')].join('\n'))).toEqual([
+    NOT_MADE('refs.bib'),
+  ]);
+  // Biber: the same, and latexmk's "Bib file(s) not found" is not also an error.
+  const biber = [
+    'Latexmk: Bibliography file(s) form .bcf file:',
+    '  refs.bib',
+    'Bib file(s) not found in search path:',
+    '  refs.bib',
+    "Latexmk: I WON'T RUN 'biber main' because I don't find the following files:",
+    '  refs.bib',
+  ].join('\n');
+  expect(diagnostics('', `${STUB}\n${biber}\n${biber}`)).toEqual([NOT_MADE('refs.bib')]);
+});
+
+test('without the empty .bbl the build made, a .bib that is not there is not a warning', () => {
+  // The same words from latexmk, with no marker: BibTeX, nothing said (the build failed or has a .bbl).
+  expect(diagnostics('', WONT_BIBTEX('refs.bib'))).toEqual([]);
+  // Biber: the error stays.
+  const biber = [
+    'Latexmk: Bibliography file(s) form .bcf file:',
+    '  nope.bib',
+    'Bib file(s) not found in search path:',
+    '  nope.bib',
+    "Latexmk: I WON'T RUN 'biber main' because I don't find the following files:",
+    '  nope.bib',
+  ].join('\n');
+  expect(diagnostics('', biber)).toEqual([
+    {
+      severity: 'error',
+      file: 'nope.bib',
+      message: 'Biber could not find the bibliography file nope.bib.',
+    },
+  ]);
+  // The marker alone says nothing.
+  expect(diagnostics('', STUB)).toEqual([]);
+});
+
 test('another Biber error is said without a file', () => {
   expect(diagnostics('', 'ERROR - Cannot open bcf file')).toEqual([
     { severity: 'error', message: 'Biber: Cannot open bcf file.' },

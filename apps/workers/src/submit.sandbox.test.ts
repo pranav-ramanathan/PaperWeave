@@ -416,12 +416,17 @@ test('a biblatex paper with a ready-made .bbl and no .bib is ready', async () =>
     }),
   );
 
-  // Guard (passes before and after the fix): with no .bbl the build fails, and the problem stays.
+  // With no .bbl either, the build still makes a PDF, with [?] for citations: the paper is not
+  // ready, and the problem says the bibliography was not made (not that a .bbl stands in).
   const none = await verdict('Biblatex nothing', { 'main.tex': main });
   expect(none.ready).toBe(false);
-  expect(none.problems.map((f) => f.message)).toContainEqual(
-    expect.stringMatching(/^Biber could not find the bibliography file refs\.bib/),
+  expect(none.problems).toContainEqual(
+    expect.objectContaining({
+      kind: 'file',
+      message: expect.stringMatching(/^Bibliography not made: refs\.bib/),
+    }),
   );
+  expect(none.findings.map((f) => f.message)).not.toContain(readyMadeMessage('refs.bib'));
 }, 240_000);
 
 test('files that come with the TeX installation do not stop a paper; one that is not there does', async () => {

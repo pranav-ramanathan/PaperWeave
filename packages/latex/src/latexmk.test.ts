@@ -7,3 +7,8 @@ test('the latexmk rules fit inside single quotes and run no shell', () => {
   // List-form system(): the first argument is a program name, the rest are not shell-parsed.
   expect(LATEXMK_RULES).not.toMatch(/system\((?!q\()/);
 });
+
+test('the latexmk rules stand in an empty .bbl when the paper names a .bib it does not have', () => {
+  expect(LATEXMK_RULES).toContain('pw_bbl');
+  expect(LATEXMK_RULES).toContain('after_xlatex');
+});

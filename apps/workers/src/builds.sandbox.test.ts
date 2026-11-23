@@ -963,6 +963,57 @@ test("a paper that \\nocite{*}s and \\input's its own .bbl builds", async () => 
   expect(text).toContain('A Book');
 });
 
+test('a paper that names a .bib it does not have, and has no .bbl, still builds, and says what is missing', async () => {
+  const { built, errors } = await importAndBuild({
+    'main.tex': tex('Hi \\cite{a} and \\cite{b}\n\\bibliographystyle{plain}\n\\bibliography{refs}'),
+  });
+  expect(errors).toEqual([]);
+  expect(built).toMatchObject({ status: 'succeeded', hasPdf: true });
+  expect(built.diagnostics.filter((d) => /^Bibliography not made: /.test(d.message))).toEqual([
+    {
+      severity: 'warning',
+      message:
+        "Bibliography not made: refs.bib is not among the paper's files, so the PDF has [?] for citations to its entries. Add the file, or correct its name in \\bibliography or \\addbibresource.",
+    },
+  ]);
+  expect(built.diagnostics.some((d) => /^Citation .* undefined/.test(d.message))).toBe(true);
+});
+
+test('a paper with two missing .bib files and an inline thebibliography builds, with both said', async () => {
+  const { built, text, errors } = await importAndBuild({
+    'main.tex': tex(
+      'Hi \\cite{k}\n\\begin{thebibliography}{1}\n\\bibitem{k} A.~Author. \\newblock {\\em A Book}.\n\\end{thebibliography}\n\\bibliography{strings,refs}',
+    ),
+  });
+  expect(errors).toEqual([]);
+  expect(built).toMatchObject({ status: 'succeeded', hasPdf: true });
+  expect(text).toContain('A Book');
+  expect(built.diagnostics.filter((d) => /^Citation .* undefined/.test(d.message))).toEqual([]);
+  const said = built.diagnostics
+    .filter((d) => /^Bibliography not made: /.test(d.message))
+    .map((d) => d.message.replace(/ is not among.*/, ''))
+    .sort();
+  expect(said).toEqual(['Bibliography not made: refs.bib', 'Bibliography not made: strings.bib']);
+});
+
+test('a biblatex paper with no .bib and no .bbl still builds, with one warning', async () => {
+  const { built, errors } = await importAndBuild({
+    'main.tex': tex(
+      'Hi \\autocite{k}\n\\printbibliography',
+      '\\usepackage[backend=biber]{biblatex}\n\\addbibresource{refs.bib}',
+    ),
+  });
+  expect(errors).toEqual([]);
+  expect(built).toMatchObject({ status: 'succeeded', hasPdf: true });
+  expect(built.diagnostics.filter((d) => /^Bibliography not made: /.test(d.message))).toEqual([
+    expect.objectContaining({
+      severity: 'warning',
+      message: expect.stringMatching(/^Bibliography not made: refs\.bib is not among/),
+    }),
+  ]);
+  expect(built.diagnostics.some((d) => /Biber could not find/.test(d.message))).toBe(false);
+});
+
 test('the next build taken is the one whose requester has had the fewest done, not the oldest', async () => {
   const a = await t.signIn('fair-a@example.org');
   const b = await t.signIn('fair-b@example.org');
