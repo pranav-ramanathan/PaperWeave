@@ -4535,7 +4535,7 @@ Found by a three-person walkthrough.
   imports as the paper alone; a symlink inside `.git` imports). The hostile-archive test's
   symbolic link row (`link.tex`) is still refused.
 - **Not done.** Other unwanted folders such as `node_modules` or `.venv` still count and can
-  refuse.
+  refuse. (Fixed in "Files the import leaves out no longer refuse the ZIP".)
 
 ## The import report names files LaTeX cannot use
 
@@ -5041,3 +5041,32 @@ Found by a three-person walkthrough.
 - **Tests.** `keys.spec` "a reviewer selects words in the visual view with keys alone..." (fails
   before: no selection). The reviewer assertions in `visual.spec`, `insert.spec` and
   `recover.spec` now expect `aria-readonly="true"` and `contenteditable="true"`.
+
+## Files the import leaves out no longer refuse the ZIP
+
+- **What was wrong.** `readZip` ran every entry that is not a system entry through the symbolic
+  link, encryption, name, duplicate, count and size checks before looking at its type. Entries the
+  import never opens (`node_modules`, `.venv`, data files, videos, pictures LaTeX cannot read, the
+  toolchain file, build output, `latexmkrc`) could therefore refuse the whole archive: a 60 MB
+  `data/raw.h5` ("too large"), 2,001 `.pyc` files ("too many files"), a symbolic link `Makefile`,
+  a long path under `node_modules`, seven 45 MB videos ("too much data"). A report with thousands
+  of left-out files was also thousands of list items.
+- **Now** the type is decided first (`archive.ts`). An entry whose type the import leaves out is
+  never read, checked or counted, except toward the 50,000-entry bound; it is listed in `skipped`
+  once, with the same reason as before, and not at all if its name has a control character or is
+  too long to show. Wanted files, `.bbl` files and `paperweave-review.json` keep every check, so
+  `link.tex` as a symbolic link or an encrypted `.tex` is still refused. The 100 MB archive bound
+  is unchanged. The report (`describeImport`) lists at most 200 left-out files (`SKIPPED_SHOWN`),
+  the ones with a reason worth reading (picture, duplicate folder, name length) before the generic
+  "not a file type a paper uses", and sets `skippedMore` to the rest; the page ends the list with
+  "And N more files were left out." The latexmkrc note still reads the whole list.
+- **Held by** `archive.test` (junk of every kind imports; picture, symbolic link, encrypted and
+  duplicate entries of a left-out type import; names that cannot be shown are not listed; wanted
+  symbolic link, encrypted and too-many-files entries and the entry bound are still refused),
+  `compiler.test` (the cut and the count), a sandbox test (a folder with 301 `.pyc` files and a
+  data file imports as the paper alone), and `import.spec` (200 rows, picture first, "And 6 more").
+- **Not done.** An archive over 50,000 entries or 100 MB is still refused. A symbolic link or
+  encrypted entry among the wanted files still refuses the archive without naming the file. The
+  existing hostile-archive sandbox test's "password-protected entry" row has a stored size that
+  yauzl rejects as damaged, so it passes without reaching the encryption check; the new
+  `archive.test` guard builds the entry properly.

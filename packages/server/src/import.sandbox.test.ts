@@ -294,6 +294,27 @@ test('a zipped working folder with .git imports as the paper alone', async () =>
   expect((await importReport(t.pool, owner.id, made[0].id))!.skipped).toEqual([]);
 });
 
+test('a working folder full of files the import leaves out imports as the paper alone', async () => {
+  const paper = fixture('article-basic', 'My Paper/');
+  const junk = [
+    ...Array.from({ length: 301 }, (_, i) => file(`My Paper/.venv/lib/m${i}.pyc`, `p${i}`)),
+    { path: 'My Paper/data/raw.h5', bytes: Buffer.alloc(20_000) },
+  ];
+  const zip = await writeZip([...paper, ...junk]);
+  const limits = { ...LIMITS, files: paper.length + 1, fileBytes: 10_000 };
+  const made = await importZip(t.pool, store, owner.id, zip, 'x', limits);
+  expect(made).toHaveLength(1);
+  const paths = (await listFiles(t.pool, owner.id, made[0].id)).map((f) => f.path).sort();
+  expect(paths).toEqual(
+    fixture('article-basic')
+      .map((e) => e.path)
+      .sort(),
+  );
+  const report = (await importReport(t.pool, owner.id, made[0].id))!;
+  expect(report.skipped).toHaveLength(200);
+  expect(report.skippedMore).toBe(102);
+});
+
 test('a symbolic link inside .git does not refuse the archive', async () => {
   const zip = rawZip([
     main,

@@ -9,7 +9,7 @@ import { AppError } from './errors.ts';
 export const LIMITS = {
   archiveBytes: 100_000_000,
   files: 2_000,
-  /** Every entry in the archive, system folders included: system entries are never read, only counted here. */
+  /** Every entry in the archive, system folders included: entries left out (system folders, files of a type no paper uses) are never read, only counted here. */
   entries: 50_000,
   fileBytes: 50_000_000,
   totalBytes: 300_000_000,
@@ -163,7 +163,11 @@ export function texName(path: string): string | null {
     : null;
 }
 
-/** Unpack an archive, or refuse it. Refusal is all-or-nothing: a hostile archive imports nothing. */
+/**
+ * Unpack an archive, or refuse it. Refusal is all-or-nothing: a hostile archive imports nothing.
+ * Entries whose type the import leaves out are never read, checked or counted (except toward
+ * `limits.entries`); every file that is read keeps every check.
+ */
 export function readZip(
   zip: Uint8Array,
   limits: Limits = LIMITS,
@@ -181,6 +185,8 @@ export function readZip(
       // Review data exported with a paper: not a file of the paper, but read all the same.
       const review: Entry[] = [];
       const seen = new Set<string>();
+      // Entries left out by type, so that one listed twice shows once.
+      const left = new Set<string>();
       let total = 0;
       const fail = (message: string) => {
         file.close();
@@ -213,24 +219,6 @@ export function readZip(
         if (path.endsWith('/')) return file.readEntry();
         // Never read, so neither counted nor checked: .git and __MACOSX can be huge or odd.
         if (SYSTEM.test(path)) return file.readEntry();
-        // The Unix file type lives in the top bits; 0o120000 is a symbolic link.
-        if (((entry.externalFileAttributes >>> 16) & 0o170000) === 0o120000)
-          return fail('it contains a symbolic link');
-        if (entry.isEncrypted()) return fail('it is password-protected');
-        // eslint-disable-next-line no-control-regex -- control characters are exactly what is being refused
-        if (/[\u0000-\u001f\u007f\\]/.test(path) || path.length > limits.pathLength)
-          return fail('a file name in it is not usable');
-        if (seen.has(path)) return fail('it contains the same file twice');
-        seen.add(path);
-        if (seen.size > limits.files) return fail('it has too many files');
-        if (entry.uncompressedSize > limits.fileBytes) return fail(`${path} is too large`);
-        total += entry.uncompressedSize;
-        if (total > limits.totalBytes) return fail('it unpacks to too much data');
-
-        if (path.split('/').some(tooLong)) {
-          skipped.push({ path, reason: `a name in it is over ${NAME_BYTES} bytes in UTF-8` });
-          return file.readEntry();
-        }
         const isReview = /(^|\/)paperweave-review\.json$/.test(path);
         const reason =
           isReview || BBL.test(path)
@@ -247,7 +235,33 @@ export function readZip(
                       ? 'not a file type a paper uses'
                       : '';
         if (reason) {
-          skipped.push({ path, reason });
+          // Left out by type: never opened, so no size, link or encryption check applies. It is
+          // only listed, and only if its name can be shown (no control characters, not too long).
+          const showable =
+            // eslint-disable-next-line no-control-regex -- control characters are exactly what is being refused
+            !/[\u0000-\u001f\u007f\\]/.test(path) && path.length <= limits.pathLength;
+          if (showable && !left.has(path)) {
+            left.add(path);
+            skipped.push({ path, reason });
+          }
+          return file.readEntry();
+        }
+        // The Unix file type lives in the top bits; 0o120000 is a symbolic link.
+        if (((entry.externalFileAttributes >>> 16) & 0o170000) === 0o120000)
+          return fail('it contains a symbolic link');
+        if (entry.isEncrypted()) return fail('it is password-protected');
+        // eslint-disable-next-line no-control-regex -- control characters are exactly what is being refused
+        if (/[\u0000-\u001f\u007f\\]/.test(path) || path.length > limits.pathLength)
+          return fail('a file name in it is not usable');
+        if (seen.has(path)) return fail('it contains the same file twice');
+        seen.add(path);
+        if (seen.size > limits.files) return fail('it has too many files');
+        if (entry.uncompressedSize > limits.fileBytes) return fail(`${path} is too large`);
+        total += entry.uncompressedSize;
+        if (total > limits.totalBytes) return fail('it unpacks to too much data');
+
+        if (path.split('/').some(tooLong)) {
+          skipped.push({ path, reason: `a name in it is over ${NAME_BYTES} bytes in UTF-8` });
           return file.readEntry();
         }
         file.openReadStream(entry, (openErr, stream) => {
