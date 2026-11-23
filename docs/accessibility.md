@@ -50,6 +50,11 @@ Where this stands, what holds it there, and what nobody has checked yet.
   and Shift+arrows select the words to comment on or propose a change to. Every change they try
   (typing, delete, Enter, undo, paste, drop, IME) is refused with a short note and the paper is
   unchanged; `keys.spec` holds it.
+- **Find and replace in the source view**: Ctrl+F (or the "Find and replace" button) opens the
+  panel at the foot of the editor with the Find field focused; Enter, F3 and Ctrl+G go to the next
+  match, with Shift to the previous; Escape closes the panel and gives the caret back to the
+  text. People who cannot edit get Find only. `find.spec` holds it, with axe passing while the
+  panel is open. The visual view keeps the browser's own Ctrl+F.
 - **The keys that insert in the visual view**: Alt+R (reference), Alt+C (citation), Alt+= (equation),
   Alt+G (figure), Alt+T (table), Alt+H (heading), Alt+L (bulleted list) and Alt+N (numbered
   list), Ctrl+I (emphasis), Ctrl+B (bold) and Shift+F10 (the menu at

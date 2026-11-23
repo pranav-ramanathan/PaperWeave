@@ -1030,3 +1030,7 @@ img.chart {
 .waiting:empty {
   display: none;
 }
+/* "All" selects every match as several carets; the editor is single-caret. */
+.cm-search button[name='select'] {
+  display: none;
+}

@@ -5101,3 +5101,21 @@ Found by a three-person walkthrough.
 - **Held by** `prose.test`, the grammar sandbox test (real checker) and `grammar.spec`.
 - **Not done.** The panel still quotes the source form (`Kov\'a\v{c}`). Accents that stay raw
   (`\' e`, `\t`, `\d`, `Gro\ss e`) are never checked, as before.
+
+## Find and replace in the source editor
+
+- **What was wrong.** The source editor drew only the lines near the window, so the browser's
+  Ctrl+F found nothing for a word further down a long file, and there was no replace anywhere.
+- **Now** the source view uses `@codemirror/search` (6.7.2) with four keys only: Ctrl+F, F3, Ctrl+G
+  and Escape. The panel reads in house phrases ("Next", "Previous", "Match case", "Regular
+  expression", "Whole word", "Replace all", "Close"). A "Find and replace" button in the "Go to"
+  group opens it in the source view. Replace and Replace all are ordinary edits, so they are
+  shared, saved and, for Replace all, one undo step. Someone who cannot edit gets Find only. The
+  "All" button (several carets) is hidden: the editor has one caret.
+- **Held by** `find.spec`: finding a word that is not drawn, Replace all shared with a second
+  editor, saved and undone in one Ctrl+Z, a reviewer who finds but cannot replace, and the button,
+  Escape and an axe audit with the panel open. No unit or sandbox test: no server or package
+  change.
+- **Not done.** Files without a visual view (.bib, .sty, .cls) have no toolbar, so they have
+  Ctrl+F only. A panel opened while the file is still locked has no Replace row until it is
+  reopened. No find in the visual view or the PDF, and no go-to-line.
