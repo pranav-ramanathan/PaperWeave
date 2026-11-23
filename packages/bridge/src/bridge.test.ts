@@ -3129,3 +3129,83 @@ describe('comments in a paragraph in the visual view', () => {
     expect(done).toBeGreaterThan(1000);
   });
 });
+
+describe('commands that print nothing in the visual view', () => {
+  const A = '\\noindent We train\\\\\nthe mod\\-el et al.\\\nnow.\n';
+  const edit = (src: string, off: number, text: string, del = 0) => {
+    const r = replica(src);
+    const start = textblocks(r)[0].start + off;
+    expect(
+      r.dispatch(
+        text
+          ? r.state.tr.insertText(text, start, start + del)
+          : r.state.tr.delete(start, start + del),
+      ),
+    ).toBe(true);
+    r.check();
+    return r.src;
+  };
+
+  test('typing and deleting around quiet commands change only their own bytes', () => {
+    expect(shown(replica(A))).toBe('\ufffc We train\ufffc the mod\ufffcel et al. now.');
+    expect(edit(A, 1, 'X')).toBe('\\noindent{}X We train\\\\\nthe mod\\-el et al.\\\nnow.\n');
+    expect(edit(A, 11, 'X')).toBe('\\noindent We train\\\\X\nthe mod\\-el et al.\\\nnow.\n');
+    expect(edit(A, 20, 'X')).toBe('\\noindent We train\\\\\nthe mod\\-Xel et al.\\\nnow.\n');
+    expect(edit(A, 30, 'X')).toBe('\\noindent We train\\\\\nthe mod\\-el et al.\\\nXnow.\n');
+    expect(edit(A, 10, '', 1)).toBe('\\noindent We train\nthe mod\\-el et al.\\\nnow.\n');
+    expect(edit(A, 19, '', 1)).toBe('\\noindent We train\\\\\nthe model et al.\\\nnow.\n');
+    expect(edit(A, 29, '', 1)).toBe('\\noindent We train\\\\\nthe mod\\-el et al.now.\n');
+    expect(edit(A, 1, '', 1)).toBe('\\noindent{}We train\\\\\nthe mod\\-el et al.\\\nnow.\n');
+    // The braces after \noindent are a group of their own.
+    const B = '\\noindent{\\bf Old.} x\n';
+    const r = replica(B);
+    const at = textblocks(r)[0].start + 2;
+    expect(r.dispatch(r.state.tr.insertText('Z', at, at))).toBe(true);
+    r.check();
+    expect(r.src).toBe('\\noindent{\\bf OZld.} x\n');
+  });
+
+  test('generated edits around quiet commands stay inside their range', () => {
+    const DENSE =
+      '\\noindent\\textbf{Setup.} We train\\\\\nthe mod\\-el of Smith et al.\\\nnow \\\\[2pt]\nand then\\\\\n\n' +
+      '\\noindent Plain start and shelf\\/ful NP\\@. Next \\newline here\\allowbreak there.\n\n' +
+      '\\noindent{\\bf Old bold.} More words \\\\ on one line \\\\\n\n' +
+      '\\emph{inside\\\\\nthe em\\-ph} text et al.\\\n\n' +
+      '\\begin{itemize}\n\\item \\noindent first it\\-em \\\\\nmore of it\n\\item second\\\\\n\\end{itemize}\n\n' +
+      'Before a heading \\\\\n\\section{Next\\\\ line}\n\nEnd words\\\\\n';
+    let done = 0;
+    for (let seed = 0; seed < 600; seed++) {
+      const r = rng(seed);
+      const rep = replica(DENSE);
+      for (let step = 0; step < 40; step++) {
+        const before = rep.src;
+        let op;
+        try {
+          op = visualOp(r, rep);
+          if (!op) continue;
+          rep.check();
+        } catch (err) {
+          throw new Error(`seed ${seed} step ${step}: ${(err as Error).message}`, { cause: err });
+        }
+        const where = `seed ${seed} step ${step} ${op.what}`;
+        if (!op.accepted) {
+          expect(rep.src, where).toBe(before);
+          continue;
+        }
+        done++;
+        if (rep.src === before) continue;
+        if (
+          op.what === 'enter' &&
+          before.replace(/\\item[ \t]*\n(?=\\end\{itemize\})/, '') === rep.src
+        )
+          continue;
+        if (
+          before.slice(0, op.lo) !== rep.src.slice(0, op.lo) ||
+          !rep.src.endsWith(before.slice(op.hi))
+        )
+          throw new Error(`${where}: changed outside [${op.lo}, ${op.hi})`);
+      }
+    }
+    expect(done).toBeGreaterThan(1000);
+  });
+});

@@ -329,3 +329,22 @@ test('a comment in a sentence says nothing', () => {
   expect(proseIn(src, 'old claim')).toBe(false);
   expect(proseIn(src, 'result')).toBe(true);
 });
+
+test('commands that print nothing say nothing', () => {
+  expect(read('\\noindent\\textbf{Setup.} We train.')).toBe('Setup. We train.\n\n');
+  expect(read('Schmid\\-huber re\\/do NP\\@.')).toBe('Schmidhuber redo NP.\n\n');
+  const br = read('one \\\\\ntwo');
+  expect(br).not.toContain('Dummy');
+  expect(br).toMatch(/one\s+two/);
+  expect(read('Smith et al.\\\nshow it.')).toBe('Smith et al. show it.\n\n');
+  const src = 'See Schmid\\-huber.\n\\noindent Then one \\\\ two.';
+  const word = 'Schmid\\-huber';
+  const at = src.indexOf(word);
+  const { segments } = prose(src);
+  expect(inProse(segments, at, at + word.length)).toBe(true);
+  for (const q of ['\\noindent', '\\\\']) {
+    const i = src.indexOf(q);
+    expect(inProse(segments, i, i + q.length), q).toBe(false);
+  }
+  expect(readAs(src, segments, at, at + word.length)).toBe('Schmidhuber');
+});
