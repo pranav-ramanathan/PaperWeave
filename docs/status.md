@@ -4922,3 +4922,17 @@ Found by a three-person walkthrough.
 - **Not done.** The line-endings-only sentence was not looked at in a browser. At most 200 pairs of
   lines per file are compared word by word. Lines are paired by position, only when a run has as
   many removed lines as added ones; otherwise they stay whole-line changes.
+
+## A paper could not be renamed
+
+- **What was wrong.** The name given when a paper was made was for good: a typo or a working
+  title like `paper-final-v3 (1)` stayed on every page, email and download.
+- **Now** the owner can rename the paper from a form on its page (`renameProject` in
+  `projects.ts`, under the existing `project.settings` right, with the same one-line,
+  at-most-200-characters rule as a new paper). The name is read live, so revisions, downloads
+  and other people's pages show the new name; a rename makes no revision. Pages already open show
+  the old name until reloaded.
+- **Held by** a sandbox test in `projects.sandbox.test.ts` (only the owner may; bad names refused;
+  an old revision is titled with the new name) and a browser test in `projects.spec`
+  ("the owner renames a paper; a viewer cannot"), which failed before.
+- **Not done.** Editors cannot rename; no history of old names; no live update of open pages.

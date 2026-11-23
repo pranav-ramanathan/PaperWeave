@@ -14,13 +14,14 @@ import {
   listMembers,
   listProjects,
   removeMember,
+  renameProject,
   setCompiler,
   setRole,
   withdrawInvitation,
 } from './projects.ts';
 import { blobStore } from './blobs.ts';
 import { createFile } from './files.ts';
-import { cutRevision } from './revisions.ts';
+import { cutRevision, revisionTitle } from './revisions.ts';
 import { TEST_ENV, testDb } from './testing.ts';
 
 let t: Awaited<ReturnType<typeof testDb>>;
@@ -487,4 +488,50 @@ test('the compiler can be changed by a writer, and the next revision carries it'
   expect(await code(setCompiler(t.pool, users.outsider.id, p, 'lualatex'))).toBe('not_found');
   expect(await code(setCompiler(t.pool, users.owner.id, p, 'latex; rm'))).toBe('invalid_input');
   expect((await getProject(t.pool, users.owner.id, p)).compiler).toBe('xelatex');
+});
+
+test('only the owner renames a paper, and everything named after it follows', async () => {
+  const store = blobStore(TEST_ENV);
+  const owner = users.owner.id;
+  const { id: p } = await createProject(t.pool, owner, 'paper-final-v3 (1)');
+  await createFile(
+    t.pool,
+    store,
+    owner,
+    p,
+    'main.tex',
+    Buffer.from('\\documentclass{article}\n\\begin{document}Hi.\\end{document}\n'),
+  );
+  const before = await cutRevision(t.pool, store, owner, p);
+  for (const role of ['editor', 'reviewer', 'viewer'] as const) {
+    const { token } = await invite(t.pool, owner, p, users[role].email, role);
+    await acceptInvitation(t.pool, users[role].id, token);
+    expect(await code(renameProject(t.pool, users[role].id, p, 'X'))).toBe('permission_denied');
+  }
+  expect(await code(renameProject(t.pool, users.outsider.id, p, 'X'))).toBe('not_found');
+  expect(await code(renameProject(t.pool, owner, 'not-an-id', 'X'))).toBe('not_found');
+  // Who may rename is decided before the name is looked at.
+  expect(await code(renameProject(t.pool, users.editor.id, p, ''))).toBe('permission_denied');
+  for (const bad of ['', '   ', 'a'.repeat(201), 'a\nb', 'a\u2028b', 42])
+    expect(await code(renameProject(t.pool, owner, p, bad))).toBe('invalid_input');
+  expect((await getProject(t.pool, owner, p)).name).toBe('paper-final-v3 (1)');
+
+  expect(await renameProject(t.pool, owner, p, '  Merge latency: final  ')).toEqual({
+    name: 'Merge latency: final',
+  });
+  expect((await getProject(t.pool, owner, p)).name).toBe('Merge latency: final');
+  expect((await listProjects(t.pool, users.viewer.id)).find((x) => x.id === p)?.name).toBe(
+    'Merge latency: final',
+  );
+  // Revisions keep no name of their own: an old one is called what the paper is called now.
+  expect(await revisionTitle(t.pool, owner, p, before.id)).toEqual({
+    paper: 'Merge latency: final',
+    number: before.number,
+  });
+  // A rename makes no revision.
+  expect((await cutRevision(t.pool, store, owner, p)).number).toBe(before.number);
+  const longest = 'a'.repeat(200);
+  expect((await renameProject(t.pool, owner, p, longest)).name).toBe(longest);
+  await renameProject(t.pool, owner, p, longest);
+  expect((await getProject(t.pool, owner, p)).name).toBe(longest);
 });

@@ -542,6 +542,58 @@ test('inviting someone already on the paper is refused and points to their role'
   await expect(guest.page.getByText('You are an editor')).toBeVisible();
 });
 
+test('the owner renames a paper; a viewer cannot', async ({ browser }) => {
+  const owner = await person(browser, 'rename-owner');
+  const guest = await person(browser, 'rename-guest');
+  const { page } = owner;
+  const oldName = `paper-final-v3 (1) ${run}`;
+  const newName = `Merge latency: \u201Cfinal\u201D ${run}`;
+  await page.goto('/sign-in');
+  await signIn(page, owner.email);
+  await page.getByLabel('Name of a new paper').fill(oldName);
+  await page.getByRole('button', { name: 'Create paper' }).click();
+  await expect(page.getByRole('heading', { name: oldName })).toBeVisible();
+  const paper = page.url();
+
+  await page.getByLabel('Their email address').fill(guest.email);
+  await page.getByLabel('Their role').selectOption('viewer');
+  await page.getByRole('button', { name: 'Send invitation' }).click();
+  await expect(page.getByRole('status')).toContainText('Invitation sent');
+  await guest.page.goto('/sign-in');
+  await signIn(guest.page, guest.email);
+  await guest.page.goto(await emailedLink(guest.email, '/invitations/'));
+  await guest.page.getByRole('button', { name: 'Join this paper' }).click();
+  await expect(guest.page.getByText('You are a viewer')).toBeVisible();
+
+  await page.getByText('Rename this paper').click();
+  await audit(page, 'the paper with its rename form open');
+  await page.getByLabel('New name for this paper').fill(newName);
+  await page.getByRole('button', { name: 'Rename paper' }).click();
+  await expect(page.getByRole('status')).toContainText(
+    `This paper is now called \u201C${newName}\u201D.`,
+  );
+  await expect(page.getByRole('heading', { name: newName })).toBeVisible();
+  await expect(page).toHaveTitle(`${newName} \u2014 PaperWeave`);
+  await audit(page, 'a renamed paper');
+
+  await page.goto('/projects');
+  await expect(page.getByRole('link', { name: newName })).toBeVisible();
+  await expect(page.getByRole('link', { name: oldName })).toHaveCount(0);
+
+  await page.goto(paper);
+  await page.getByText('Rename this paper').click();
+  await page.getByLabel('New name for this paper').fill('   ');
+  await page.getByRole('button', { name: 'Rename paper' }).click();
+  await expect(page.getByRole('alert').filter({ hasText: 'needs a name' })).toHaveText(
+    'A project needs a name of at most 200 characters.',
+  );
+  await expect(page.getByRole('heading', { name: newName })).toBeVisible();
+
+  await guest.page.reload();
+  await expect(guest.page.getByRole('heading', { name: newName })).toBeVisible();
+  await expect(guest.page.getByText('Rename this paper')).toHaveCount(0);
+});
+
 test('a sign-in form whose request is never answered gives up, says so and can be used again', async ({
   browser,
 }) => {

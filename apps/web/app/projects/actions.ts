@@ -17,6 +17,7 @@ import {
   removeMember,
   renameFileAndReferences,
   renameLabel,
+  renameProject,
   requestBuild,
   restoreRevision,
   saveChart,
@@ -201,6 +202,15 @@ export async function compilerAction(projectId: string, form: FormData) {
   await act(back, async () => {
     await setCompiler(db(), user.id, projectId, text(form, 'compiler'));
     return `${back}?compiler=1`;
+  });
+}
+
+export async function renamePaperAction(projectId: string, form: FormData) {
+  const back = `/projects/${projectId}`;
+  const user = await requireUser(back);
+  await act(back, async () => {
+    await renameProject(db(), user.id, projectId, text(form, 'name'));
+    return `${back}?renamed=1`;
   });
 }
 
