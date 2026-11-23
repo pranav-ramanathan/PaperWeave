@@ -1,5 +1,6 @@
 import { expect, test } from 'vitest';
 import {
+  bareIn,
   bblEntries,
   bibEntries,
   bibItems,
@@ -207,4 +208,51 @@ test('logos and text commands read as what they print', () => {
   expect(logoOf('\\LaTeX{} x')).toBeNull();
   expect(logoOf('\\foo')).toBeNull();
   expect(plainText('A\\slash B \\copyright{} \\ldots')).toBe('A/B © …');
+});
+
+const BARE = [
+  '@article{first2019,',
+  '  title = {First},',
+  '  year = {2019}',
+  '}',
+  '',
+  '@misc{smith2020,',
+  '  author = {B. Smith},',
+  '  title = {A study of max_pool layers},',
+  '  year = {2020}',
+  '}',
+].join('\n');
+const entryOf = (src: string, key: string) => bibEntries(src).find((e) => e.key === key)!;
+
+test('a bare character is found on its line, in its field, in the whole file', () => {
+  expect(bareIn(BARE, entryOf(BARE, 'smith2020'), '_^', [])).toEqual({
+    line: 8,
+    field: 'title',
+    char: '_',
+  });
+  // The first entry's own lines count from 2, after its @ line.
+  const first = '@article{a,\n  title = {x & y}\n}';
+  expect(bareIn(first, entryOf(first, 'a'), '&', [])).toEqual({
+    line: 2,
+    field: 'title',
+    char: '&',
+  });
+});
+
+test('an escaped character, one in math, and one in a skipped field are not bare', () => {
+  const src = [
+    '@misc{k,',
+    '  title = {max\\_pool and $x_i$ and 50\\% \\& more},',
+    '  url = {http://example.org/a_b},',
+    '  year = {2020}',
+    '}',
+  ].join('\n');
+  expect(bareIn(src, entryOf(src, 'k'), '_^&', ['url'])).toBeUndefined();
+  expect(bareIn(src, entryOf(src, 'k'), '_', [])).toMatchObject({ line: 3, field: 'url' });
+});
+
+test('a value that goes on to a second line keeps its field', () => {
+  const src = '@misc{k,\n  title = {A long\n    max_pool title},\n  year = {2020}\n}';
+  expect(bareIn(src, entryOf(src, 'k'), '_', [])).toEqual({ line: 3, field: 'title', char: '_' });
+  expect(bareIn(src, entryOf(src, 'k'), '_', ['title'])).toBeUndefined();
 });

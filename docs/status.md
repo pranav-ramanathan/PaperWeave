@@ -2151,7 +2151,7 @@ update` held the paper's file rows for **189.6 s** (until the proxy was cut; it 
   the file it was opened in. A mistake inside a command is placed where the command is used. A
   missing package or file is given its file but not its line. A package of TeX's own is named
   without the line that loads it. Biber's errors are read from latexmk's output, with the .bib and its line (a .bib that
-  is not there has no line); biber's own log, main.blg, is still not the build log shown. BibTeX's own words are not in the build log a person can open.
+  is not there has no line); biber's own log, main.blg, is still not the build log shown. BibTeX's own words are not in the build log a person can open. A bare `_`, `^`, `&` or `#` in a `.bib` entry is now placed in the `.bib`; see "A bare character in a .bib entry".
 - **How it was made.** Planned by one agent, probed and written by others, checked here.
 
 ## A paper taken out and brought back
@@ -5595,3 +5595,31 @@ inserted`), `Item #3` (`macro parameter character #`, or `Illegal parameter numb
   using the `underscore` package is told to write `\_` the first time (that still builds); the
   server chart-caption check, the atom/footnote window, inline-formula `&` and `#`; no
   server-side check.
+
+## A bare character in a .bib entry
+
+- **What was wrong.** A `_`, `^`, `&` or `#` written bare in a `.bib` field (`title = {max_pool}`,
+  `journal = {Science & Nature}`, a `howpublished` with a URL) is fine to BibTeX and Biber but
+  not to TeX when it reads the result. Under BibTeX the errors were in the `.bbl` and said only
+  "In the bibliography (an entry of a .bib file, as LaTeX reads it)", up to four times, with no
+  file or line. Under biblatex they were reported at the paper's `\end{document}`, in
+  `main.tex`, a line with nothing wrong in it.
+- **Now** the error is one line in the `.bib`: "In the reference smith2020, the title field has
+  a bare _: Missing $ inserted. Write \_ instead." (`^`: write `\^{}` or put it in `$...$`). The
+  reference is read from the `.bbl` line TeX names (BibTeX), or, for biblatex, from every
+  `\entry` of the `.bbl` when the error is at or just after `\printbibliography`; only an entry
+  whose field really has the character is named (a `\_`, a `$x_i$` and `abstract`, `keywords`,
+  `file`, and for biblatex `url`, `doi`, `eprint` are not). The knock-on errors of the same
+  entry are dropped. An entry found with no such character is named at its own line; a key no
+  `.bib` has says "In the bibliography, in the reference k ...", with no file. Without the
+  paper's files to read, the old sentence stays. Builds from before are rebuilt (`-bibentry`).
+- **Held by** `bareIn` tests in `bib.test.ts`, excerpts of real logs in `diagnostics.test.ts`
+  (BibTeX and Biber, a root in a folder, guards for a message away from `\printbibliography` and
+  for `$x_i$`/`url`), two real compiles in `compile.sandbox.test.ts` (the `&` test now asserts
+  the `.bib` file, line and reference; a `_` under both engines gives one error at its line) and a
+  browser test in `building.spec.ts`, each failed on the old code.
+- **Not done.** A `%` in a biblatex field (`File ended while scanning use of \field`; BibTeX builds
+  it silently). A key in a braced `\bibitem` label that contains `]`. A `.bib` found only in TeX's
+  own tree. An error printed by `\fullcite` or the like, away from `\printbibliography`. The
+  shell-escape message of minted. A `#` that joins strings in a `.bib` (`month = jan # "~1"`) is
+  read as a bare one if TeX complains of `#` in that entry.
