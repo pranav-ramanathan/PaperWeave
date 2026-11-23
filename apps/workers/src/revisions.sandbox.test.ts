@@ -1,6 +1,13 @@
 // Needs Docker, the TeX image and the services in infra/compose.yaml. Run: pnpm test:sandbox
 import { execFileSync } from 'node:child_process';
-import { mkdtempSync, readdirSync, readFileSync, statSync, writeFileSync } from 'node:fs';
+import {
+  existsSync,
+  mkdtempSync,
+  readdirSync,
+  readFileSync,
+  statSync,
+  writeFileSync,
+} from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join, relative } from 'node:path';
 import {
@@ -20,7 +27,7 @@ import {
 import { afterAll, beforeAll, expect, test } from 'vitest';
 import { FIXTURES } from '../../../packages/latex/src/testutil.ts';
 import { TEST_ENV, testDb } from '../../../packages/server/src/testing.ts';
-import { buildNext, imageId } from './builder.ts';
+import { buildNext, imageId, warmDir } from './builder.ts';
 import { compile, sandbox, type Compiler } from './compile.ts';
 
 const store = blobStore(TEST_ENV);
@@ -96,6 +103,39 @@ test.each(['article-basic', 'ieee-multifile', 'ams-multifile'])(
     expect(sha256(again)).toBe(sha256(pdf));
   },
 );
+
+test("a paper built, edited and built again: the second build's ZIP still rebuilds to the same PDF outside the app", async () => {
+  const p = await paper('article-basic');
+  // The first build starts from nothing and leaves what it made for the next.
+  await requestBuild(t.pool, owner.id, p.id);
+  expect(await buildNext(t.pool, store, image)).toBe(true);
+  await editFile(t.pool, store, p.main, owner.id, (text) =>
+    text.insert(text.toString().indexOf('\\end{document}'), 'Added after the first build.\n'),
+  );
+  const revision = await saveRevision(t.pool, store, owner.id, p.id, 'Second');
+  await requestBuild(t.pool, owner.id, p.id, { revisionId: revision.id });
+  expect(await buildNext(t.pool, store, image)).toBe(true);
+  const pdf = await revisionPdf(t.pool, store, owner.id, p.id, revision.id);
+
+  const dir = mkdtempSync(join(tmpdir(), 'paperweave-submit-'));
+  const { zip } = await exportRevision(t.pool, store, owner.id, p.id, revision.id, true);
+  writeFileSync(join(dir, 'submission.zip'), zip);
+  execFileSync('unzip', ['-q', join(dir, 'submission.zip'), '-d', join(dir, 'src')]);
+  const manifest = JSON.parse(readFileSync(join(dir, 'src/paperweave-toolchain.json'), 'utf8'));
+  // Outside the app there is no kept folder: a build from nothing.
+  const rebuilt = await compile(
+    join(dir, 'src'),
+    manifest.root,
+    join(dir, 'out'),
+    60,
+    manifest.compiler as Compiler,
+    manifest.sourceDateEpoch,
+  );
+  expect(rebuilt.ok).toBe(true);
+  expect(sha256(readFileSync(join(dir, 'out', rebuilt.pdf!)))).toBe(sha256(pdf));
+  // The worker did keep what its builds made, for the next build of this paper.
+  expect(existsSync(join(warmDir(image, p.id)!, 'made'))).toBe(true);
+});
 
 test('the ZIP of a glossaries paper, with its command run as written, makes the same PDF', async () => {
   const tex = `\\documentclass{article}

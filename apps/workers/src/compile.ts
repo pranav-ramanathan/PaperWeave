@@ -12,10 +12,12 @@ import {
   mkdtempSync,
   readdirSync,
   readFileSync,
+  renameSync,
   rmSync,
+  writeFileSync,
 } from 'node:fs';
 import { tmpdir } from 'node:os';
-import { join } from 'node:path';
+import { dirname, join } from 'node:path';
 import {
   LATEXMK_RULES,
   auxLabels,
@@ -47,6 +49,10 @@ export type CompileResult = {
   synctex?: string;
   /** The number and page LaTeX gave each label, when a PDF was produced. */
   labels?: Record<string, { number: string; page: string }>;
+  /** Whether the build started from what the paper's last good build made, and that run stood. */
+  warmed?: boolean;
+  /** How many TeX runs latexmk made in the last run. For tests; the builder does not store it. */
+  passes?: number;
 };
 
 /** Run a command in the sandbox with `work` mounted read-write at /work. */
@@ -1063,6 +1069,23 @@ function readingAt(
   });
 }
 
+/** More than this many bytes or files made by one build are not kept for the next. */
+const WARM_BYTES = 64 << 20;
+const WARM_FILES = 5000;
+
+/** Each regular file under `from`, by its `/`-joined path: nothing else is followed or listed. */
+function eachFile(from: string, each: (rel: string, size: number) => void, rel = ''): void {
+  for (const e of readdirSync(join(from, rel), { withFileTypes: true })) {
+    const r = rel ? `${rel}/${e.name}` : e.name;
+    if (e.isDirectory()) eachFile(from, each, r);
+    else if (e.isFile()) each(r, lstatSync(join(from, r)).size);
+  }
+}
+
+/** What BibTeX or biber said is on latexmk's output only, and only in the build that ran them. */
+const bibRan = (output: string) =>
+  /^Latexmk: applying rule '(?:bibtex|biber)|^PaperWeave: no /m.test(output);
+
 export type Compiler = 'pdflatex' | 'xelatex' | 'lualatex';
 const ENGINE: Record<Compiler, string> = {
   pdflatex: '-pdf',
@@ -1078,6 +1101,13 @@ export async function compile(
   compiler: Compiler = 'pdflatex',
   /** Seconds since 1970 to stamp into the PDF, so the same inputs give the same bytes. */
   epoch?: number,
+  /**
+   * A folder kept for this paper alone, between its builds. What the last good build made (the
+   * .aux, .toc, .bbl and the rest, never the PDF) is put back before this one, so latexmk runs
+   * only what the edit calls for. A build that fails from there is run again from nothing before
+   * it is reported. Without it every build starts from nothing.
+   */
+  warm?: string,
 ): Promise<CompileResult> {
   if (!(compiler in ENGINE)) throw new Error(`unknown compiler: ${compiler}`);
   // No shell is involved anywhere (sandbox() runs docker with execFile and an argument array),
@@ -1090,7 +1120,9 @@ export async function compile(
     root.split('/').includes('..')
   )
     throw new Error(`not a .tex or .ltx path inside the project: ${root}`);
-  // A clean copy: the build never writes into the project, and starts from nothing else.
+  // A copy: the build never writes into the project. It starts from the project's files and,
+  // when a `warm` folder holds what this paper's last good build made, from that too; never from
+  // anything else.
   const work = mkdtempSync(join(tmpdir(), 'paperweave-build-'));
   try {
     cpSync(project, work, { recursive: true });
@@ -1099,30 +1131,82 @@ export async function compile(
     // latexmk -cd hands TeX only the file's name, so "./" would be lost and a name that begins
     // with "-" would be an option. For such a name latexmk is started in the folder instead.
     const dashed = name.startsWith('-');
-    const run = await sandbox(
-      work,
-      // -norc: a project's latexmkrc is arbitrary Perl and is never read.
-      // -cd: TeX runs in the root file's folder, where it writes its output and resolves
-      // \input, as the rest of the app reads paths.
-      [
-        ...['latexmk', '-norc', ...(dashed ? [] : ['-cd']), ENGINE[compiler], '-no-shell-escape'],
-        // -bibtex-cond: no BibTeX where a named .bib is missing; LATEXMK_RULES' pw_bib also skips
-        // it where the .aux names no .bib at all (a paper that \input's its own .bbl).
-        ...['-bibtex-cond', '-interaction=nonstopmode'],
-        // Our own rules for glossaries and nomenclature: -norc leaves latexmk with none.
-        ...['-e', LATEXMK_RULES],
-        // "./": a name that begins with "-" is a path, not an option.
-        ...['-file-line-error', '-synctex=1', `./${dashed ? name : root}`],
-      ],
-      seconds,
-      // FORCE_SOURCE_DATE: without it pdfTeX and XeTeX use the epoch for the PDF's metadata but
-      // still read \today (\year, \month, \day) from the clock; LuaTeX takes it from the epoch.
-      Number.isInteger(epoch) ? { SOURCE_DATE_EPOCH: String(epoch), FORCE_SOURCE_DATE: '1' } : {},
-      dashed && dir ? `/${dir}` : '',
-    );
+    const latexmk = () =>
+      sandbox(
+        work,
+        // -norc: a project's latexmkrc is arbitrary Perl and is never read.
+        // -cd: TeX runs in the root file's folder, where it writes its output and resolves
+        // \input, as the rest of the app reads paths.
+        [
+          ...['latexmk', '-norc', ...(dashed ? [] : ['-cd']), ENGINE[compiler], '-no-shell-escape'],
+          // -bibtex-cond: no BibTeX where a named .bib is missing; LATEXMK_RULES' pw_bib also skips
+          // it where the .aux names no .bib at all (a paper that \input's its own .bbl).
+          ...['-bibtex-cond', '-interaction=nonstopmode'],
+          // Our own rules for glossaries and nomenclature: -norc leaves latexmk with none.
+          ...['-e', LATEXMK_RULES],
+          // "./": a name that begins with "-" is a path, not an option.
+          ...['-file-line-error', '-synctex=1', `./${dashed ? name : root}`],
+        ],
+        seconds,
+        // FORCE_SOURCE_DATE: without it pdfTeX and XeTeX use the epoch for the PDF's metadata but
+        // still read \today (\year, \month, \day) from the clock; LuaTeX takes it from the epoch.
+        Number.isInteger(epoch) ? { SOURCE_DATE_EPOCH: String(epoch), FORCE_SOURCE_DATE: '1' } : {},
+        dashed && dir ? `/${dir}` : '',
+      );
+    // The paper's files by name. latexmk does not follow a file added, taken away or renamed (a
+    // .bib that has gone leaves its .bbl in use), nor a changed root or compiler: then nothing
+    // kept is used.
+    const keptAt = warm && join(warm, 'made');
+    const listAt = warm && join(warm, 'files');
+    const saidAt = warm && join(warm, 'said');
+    const names: string[] = [];
+    eachFile(project, (rel) => names.push(rel));
+    const list = JSON.stringify({ root, compiler, names: names.sort() });
+    const fresh = () => {
+      rmSync(work, { recursive: true, force: true });
+      mkdirSync(work, { recursive: true });
+      cpSync(project, work, { recursive: true });
+    };
+    let warmed = false;
+    if (warm) {
+      try {
+        mkdirSync(warm, { recursive: true, mode: 0o700 });
+        if (existsSync(keptAt!) && existsSync(listAt!) && readFileSync(listAt!, 'utf8') === list) {
+          // The paper's own files win: only what is not in the project is put back.
+          eachFile(keptAt!, (rel) => {
+            if (existsSync(join(work, rel))) return;
+            mkdirSync(dirname(join(work, rel)), { recursive: true });
+            cpSync(join(keptAt!, rel), join(work, rel));
+            warmed = true;
+          });
+        }
+      } catch {
+        fresh();
+        warmed = false;
+      }
+    }
+    let run = await latexmk();
+    if (warmed && run.code !== 0 && run.code !== 137) {
+      // Something kept may be what is wrong, not the paper: from nothing, as a first build.
+      fresh();
+      warmed = false;
+      run = await latexmk();
+    }
     const base = root.replace(/\.(tex|ltx)$/i, '');
     const logPath = join(work, base + '.log');
     const log = existsSync(logPath) ? texText(readFileSync(logPath)) : run.output;
+    // A warm build that does not run BibTeX has none of its words on its output. While the .bbl
+    // it made is still read, they are repeated.
+    let output = run.output;
+    if (
+      warmed &&
+      run.code === 0 &&
+      !bibRan(run.output) &&
+      saidAt &&
+      existsSync(saidAt) &&
+      /\((?:\.\/)?[^\s()]+\.bbl\b/.test(log)
+    )
+      output += '\n' + readFileSync(saidAt, 'utf8');
     mkdirSync(out, { recursive: true });
     const keep = (ext: string) => {
       if (!existsSync(join(work, base + ext))) return undefined;
@@ -1132,10 +1216,27 @@ export async function compile(
     const pdf = run.code === 0 ? keep('.pdf') : undefined;
     // Every .aux file of the build: \include writes one per file.
     let aux = '';
+    // After a warm start a file the paper no longer \include's has left its .aux behind: only
+    // those the last TeX run wrote or read count (latexmk's .fls names them).
+    const flsAt = join(work, base + '.fls');
+    const live =
+      warmed && existsSync(flsAt)
+        ? new Set(
+            texText(readFileSync(flsAt))
+              .split(/\r?\n/)
+              .map((l) => /^(?:INPUT|OUTPUT) (.+)$/.exec(l)?.[1])
+              .filter((f): f is string => f !== undefined)
+              .map((f) => (f.startsWith('/work/') ? f.slice(6) : place(rootDir(root), f))),
+          )
+        : undefined;
     const gather = (dir: string) => {
       for (const e of readdirSync(dir, { withFileTypes: true }))
         if (e.isDirectory()) gather(join(dir, e.name));
-        else if (e.name.endsWith('.aux') && aux.length < 4_000_000)
+        else if (
+          e.name.endsWith('.aux') &&
+          aux.length < 4_000_000 &&
+          (!live || live.has(join(dir, e.name).slice(work.length + 1)))
+        )
           aux += texText(readFileSync(join(dir, e.name))) + '\n';
     };
     if (pdf) gather(work);
@@ -1159,7 +1260,7 @@ export async function compile(
       }
       return texts.get(name);
     };
-    const found = diagnostics(log, run.output, rootDir(root), read);
+    const found = diagnostics(log, output, rootDir(root), read);
     // pdfTeX and LuaTeX place EPS through epstopdf, which needs shell escape; without it the
     // picture is silently drawn as a box with its name, and the log says nothing. XeLaTeX
     // fails instead, and diagnostics() has said so.
@@ -1171,7 +1272,42 @@ export async function compile(
           file: f,
           message: `Picture not shown: ${f} is an EPS file, which ${compiler === 'lualatex' ? 'LuaLaTeX' : 'pdfLaTeX'} cannot place here; the PDF has a box with its name. Convert it to PDF.`,
         });
+    if (warm && pdf) {
+      // Keep what this build made for the next one: not the paper's own files, and not the PDF
+      // (or XeTeX's page file or SyncTeX), so the next build always runs TeX at least once with
+      // its own date and never hands back pages made for another revision.
+      try {
+        const next = mkdtempSync(join(warm, 'new-'));
+        let bytes = 0;
+        let count = 0;
+        eachFile(work, (rel, size) => {
+          if (rel === base + '.pdf' || rel === base + '.xdv' || rel === base + '.synctex.gz')
+            return;
+          if (existsSync(join(project, rel))) return;
+          bytes += size;
+          count++;
+          if (bytes > WARM_BYTES || count > WARM_FILES) return;
+          mkdirSync(dirname(join(next, rel)), { recursive: true });
+          cpSync(join(work, rel), join(next, rel));
+        });
+        rmSync(keptAt!, { recursive: true, force: true });
+        if (bytes <= WARM_BYTES && count <= WARM_FILES) {
+          renameSync(next, keptAt!);
+          writeFileSync(listAt!, list);
+        } else {
+          rmSync(next, { recursive: true, force: true });
+          rmSync(listAt!, { force: true });
+        }
+        if (bibRan(run.output)) writeFileSync(saidAt!, run.output);
+        else if (!warmed) rmSync(saidAt!, { force: true });
+      } catch {
+        // A problem with the kept files is never a problem with the build.
+        rmSync(warm, { recursive: true, force: true });
+      }
+    }
     return {
+      warmed,
+      passes: (run.output.match(/^Latexmk: applying rule '(?:pdf|xe|lua)latex'/gm) ?? []).length,
       ok: !!pdf,
       // `timeout -s KILL` reports 137.
       timedOut: run.code === 137,

@@ -1,6 +1,13 @@
 // Needs Docker, the TeX image and the services in infra/compose.yaml. Run: pnpm test:sandbox
 import { execFileSync } from 'node:child_process';
-import { mkdtempSync, readdirSync, readFileSync, statSync, writeFileSync } from 'node:fs';
+import {
+  existsSync,
+  mkdtempSync,
+  readdirSync,
+  readFileSync,
+  statSync,
+  writeFileSync,
+} from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join, relative } from 'node:path';
 import { gunzipSync } from 'node:zlib';
@@ -42,7 +49,7 @@ import { parseSyncTeX } from '../../../packages/latex/src/synctex.ts';
 import { FIXTURES } from '../../../packages/latex/src/testutil.ts';
 import { pdfText } from '../../../packages/server/src/pdftext.ts';
 import { TEST_ENV, testDb } from '../../../packages/server/src/testing.ts';
-import { buildNext, imageId, takeBuild } from './builder.ts';
+import { buildNext, imageId, takeBuild, warmDir } from './builder.ts';
 
 const store = blobStore(TEST_ENV);
 const image = imageId();
@@ -101,6 +108,39 @@ const code = (p: Promise<unknown>) =>
     () => 'ok',
     (e) => e.code ?? `unexpected: ${e.message}`,
   );
+
+test("a paper's builds leave one small folder on the worker, and another paper's builds never read it", async () => {
+  const names = ['article-basic', 'ams-multifile'];
+  const papers = [await paper(names[0]), await paper(names[1])];
+  const firsts: string[] = [];
+  const seconds: string[] = [];
+  for (const p of papers) firsts.push(await digest((await build(p.project)).id));
+  for (const p of papers) {
+    await edit(p.main, (text) =>
+      text.insert(text.toString().indexOf('\\end{document}'), 'Added between builds.\n'),
+    );
+    const second = await build(p.project);
+    expect(second).toMatchObject({ status: 'succeeded', cached: false });
+    seconds.push(await digest(second.id));
+  }
+  seconds.forEach((d, i) => expect(d).not.toBe(firsts[i]));
+  // What each folder holds, by path, against each paper's own files.
+  const held = (dir: string, rel = ''): string[] =>
+    readdirSync(join(dir, rel), { withFileTypes: true }).flatMap((e) =>
+      e.isDirectory() ? held(dir, `${rel}${e.name}/`) : [`${rel}${e.name}`],
+    );
+  const folders = papers.map((p) => warmDir(image, p.project)!);
+  expect(folders[0]).not.toBe(folders[1]);
+  for (const f of folders) expect(existsSync(join(f, 'made'))).toBe(true);
+  for (let i = 0; i < 2; i++) {
+    const mine = held(join(folders[i], 'made'));
+    expect(mine.length).toBeGreaterThan(0);
+    for (const q of papers) {
+      const own = (await listFiles(t.pool, owner.id, q.project)).map((f) => f.path);
+      expect(mine.filter((m) => own.includes(m))).toEqual([]);
+    }
+  }
+});
 
 test('a paper builds to a PDF, and the same inputs are never built twice', async () => {
   const { project, main } = await paper();

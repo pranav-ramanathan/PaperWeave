@@ -235,6 +235,10 @@ them.
 4. `cp infra/systemd/*.service /etc/systemd/system/`, then
    `systemctl daemon-reload && systemctl enable --now paperweave-sync paperweave-workers`.
 
+Each worker keeps what a paper's last good build made in a folder of its own on its disk, so the
+next build of that paper is quicker; `BUILD_WARM_DIR` in `docs/settings.md` says where, and how
+to turn it off.
+
 What was tried, and what was not:
 
 - `systemd-analyze verify` accepted both units. The only complaint was that `/usr/bin/node` does
