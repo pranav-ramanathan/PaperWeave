@@ -1,7 +1,16 @@
 // Takes queued builds from the builds table and builds them in the sandbox.
 import { execFileSync } from 'node:child_process';
 import { createHash } from 'node:crypto';
-import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import {
+  existsSync,
+  mkdirSync,
+  mkdtempSync,
+  readdirSync,
+  readFileSync,
+  rmSync,
+  statSync,
+  writeFileSync,
+} from 'node:fs';
 import { tmpdir } from 'node:os';
 import { dirname, join } from 'node:path';
 import { type BlobStore, cutRevision, type Db, transaction } from '@paperweave/server';
@@ -52,6 +61,43 @@ import { compile, type Compiler, IMAGE } from './compile.ts';
  */
 const TEX_TEXT =
   'utf8-biber-eps-glyphs-strings-forcedate-unicode-nullfont-csname-bbl-ended-unclosed-group-bibentry-minted-nobib-merged-opened-bibsaid';
+
+/**
+ * Where each paper's last good build leaves what it made (BUILD_WARM_DIR; empty turns it off).
+ * See compile()'s `warm`.
+ */
+const WARM = process.env.BUILD_WARM_DIR ?? join(tmpdir(), 'paperweave-warm');
+/** Papers kept per image; past this the least recently built are removed. */
+const WARM_PAPERS = 200;
+let warmSwept = false;
+
+/**
+ * The folder kept for one paper under one toolchain image, or undefined when warm builds are off
+ * or anything about it goes wrong. A new image starts empty: once per process, what an older
+ * image made is removed.
+ */
+export function warmDir(image: string, projectId: string): string | undefined {
+  if (!WARM || !/^[0-9a-f-]{36}$/i.test(projectId)) return undefined;
+  try {
+    const mine = createHash('sha256').update(image).digest('hex').slice(0, 16);
+    mkdirSync(WARM, { recursive: true, mode: 0o700 });
+    if (!warmSwept) {
+      warmSwept = true;
+      for (const e of readdirSync(WARM))
+        if (e !== mine) rmSync(join(WARM, e), { recursive: true, force: true });
+    }
+    const dir = join(WARM, mine);
+    mkdirSync(dir, { recursive: true, mode: 0o700 });
+    const papers = readdirSync(dir)
+      .map((e) => ({ e, at: statSync(join(dir, e)).mtimeMs }))
+      .sort((a, b) => a.at - b.at);
+    for (const { e } of papers.slice(0, Math.max(0, papers.length - WARM_PAPERS)))
+      if (e !== projectId) rmSync(join(dir, e), { recursive: true, force: true });
+    return join(dir, projectId);
+  } catch {
+    return undefined;
+  }
+}
 
 /** The toolchain image's content ID: part of every cache key, so a new image rebuilds everything. */
 export const imageId = () =>
@@ -175,6 +221,7 @@ export function buildNext(
         // The PDF is stamped with the moment its revision was cut, so rebuilding it elsewhere
         // from the exported files gives the same bytes.
         Math.floor(new Date(revision.created_at).getTime() / 1000),
+        warmDir(image, job.project_id),
       );
       const put = async (name?: string) =>
         name && existsSync(join(work, 'out', name))

@@ -6009,3 +6009,64 @@ of the paper's .bib files.`
   import note, PSTricks/EPS/CJK; overfull boxes; "You have requested package"; the build pane
   shows no other compiler warnings; nested lists, `\item[]` and `description` raw in the visual
   editor; Enter at the start of a list item after an empty one.
+
+## A build starts from what the paper's last good build made
+
+- **What was slow.** Every build started in an empty folder, so each edit cost two to four TeX
+  runs and a BibTeX or biber run. On 32 papers (22 real, 10 fixtures) a word typed at the end
+  took a median 3.5 s to build, 15.6 s for the largest.
+- **Now** (`compile()`'s `warm` folder in `apps/workers/src/compile.ts`; `warmDir` in
+  `builder.ts`; `BUILD_WARM_DIR`): the worker keeps what a paper's last good build made (the
+  `.aux`, `.toc`, `.bbl`, latexmk's record; not the PDF, not the paper's files) in a folder of
+  its own and puts it back before the next build, so latexmk runs only what the edit calls for:
+  one run for a word (median 1.5 s, 5.2 s for the largest), two when numbering changes. Measured
+  through the worker's own `compile()`, five edits on each of the 32 papers (160 steps):
+
+  | Edit                                                  | From nothing (before)                | From the last good build                       |
+  | ----------------------------------------------------- | ------------------------------------ | ---------------------------------------------- |
+  | A word typed at the end                               | 3 runs, median 3.5 s (all 32: 146 s) | 1 run, median 1.5 s (all 32: 57 s)             |
+  | A numbered section with a label and a reference added | 3 runs, median 3.5 s                 | 2 runs, median 2.5 s                           |
+  | That section taken out again                          | 3 runs, median 3.5 s                 | 2 runs, median 2.7 s                           |
+  | An undefined command typed (the build fails)          | 1 run, median 1.5 s                  | 2 runs (warm, then from nothing), median 3.0 s |
+  | The error mended                                      | 3 runs, median 3.6 s                 | 1 run, median 1.4 s                            |
+
+  The rules, and why each is there: nothing kept is used after a file is added, removed or
+  renamed, or the root or compiler changes (latexmk does not follow them: a `.bib` taken out
+  leaves its `.bbl` in use); a build that fails from kept files is run again from nothing before
+  it is reported (something kept may be what is wrong); BibTeX's and biber's words are repeated
+  while the `.bbl` they made is still read (a warm build that does not run them has none of
+  their words on its output); only the `.aux` files the last run touched give labels (a chapter
+  no longer included leaves its `.aux` behind); the PDF is never kept, so every build runs TeX
+  with its own date.
+
+- **Nothing a build produces changes**: 160 steps on the 32 papers and 35 on made-up ones gave
+  the same PDF bytes, SyncTeX, diagnostics, labels and log as a build from nothing. The cache
+  key and `TEX_TEXT` are unchanged, so no paper rebuilds because of this.
+- **Held by** the new tests in `compile.sandbox.test.ts` (run on the development machine), one
+  in `revisions.sandbox.test.ts` and one in `builds.sandbox.test.ts` (written, not run on the
+  development machine: the local blob store refuses writes; CI runs them).
+- **Not done.**
+  - A build that fails costs two runs where it cost one (median 3.0 s against 1.5 s): the error
+    is checked from nothing before it is shown. A failed run that ran out of time is not tried
+    again; a failure near the time limit followed by the second run can take up to twice the
+    limit.
+  - A paper whose first-ever run fails but whose later runs would pass (a `\ref` used as a
+    number) can build here after an edit and still fail from nothing; not seen in the corpus.
+  - The kept files stay on the worker's disk until 200 other papers have built, the image
+    changes or the folder is cleared; they are not removed when a person leaves a paper. They
+    hold what an `.aux`, `.toc` and `.bbl` hold: headings, captions, the reference list.
+  - Workers on different machines do not share them; the first build a machine does of a paper
+    is from nothing.
+  - **The wait around the build is now the larger part**: the pane notices its own edit only at
+    its next poll (up to 5 s when quiet), waits one more poll (2 s) for the paper to be still,
+    and sees the finished build at the next poll (up to 2 s). Telling the pane at once that this
+    editor typed is the natural next step; it needs browser tests, which cannot be run on the
+    development machine.
+  - LuaLaTeX builds its font cache on every build (7 s for a five-line paper, warm or not):
+    `TEXMFVAR` is in the container's temporary folder.
+  - Carry over, unchanged: 1509.05363 (own class loads `lastpage` and `totpages`), 1912.01703
+    (minted `frozencache`), the 2203.15556 import note, PSTricks/EPS/CJK; overfull boxes; "You
+    have requested package"; the build pane shows no other compiler warnings; nested lists,
+    `\item[]` and `description` raw in the visual editor (6 of 20 corpus papers with lists; five
+    overlapping causes); Enter at the start of a list item after an empty one; whether to build
+    on past a BibTeX error.

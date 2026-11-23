@@ -6,8 +6,11 @@ import {
   existsSync,
   mkdirSync,
   mkdtempSync,
+  readdirSync,
   readFileSync,
   renameSync,
+  rmSync,
+  unlinkSync,
   writeFileSync,
 } from 'node:fs';
 import { tmpdir } from 'node:os';
@@ -21,7 +24,7 @@ import {
   texText,
   toPdf,
 } from '@paperweave/latex';
-import { expect, test } from 'vitest';
+import { afterAll, expect, test } from 'vitest';
 import { fixtures, replica, textblocks, visualOp } from '../../../packages/bridge/src/harness.ts';
 import { describeImport } from '@paperweave/server';
 import { FIXTURES, fixtureFiles, rng } from '../../../packages/latex/src/testutil.ts';
@@ -1153,3 +1156,310 @@ test('headings with maths and tiny fonts are one warning each', async () => {
   expect(said.filter((d) => /^Font sizes not available: /.test(d.message))).toHaveLength(1);
   expect(said.filter((d) => /Token not allowed|Font shape/.test(d.message))).toEqual([]);
 });
+
+// Warm builds: a paper's last good build leaves what it made, and the next build starts from it.
+// Every one of these is "the same as a build from nothing": PDF, SyncTeX, diagnostics, labels, log.
+// The folders they make are under the system's temporary folder and are removed when the file ends.
+const scratch: string[] = [];
+afterAll(() => {
+  for (const d of scratch) rmSync(d, { recursive: true, force: true });
+});
+const wtmp = () => {
+  const d = tmp();
+  scratch.push(d);
+  return d;
+};
+const wpaper = (files: Record<string, string>) => {
+  const dir = wtmp();
+  for (const [path, text] of Object.entries(files)) {
+    mkdirSync(dirname(join(dir, path)), { recursive: true });
+    writeFileSync(join(dir, path), text);
+  }
+  return dir;
+};
+const fixturePaper = (name: string) => {
+  const dir = wtmp();
+  cpSync(join(FIXTURES, name), dir, { recursive: true });
+  return dir;
+};
+const doc = (body: string, head = '') =>
+  `\\documentclass{article}\n${head}\\begin{document}\n${body}\n\\end{document}\n`;
+// Forty days apart, so a date carried over from an earlier build would show.
+const at = (n: number) => 1_700_000_000 + n * 3_456_000;
+type Built = Awaited<ReturnType<typeof compile>> & { out: string };
+const built = async (
+  project: string,
+  n: number,
+  warm?: string,
+  compiler: 'pdflatex' | 'xelatex' | 'lualatex' = 'pdflatex',
+  root = 'main.tex',
+): Promise<Built> => {
+  const out = wtmp();
+  const r = await compile(project, root, out, 120, compiler, at(n), warm);
+  return { ...r, out };
+};
+const same = (a: Built, b: Built) => {
+  expect(a.ok).toBe(b.ok);
+  expect(a.diagnostics).toEqual(b.diagnostics);
+  expect(a.labels).toEqual(b.labels);
+  expect(a.log).toBe(b.log);
+  if (b.pdf) {
+    expect(a.pdf).toBeDefined();
+    expect(readFileSync(join(a.out, a.pdf!)).equals(readFileSync(join(b.out, b.pdf)))).toBe(true);
+    expect(
+      gunzipSync(readFileSync(join(a.out, a.synctex!))).equals(
+        gunzipSync(readFileSync(join(b.out, b.synctex!))),
+      ),
+    ).toBe(true);
+  } else expect(a.pdf).toBeUndefined();
+};
+// The warm build of `project` as the n-th, and the build from nothing of the same text and date.
+const both = async (
+  project: string,
+  n: number,
+  warm: string,
+  compiler: 'pdflatex' | 'xelatex' | 'lualatex' = 'pdflatex',
+) => {
+  const w = await built(project, n, warm, compiler);
+  same(w, await built(project, n, undefined, compiler));
+  return w;
+};
+const WARM_TIME = 600_000;
+
+test.each(['article-basic', 'ams-multifile', 'real-xelatex'])(
+  '%s: the build after an edit runs TeX once and is the build from nothing',
+  async (name) => {
+    const project = fixturePaper(name);
+    const compiler = name === 'real-xelatex' ? 'xelatex' : 'pdflatex';
+    const warm = wtmp();
+    const first = await built(project, 1, warm, compiler);
+    expect(first.ok).toBe(true);
+    expect(first.warmed).toBe(false);
+    const main = readFileSync(join(project, 'main.tex'), 'utf8');
+    const i = main.lastIndexOf('\\end{document}');
+    writeFileSync(join(project, 'main.tex'), main.slice(0, i) + 'word\n' + main.slice(i));
+    const second = await both(project, 2, warm, compiler);
+    expect(second.ok).toBe(true);
+    expect(second.warmed).toBe(true);
+    expect(second.passes).toBe(1);
+  },
+  WARM_TIME,
+);
+
+test(
+  'a section with a label added, then taken out, is each time the build from nothing',
+  async () => {
+    const project = wpaper({
+      'main.tex': doc('\\section{One}\\label{s:one}\nText, see \\ref{s:one}.'),
+    });
+    const warm = wtmp();
+    await built(project, 1, warm);
+    writeFileSync(
+      join(project, 'main.tex'),
+      doc(
+        '\\section{One}\\label{s:one}\nText, see \\ref{s:one} and \\ref{s:two}.\n\\section{Two}\\label{s:two}\nMore.',
+      ),
+    );
+    const added = await both(project, 2, warm);
+    expect(added.warmed).toBe(true);
+    expect(Object.keys(added.labels!).sort()).toEqual(['s:one', 's:two']);
+    writeFileSync(
+      join(project, 'main.tex'),
+      doc('\\section{One}\\label{s:one}\nText, see \\ref{s:one}.'),
+    );
+    const removed = await both(project, 3, warm);
+    expect(removed.warmed).toBe(true);
+    expect(Object.keys(removed.labels!)).toEqual(['s:one']);
+  },
+  WARM_TIME,
+);
+
+test.each(['bibtex', 'biber'] as const)(
+  'what %s warned of is still said by a build that did not run it',
+  async (engine) => {
+    const project = abbrPaper(engine);
+    scratch.push(project);
+    const warm = wtmp();
+    const abbr = (b: Built) =>
+      b.diagnostics.filter((d) => /^Abbreviation not defined: /.test(d.message));
+    const first = await built(project, 1, warm);
+    expect(abbr(first)).toHaveLength(1);
+    const main = readFileSync(join(project, 'main.tex'), 'utf8');
+    writeFileSync(join(project, 'main.tex'), main.replace('Cite', 'Now cite'));
+    const second = await both(project, 2, warm);
+    expect(second.warmed).toBe(true);
+    expect(second.passes).toBe(1);
+    expect(abbr(second)).toEqual(abbr(first));
+    writeFileSync(
+      join(project, 'refs.bib'),
+      '@article{he16,\n  author = {He, K.},\n  title = {Deep},\n  journal = {CVPR},\n  year = {2016}\n}\n',
+    );
+    const third = await both(project, 3, warm);
+    expect(abbr(third)).toEqual([]);
+  },
+  WARM_TIME,
+);
+
+test(
+  'a .bib taken out of the paper is not answered from the .bbl it left',
+  async () => {
+    const project = wpaper({
+      'main.tex': doc('Cite \\cite{k}.\n\\bibliographystyle{plain}\n\\bibliography{refs}'),
+      'refs.bib':
+        '@article{k,\n  author = {A, B.},\n  title = {T},\n  journal = {J},\n  year = {2001}\n}\n',
+    });
+    const warm = wtmp();
+    await built(project, 1, warm);
+    unlinkSync(join(project, 'refs.bib'));
+    const second = await both(project, 2, warm);
+    expect(second.warmed).toBe(false);
+    expect(
+      second.diagnostics.filter((d) => /^Bibliography not made: /.test(d.message)),
+    ).toHaveLength(1);
+  },
+  WARM_TIME,
+);
+
+test(
+  "a paper that drops its bibliography drops BibTeX's warnings with it",
+  async () => {
+    const project = abbrPaper('bibtex');
+    scratch.push(project);
+    const warm = wtmp();
+    const first = await built(project, 1, warm);
+    expect(
+      first.diagnostics.filter((d) => /^Abbreviation not defined: /.test(d.message)),
+    ).toHaveLength(1);
+    writeFileSync(join(project, 'main.tex'), doc('Nothing is cited now.'));
+    const second = await both(project, 2, warm);
+    expect(second.warmed).toBe(true);
+    expect(second.diagnostics.filter((d) => /^Abbreviation not defined: /.test(d.message))).toEqual(
+      [],
+    );
+  },
+  WARM_TIME,
+);
+
+test(
+  'a chapter no longer included leaves no labels behind',
+  async () => {
+    const project = wpaper({
+      'main.tex': doc('\\include{a}\n\\include{b}'),
+      'a.tex': '\\section{A}\\label{la}\nText.\n',
+      'b.tex': '\\section{B}\\label{lb}\nText.\n',
+    });
+    const warm = wtmp();
+    const first = await built(project, 1, warm);
+    expect(Object.keys(first.labels!).sort()).toEqual(['la', 'lb']);
+    writeFileSync(join(project, 'main.tex'), doc('\\include{a}'));
+    const second = await both(project, 2, warm);
+    expect(second.warmed).toBe(true);
+    expect(second.labels).not.toHaveProperty('lb');
+    expect(second.labels).toHaveProperty('la');
+  },
+  WARM_TIME,
+);
+
+test(
+  "a paper's own .bbl replaced is the one read",
+  async () => {
+    const bbl = (text: string) =>
+      `\\begin{thebibliography}{1}\n\\bibitem{k} ${text}\n\\end{thebibliography}\n`;
+    const project = wpaper({
+      'main.tex': doc('Cite \\cite{k}.\n\\input{main.bbl}'),
+      'main.bbl': bbl('First entry text.'),
+    });
+    const warm = wtmp();
+    await built(project, 1, warm);
+    writeFileSync(join(project, 'main.bbl'), bbl('A quite different entry text.'));
+    expect((await both(project, 2, warm)).warmed).toBe(true);
+  },
+  WARM_TIME,
+);
+
+test(
+  "an edit to a file TeX does not read still gets the build's own date",
+  async () => {
+    const project = wpaper({ 'main.tex': doc('Made \\today.'), 'spare.tex': 'one\n' });
+    const warm = wtmp();
+    await built(project, 1, warm);
+    writeFileSync(join(project, 'spare.tex'), 'two\n');
+    const second = await both(project, 2, warm);
+    expect(second.passes).toBeGreaterThanOrEqual(1);
+  },
+  WARM_TIME,
+);
+
+test(
+  'an error in the paper is reported as by a build from nothing, and the mended paper builds in one run',
+  async () => {
+    const good = doc('Fine.');
+    const project = wpaper({ 'main.tex': good });
+    const warm = wtmp();
+    await built(project, 1, warm);
+    writeFileSync(join(project, 'main.tex'), doc('Fine.\n\\nosuchcommandpw'));
+    const bad = await both(project, 2, warm);
+    expect(bad.ok).toBe(false);
+    expect(bad.warmed).toBe(false);
+    writeFileSync(join(project, 'main.tex'), doc('Fine again.'));
+    const mended = await both(project, 3, warm);
+    expect(mended.ok).toBe(true);
+    expect(mended.warmed).toBe(true);
+    expect(mended.passes).toBe(1);
+  },
+  WARM_TIME,
+);
+
+test(
+  'something broken among the kept files is not held against the paper',
+  async () => {
+    const project = wpaper({ 'main.tex': doc('Fine.') });
+    const warm = wtmp();
+    await built(project, 1, warm);
+    writeFileSync(join(warm, 'made', 'main.aux'), '\\relax\n\\nosuchcommandinaux\n');
+    const second = await built(project, 2, warm);
+    expect(second.ok).toBe(true);
+    expect(second.diagnostics.filter((d) => d.severity === 'error')).toEqual([]);
+    expect(second.warmed).toBe(false);
+    const third = await built(project, 3, warm);
+    expect(third.warmed).toBe(true);
+  },
+  WARM_TIME,
+);
+
+test(
+  'a changed compiler starts from nothing',
+  async () => {
+    const project = wpaper({ 'main.tex': doc('Fine.') });
+    const warm = wtmp();
+    await built(project, 1, warm, 'pdflatex');
+    const second = await both(project, 2, warm, 'xelatex');
+    expect(second.warmed).toBe(false);
+    const third = await both(project, 3, warm, 'xelatex');
+    expect(third.warmed).toBe(true);
+  },
+  WARM_TIME,
+);
+
+test(
+  "nothing of the paper's own, and no PDF, is among what is kept",
+  async () => {
+    const project = fixturePaper('ieee-multifile');
+    const warm = wtmp();
+    const r = await built(project, 1, warm);
+    expect(r.ok).toBe(true);
+    const kept: string[] = [];
+    const walk = (rel: string) => {
+      for (const e of readdirSync(join(warm, 'made', rel), { withFileTypes: true })) {
+        const p = rel ? `${rel}/${e.name}` : e.name;
+        if (e.isDirectory()) walk(p);
+        else kept.push(p);
+      }
+    };
+    walk('');
+    expect(kept.length).toBeGreaterThan(0);
+    expect(kept.filter((p) => existsSync(join(FIXTURES, 'ieee-multifile', p)))).toEqual([]);
+    expect(kept.filter((p) => /\.(pdf|xdv|synctex\.gz)$/.test(p))).toEqual([]);
+  },
+  WARM_TIME,
+);
