@@ -118,7 +118,25 @@ export const LIGATURES: Record<string, string> = {
   dots: '…',
   textendash: '–',
   textemdash: '—',
+  textellipsis: '…',
+  slash: '/',
+  thinspace: '\u2009',
+  copyright: '©',
+  textcopyright: '©',
+  textregistered: '®',
+  texttrademark: '™',
+  textdegree: '°',
+  texteuro: '€',
+  pounds: '£',
+  textsterling: '£',
 };
+
+const LOGO = /^\\(TeX|LaTeX|LaTeXe|BibTeX|XeTeX|LuaTeX)(?:\{\})?$/;
+/** What a logo command, written exactly as `\LaTeX` or `\LaTeX{}`, prints; null for anything else. */
+export function logoOf(src: string): string | null {
+  const m = LOGO.exec(src);
+  return m ? LIGATURES[m[1]!]! : null;
+}
 
 /** An accent command and the combining mark it puts on the letter after it. */
 const ACCENTS: Record<string, string> = {

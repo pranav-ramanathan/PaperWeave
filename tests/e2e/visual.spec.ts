@@ -1179,3 +1179,50 @@ test('TeX accents show as one character each, and typing and deleting treat each
   await expect.poll(() => sourceText(page)).toContain('Erds at');
   expect(await sourceText(page)).not.toContain('\\H');
 });
+
+test('text commands read as what they print, and typing around them keeps the source', async ({
+  browser,
+}) => {
+  const { page, email } = await person(browser, 'vis-textcmd');
+  const main = [
+    '\\documentclass{article}',
+    '\\begin{document}',
+    'Written in \\LaTeX{}, sizes 1, 2, \\ldots, 9 and so on \\ldots then 5\\,km for Gro\\ss e.',
+    '\\end{document}',
+    '',
+  ].join('\n');
+  const zip = join(mkdtempSync(join(tmpdir(), 'paperweave-e2e-')), `Textcmd ${run}.zip`);
+  writeFileSync(zip, await writeZip([{ path: 'main.tex', bytes: Buffer.from(main) }]));
+  await page.goto('/sign-in');
+  await signIn(page, email);
+  await page.getByLabel('Or import a ZIP of a LaTeX project').setInputFiles(zip);
+  await page.getByRole('button', { name: 'Import ZIP' }).click();
+  await page.getByRole('link', { name: 'main.tex' }).first().click();
+  await expect(status(page)).toHaveText('All edits saved.');
+  await expect(page.locator(VISUAL)).toContainText(
+    'Written in LaTeX, sizes 1, 2, \u2026, 9 and so on \u2026then 5',
+  );
+  await expect(page.locator(VISUAL)).toContainText('km for Gro\u00dfe.');
+  const logo = page.locator(`${VISUAL} .pw-raw_inline`);
+  await expect(logo).toHaveCount(1);
+  await expect(logo).toHaveClass(/pw-word/);
+  await expect(logo).toHaveText('LaTeX');
+  await expect(logo).toHaveAttribute('title', '\\LaTeX{}');
+  await expect(page.locator(`${VISUAL} .pw-raw_inline:not(.pw-word)`)).toHaveCount(0);
+  expect(await page.evaluate((v) => document.querySelector(v)!.textContent, VISUAL)).toContain(
+    '5\u2009km',
+  );
+
+  await typeAfter(page, VISUAL, 'so on \u2026', ' ');
+  await expect(status(page)).toHaveText('All edits saved.');
+  await showSource(page);
+  await expect.poll(() => sourceText(page)).toContain('so on \\ldots \\ then');
+  await showVisual(page);
+  await expect(page.locator(VISUAL)).toContainText('so on \u2026 then');
+  await pick(page, VISUAL, '\u2026');
+  await page.keyboard.press('Backspace');
+  await expect(status(page)).toHaveText('All edits saved.');
+  await showSource(page);
+  await expect.poll(() => sourceText(page)).toContain('1, 2, , 9');
+  expect(await sourceText(page)).toContain('\\ldots \\ then');
+});

@@ -5015,8 +5015,8 @@ Found by a three-person walkthrough.
   fuzz over a document dense with supported and unsupported forms), six new fragments in the
   shared fuzz list, and a browser test in `visual.spec` ("TeX accents show as one character
   each…"), which failed before. A test that unsupported forms stay raw passes before and after.
-- **Left out.** Forms with a space (`\' e`, `\c c`, `Gro\ss e`), which need a guard rule of their
-  own; accents with no single-unit composition, `\t`, `\d`, `\b`, standalone `\i` and `\j`,
+- **Left out.** Forms with a space (`\' e`, `\c c`; `Gro\ss e` is done, see the text commands section below),
+  which need a guard rule of their own; accents with no single-unit composition, `\t`, `\d`, `\b`, standalone `\i` and `\j`,
   `\dh`, `\th`; a paper that redefines these commands is not checked for; `\LaTeX`, `\ldots`,
   `--` and ``…'' are still chips; accents inside raw atoms are unchanged; typing `é` still writes
   UTF-8; the chip's double-click LaTeX window is gone for these. A paragraph made only of
@@ -5119,3 +5119,28 @@ Found by a three-person walkthrough.
 - **Not done.** Files without a visual view (.bib, .sty, .cls) have no toolbar, so they have
   Ctrl+F only. A panel opened while the file is still locked has no Replace row until it is
   reopened. No find in the visual view or the PDF, and no go-to-line.
+
+  (`\' e`, `\t`, `\d`) are never checked, as before (`Gro\ss e` is now read, see below).
+
+## Text commands read as what they print
+
+- **What was wrong.** `\ldots`, `\,`, `\textendash` and `\LaTeX` were grey raw chips in the visual
+  view and "Dummy" to the grammar checker, so `5\,km` was read as `5Dummykm`. `See Vo\ss ler` gave
+  a false spelling finding on `ler`, because `\ss ` (TeX skips the space) was not one piece.
+- **Now** `\ldots \dots \textellipsis \textendash \textemdash \slash \thinspace \copyright
+\textcopyright \textregistered \texttrademark \textdegree \texteuro \pounds \textsterling`
+  join the national letters as one-character `esc` pieces (`TEXT_WORDS`, `parse.ts`), and `\,` is a
+  thin space. A piece takes the `{}` or the same-line spaces and tabs after the name, as TeX does,
+  never a newline. The logos (`\LaTeX{}`, `\TeX`, ...) stay atoms (they are several characters),
+  but read as their name to the checker and show as that word in the visual view (`logoOf`,
+  class `pw-word`, source in the title). In the bridge, a space or tab typed after such a command
+  and its eaten spaces gets `\ ` or `{}` first, so it is not lost; this is limited to these names
+  (for every control word `\item  y` would become `\item \ y`).
+- **Held by** `parse.test`, `prose.test`, `bib.test`, the fuzz list in `testutil`, `bridge.test`
+  ("text commands in the visual view", including a generated-edit loop), the grammar sandbox test
+  (real checker), and a browser test in `visual.spec`.
+- **Left out.** `\-`, `\/` and `\@` print nothing and stay chips; accents with a space (`\' e`,
+  `\c c`, `\H o`); `--`, `---` and quote ligatures still show as typed; a line break straight
+  after `\ldots` shows as a space although TeX prints none; a space after `\LaTeX ` is shown
+  although TeX skips it; papers that redefine these commands are not checked for; `plainText` for
+  bibliography titles gains the new symbols; a line that is only `\ldots` stays a raw block.

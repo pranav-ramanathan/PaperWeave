@@ -1,5 +1,13 @@
 import { expect, test } from 'vitest';
-import { bblEntries, bibEntries, bibItems, cleanDoi, describeEntry, plainText } from './bib.ts';
+import {
+  bblEntries,
+  bibEntries,
+  bibItems,
+  cleanDoi,
+  describeEntry,
+  logoOf,
+  plainText,
+} from './bib.ts';
 import { citeIndex } from './labels.ts';
 import { fixtureFiles } from './testutil.ts';
 
@@ -191,4 +199,12 @@ test('a biblatex .bbl gives each key once, with its title', () => {
 test('a .bbl with no entries gives none', () => {
   expect(bblEntries('')).toEqual([]);
   expect(bblEntries('Just prose, \\cite{k}.')).toEqual([]);
+});
+
+test('logos and text commands read as what they print', () => {
+  expect(logoOf('\\LaTeX{}')).toBe('LaTeX');
+  expect(logoOf('\\LaTeXe')).toBe('LaTeX2e');
+  expect(logoOf('\\LaTeX{} x')).toBeNull();
+  expect(logoOf('\\foo')).toBeNull();
+  expect(plainText('A\\slash B \\copyright{} \\ldots')).toBe('A/B © …');
 });

@@ -1,6 +1,6 @@
 // Visual edit -> source splices. The bridge never regenerates LaTeX: it works out which source
 // characters an edit touched and replaces exactly those.
-import { commentOpen, escape, type Piece } from '@paperweave/latex';
+import { commentOpen, escape, TEXT_WORDS, type Piece } from '@paperweave/latex';
 import type { Node as PMNode } from '@tiptap/pm/model';
 import { Transform } from '@tiptap/pm/transform';
 import { locate, markKey, type Model, type Phantom, width } from './project.ts';
@@ -17,6 +17,8 @@ export type Translation = {
 // An odd run of backslashes then letters is a control word; an even run is a line break.
 const AFTER_WORD = /(^|[^\\])(\\\\)*\\[a-zA-Z]+$/;
 const AFTER_BREAK = /(^|[^\\])(\\\\)+$/;
+// A text symbol such as \ldots followed by spaces: TeX skips them, so a space typed there would vanish.
+const AFTER_EATEN = new RegExp('(^|[^\\\\])(\\\\\\\\)*\\\\(' + TEXT_WORDS.join('|') + ')[ \\t]+$');
 
 /** The smallest changed range between two documents: before[a, endA) became after[a, endB). */
 export function diff(before: PMNode, after: PMNode) {
@@ -160,6 +162,8 @@ export function guard(tail: string, next: string) {
     tail = tail.replace(/[ \t]*(\n[ \t]*)?$/, '');
     if (c === '[' && /\\begin\{[^{}]*\}$/.test(tail)) return '{}';
   }
+  if (c === ' ' && AFTER_EATEN.test(tail)) return '\\';
+  if (c === '\t' && AFTER_EATEN.test(tail)) return '{}';
   const word = AFTER_WORD.test(tail);
   if (word && /[A-Za-z]/.test(c)) return '{}';
   if (word && (c === ' ' || c === '\t')) return '{}';

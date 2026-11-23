@@ -2549,3 +2549,95 @@ describe('TeX accents in the visual view', () => {
     expect(done).toBeGreaterThan(1000);
   });
 });
+
+describe('text commands in the visual view', () => {
+  const insertAt = (src: string, off: number, text: string) => {
+    const r = replica(src);
+    expect(r.dispatch(r.state.tr.insertText(text, textblocks(r)[0].start + off))).toBe(true);
+    r.check();
+    return r;
+  };
+  const deleteAt = (src: string, off: number) => {
+    const r = replica(src);
+    const at = textblocks(r)[0].start + off;
+    expect(r.dispatch(r.state.tr.delete(at, at + 1))).toBe(true);
+    r.check();
+    return r;
+  };
+
+  test('they show as the character they print', () => {
+    const r = replica('a, b, \\ldots, z and so on \\ldots and Gro\\ss e.\n');
+    expect(shown(r)).toBe('a, b, \u2026, z and so on \u2026and Gro\u00dfe.');
+    const k = replica('5\\,km\n');
+    const tb = textblocks(k)[0];
+    expect(k.state.doc.textBetween(tb.start + 1, tb.start + 2)).toBe('\u2009');
+  });
+
+  test('typing next to one never lands inside the command or loses a space', () => {
+    const src = 'so on \\ldots and\n';
+    expect(insertAt(src, 7, 'x').src).toBe('so on \\ldots xand\n');
+    const sp = insertAt(src, 7, ' ');
+    expect(sp.src).toBe('so on \\ldots \\ and\n');
+    expect(shown(sp)).toBe('so on \u2026 and');
+    expect(insertAt(src, 6, 'x').src).toBe('so on x\\ldots and\n');
+    expect(insertAt('a\\ldots, b\n', 2, 'x').src).toBe('a\\ldots{}x, b\n');
+  });
+
+  test('deleting the character removes the whole command', () => {
+    expect(deleteAt('so on \\ldots and\n', 6).src).toBe('so on and\n');
+    const r = deleteAt('so on \\ldots x and\n', 7);
+    expect(r.src).toBe('so on \\ldots \\ and\n');
+    expect(shown(r)).toBe('so on \u2026 and');
+    expect(deleteAt('5\\,km\n', 1).src).toBe('5km\n');
+  });
+
+  test('selecting it copies the source, and emphasis wraps whole pieces', () => {
+    const src = 'so on \\ldots and\n';
+    const r = replica(src);
+    const tb = textblocks(r)[0];
+    r.select(tb.start + 6, tb.start + 7);
+    expect(r.bridge.sourceOf(r.state)).toBe('\\ldots ');
+    expect(marked(src, 3, 7, 'emph')!.src).toBe('so \\emph{on \\ldots }and\n');
+  });
+
+  test('the space guard is limited to these commands', () => {
+    const r = deleteAt('A \\noindent x y\n', 4);
+    expect(r.src).not.toContain('\\ ');
+  });
+
+  test('generated edits around text commands stay inside their range', () => {
+    const DENSE =
+      'a, b, \\ldots, z and so on \\ldots and 5\\,km, Gro\\ss e, \\o re \\dots\\ ok \\textendash{} x \\copyright  y \\LaTeX{} z \\ldots\n next \\ldots  \n\n' +
+      'More \\emph{so \\ldots on \\ss } and {\\ldots} and {\\ss } \\, \\,\\, $\\ldots$ \\ldots[x] \\ldots* \\ldots\\ldots x.\n\n' +
+      'Third \\ldots a \\ldots\n\\, b \\dots c \\o\n';
+    let done = 0;
+    for (let seed = 0; seed < 300; seed++) {
+      const r = rng(seed);
+      const rep = replica(DENSE);
+      for (let step = 0; step < 40; step++) {
+        const before = rep.src;
+        let op;
+        try {
+          op = visualOp(r, rep);
+          if (!op) continue;
+          rep.check();
+        } catch (err) {
+          throw new Error(`seed ${seed} step ${step}: ${(err as Error).message}`, { cause: err });
+        }
+        const where = `seed ${seed} step ${step} ${op.what}`;
+        if (!op.accepted) {
+          expect(rep.src, where).toBe(before);
+          continue;
+        }
+        done++;
+        if (rep.src === before) continue;
+        if (
+          before.slice(0, op.lo) !== rep.src.slice(0, op.lo) ||
+          !rep.src.endsWith(before.slice(op.hi))
+        )
+          throw new Error(`${where}: changed outside [${op.lo}, ${op.hi})`);
+      }
+    }
+    expect(done).toBeGreaterThan(1000);
+  });
+});
