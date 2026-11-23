@@ -621,7 +621,7 @@ Read this first. Update it in every pull request.
     containment check, so both sides agree by construction. That check is a correctness guard, not
     a permission: a writer can already type any bytes through Yjs.
   - Staleness: the set is read when the page loads, like the macros. A `\newtheorem` added since
-    shows raw in the visual view until a reload. The grammar check reads it on each check.
+    shows as a boxed block in the visual view (not a one-line marker) until a reload. The grammar check reads it on each check.
   - Proposals never set `contained`, so they run on the default set and are unchanged.
 
 ## DOI lookups are limited, polite and bounded
@@ -5250,3 +5250,25 @@ closed: ...` (outermost first, at most 10). The log does not name the file: with
   `a` / `b` against `a` / `b x` / `b y` now pairs `b` with one of the added lines.
 - **Not done.** A run of more than 100 cells (removed x added) is paired by position only, and only
   with equal counts. Moved lines are not detected.
+
+## Labels and environment lines are one line in the visual view
+
+- **What was wrong.** Every lone `\label{..}`, every `\begin{theorem}[..]` / `\end{theorem}` (and
+  `proof`, `lemma`, ...) and the final `\end{document}` was a dashed box headed "LaTeX: label", with
+  the source in a `<pre>` and an "Edit in source" button. A labelled theorem was four boxes around
+  one sentence.
+- **Now** those lines are one quiet line: a lone label reads `label sec:intro` (with ` · 2.1` when
+  the last build numbered it), a begin line reads `Theorem (Convergence)` or `Proof`, an end line
+  `End of theorem`, the end of the file `End of document`. The line has a `source` button (its name
+  is `Edit in source: <the line>`); the LaTeX is the line's title. A `\label` inside a paragraph is a
+  small tag showing its key. Display only: `markerOf` (`apps/web/lib/marker.ts`) decides from the
+  block's source and the parser's label, so the parser, bridge, schema and server are unchanged,
+  and deleting a lone label still works while the halves of an environment still refuse.
+- **Held by** `marker.test.ts`, the bridge guard "markers are display only" (projected source,
+  typing, label removal, refused halves, undo) and a browser test in `visual.spec`
+  (counts, texts, button, typing, Backspace on a label, axe audit).
+- **Not done.** A theorem's printed title and number (`\newtheorem{obs}{Observation}` shows
+  `Obs`); merging a label into its heading line; the preamble box, `\maketitle`, `\input`, `\title`
+  lines, which stay boxes; paper text macros (`\eg`) and `--`/quote ligatures; a `\newtheorem`
+  added since the page loaded stays boxed until a reload. A label with a trailing comment, or an
+  `\end{document}` followed by text, stays a box.

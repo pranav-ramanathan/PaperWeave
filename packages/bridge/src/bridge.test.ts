@@ -1777,6 +1777,97 @@ test('undoing the deletion of a block restores every byte', () => {
   }
 });
 
+describe('markers are display only', () => {
+  const PROBE = [
+    '\\documentclass{article}',
+    '\\begin{document}',
+    '\\section{Introduction}',
+    '\\label{sec:intro}',
+    'We study things.',
+    '',
+    '\\section{Setup}',
+    '\\label{sec:setup}',
+    '',
+    '\\begin{theorem}[Convergence]',
+    '\\label{thm:main}',
+    'Every sequence converges.',
+    '\\end{theorem}',
+    '',
+    '\\begin{proof}',
+    'Obvious.',
+    '\\end{proof}',
+    '',
+    '\\label{thm:two} Text after the label.',
+    '',
+    '\\end{document}',
+    '',
+  ].join('\n');
+  const T = new Set(DEFAULT_TRANSPARENT);
+  const raws = (r: Rep) => {
+    const out: string[] = [];
+    r.state.doc.forEach((n) => void (n.type.name === 'raw_block' && out.push(n.attrs.src)));
+    return out;
+  };
+  const index = (r: Rep, src: string) => {
+    let at = -1;
+    r.state.doc.forEach((n, _o, i) => void (n.attrs.src === src && at < 0 && (at = i)));
+    return at;
+  };
+
+  test('the projected raw blocks are the lines of source, unchanged', () => {
+    const r = replica(PROBE, undefined, { transparent: T });
+    expect(raws(r)).toEqual([
+      '\\documentclass{article}\n\\begin{document}',
+      '\\label{sec:intro}',
+      '\\label{sec:setup}',
+      '\\begin{theorem}[Convergence]',
+      '\\label{thm:main}',
+      '\\end{theorem}',
+      '\\begin{proof}',
+      '\\end{proof}',
+      '\\end{document}\n',
+    ]);
+    for (const piece of raws(r)) expect(PROBE).toContain(piece);
+    r.check();
+  });
+
+  test('typing in the theorem changes only those bytes', () => {
+    const r = replica(PROBE, undefined, { transparent: T });
+    const k = textblocks(r).findIndex((_b, i, all) => {
+      let text = '';
+      r.state.doc.descendants((n, pos) => {
+        if (n.isTextblock && pos + 1 === all[i].start) text = n.textContent;
+      });
+      return text.startsWith('Every');
+    });
+    const start = textblocks(r)[k].start;
+    expect(r.dispatch(r.state.tr.insertText('really ', start + 6, start + 6))).toBe(true);
+    expect(r.src).toBe(PROBE.replace('Every ', 'Every really '));
+    r.check();
+  });
+
+  test('deleting a lone label splices as before, and the halves of an environment are refused', () => {
+    const r = replica(PROBE, undefined, { transparent: T });
+    expect(dropAt(r, index(r, '\\label{sec:setup}'))).toBe(true);
+    expect(r.src).toBe(PROBE.replace('\\label{sec:setup}\n\n', '\n'));
+    r.check();
+    const s = replica(PROBE, undefined, { transparent: T });
+    expect(dropAt(s, index(s, '\\begin{theorem}[Convergence]'))).toBe(false);
+    expect(dropAt(s, index(s, '\\end{proof}'))).toBe(false);
+    expect(s.src).toBe(PROBE);
+  });
+
+  test('undo restores every byte', () => {
+    const r = replica(PROBE, undefined, { transparent: T });
+    const um = new Y.UndoManager(r.ytext, { trackedOrigins: new Set([r.bridge]) });
+    expect(dropAt(r, index(r, '\\label{thm:main}'))).toBe(true);
+    expect(r.src).not.toBe(PROBE);
+    um.undo();
+    expect(r.src).toBe(PROBE);
+    r.check();
+  });
+});
+
 const ELSEVIER = fixtures['real-elsevier/main.tex'];
 
 test('typing in an abstract inside frontmatter splices only those bytes, and undo restores them', () => {
