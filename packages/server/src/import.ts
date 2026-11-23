@@ -127,13 +127,24 @@ function compilerFor(texts: Record<string, string>, root: string, graph: Graph):
 const NO_ROOT =
   'No file here has \\begin{document} with a \\documentclass before it, in that file or in a file it \\inputs.';
 
+type ArchivePaper = {
+  dir: string;
+  name: string;
+  entries: Entry[];
+  skipped: Skipped[];
+  note?: string;
+};
+
 /**
  * Split an archive into the papers it holds. One wrapping folder is removed. If root files sit in
  * different top-level folders (an "export all projects" archive), each folder is a paper. If one
  * folder holds the root but the archive has usable files outside it (`src/main.tex` reaching for
  * `../figures`), the whole archive is the paper, so that what the root reaches for is there.
+ * Among several papers, one that reads files outside its folder (`../figures/a`, `\graphicspath`,
+ * a `.sty`, `\bibliography`) keeps the archive's layout and gets its own copy of those shared
+ * files, with a note saying so; a paper that reads none of them is its folder alone, as before.
  */
-export function papers(entries: Entry[], skipped: Skipped[]) {
+export function papers(entries: Entry[], skipped: Skipped[]): ArchivePaper[] {
   const text = new Map<string, string>();
   const unreadable: string[] = [];
   for (const e of entries) {
@@ -171,9 +182,7 @@ export function papers(entries: Entry[], skipped: Skipped[]) {
   if (tops.length > MAX_PROJECTS)
     throw new AppError('invalid_input', `This ZIP holds more than ${MAX_PROJECTS} papers.`);
   if (tops.length === 1 && tops[0] !== '' && entries.some((e) => !e.path.startsWith(tops[0]))) {
-    // The folder every file shares, if there is one: that is the wrapper, and only that goes.
-    const first = entries[0].path.split('/')[0] + '/';
-    const wrapper = entries.every((e) => e.path.startsWith(first)) ? first : '';
+    const wrapper = wrapperOf(entries);
     return [
       {
         dir: wrapper,
@@ -186,22 +195,58 @@ export function papers(entries: Entry[], skipped: Skipped[]) {
     ];
   }
   const outside = entries.filter((e) => !tops.some((t) => e.path.startsWith(t)));
-  for (const e of outside)
-    skipped.push({
-      path: e.path,
-      reason: 'shared between the papers in this archive: add it to each paper that needs it',
-    });
-  return tops.map((dir) => ({
-    dir,
-    name: dir.replace(/\/$/, '').split('/').pop() ?? '',
-    entries: entries
-      .filter((e) => e.path.startsWith(dir))
-      .map((e) => ({ path: e.path.slice(dir.length), bytes: e.bytes })),
-    // Each paper's report lists what was left out of it, and what sat outside every paper.
-    skipped: skipped.filter(
-      (s) => s.path.startsWith(dir) || !tops.some((t) => s.path.startsWith(t)),
-    ),
-  }));
+  for (const e of outside) skipped.push({ path: e.path, reason: SHARED });
+  const outsidePaths = new Set(outside.map((e) => e.path));
+  const wrapper = wrapperOf(entries);
+  const unwrap = <T extends { path: string }>(x: T): T =>
+    x.path.startsWith(wrapper) ? { ...x, path: x.path.slice(wrapper.length) } : x;
+  return tops.map((dir) => {
+    const name = dir.replace(/\/$/, '').split('/').pop() ?? '';
+    // Does a root of this paper read a file that sits outside every paper?
+    const reads =
+      outside.length > 0 &&
+      roots
+        .filter((r) => r.startsWith(dir))
+        .some((r) =>
+          includeGraph(asObject, r, [...everything]).edges.some((e) => outsidePaths.has(e.to)),
+        );
+    if (!reads)
+      return {
+        dir,
+        name,
+        entries: entries
+          .filter((e) => e.path.startsWith(dir))
+          .map((e) => ({ path: e.path.slice(dir.length), bytes: e.bytes })),
+        // Each paper's report lists what was left out of it, and what sat outside every paper.
+        skipped: skipped.filter(
+          (s) => s.path.startsWith(dir) || !tops.some((t) => s.path.startsWith(t)),
+        ),
+      };
+    return {
+      dir,
+      name,
+      entries: entries
+        .filter((e) => e.path.startsWith(dir) || outsidePaths.has(e.path))
+        .map((e) => unwrap({ path: e.path, bytes: e.bytes })),
+      // What it was given is not "shared" for it; what was dropped for another reason still is.
+      skipped: skipped
+        .filter(
+          (s) =>
+            s.path.startsWith(dir) ||
+            (!tops.some((t) => s.path.startsWith(t)) && s.reason !== SHARED),
+        )
+        .map(unwrap),
+      note: `This archive holds several papers that share files. This paper reads some of them, so it has its own copy of them and keeps its folder (${dir.slice(wrapper.length)}), so that paths such as ../ still lead to them. A change to a shared file here does not change the other papers.`,
+    };
+  });
+}
+
+const SHARED = 'shared between the papers in this archive: add it to each paper that needs it';
+
+/** The folder every file shares, if there is one: that is the wrapper, and only that goes. */
+function wrapperOf(entries: Entry[]): string {
+  const first = entries[0].path.split('/')[0] + '/';
+  return entries.every((e) => e.path.startsWith(first)) ? first : '';
 }
 
 /** The one line that opens the import report, from facts the report already holds. */
@@ -328,6 +373,7 @@ export async function importZip(
     ...p,
     ...describeImport(p.entries, p.skipped),
   }));
+  for (const p of found) if (p.note) p.report.notes.push(p.note);
   await mayStartPapers(pool, userId, found.length, limits.papersPerHour);
   // Blobs first: they are content-addressed, so a failure later leaves nothing that matters behind.
   // Sixteen at a time. One after another, a paper of two thousand files took eight and a half

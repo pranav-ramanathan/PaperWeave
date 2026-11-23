@@ -2618,7 +2618,7 @@ update` held the paper's file rows for **189.6 s** (until the proxy was cut; it 
 | Archive                                                                                  | Before                                                           | Now                                              |
 | ---------------------------------------------------------------------------------------- | ---------------------------------------------------------------- | ------------------------------------------------ |
 | `src/main.tex`, with `figures/` and `refs.bib` beside `src/`                             | **only `main.tex` kept; never built**                            | imported whole, root `src/main.tex`; builds      |
-| Two papers sharing `figures/` and `refs.bib`                                             | **each without them, "outside every paper"**                     | the same, said to be shared, to add to each      |
+| Two papers sharing `figures/` and `refs.bib`                                             | **each without them, "outside every paper"**                     | a reader keeps its layout and a copy, noted      |
 | An arXiv source: `main.bbl`, no `.bib`                                                   | **the `.bbl` dropped as build output; failed with no reason**    | kept, and said to be ready-made; builds          |
 | `.tikz`, `.pgf`, `.pdf_tex`, `.dat`, `.lua`, a font                                      | **dropped as "not a file type a paper uses"; never built**       | kept; builds                                     |
 | `.svg`, `.gif`                                                                           | dropped as not a type a paper uses                               | dropped: convert it to PDF or PNG                |
@@ -2651,7 +2651,11 @@ update` held the paper's file rows for **189.6 s** (until the proxy was cut; it 
   the old code.
 - **Not changed:**
   - A `.tar.gz` is refused with a sentence, not read.
-  - Files shared between papers are not copied into each.
+  - Files shared between papers are copied only into a paper that reads them (`../`,
+    `\graphicspath`, a `.sty`, `\bibliography`); a paper that reads none is as before. A copy is its
+    own: a change to it does not reach the other papers. A paper reading a file inside another
+    paper's folder is as before, a `paperweave-review.json` in a reading paper's folder has
+    folder-relative paths and does not match, and a shared file is not linked between papers.
   - A root whose name begins with `-` and that has a bibliography does not build: BibTeX takes
     the name for an option.
   - A kept `.bbl` is shown as a file that cannot be edited, and cannot be renamed by hand.
