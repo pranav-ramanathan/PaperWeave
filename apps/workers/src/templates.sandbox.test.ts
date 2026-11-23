@@ -1,11 +1,13 @@
 // Needs the services in infra/compose.yaml and the toolchain image. Run: pnpm test:sandbox
 import {
   blobStore,
+  createFile,
   createFromTemplate,
   editFile,
   exportZip,
   firstSteps,
   invite,
+  latestBuilds,
   listFiles,
   requestBuild,
   submissionChecks,
@@ -52,6 +54,34 @@ test.each(TEMPLATES.map((x) => [x.id, x] as const))(
     expect(checks.findings.filter((f) => f.level === 'problem')).toEqual([]);
     expect(checks.findings.filter((f) => /undefined/i.test(f.message))).toEqual([]);
     expect(checks.ready).toBe(true);
+  },
+  120_000,
+);
+
+const PNG = Buffer.from(
+  'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mP8z8BQDwAEhQGAhKmMIQAAAABJRU5ErkJggg==',
+  'base64',
+);
+
+test.each(TEMPLATES.map((x) => [x.id, x] as const))(
+  'a figure put in from the Figure dialog builds in a paper from the %s template',
+  async (_id, template) => {
+    const project = await createFromTemplate(t.pool, store, owner.id, 'With a figure', template.id);
+    await createFile(t.pool, store, owner.id, project.id, 'figures/dot.png', PNG);
+    // Exactly what the Figure dialog writes.
+    const figure =
+      '\n\\begin{figure}[t]\n  \\centering\n  \\includegraphics[width=\\linewidth,alt={A dot}]{figures/dot.png}\n  \\caption{A dot}\n  \\label{fig:a-dot}\n\\end{figure}\n';
+    const [main] = (await listFiles(t.pool, owner.id, project.id)).filter(
+      (f) => f.path === 'main.tex',
+    );
+    await editFile(t.pool, store, main.id, owner.id, (text) =>
+      text.insert(text.toString().lastIndexOf('\\end{document}'), figure),
+    );
+    await requestBuild(t.pool, owner.id, project.id);
+    expect(await buildNext(t.pool, store, image)).toBe(true);
+    const { latest } = await latestBuilds(t.pool, owner.id, project.id);
+    expect(latest!.status).toBe('succeeded');
+    expect(latest!.diagnostics.filter((d) => d.severity === 'error')).toEqual([]);
   },
   120_000,
 );

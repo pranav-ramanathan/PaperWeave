@@ -15,7 +15,7 @@ test('errors are read from a log with their place, and fatal ones without', () =
       severity: 'error',
       file: 'sections/intro.tex',
       line: 12,
-      message: 'Undefined control sequence.',
+      message: 'Undefined control sequence. LaTeX does not know \\nosuchmacro.',
     },
     {
       severity: 'error',
@@ -183,13 +183,13 @@ test('many errors end at the last real one, not at TeX giving up', () => {
       severity: 'error',
       file: 'sections/intro.tex',
       line: 15,
-      message: 'Undefined control sequence.',
+      message: 'Undefined control sequence. LaTeX does not know \\nosuchmacro.',
     },
     {
       severity: 'error',
       file: 'sections/intro.tex',
       line: 16,
-      message: 'Undefined control sequence.',
+      message: 'Undefined control sequence. LaTeX does not know \\nosuchmacro.',
     },
   ]);
 });
@@ -299,7 +299,7 @@ test('guard: an ordinary error in the paper, and a package of its own, keep thei
       severity: 'error',
       file: 'sections/intro.tex',
       line: 12,
-      message: 'Undefined control sequence.',
+      message: 'Undefined control sequence. LaTeX does not know \\nosuchmacro.',
     },
     { severity: 'error', file: 'local.sty', line: 3, message: 'Package local Error: Mine.' },
   ]);
@@ -894,4 +894,57 @@ test('a visible character with no setup is named once, with its code', () => {
       message: 'pdfLaTeX has no character set up for \u2264 (U+2264).',
     },
   ]);
+});
+
+const GRAPHICX =
+  'Undefined control sequence. LaTeX does not know \\includegraphics: the paper does not load the graphicx package. Add \\usepackage{graphicx} before \\begin{document}.';
+
+test('an undefined \\includegraphics says the graphicx package is missing', () => {
+  const log = [
+    './main.tex:12: Undefined control sequence.',
+    'l.12   \\includegraphics',
+    '                       [width=\\linewidth]{charts/a.pdf}',
+  ].join('\n');
+  expect(diagnostics(log)).toEqual([
+    { severity: 'error', file: 'main.tex', line: 12, message: GRAPHICX },
+  ]);
+});
+
+test('an undefined \\eqref says the amsmath package is missing', () => {
+  const log = ['./main.tex:30: Undefined control sequence.', 'l.30 see \\eqref'].join('\n');
+  expect(diagnostics(log)[0].message).toBe(
+    'Undefined control sequence. LaTeX does not know \\eqref: the paper does not load the amsmath package. Add \\usepackage{amsmath} before \\begin{document}.',
+  );
+});
+
+test('inside a macro, the command named is the one TeX could not find', () => {
+  const log = [
+    './main.tex:9: Undefined control sequence.',
+    '\\foo ->\\bar ',
+    '            baz',
+    'l.9 \\foo',
+  ].join('\n');
+  expect(diagnostics(log)[0].message).toBe(
+    'Undefined control sequence. LaTeX does not know \\bar.',
+  );
+});
+
+test('an undefined control sequence with no command to name keeps the bare message', () => {
+  const last = './main.tex:4: Undefined control sequence.';
+  expect(diagnostics(last)[0].message).toBe('Undefined control sequence.');
+  expect(diagnostics(last + '\n')[0].message).toBe('Undefined control sequence.');
+  expect(diagnostics(last + '\nl.4 ~')[0].message).toBe('Undefined control sequence.');
+  expect(diagnostics(last + '\nl.4 \\' + 'x'.repeat(80))[0].message).toBe(
+    'Undefined control sequence.',
+  );
+});
+
+test('two identical undefined commands on different lines stay two entries', () => {
+  const log = [
+    './main.tex:3: Undefined control sequence.',
+    'l.3 \\nosuchmacro',
+    './main.tex:5: Undefined control sequence.',
+    'l.5 \\nosuchmacro',
+  ].join('\n');
+  expect(diagnostics(log).map((d) => d.line)).toEqual([3, 5]);
 });

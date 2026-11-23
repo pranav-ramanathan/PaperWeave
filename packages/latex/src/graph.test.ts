@@ -1,5 +1,12 @@
 import { expect, test } from 'vitest';
-import { findRoot, graphicsPaths, projectGraphicsPaths, includeGraph, includes } from './graph.ts';
+import {
+  findRoot,
+  graphicsPaths,
+  projectGraphicsPaths,
+  includeGraph,
+  includes,
+  leftOut,
+} from './graph.ts';
 import { labelIndex } from './labels.ts';
 
 test('\\graphicspath folders are read, and a comment hides them', () => {
@@ -354,4 +361,70 @@ test('a file named in \\includeonly is not read in the preamble, and a name ther
   expect(g.missing).toEqual([]);
   expect(g.dynamic).toEqual([]);
   expect(g.edges.map((e) => e.kind)).toEqual(['input', 'input']);
+});
+
+// What an active \includeonly in the root's preamble leaves out of the PDF.
+const chapters = '\\include{ch/a}\\include{ch/b}\\include{ch/c}';
+const paper = (pre: string, body = chapters) =>
+  `\\documentclass{article}\n${pre}\n\\begin{document}\n${body}\n\\end{document}\n`;
+const out = (main: string, more: Record<string, string> = {}, root = 'main.tex') => {
+  const files = { [root]: main, ...more };
+  return leftOut(files, root, includeGraph(files, root, Object.keys(files)).order);
+};
+
+test('an \\includeonly names which chapters the PDF leaves out', () => {
+  const main = paper('\\includeonly{ch/a}');
+  expect(out(main)).toEqual({ at: main.indexOf('\\includeonly'), names: ['ch/b', 'ch/c'] });
+  expect(out(paper('\\includeonly{}'))?.names).toEqual(['ch/a', 'ch/b', 'ch/c']);
+});
+
+test('spaces, quotes and .tex do not make a chapter differ from its name', () => {
+  const main = paper('\\includeonly{ch/a.tex , "ch/b"}', '\\include{ ch/a}\\include{ch/b.tex}');
+  expect(out(main)).toBeNull();
+});
+
+test('an \\includeonly that does not count leaves nothing out', () => {
+  expect(out(paper('% \\includeonly{ch/a}'))).toBeNull();
+  expect(out(paper('', '\\includeonly{ch/a}' + chapters))).toBeNull();
+  expect(out(paper('\\includeonly{\\only}'))).toBeNull();
+  expect(out(paper('\\includeonly{ch/a}', '\\include{ch/a}'))).toBeNull();
+  expect(out(paper('\\includeonly{ch/a}', '\\input{ch/a}'))).toBeNull();
+  expect(out(paper(''))).toBeNull();
+  expect(out('\\input{x}')).toBeNull();
+});
+
+test('the last \\includeonly decides', () => {
+  expect(out(paper('\\includeonly{ch/a}\n\\includeonly{ch/a,ch/b,ch/c}'))).toBeNull();
+  expect(out(paper('\\includeonly{ch/a,ch/b,ch/c}\n\\includeonly{ch/c}'))?.names).toEqual([
+    'ch/a',
+    'ch/b',
+  ]);
+});
+
+test('a chapter included twice is named once; names are compared as plain strings', () => {
+  expect(out(paper('\\includeonly{ch/a}', '\\include{ch/b}\\include{ch/b}'))?.names).toEqual([
+    'ch/b',
+  ]);
+  expect(out(paper('\\includeonly{ch/a}', '\\include{./ch/a}'))?.names).toEqual(['./ch/a']);
+  expect(out(paper('\\includeonly{ch/a}', '\\include{ch/A}'))?.names).toEqual(['ch/A']);
+});
+
+test('a macro in an \\include is skipped, and a root in a folder compares names as written', () => {
+  expect(out(paper('\\includeonly{ch/a}', '\\include{\\chap}'))).toBeNull();
+  const main = paper('\\includeonly{ch/a}', '\\include{ch/a}\\include{ch/b}');
+  expect(out(main, {}, 'paper/main.tex')?.names).toEqual(['ch/b']);
+});
+
+test('an \\include in a file the body reads is found; other commands are not \\include', () => {
+  const main = paper('\\includeonly{ch/a}', '\\input{ch/body}\\input{ch/b}');
+  const more = { 'ch/body.tex': '\\include{ch/c}\n', 'ch/b.tex': 'x', 'ch/c.tex': 'y' };
+  expect(out(main, more)?.names).toEqual(['ch/c']);
+  expect(
+    out(paper('\\includeonly{ch/a}', '\\includegraphics{x}\\includefrom{ch/}{b}\\input{ch/b}')),
+  ).toBeNull();
+});
+
+test('a subfiles paper that includes only the chapter it names leaves nothing out', () => {
+  const main = paper('\\includeonly{sections/discussion}', '\\include{sections/discussion}');
+  expect(out(main, { 'sections/discussion.tex': 'x' })).toBeNull();
 });

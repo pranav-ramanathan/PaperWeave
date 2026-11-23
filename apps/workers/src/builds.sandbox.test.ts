@@ -386,7 +386,7 @@ test('a broken paper reports where, and the last good PDF is still there', async
     severity: 'error',
     file: 'main.tex',
     line: 21,
-    message: 'Undefined control sequence.',
+    message: 'Undefined control sequence. LaTeX does not know \\nosuchmacro.',
   });
   const { latest, lastGood } = await latestBuilds(t.pool, owner.id, project);
   expect(latest!.id).toBe(bad.id);

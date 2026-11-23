@@ -175,6 +175,7 @@ Report what was found. Equation~\eqref{eq:mean} gives the mean reported in Table
       'main.tex': String.raw`\documentclass{amsart}
 \usepackage[utf8]{inputenc}
 \usepackage{amssymb}
+\usepackage{graphicx}
 
 \newtheorem{theorem}{Theorem}[section]
 \newtheorem{lemma}[theorem]{Lemma}

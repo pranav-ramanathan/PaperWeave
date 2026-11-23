@@ -4752,8 +4752,6 @@ Found by a three-person walkthrough.
   it is `\include`d and not in the preamble.
 - **Held by** unit tests in `graph.test.ts` and `files.test.ts`, and a sandbox test in
   `files.sandbox.test.ts`.
-- **Not done.** No warning on the submit check that an active `\includeonly` leaves chapters out
-  of the PDF.
 
 ## Opening another page no longer drops edits the sync service has not confirmed
 
@@ -4770,3 +4768,38 @@ Found by a three-person walkthrough.
 - **Held by** unit tests in `apps/web/lib/leaving.test.ts` and two tests in
   `tests/e2e/recover.spec.ts`.
 - **Not done.** Back/Forward cannot be cancelled and still drops unsaved edits silently.
+
+## A figure from the Figure dialog broke the build in the AMS template, and the error did not say why
+
+- **What was wrong.** The AMS template did not load `graphicx`, but the Figure dialog (and a drawn
+  chart) writes `\includegraphics`. The build failed with no PDF and the pane showed only
+  `Undefined control sequence.`, because the log line that names the command was dropped. Any
+  imported paper without `graphicx` behaved the same.
+- **Now** the AMS template loads `graphicx`, and an "Undefined control sequence." build error
+  names the command (`LaTeX does not know \nosuchmacro.`). For `\includegraphics` and `\eqref` it
+  also says which package to add (`graphicx`, `amsmath`). The message keeps its old first sentence.
+- **Held by** unit tests in `diagnostics.test.ts` and `templates.test.ts`, and sandbox tests in
+  `templates.sandbox.test.ts` (a dialog-written figure builds from every template) and
+  `compile.sandbox.test.ts` (real TeX log).
+- **Not done.** The dialog does not add the package itself, and other packages' commands get only
+  the generic sentence. A build that failed before keeps the bare message until it is rebuilt.
+
+## The submit check said ready when an `\includeonly` left chapters out of the PDF
+
+- **What was wrong.** With `\includeonly{ch/a}` in the root's preamble, TeX builds without error
+  and reads only `ch/a`, so the PDF silently lacked every other `\include`d chapter. The submit
+  check saw nothing wrong and offered the downloads.
+- **Now** `leftOut` (in `graph.ts`) finds the `\include`d chapters of the files the paper reads that
+  the last `\includeonly` before `\begin{document}` does not name, and the submit check reports
+  them as a `file` problem naming them (at most five, then "and N more") and the way out: take
+  the `\includeonly` line out, or the `\include` lines of what is not meant to be there. The
+  problem points at the `\includeonly` line. Names are compared as TeX does, as plain strings
+  after trimming, dropping quotes and a trailing `.tex`: `./ch/a` is not `ch/a`. An empty
+  `\includeonly{}` leaves every `\include`d chapter out. A commented-out `\includeonly`, one
+  that names a macro, or one after `\begin{document}` (already a build error) is ignored.
+- **Held by** unit tests in `graph.test.ts` and `submit.test.ts`, and a sandbox test in
+  `submit.sandbox.test.ts`.
+- **Not done.** An `\includeonly` inside a file the preamble reads with `\input`, `\includefrom`
+  and `\subincludefrom`, and an `\include` under `\iffalse` or after `\end{document}` (read as
+  live) are not handled. A left-out `\include` of a file the paper lacks also gets the existing
+  "not among the paper's files" warning.

@@ -161,6 +161,25 @@ function plainError(message: string): string {
     : `pdfLaTeX has no character set up for ${char} (${name}).`;
 }
 
+/** Commands that are undefined for want of a package, and the package that defines them. */
+const NEEDS: Record<string, string> = { includegraphics: 'graphicx', eqref: 'amsmath' };
+
+/**
+ * "Undefined control sequence." with the command named. TeX shows the context under the error
+ * line, and the undefined command is the last thing on its top line ("l.12 \\nosuchmacro", or
+ * "\\foo ->\\bar " for one inside a macro). `next` is the log line after the error line.
+ */
+function undefinedCommand(message: string, next: string | undefined): string {
+  if (message !== 'Undefined control sequence.' || next === undefined) return message;
+  if (new RegExp(ERROR.source).test(next)) return message;
+  const name = /(\\[^\\\s]+)\s*$/.exec(next)?.[1];
+  if (!name || name.length > 60) return message;
+  const pkg = NEEDS[name.slice(1)];
+  return pkg
+    ? `${message} LaTeX does not know ${name}: the paper does not load the ${pkg} package. Add \\usepackage{${pkg}} before \\begin{document}.`
+    : `${message} LaTeX does not know ${name}.`;
+}
+
 /**
  * `dir` is the root file's folder with its trailing slash, or '': the build runs there (-cd),
  * so that is what the paths in the log are relative to.
@@ -168,11 +187,20 @@ function plainError(message: string): string {
 export function diagnostics(log: string, output = '', dir = ''): Diagnostic[] {
   // Errors in the order the log has them, so the cause is not listed after the stop.
   const found: { at: number; d: Diagnostic }[] = [];
-  for (const m of log.matchAll(ERROR))
+  for (const m of log.matchAll(ERROR)) {
+    const from = m.index + m[0].length + 1;
+    const end = log.indexOf('\n', from);
+    const next = from > log.length ? undefined : log.slice(from, end < 0 ? undefined : end);
     found.push({
       at: m.index,
-      d: { severity: 'error', file: m[1], line: Number(m[2]), message: plainError(m[3]) },
+      d: {
+        severity: 'error',
+        file: m[1],
+        line: Number(m[2]),
+        message: undefinedCommand(plainError(m[3]), next),
+      },
     });
+  }
   // An error that stops the engine outright (a picture it cannot read, say) has no file and
   // line in front of it, only an exclamation mark.
   for (const m of log.matchAll(/^!\s?(?:pdfTeX error: |LuaTeX error |)(.+)$/gm)) {
