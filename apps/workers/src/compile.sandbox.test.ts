@@ -281,6 +281,62 @@ test.each([
   expect(readFileSync(join(out, r.pdf!)).subarray(0, 5).toString()).toBe('%PDF-');
 });
 
+// Packages that live in tex-gyre (only recommended by texlive-fonts-recommended) and texlive-humanities.
+test.each([
+  ['tgpagella', '\\usepackage[T1]{fontenc}\\usepackage{tgpagella}', 'x'],
+  ['tgtermes', '\\usepackage[T1]{fontenc}\\usepackage{tgtermes}', 'x'],
+  ['tgheros', '\\usepackage[T1]{fontenc}\\usepackage{tgheros}', '\\textsf{x}'],
+  ['qtree', '\\usepackage{qtree}', '\\Tree [.S NP VP ]'],
+  ['dramatist', '\\usepackage{dramatist}', 'x'],
+  ['gb4e', '\\usepackage{gb4e}', '\\begin{exe}\\ex x\\end{exe}'],
+])('%s builds', async (_name, pre, body) => {
+  const { r, out } = await buildSource(
+    `\\documentclass{article}\n${pre}\n\\begin{document}\n${body}\n\\end{document}\n`,
+  );
+  expect(r.diagnostics.filter((d) => d.severity === 'error')).toEqual([]);
+  expect(r.ok).toBe(true);
+  expect(readFileSync(join(out, r.pdf!)).subarray(0, 5).toString()).toBe('%PDF-');
+});
+
+test.each(['xelatex', 'lualatex'] as const)('%s loads TeX Gyre Termes by name', async (engine) => {
+  const project = tmp();
+  writeFileSync(
+    join(project, 'main.tex'),
+    '\\documentclass{article}\n\\usepackage{fontspec}\n\\setmainfont{TeX Gyre Termes}\n\\begin{document}\nx\n\\end{document}\n',
+  );
+  const out = tmp();
+  const t0 = Date.now();
+  const r = await compile(project, 'main.tex', out, 60, engine);
+  console.log(`${engine} build took ${Date.now() - t0} ms`);
+  expect(r.diagnostics.filter((d) => d.severity === 'error')).toEqual([]);
+  expect(r.timedOut).toBeFalsy();
+  expect(r.ok).toBe(true);
+  expect(readFileSync(join(out, r.pdf!)).subarray(0, 5).toString()).toBe('%PDF-');
+});
+
+test.runIf(havePdfinfo)('xelatex sets maths in TeX Gyre Pagella Math', async () => {
+  const project = tmp();
+  writeFileSync(
+    join(project, 'main.tex'),
+    '\\documentclass{article}\n\\usepackage{unicode-math}\n\\setmainfont{TeX Gyre Pagella}\n\\setmathfont{TeX Gyre Pagella Math}\n\\begin{document}\nHello $x^2$.\n\\end{document}\n',
+  );
+  const out = tmp();
+  const r = await compile(project, 'main.tex', out, 60, 'xelatex');
+  expect(r.ok).toBe(true);
+  expect(r.diagnostics.filter((d) => d.severity === 'error')).toEqual([]);
+  const fonts = execFileSync('pdffonts', [join(out, r.pdf!)], { encoding: 'utf8' });
+  expect(fonts).toMatch(/TeXGyrePagellaMath/);
+});
+
+test.runIf(havePdfinfo)('tgtermes sets the text in TeX Gyre Termes', async () => {
+  const { r, out } = await buildSource(
+    '\\documentclass{article}\n\\usepackage[T1]{fontenc}\n\\usepackage{tgtermes}\n\\begin{document}\nx\n\\end{document}\n',
+  );
+  expect(r.ok).toBe(true);
+  const fonts = execFileSync('pdffonts', [join(out, r.pdf!)], { encoding: 'utf8' });
+  expect(fonts).toMatch(/TeXGyreTermes/);
+});
+
 // Fonts loaded by name, which XeLaTeX finds through fontconfig and LuaLaTeX through its own
 // font-name database, built in a temporary texmf-var on every build.
 test.each(['xelatex', 'lualatex'] as const)('%s loads Libertinus Serif by name', async (engine) => {

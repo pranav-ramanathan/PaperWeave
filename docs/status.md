@@ -5939,3 +5939,38 @@ two`, cut at 40 characters, the source in the title, announced as "comment: ..."
   still named as TeX names it (`\iftrue`). The faulty line inside the `.sty` is not found. Still
   carried over: overfull boxes are not reported; "You have requested package" from an installed
   file is still listed; the build pane shows no compiler warnings.
+
+## The e2e tests' temporary folders
+
+- **What was wrong.** The Playwright tests make folders with `mkdtempSync(join(tmpdir(),
+'paperweave-e2e-'))` and never removed them. On one machine that was about 15,000 folders and
+  4.7 GB in `/tmp` (63 MB each for `large.spec.ts`), which filled the disk. CI starts fresh each
+  time, so only local runs suffered.
+- **Now** `tests/e2e-global-setup.ts` (the config's `globalSetup`) makes one
+  `paperweave-e2e-run-*` folder and sets `TMPDIR` to it, so `tmpdir()` in the test workers
+  returns it; it returns a function that removes the folder when the run ends. The web servers
+  start before `globalSetup`, so they keep the normal `TMPDIR`. No spec file changed. Running
+  `large.spec.ts` and `uploading.spec.ts` left the count of `/tmp/paperweave-e2e-*` unchanged.
+- **Not done.** Folders from earlier runs are not removed. A run killed with SIGKILL still leaves
+  its one `paperweave-e2e-run-*` folder. Existing servers reused from an earlier run keep their
+  own `TMPDIR`. `uploading.spec.ts:117` ("a page restored after a large upload...") fails here
+  with and without this change.
+
+## TeX Gyre and `texlive-humanities` added to the image
+
+- **What was wrong.** 30 arXiv papers not tried before went through import and the worker's build: 23 built. Three got no PDF only because the image lacked a package: `tgpagella` (2307.09288, Llama 2), `qtree` (2305.10601, Tree of Thoughts), `dramatist` (2203.15556, Chinchilla). `texlive-fonts-recommended` only recommends `tex-gyre` and the image installs without recommended packages, so TeX Gyre was missing under every engine: `\usepackage{tgtermes}` said "File not found", and `\setmainfont{TeX Gyre Termes}` or `\setmathfont{TeX Gyre Pagella Math}` failed under XeLaTeX and LuaLaTeX.
+
+  | Paper      | Before                                   | With the packages     |
+  | ---------- | ---------------------------------------- | --------------------- |
+  | 2307.09288 | `File 'tgpagella.sty' not found.` no PDF | 77 pages, 0 undefined |
+  | 2305.10601 | `File 'qtree.sty' not found.` no PDF     | 14 pages, 0 undefined |
+  | 2203.15556 | `File 'dramatist.sty' not found.` no PDF | 36 pages, 0 undefined |
+
+  Every package name the 47 corpus papers load and do not ship is 161 names; the image lacked 6: the three above, `pst-node` and `auto-pst-pdf` (PSTricks, stays out) and `eprint` (optional in its class).
+
+- **Now** `infra/tex/Dockerfile` installs `tex-gyre`, `fonts-texgyre`, `fonts-texgyre-math` and `texlive-humanities` (`qtree`, `dramatist`, `gb4e`, `linguex`, `covington`). The three papers build untouched; 26 of the 30 build. Size: 17.0 MB more to download, 45.8 MB installed; `docker images` shows `paperweave-tex` at 4.15GB and the derived test image at 4.25GB. Papers that built before give the same pages, text and fonts under both images (all three corpora). **The image ID is part of the build cache key, so every paper rebuilds once** after the image is rebuilt. On the machine where this was written the tests ran against a derived image (old image + the same four packages + `fc-cache -f`) because of disk space; CI builds the real one.
+- **Held by** the ten new cases in `compile.sandbox.test.ts`; each fails on the old image. Run locally
+  against the derived image: 10 failed on the old image, 10 passed on the new. The full sandbox suite
+  could not run locally because the local blob store was out of disk; CI builds the real image from the
+  Dockerfile and runs the whole suite against it.
+- **Not done.** `pstricks` and `CJKutf8` are still not installed (`docs/import-matrix.md` already says so). The import report does not say that a paper loads a package the image lacks; the build says "File 'X.sty' not found". The other fresh-corpus failures: 1909.11942 (one author field with a comma before "and" makes BibTeX report errors; latexmk stops and the only message is "The bibliography could not be made. The build log has the details."), 1509.05363 (the paper's own class loads `lastpage` and `totpages`, which the installed `totpages` refuses), 1912.01703 (minted with `frozencache`), 1411.4028 (PSTricks and EPS). 2203.15556 loads minted but never uses it and builds; its import note still says it "will not build until the code is set another way". Carried over: overfull boxes; "You have requested package"; the build pane shows no other compiler warnings.

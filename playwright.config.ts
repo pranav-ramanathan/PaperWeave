@@ -22,6 +22,7 @@ const services = {
 
 export default defineConfig({
   testDir: 'tests/e2e',
+  globalSetup: './tests/e2e-global-setup.ts',
   timeout: 90_000,
   // One at a time so the timing test is not competing with the others for the CPU.
   workers: 1,
