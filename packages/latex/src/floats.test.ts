@@ -1,6 +1,7 @@
 import { expect, test } from 'vitest';
 import {
   altEdit,
+  atomProblem,
   captionText,
   cellText,
   fieldText,
@@ -453,7 +454,8 @@ test('stray lets through what builds', () => {
 });
 
 test('strayAdvice says what to write and never quotes the text', () => {
-  for (const kind of ['_', '^', '#', '$'] as const) expect(strayAdvice(kind)).not.toBe('');
+  for (const kind of ['_', '^', '#', '$', '&'] as const) expect(strayAdvice(kind)).not.toBe('');
+  expect(strayAdvice('&')).toContain('\\&');
   expect(strayAdvice('_')).toContain('\\_');
   expect(strayAdvice('#')).toContain('\\#');
   expect(strayAdvice('$')).toContain('\\$');
@@ -462,4 +464,59 @@ test('strayAdvice says what to write and never quotes the text', () => {
 test('stray is separate from what cellText and captionText allow', () => {
   expect(cellText('file_name')).toBe(true);
   expect(captionText('Costs $5')).toBe(true);
+});
+
+const WAS = '\\footnote{Old}';
+const ENV = 'no matching \\end';
+
+test('atomProblem names what would stop the build', () => {
+  const flagged: [string, string][] = [
+    ['\\footnote{Costs $5.}', '\\$'],
+    ['\\footnote{R & D}', '\\&'],
+    ['\\emph{R & D}', '\\&'],
+    ['\\footnote{$a & b$}', '\\&'],
+    ['\\footnote{Item #3}', '\\#'],
+    ['\\mbox{#1}', '\\#'],
+    ['\\footnote{a_b}', '\\_'],
+    ['\\textsc{a_b}', '\\_'],
+    ['\\footnote{x^2}', '$ signs'],
+    ['\\footnote{\\begin{itemize}}', ENV],
+    ['\\footnote{a\\end{itemize}}', ENV],
+    ['\\footnote{\\begin{itemize}\\item a\\end{enumerate}}', ENV],
+  ];
+  for (const [text, part] of flagged) {
+    const message = atomProblem(text, WAS);
+    expect([text, message]).not.toEqual([text, null]);
+    expect(message).toContain(part);
+    for (const quoted of ['Costs', 'Item', 'itemize']) expect(message).not.toContain(quoted);
+  }
+});
+
+test('atomProblem lets through what builds', () => {
+  const fine = [
+    '\\footnote{$x_1$ ok \\_ \\# \\& \\% \\$5}',
+    '\\footnote{New \\emph{note}.}',
+    '\\footnote{See \\url{http://a/b_c#d&e}}',
+    '\\url{http://x.org/a_b#c%20d&e}',
+    '\\href{http://x#a_b&c}{t}',
+    '\\cite{a_b}',
+    '\\ref{sec_a}',
+    '\\label{a_b}',
+    '\\includegraphics[width=1cm]{a_b}',
+    '\\verb|a_b & #|',
+    '\\sys{}',
+    '\\ce{H_2O}',
+    '\\footnote{\\begin{tabular}{ll}a & b\\end{tabular}}',
+    '\\footnote{\\begin{itemize}\\item a\\end{itemize}}',
+  ];
+  for (const text of fine) expect([text, atomProblem(text, WAS)]).toEqual([text, null]);
+});
+
+test('text that already had it is not locked', () => {
+  expect(atomProblem('\\footnote{a_c}', '\\footnote{a_b}')).toBeNull();
+  expect(atomProblem('\\footnote{R & E}', '\\footnote{R & D}')).toBeNull();
+});
+
+test('stray still lets an ampersand through', () => {
+  expect(stray('R & D')).toBeNull();
 });

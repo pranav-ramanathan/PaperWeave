@@ -75,6 +75,18 @@ test('a citation, a reference and a footnote are opened and edited as LaTeX', as
   await note.getByRole('button', { name: 'Apply' }).click();
   await expect(note.getByRole('alert')).toContainText('change how the text around it is read');
   await expect(note).toBeVisible();
+  // Text that would stop the build is refused with its own advice, and the typed text kept.
+  for (const [typed, advice] of [
+    ['\\footnote{Costs $5.}', 'Write \\$ for a dollar sign'],
+    ['\\footnote{R & D}', 'Write \\& for the sign'],
+    ['\\footnote{\\begin{itemize}}', 'no matching \\end'],
+  ]) {
+    await note.getByLabel('LaTeX').fill(typed);
+    await note.getByRole('button', { name: 'Apply' }).click();
+    await expect(note.getByRole('alert')).toContainText(advice);
+    await expect(note).toBeVisible();
+    await expect(note.getByLabel('LaTeX')).toHaveValue(typed);
+  }
   await note.getByLabel('LaTeX').fill('\\footnote{New \\emph{note}.}');
   await note.getByRole('button', { name: 'Apply' }).click();
   await expect(note).toBeHidden();

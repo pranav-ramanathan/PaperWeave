@@ -19,6 +19,7 @@ import {
   escape,
   fieldText,
   floatParts,
+  atomProblem,
   logoOf,
   stray,
   strayAdvice,
@@ -174,7 +175,7 @@ export function createVisual(opts: {
   editAtom?(
     what: 'citation' | 'reference' | 'footnote' | 'LaTeX',
     src: string,
-    apply: (replacement: string) => Promise<CommandResult | 'spills'>,
+    apply: (replacement: string) => Promise<CommandResult | 'spills' | { problem: string }>,
   ): void;
   /** The person asked, from the keyboard, to insert a reference, a citation or an equation. */
   ask?(
@@ -289,6 +290,9 @@ export function createVisual(opts: {
       return say('That cannot be edited here. Edit it in the source.');
     resume = { from: editor.state.selection.from, to: editor.state.selection.to, acted };
     opts.editAtom!(atomName(node), src, async (replacement) => {
+      // Text that would stop the build is refused here, not in the bridge: formulas share it.
+      const problem = atomProblem(replacement, src);
+      if (problem) return { problem };
       const next = bridge.rewriteCommand(c, replacement);
       return typeof next === 'string' ? next : run(next);
     });

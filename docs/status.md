@@ -5566,7 +5566,8 @@ closed: ...` (outermost first, at most 10). The log does not name the file: with
   the new test in `tests/e2e/insert.spec.ts` and the extra step in `tests/e2e/maths.spec.ts`.
 - **Not done.** `&` or `#` in an inline formula and `_`/`^` misuse still give TeX errors. `a = 50%`
   at the end of a line of a display equation is accepted and prints without the percent sign.
-  Footnote and other atom edits get no brace check beyond `contained`. No server-side check for
+  Footnote and other atom edits get no brace check beyond `contained` (later: see "A footnote or
+  other text command edited as LaTeX can no longer stop the build"). No server-side check for
   insertions. No TEX_TEXT bump.
 
 ## A bare `_`, `^`, `#` or unclosed `$` in a table cell, caption or heading title failed the build with no PDF
@@ -5594,7 +5595,8 @@ inserted`), `Item #3` (`macro parameter character #`, or `Illegal parameter numb
 - **Not done.** Marks inside text-like commands outside the known set, or inside any unknown
   command's argument; `#` inside `\href` in a caption or title (exit 12, stays allowed); a paper
   using the `underscore` package is told to write `\_` the first time (that still builds); the
-  server chart-caption check, the atom/footnote window, inline-formula `&` and `#`; no
+  server chart-caption check, the atom/footnote window (later: see "A footnote or other text
+  command edited as LaTeX can no longer stop the build"), inline-formula `&` and `#`; no
   server-side check.
 
 ## A bare character in a .bib entry
@@ -5653,3 +5655,29 @@ inserted`), `Item #3` (`macro parameter character #`, or `Illegal parameter numb
   change): an owner decision. `frozencache` without its cache still shows minted's own errors.
   `pythontex`, `svg` and other shell-escape packages. Import reports stored earlier keep the old
   sentence. Nothing converts minted to listings.
+
+## A footnote or other text command edited as LaTeX can no longer stop the build
+
+- **What was wrong.** The atom window (footnote, citation, reference, other inline LaTeX) only
+  asked the bridge to rewrite the command, and the bridge accepted `\footnote{Costs $5.}`,
+  `{R & D}`, `{Item #3}`, `{a_b}`, `{x^2}` and `{\begin{itemize}}`. With the worker's own flags
+  every one of them exits 12 and the worker keeps no PDF: `Missing $ inserted`, `Misplaced
+alignment tab character &`, `You can't use 'macro parameter character #'`, `Extra }, or
+forgotten \endgroup`. `\emph{R & D}`, `\textsc{a_b}` and `\mbox{#1}` failed the same way.
+  Several `Missing $ inserted` on one line show as one diagnostic, because `diagnostics()`
+  de-duplicates by file, line and message.
+- **Now.** `atomProblem(text, was)` (`packages/latex/src/floats.ts`) names the first mark that
+  stops the build (`_`, `^`, `#`, an unclosed `$`, and `&` while the text has no `\begin{`) or an
+  unbalanced `\begin`/`\end`, and says what to write, without quoting the text. `openAtom`
+  (`apps/web/lib/visual.ts`) asks it first and the window shows the message in its alert and stays
+  open with what was typed. Text that already had the problem is not held to it. The check is in
+  the web layer, not the bridge, because the formula window shares `rewriteCommand`. `\url`,
+  `\href`, `\cite`, `\ref`, `\label`, `\verb` and tables pass.
+- **Held by** the `atomProblem` tests in `packages/latex/src/floats.test.ts`, the guard that no
+  inline atom of any fixture is flagged and the pinned bridge line in
+  `packages/bridge/src/bridge.test.ts`, and the refusal steps in `tests/e2e/atoms.spec.ts`.
+- **Not done.** `#` in `\url` or `\href` inside a footnote (exit 12 with hyperref, stays
+  allowed); `\verb` inside a footnote; `&` in an optional argument (`\citep[pp. 3 & 4]{a}`); `&`
+  is not checked once the text has any `\begin{`; a `\begin` inside a comment is counted; text
+  commands outside the known set; a paper using the `underscore` package is told to write `\_`;
+  no server-side check; the formula window is unchanged. No TEX_TEXT bump.

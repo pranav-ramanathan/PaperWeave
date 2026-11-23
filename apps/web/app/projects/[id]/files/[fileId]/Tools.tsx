@@ -8,7 +8,7 @@ import { type RefObject, useEffect, useLayoutEffect, useRef, useState } from 're
 import { numbers } from '../../../../../lib/numbers';
 import { renderMath } from '../../../../../lib/visual';
 
-type Apply = (latex: string) => Promise<CommandResult | 'spills'>;
+type Apply = (latex: string) => Promise<CommandResult | 'spills' | { problem: string }>;
 
 /** A native dialog that is open exactly while `open` is true. It holds the focus while open. */
 function useDialog(open: boolean): RefObject<HTMLDialogElement | null> {
@@ -80,7 +80,8 @@ export function FormulaBox(props: {
     try {
       // A formula on its own line needs its own lines in the source too.
       const result = await request.apply(place === 'display' ? `\n${latex}\n` : latex);
-      if (result === 'spills')
+      if (typeof result === 'object') setProblem(result.problem);
+      else if (result === 'spills')
         setProblem(
           'This would change how the text around it is read (an unclosed brace, a blank line, a % at the end, or a command run into the next word). Fix it here, or make the change in the source.',
         );
