@@ -1,6 +1,6 @@
 import { crc32 } from 'node:zlib';
 import { expect, test } from 'vitest';
-import { type Entry, LIMITS, readZip, writeZip } from './archive.ts';
+import { checkPath, type Entry, LIMITS, readZip, writeZip } from './archive.ts';
 
 const small = { ...LIMITS, files: 3, fileBytes: 1000, totalBytes: 1500, entries: 40 };
 const tex = '\\documentclass{article}\\begin{document}x\\end{document}';
@@ -127,4 +127,12 @@ test('names that are the same once composed are the same file twice', async () =
       small,
     ),
   ).rejects.toThrow(/same file twice/);
+});
+
+// Guard parts: the build leftovers stay refused. The .bbl cases fail without the fix.
+test('a .bbl is a usable name, whatever its case or folder; other build output is not', () => {
+  expect(checkPath('main.bbl')).toBe('');
+  expect(checkPath('sub/Refs.BBL')).toBe('');
+  for (const bad of ['main.blg', 'main.aux', 'main.synctex.gz', '.git/x.bbl', '__MACOSX/main.bbl'])
+    expect(checkPath(bad), bad).toBe('it is not a file type a paper uses');
 });

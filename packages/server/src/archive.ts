@@ -144,7 +144,8 @@ export function checkPath(path: unknown, limits: Limits = LIMITS): string {
   if (PICTURE.test(path)) return PICTURE_REASON;
   if (TOOLCHAIN.test(path))
     return 'paperweave-toolchain.json is written by PaperWeave on download, so it cannot be a file of the paper';
-  if (SYSTEM.test(path) || BUILD.test(path) || !WANTED.test(path))
+  // A .bbl is let in by name: it is how a paper with no .bib file keeps its bibliography.
+  if (SYSTEM.test(path) || (!BBL.test(path) && (BUILD.test(path) || !WANTED.test(path))))
     return 'it is not a file type a paper uses';
   return '';
 }

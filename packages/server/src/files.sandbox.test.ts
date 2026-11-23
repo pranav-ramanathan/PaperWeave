@@ -132,6 +132,27 @@ test('bad names, duplicates and people without write access are refused', async 
   expect(await paths(p.id)).toEqual(['intro.tex', 'main.tex']);
 });
 
+test('a ready-made .bbl can be added, replaced and renamed, and stays a stored file', async () => {
+  const p = await paper();
+  const one = Buffer.from('\\begin{thebibliography}{1}\n\\bibitem{a} A.\n\\end{thebibliography}\n');
+  const two = Buffer.from(one.toString().replace('{a}', '{b}'));
+  const bbl = await createFile(t.pool, store, owner.id, p.id, 'main.bbl', one);
+  expect(await paths(p.id)).toContain('main.bbl');
+  expect(await replaceFile(t.pool, store, owner.id, p.id, 'main.bbl', two)).toBe(bbl);
+  const out = (await readZip(await exportZip(t.pool, store, owner.id, p.id))).entries.find(
+    (e) => e.path === 'main.bbl',
+  )!;
+  expect(Buffer.from(out.bytes)).toEqual(two);
+  const proposal = await proposeFileRename(t.pool, store, owner.id, p.id, bbl, 'paper.bbl');
+  expect(
+    await renameFileAndReferences(t.pool, store, owner.id, p.id, bbl, 'paper.bbl', proposal.digest),
+  ).toMatchObject({ places: 0 });
+  expect(await paths(p.id)).toContain('paper.bbl');
+  // Build output other than a .bbl is still refused, and a viewer may not add one.
+  expect(await code(createFile(t.pool, store, owner.id, p.id, 'main.blg'))).toBe('invalid_input');
+  expect(await code(createFile(t.pool, store, viewer.id, p.id, 'x.bbl'))).toBe('permission_denied');
+});
+
 test('a paper takes only so many files, and only so much in all', async () => {
   const p = await paper();
   // The paper has two files already. The limits here are small ones: room for 27 bytes more.
