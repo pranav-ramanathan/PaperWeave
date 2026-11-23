@@ -465,6 +465,27 @@ test('an unclosed brace in an \\input-ed file is blamed on that file, not the ro
   expect(d).toMatchObject({ severity: 'error', file: 'sections/method.tex' });
 });
 
+test('an environment left open in an \\input-ed file is blamed on that file and its line', async () => {
+  const project = tmp();
+  mkdirSync(join(project, 'sections'));
+  writeFileSync(
+    join(project, 'main.tex'),
+    '\\documentclass{article}\n\\begin{document}\nHello.\n\n\\input{sections/method}\n\\end{document}\n',
+  );
+  writeFileSync(
+    join(project, 'sections/method.tex'),
+    'Some words.\n\n\\begin{itemize}\n\\item a\n',
+  );
+  const r = await compile(project, 'main.tex', tmp());
+  expect(r.ok).toBe(false);
+  expect(r.diagnostics).toContainEqual({
+    severity: 'error',
+    file: 'sections/method.tex',
+    line: 3,
+    message: expect.stringMatching(/never closed/),
+  });
+});
+
 test('a paper that uses includegraphics without graphicx is told to add the package', async () => {
   const project = tmp();
   writeFileSync(

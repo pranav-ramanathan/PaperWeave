@@ -4978,8 +4978,8 @@ Found by a three-person walkthrough.
   guards for text before the runaway and an installed file), a compile
   (`compile.sandbox.test.ts`) and a browser test (`building.spec`: by pointer, in the open file,
   by keyboard, audit), each failed before the change.
-- **Not done.** The unclosed-brace error has no line. `\begin{itemize} on input line 4 ended by
-\end{document}` still reads as if line 4 were in the main file.
+- **Not done.** The unclosed-brace error has no line. (`\begin{itemize} on input line 4 ended by
+\end{document}` is placed in its own file now: see "An environment left open in an input file".)
 
 ## A read-only visual view could not be reached by keyboard
 
@@ -5144,3 +5144,26 @@ Found by a three-person walkthrough.
   after `\ldots` shows as a space although TeX prints none; a space after `\LaTeX ` is shown
   although TeX skips it; papers that redefine these commands are not checked for; `plainText` for
   bibliography titles gains the new symbols; a line that is only `\ldots` stays a raw block.
+
+## An environment left open in an input file
+
+- **What was wrong.** A forgotten `\end{itemize}` in `sections/body.tex` is only found at
+  `\end{document}`, so the pane said `main.tex:9 ... \begin{itemize} on input line 3 ended by
+\end{document}`, and its button went to the end of the main file, where "line 3" is something
+  else.
+- **Now** the error is placed in the file that has the open `\begin` on that line:
+  `sections/body.tex:3 \begin{itemize} on this line is never closed: \end{document} came first, at
+main.tex line 9. Add \end{itemize}.` The worker reads the files the log shows were opened (a
+  regular file, up to 2 MB, under the build copy; nothing is logged) and picks the one whose line
+  has the `\begin` (comments left out) with more `\begin` than `\end` from there on. If two or more
+  fit, the error stays on the root and says which files may hold it. The same error repeated by TeX
+  is listed once. The build cache key changed, so an old failed build is rebuilt.
+- **Held by** unit tests on real-shape logs (`diagnostics.test.ts`: the input file, same line in
+  three files, a root in a folder, a repeated error, two candidates; guards for a mismatch in one
+  file, a macro-made `\begin`, a comment, no reader, an installed file), a compile
+  (`compile.sandbox.test.ts`) and a browser test (`building.spec`: the button names the input file
+  and its caret lands on the `\begin` line, audit); each failed before the change.
+- **Not done.** A `{` or `\begingroup` never closed still builds with exit 0 and no message (it
+  needs a new kind of warning in the pane and the submit check). Knock-on errors (`You can't use
+\end in internal vertical mode`) stay. A `\begin` whose matching `\end` was itself rejected as a
+  mismatch stays on the root.

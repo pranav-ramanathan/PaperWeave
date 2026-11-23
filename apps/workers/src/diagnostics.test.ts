@@ -988,3 +988,134 @@ test('two identical undefined commands on different lines stay two entries', () 
   ].join('\n');
   expect(diagnostics(log).map((d) => d.line)).toEqual([3, 5]);
 });
+
+// An environment left open in an \input-ed file: TeX finds out at \end{document} in the root.
+const ENDED_BY = (root: string, line: number, inputs: string[], env = 'itemize') =>
+  [
+    `(${root}.tex`,
+    '(/usr/share/texlive/texmf-dist/tex/latex/base/article.cls',
+    '(/usr/share/texlive/texmf-dist/tex/latex/base/size10.clo))',
+    ' ' + inputs.map((f) => `(${f})`).join(' '),
+    `${root}.tex:9: LaTeX Error: \\begin{${env}} on input line ${line} ended by \\end{document}.`,
+    '',
+    'See the LaTeX manual or LaTeX Companion for explanation.',
+    'l.9 \\end{document}',
+  ].join('\n');
+
+const reader = (files: Record<string, string>) => (f: string) => files[f];
+
+test('an environment left open in an input file is blamed on that file and its line', () => {
+  const log = ENDED_BY('./main', 3, ['./sections/intro.tex', './sections/body.tex']);
+  const read = reader({
+    'main.tex': '\\documentclass{article}\n\\begin{document}\n\\input{sections/intro}\n',
+    'sections/intro.tex': 'Intro.\n\nMore.\n\\begin{itemize}\n\\item a\n\\end{itemize}\n',
+    'sections/body.tex': 'Text.\n\n\\begin{itemize}\n\\item a\n\nAfter.\n',
+  });
+  expect(diagnostics(log, '', '', read)).toEqual([
+    {
+      severity: 'error',
+      file: 'sections/body.tex',
+      line: 3,
+      message:
+        '\\begin{itemize} on this line is never closed: \\end{document} came first, at main.tex line 9. Add \\end{itemize}.',
+    },
+  ]);
+});
+
+test('the file that holds the open environment is the one with it on that very line', () => {
+  const log = ENDED_BY('./main', 3, ['./sections/one.tex', './sections/two.tex']);
+  const read = reader({
+    'main.tex':
+      '\\documentclass{article}\n\\begin{document}\n\\begin{itemize}\n\\item x\n\\end{itemize}\n',
+    'sections/one.tex': 'A.\n\n\\begin{itemize}\n\\item a\n\\end{itemize}\n',
+    'sections/two.tex': 'B.\n\n\\begin{itemize} % open\n\\item a\n',
+  });
+  const [d] = diagnostics(log, '', '', read);
+  expect(d).toMatchObject({ file: 'sections/two.tex', line: 3 });
+});
+
+test('a root in a folder gives the input file its folder, and the message the root\u2019s', () => {
+  const log = ENDED_BY('./main', 2, ['./sections/body.tex']).replace('main.tex:9', 'main.tex:7');
+  const read = reader({
+    'main.tex': '\\documentclass{article}\n\\begin{document}\n',
+    'sections/body.tex': 'T.\n\\begin{itemize}\nq\n',
+  });
+  const [d] = diagnostics(log, '', 'paper/', read);
+  expect(d.file).toBe('paper/sections/body.tex');
+  expect(d.line).toBe(2);
+  expect(d.message).toContain('at paper/main.tex line 7.');
+});
+
+test('the same error written twice is listed once', () => {
+  const one = ENDED_BY('./main', 3, ['./sections/body.tex']);
+  const log = `${one}\n(./main.aux)\n${one.split('\n').slice(4).join('\n')}`;
+  const read = reader({
+    'main.tex': '\\begin{document}\n',
+    'sections/body.tex': 'Text.\n\n\\begin{itemize}\n\\item a\n',
+  });
+  expect(diagnostics(log, '', '', read)).toHaveLength(1);
+});
+
+test('two input files that are both open at that line leave the root, and say so', () => {
+  const log = ENDED_BY('./main', 3, ['./sections/a.tex', './sections/b.tex']);
+  const open = 'Text.\n\n\\begin{itemize}\n\\item a\n';
+  const read = reader({
+    'main.tex': '\\begin{document}\n',
+    'sections/a.tex': open,
+    'sections/b.tex': open,
+  });
+  const [d] = diagnostics(log, '', '', read);
+  expect(d).toMatchObject({ file: 'main.tex', line: 9 });
+  expect(d.message).toMatch(/Line 3 may be in a file read in before this: .+ or .+\.$/);
+  expect(d.message).toContain('sections/a.tex');
+  expect(d.message).toContain('sections/b.tex');
+});
+
+test('guard: an environment closed by the wrong \\end in one file is left as TeX said it', () => {
+  const log = [
+    '(./main.tex',
+    './main.tex:5: LaTeX Error: \\begin{itemize} on input line 3 ended by \\end{enumerate}.',
+  ].join('\n');
+  const read = reader({ 'main.tex': 'a\nb\n\\begin{itemize}\n\\item x\n\\end{enumerate}\n' });
+  expect(diagnostics(log, '', '', read)).toEqual(diagnostics(log));
+});
+
+test('guard: a \\begin made by a macro is left on the root', () => {
+  const log = ENDED_BY('./main', 2, ['./sections/body.tex']);
+  const read = reader({
+    'main.tex': '\\newcommand{\\bi}{\\begin{itemize}}\n\\begin{document}\n',
+    'sections/body.tex': 'T.\n\\bi\n\\item q\n',
+  });
+  expect(diagnostics(log, '', '', read)).toEqual(diagnostics(log));
+});
+
+test('guard: a \\begin only in a comment on that line is not an open environment', () => {
+  const log = ENDED_BY('./main', 3, ['./sections/body.tex']);
+  const read = reader({
+    'main.tex': '\\begin{document}\n',
+    'sections/body.tex': 'Text.\n\n% \\begin{itemize}\n\\item a\n',
+  });
+  expect(diagnostics(log, '', '', read)).toEqual(diagnostics(log));
+});
+
+test('guard: without a reader the diagnostics are what they were', () => {
+  const log = ENDED_BY('./main', 3, ['./sections/body.tex']);
+  expect(diagnostics(log)).toEqual([
+    {
+      severity: 'error',
+      file: 'main.tex',
+      line: 9,
+      message: 'LaTeX Error: \\begin{itemize} on input line 3 ended by \\end{document}.',
+    },
+  ]);
+});
+
+test('guard: a file of the TeX installation is never asked for', () => {
+  const log = ENDED_BY('./main', 3, ['./sections/body.tex']).replace(
+    '(./sections/body.tex)',
+    '(/usr/share/texlive/texmf-dist/tex/latex/base/x.sty) (./sections/body.tex)',
+  );
+  const asked: string[] = [];
+  diagnostics(log, '', '', (f) => (asked.push(f), undefined));
+  expect(asked.filter((f) => f.startsWith('/'))).toEqual([]);
+});

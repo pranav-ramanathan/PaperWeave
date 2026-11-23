@@ -7,6 +7,7 @@ import {
   chownSync,
   cpSync,
   existsSync,
+  lstatSync,
   mkdirSync,
   mkdtempSync,
   readdirSync,
@@ -182,9 +183,15 @@ function undefinedCommand(message: string, next: string | undefined): string {
 
 /**
  * `dir` is the root file's folder with its trailing slash, or '': the build runs there (-cd),
- * so that is what the paths in the log are relative to.
+ * so that is what the paths in the log are relative to. `read` gives the text of a paper file
+ * named as the log names it (relative to that folder, "./" left off), or undefined.
  */
-export function diagnostics(log: string, output = '', dir = ''): Diagnostic[] {
+export function diagnostics(
+  log: string,
+  output = '',
+  dir = '',
+  read?: (file: string) => string | undefined,
+): Diagnostic[] {
   // Errors in the order the log has them, so the cause is not listed after the stop.
   const found: { at: number; d: Diagnostic }[] = [];
   for (const m of log.matchAll(ERROR)) {
@@ -220,7 +227,9 @@ export function diagnostics(log: string, output = '', dir = ''): Diagnostic[] {
   const out = found
     .filter(({ d }) => !STOP.test(d.message))
     .sort((x, y) => x.at - y.at)
-    .map(({ at, d }) => runaway(log, at, d, reading.ended));
+    .map(({ at, d }) => unclosed(runaway(log, at, d, reading.ended), reading.opened(at), read, dir))
+    // TeX says the same thing again when it comes to the same \end a second time.
+    .filter((d, i, all) => all.findIndex((e) => JSON.stringify(e) === JSON.stringify(d)) === i);
   // The paper ends before \end{document}: TeX's own words for it are about its input.
   if (/^\*\*\* \(job aborted, no legal \\end found\)/m.test(log))
     out.push({ severity: 'error', message: 'The paper ends without \\end{document}.' });
@@ -510,6 +519,57 @@ function runaway(
   };
 }
 
+const ENDED_BY =
+  /^LaTeX Error: \\begin\{([^{}]+)\} on input line (\d+) ended by \\end\{([^{}]+)\}\.$/;
+/** A line without its comment: cut at the first % that no odd run of backslashes escapes. */
+const uncommented = (line: string) => line.replace(/(^|[^\\])((?:\\\\)*)%.*$/, '$1$2');
+const count = (text: string, what: string) => text.split(what).length - 1;
+
+/**
+ * "\begin{itemize} on input line 3 ended by \end{document}": TeX finds out at the \end, in the
+ * file that has it, which is usually the root. The environment is open in whichever file it
+ * began in, so where exactly one of the files read so far (or the error's own) has that \begin
+ * on that line with no \end after it, the error is placed there. Left alone where it cannot be
+ * told (the same file, a \begin made by a macro, two files that both fit).
+ */
+function unclosed(
+  d: Diagnostic,
+  opened: string[],
+  read: ((file: string) => string | undefined) | undefined,
+  dir: string,
+): Diagnostic {
+  const m = ENDED_BY.exec(d.message);
+  if (!m || !read || d.file === undefined) return d;
+  const [, env, n, by] = m;
+  const line = Number(n);
+  const own = d.file.replace(/^\.\//, '');
+  const open = (file: string) => {
+    const lines = read(file)?.split(/\r\n|\r|\n/);
+    if (!lines || lines.length < line) return false;
+    if (!uncommented(lines[line - 1]).includes(`\\begin{${env}}`)) return false;
+    const rest = lines
+      .slice(line - 1)
+      .map(uncommented)
+      .join('\n');
+    return count(rest, `\\begin{${env}}`) > count(rest, `\\end{${env}}`);
+  };
+  const found = [...new Set([own, ...opened])].slice(0, 500).filter(open);
+  if (found.length === 1 && found[0] !== own)
+    return {
+      severity: 'error',
+      file: found[0],
+      line,
+      message: `\\begin{${env}} on this line is never closed: \\end{${by}} came first, at ${place(dir, own) ?? own} line ${d.line}. Add \\end{${env}}.`,
+    };
+  const others = found.filter((f) => f !== own);
+  if (found.length > 1 && others.length)
+    return {
+      ...d,
+      message: `${d.message} Line ${line} may be in a file read in before this: ${others.slice(0, 3).join(' or ')}.`,
+    };
+  return d;
+}
+
 /**
  * Which of the paper's files TeX was reading at a place in its log. TeX writes "(" and a
  * file's name when it starts on a file and ")" when it has finished it, so the log is nested
@@ -527,11 +587,14 @@ function readingAt(
   (offset: number): string | undefined;
   /** The file whose ")" was the last before a place, as the log wrote it, with where. */
   ended: (offset: number) => { at: number; file: string } | undefined;
+  /** The paper's files opened by a place, as the log wrote them but without "./". */
+  opened: (offset: number) => string[];
 } {
   // The file being read from each place where that changes.
   const changes: { at: number; file: string | undefined }[] = [];
   const stack: (string | null)[] = [];
   const closed: { at: number; file: string }[] = [];
+  const opened: { at: number; file: string }[] = [];
   const opening = /\(((?:\.\.?\/|\/)[^\s()]+)/y;
   let at = 0;
   let quoted = false;
@@ -547,6 +610,7 @@ function readingAt(
         opening.lastIndex = i;
         const name = opening.exec(text)?.[1];
         stack.push(name ?? null);
+        if (name && !name.startsWith('/')) opened.push({ at: at + i, file: name });
         if (name) i += name.length;
       } else if (text[i] === ')') {
         const name = stack.pop();
@@ -564,6 +628,9 @@ function readingAt(
   }
   return Object.assign((offset: number) => changes.findLast((c) => c.at <= offset)?.file, {
     ended: (offset: number) => closed.findLast((c) => c.at <= offset),
+    opened: (offset: number) => [
+      ...new Set(opened.filter((o) => o.at <= offset).map((o) => o.file.replace(/^\.\//, ''))),
+    ],
   });
 }
 
@@ -643,7 +710,27 @@ export async function compile(
           aux += texText(readFileSync(join(dir, e.name))) + '\n';
     };
     if (pdf) gather(work);
-    const found = diagnostics(log, run.output, rootDir(root));
+    // The paper's own text, read only to see which file an unclosed environment is in; nothing
+    // of it is logged.
+    const texts = new Map<string, string | undefined>();
+    const read = (name: string) => {
+      if (!texts.has(name)) {
+        let text: string | undefined;
+        try {
+          const placed = place(rootDir(root), name);
+          const path = placed && join(work, placed);
+          if (path) {
+            const st = lstatSync(path);
+            if (st.isFile() && st.size <= 2_000_000) text = texText(readFileSync(path));
+          }
+        } catch {
+          text = undefined;
+        }
+        texts.set(name, text);
+      }
+      return texts.get(name);
+    };
+    const found = diagnostics(log, run.output, rootDir(root), read);
     // pdfTeX and LuaTeX place EPS through epstopdf, which needs shell escape; without it the
     // picture is silently drawn as a box with its name, and the log says nothing. XeLaTeX
     // fails instead, and diagnostics() has said so.

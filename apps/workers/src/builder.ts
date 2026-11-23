@@ -32,8 +32,11 @@ import { compile, type Compiler, IMAGE } from './compile.ts';
  * failed build would keep it failed.
  * '...-ended': "File ended while scanning" names the \input-ed file that ended; a cached failed
  * build keeps naming the root file.
+ * '...-ended-unclosed': an environment left open in an \input-ed file is placed in that file; a
+ * cached failed build keeps naming the root.
  */
-const TEX_TEXT = 'utf8-biber-eps-glyphs-strings-forcedate-unicode-nullfont-csname-bbl-ended';
+const TEX_TEXT =
+  'utf8-biber-eps-glyphs-strings-forcedate-unicode-nullfont-csname-bbl-ended-unclosed';
 
 /** The toolchain image's content ID: part of every cache key, so a new image rebuilds everything. */
 export const imageId = () =>
