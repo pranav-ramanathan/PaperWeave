@@ -17,6 +17,7 @@ import {
   importZip,
   invite,
   listFiles,
+  readyMadeMessage,
   readZip,
   requestBuild,
   restoreRevision,
@@ -361,6 +362,66 @@ test('a paper with a ready-made .bbl and no .bib has no missing citations', asyn
   });
   expect(found.findings.filter((f) => f.kind === 'citation')).toEqual([]);
   expect(found.ready).toBe(true);
+}, 240_000);
+
+test('a biblatex paper with a ready-made .bbl and no .bib is ready', async () => {
+  const main = doc(
+    '\\usepackage[backend=biber]{biblatex}\n\\addbibresource{refs.bib}',
+    'Cite \\cite{knuth}.\n\\printbibliography',
+  );
+  const bbl = [
+    '% $ biblatex auxiliary file $\n',
+    '% $ biblatex bbl format version 3.2 $\n',
+    '% Do not modify the above lines!\n',
+    '\n',
+    '\\refsection{0}\n',
+    '  \\datalist[entry]{nty/global//global/global}\n',
+    '    \\entry{knuth}{book}{}\n',
+    '      \\name{author}{1}{}{%\n',
+    '        {{hash=1dd533466eb3313074d496394d319407}{%\n',
+    '           family={Knuth},\n',
+    '           familyi={K\\bibinitperiod},\n',
+    '           given={Donald},\n',
+    '           giveni={D\\bibinitperiod}}}%\n',
+    '      }\n',
+    '      \\list{publisher}{1}{%\n',
+    '        {AW}%\n',
+    '      }\n',
+    '      \\strng{namehash}{1dd533466eb3313074d496394d319407}\n',
+    '      \\strng{fullhash}{1dd533466eb3313074d496394d319407}\n',
+    '      \\strng{bibnamehash}{1dd533466eb3313074d496394d319407}\n',
+    '      \\strng{authorbibnamehash}{1dd533466eb3313074d496394d319407}\n',
+    '      \\strng{authornamehash}{1dd533466eb3313074d496394d319407}\n',
+    '      \\strng{authorfullhash}{1dd533466eb3313074d496394d319407}\n',
+    '      \\field{sortinit}{K}\n',
+    '      \\field{sortinithash}{c02bf6bff1c488450c352b40f5d853ab}\n',
+    '      \\field{labelnamesource}{author}\n',
+    '      \\field{labeltitlesource}{title}\n',
+    '      \\field{title}{The TeXbook}\n',
+    '      \\field{year}{1984}\n',
+    '    \\endentry\n',
+    '  \\enddatalist\n',
+    '\\endrefsection\n',
+    '\\endinput\n',
+  ].join('');
+  const ready = await verdict('Biblatex bbl only', { 'main.tex': main, 'main.bbl': bbl });
+  expect(ready.problems).toEqual([]);
+  expect(ready.ready).toBe(true);
+  expect(ready.revisionId).not.toBeNull();
+  expect(ready.findings).toContainEqual(
+    expect.objectContaining({
+      level: 'warning',
+      kind: 'compiler',
+      message: readyMadeMessage('refs.bib'),
+    }),
+  );
+
+  // Guard (passes before and after the fix): with no .bbl the build fails, and the problem stays.
+  const none = await verdict('Biblatex nothing', { 'main.tex': main });
+  expect(none.ready).toBe(false);
+  expect(none.problems.map((f) => f.message)).toContainEqual(
+    expect.stringMatching(/^Biber could not find the bibliography file refs\.bib/),
+  );
 }, 240_000);
 
 test('files that come with the TeX installation do not stop a paper; one that is not there does', async () => {

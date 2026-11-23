@@ -4739,7 +4739,7 @@ Found by a three-person walkthrough.
 - **Held by** unit tests in `bib.test.ts` and sandbox tests in `citations.sandbox.test.ts`,
   `evidence.sandbox.test.ts`, `import.sandbox.test.ts` and `submit.sandbox.test.ts`.
 - **Not done.** A `]` inside a braced `\bibitem` label; a key BibTeX broke across lines with `%`;
-  a biblatex `.bbl` whose format version differs from the image's (a build error, separate); a DOI
+  a biblatex `.bbl` whose header names another format version (a warning here, not a build error); a DOI
   lookup for `.bbl` entries.
 
 ## Renaming a chapter left `\includeonly` on the old name, and the chapter dropped out of the PDF
@@ -4869,8 +4869,7 @@ Found by a three-person walkthrough.
 - **Held by** unit tests in `graph.test.ts`, `archive.test.ts` and `import.test.ts`, sandbox tests
   in `import.sandbox.test.ts`, `citations.sandbox.test.ts` and `builds.sandbox.test.ts`.
 - **Not done.** A `.bib` named only inside the paper's own `.cls` or `.sty` is not seen; a
-  biblatex paper with a kept `.bbl` still gets the "Biber could not find the bibliography file"
-  diagnostic; a named `.bib` that is present but incomplete still replaces the `.bbl`; a paper
+  named `.bib` that is present but incomplete still replaces the `.bbl`; a paper
   that `\input`s its `.bbl` and has no `\bibliography` imported with the `.bbl` but did not
   build; fixed below (the cause was the root's own `.bbl` being read, not the `\citation` lines).
 
@@ -4889,3 +4888,18 @@ Found by a three-person walkthrough.
 - **Held by** `builds.sandbox.test.ts` (no `.bib`, an unrelated `.bib`, and `\nocite{*}`); the existing
   BibTeX-error, missing-`.bib` and manifest-command sandbox tests pass unchanged.
 - **Not done.** Nothing known.
+
+## A biblatex paper with a ready-made `.bbl` and no `.bib` built, but the submit check refused it
+
+- **What was wrong.** With `\addbibresource{refs.bib}`, a biber-made `main.bbl` and no `refs.bib`,
+  the build succeeded and the PDF was right, but the worker's "Biber could not find the
+  bibliography file refs.bib." diagnostic has severity error, and the submit check made every
+  error a problem: not ready, no revision, no ZIP or PDF to download.
+- **Now** the submit check reads that diagnostic as a warning when the last build succeeded
+  (`readyMadeMessage` in `submit.ts`), saying the bibliography was not made again and the PDF
+  shows the ready-made `.bbl`. On a failed build (no `.bbl`) it stays a problem. A citation the
+  `.bbl` lacks is still a citation problem.
+- **Held by** a unit test in `submit.test.ts` and a sandbox test in `submit.sandbox.test.ts`
+  (ready with a `.bbl`; a guard that the same paper with no `.bbl` is still refused).
+- **Not done.** The stored diagnostic is still severity error (only the submit check reads it
+  differently); the generic "LaTeX found it elsewhere" warning for the same `.bib` remains.

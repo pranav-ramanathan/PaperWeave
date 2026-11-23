@@ -42,12 +42,18 @@ const PICTURE = /^Picture not shown: /;
 /** The worker's warning for characters the font lacks: the PDF leaves them out. */
 const MISSING = /^Characters not shown: /;
 const ABBREVIATION = /^Abbreviation not defined: /;
+/** The worker's error for a .bib biber could not find; on a build that succeeded the .bbl stood in. */
+const NO_BIB = /^Biber could not find the bibliography file (.+)\.$/;
 const NOT_FOUND = /[`'](.+?)' not found/;
 /** Whether a file TeX could not find ("nosuchfile.tex") is the one a command named ("nosuchfile"). */
 const namesTarget = (found: string, target: string) => {
   const bare = (p: string) => p.replace(/^\.\//, '').replace(/\.[a-z0-9]+$/i, '');
   return found === target || bare(found) === bare(target);
 };
+
+/** Why a missing .bib is only a warning when the build succeeded on a ready-made .bbl. */
+export const readyMadeMessage = (bib: string) =>
+  `${bib} is not among the paper's files, so the bibliography was not made again: the PDF shows the paper's ready-made .bbl as it stands.`;
 
 /** Why a data file held back from downloads, which the paper reads, is a problem. */
 export const heldReadMessage = (path: string) =>
@@ -339,6 +345,11 @@ async function checksOf(
         (PICTURE.test(d.message) || MISSING.test(d.message) || ABBREVIATION.test(d.message))
       ) {
         problem('file', d.message, where);
+        continue;
+      }
+      const noBib = latest.status === 'succeeded' ? NO_BIB.exec(d.message) : null;
+      if (noBib) {
+        warning('compiler', readyMadeMessage(noBib[1]), where);
         continue;
       }
       if (d.severity === 'error') problem('compiler', d.message, where);
