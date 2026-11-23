@@ -5472,3 +5472,29 @@ closed: ...` (outermost first, at most 10). The log does not name the file: with
 - **Not done.** The page still does not show others' changes until it is saved or reloaded; a word
   removed on the page while someone re-adds it in the editor follows whichever came last; the
   editor's panel does not hear of a word removed on the page until its next check.
+
+## A file named in the wrong letter case said "may come with TeX", with no hint
+
+- **What was wrong.** Papers written on macOS or Windows, which ignore letter case in file
+  names, often say `\includegraphics{Figures/Plot}` for `figures/plot.png`, or
+  `\input{Sections/Intro}` for `sections/intro.tex`. They build at home and fail here and on
+  arXiv. Nothing said the file was there under another spelling:
+  - the import report said the name "is not among the paper's files. It may come with the TeX
+    installation", which only a build can tell;
+  - the checks before submitting said `The paper has no file "Figures/Plot".`;
+  - the build pane said only ``LaTeX Error: File `Figures/Plot' not found.``
+- **Now.** `includeGraph` records `near` on a missing name: the paper's file that matches it
+  but for letter case (with the extension TeX would add, through `\graphicspath` and an
+  import folder too). It is advice only: no edge, no reading order, no build and no export
+  changes, and nothing in the paper is rewritten. The import report, the submit check and the
+  build pane (which reads the name out of the error it shows) each say which file it is and
+  that capitals count here. A name that matches nothing keeps its old sentence exactly.
+- **Held by** tests in `graph.test.ts`, `import.test.ts`, `submit.sandbox.test.ts`, and a
+  browser test in `import.spec.ts` that imports such a paper, reads the hint in the report and
+  in the pane, corrects the name and builds.
+- **Not done.** No one-press fix. The visual view still says "cannot be shown here. It is in
+  the PDF." Names that differ in Unicode normalisation are not matched. A reference made
+  through a macro is not checked. Import reports stored earlier keep the old sentence.
+- **Known, not fixed.** "Add a row" on a one-column table inserts `\n     \\`, which
+  `tableOf` does not read back as a row (`closeRow` drops a lone empty cell), so the button
+  seems to do nothing and each press adds a blank line to the PDF.

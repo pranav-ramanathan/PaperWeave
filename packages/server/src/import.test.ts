@@ -1,6 +1,6 @@
 import { expect, test } from 'vitest';
 import type { Entry, Skipped } from './archive.ts';
-import { keepBbls } from './import.ts';
+import { describeImport, keepBbls } from './import.ts';
 
 const f = (path: string, text: string): Entry => ({ path, bytes: Buffer.from(text) });
 const doc = (body: string) => `\\documentclass{article}\\begin{document}${body}\\end{document}`;
@@ -55,4 +55,23 @@ test('a .bbl is still dropped when every .bib the paper names is in the archive'
       f('refs.bib', '@misc{a,title={T}}'),
     ]),
   ).toEqual({ paths: ['main.tex', 'refs.bib'], skipped: ['main.bbl'] });
+});
+
+test('the report says which file a wrongly capitalised name is meant for', () => {
+  const main =
+    '\\documentclass{article}\\usepackage{graphicx}\\begin{document}\\input{Sections/Intro}\\includegraphics{Figures/Plot}\\includegraphics{figures/second.PNG}\\bibliography{Refs}\\includegraphics{gone}\\end{document}';
+  const { report } = describeImport([
+    f('main.tex', main),
+    f('sections/intro.tex', 'Hello.'),
+    f('figures/plot.png', 'x'),
+    f('figures/second.png', 'x'),
+    f('refs.bib', '@misc{a,title={A}}'),
+  ]);
+  expect(report.missing.map((m) => [m.target, m.near])).toEqual([
+    ['Sections/Intro', 'sections/intro.tex'],
+    ['Figures/Plot', 'figures/plot.png'],
+    ['figures/second.PNG', 'figures/second.png'],
+    ['Refs', 'refs.bib'],
+    ['gone', undefined],
+  ]);
 });

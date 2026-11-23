@@ -871,3 +871,29 @@ test('a paper whose \\includeonly leaves chapters out is not ready, and says whi
   expect(off.text).toEqual([]);
   expect(off.ready).toBe(true);
 }, 300_000);
+
+test('a file named in the wrong letter case is pointed out, and a missing one is not', async () => {
+  const main = [
+    '\\documentclass{article}',
+    '\\usepackage{graphicx}',
+    '\\begin{document}',
+    '\\includegraphics{Figures/Plot}',
+    '\\includegraphics{figures/absent}',
+    '\\end{document}',
+    '',
+  ].join('\n');
+  const zip = await writeZip([
+    { path: 'main.tex', bytes: Buffer.from(main) },
+    { path: 'figures/plot.png', bytes: Buffer.from([137, 80, 78, 71]) },
+  ]);
+  const [project] = await importZip(t.pool, store, users.owner.id, zip, 'Case');
+  const found = await submissionChecks(t.pool, store, users.owner.id, project.id);
+  const files = found.findings.filter((f) => f.kind === 'file');
+  expect(files.map((f) => [f.message, f.line])).toEqual([
+    [
+      'The paper has no file "Figures/Plot". It has "figures/plot.png": only the capital letters differ, and they count here. Change the name to match.',
+      4,
+    ],
+    ['The paper has no file "figures/absent".', 5],
+  ]);
+});

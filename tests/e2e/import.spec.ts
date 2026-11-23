@@ -5,7 +5,17 @@ import { mkdtempSync, readdirSync, readFileSync, statSync, writeFileSync } from 
 import { tmpdir } from 'node:os';
 import { join, relative } from 'node:path';
 import { readZip, writeZip } from '../../packages/server/src/archive';
-import { address, emailedLink, person, run, selectWord, signIn, typingSaved } from './helpers';
+import {
+  address,
+  audit,
+  emailedLink,
+  person,
+  run,
+  selectWord,
+  showSource,
+  signIn,
+  typingSaved,
+} from './helpers';
 
 const FIXTURE = join(import.meta.dirname, '../../fixtures/ieee-multifile');
 
@@ -181,6 +191,67 @@ test('a root in a folder with its figures and bibliography beside it imports who
     'The PDF is up to date.',
     { timeout: 90_000 },
   );
+});
+
+test('a picture named in the wrong letter case is pointed out in the report and the build pane, and builds once it matches', async ({
+  browser,
+}) => {
+  test.setTimeout(240_000);
+  const owner = await person(browser, 'lettercase');
+  const { page } = owner;
+  const name = `Letter case ${run}`;
+  const png = Buffer.from(
+    'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mP8z8BQDwAEhQGAhKmMIQAAAABJRU5ErkJggg==',
+    'base64',
+  );
+  const zip = join(mkdtempSync(join(tmpdir(), 'paperweave-e2e-')), `${name}.zip`);
+  writeFileSync(
+    zip,
+    await writeZip([
+      {
+        path: 'main.tex',
+        bytes: Buffer.from(
+          '\\documentclass{article}\n\\usepackage{graphicx}\n\\begin{document}\n' +
+            '\\includegraphics{Figures/Plot}\n\\end{document}\n',
+        ),
+      },
+      { path: 'figures/plot.png', bytes: png },
+    ]),
+  );
+  await page.goto('/sign-in');
+  await signIn(page, owner.email);
+  await page.getByLabel('Or import a ZIP of a LaTeX project').setInputFiles(zip);
+  await page.getByRole('button', { name: 'Import ZIP' }).click();
+  await expect(page.getByRole('heading', { name })).toBeVisible();
+
+  const report = page.locator('.report:not(.first-steps)');
+  await expect(report).toContainText(
+    'The paper has figures/plot.png: only the capital letters differ',
+  );
+  await expect(report).not.toContainText('may come with the TeX installation');
+  await audit(page, 'import report with a near name');
+
+  await page.getByRole('link', { name: 'main.tex', exact: true }).click();
+  const errors = page.locator('.build').getByRole('list', { name: 'Build errors' });
+  await expect(errors).toContainText("File `Figures/Plot' not found", { timeout: 90_000 });
+  await expect(errors).toContainText('The paper has figures/plot.png');
+  await audit(page, 'build pane with a near name');
+
+  // Make the name match: the build succeeds and the list goes.
+  await showSource(page);
+  const source = page.locator('.editor .cm-content');
+  await source.click();
+  await page.keyboard.press('ControlOrMeta+Home');
+  for (let i = 0; i < 3; i++) await page.keyboard.press('ArrowDown');
+  await page.keyboard.press('End');
+  for (let i = 0; i < 13; i++) await page.keyboard.press('ArrowLeft');
+  for (let i = 0; i < 12; i++) await page.keyboard.press('Shift+ArrowRight');
+  await page.keyboard.type('figures/plot');
+  await typingSaved(page);
+  await expect(page.locator('.build').getByRole('status')).toHaveText('The PDF is up to date.', {
+    timeout: 90_000,
+  });
+  await expect(errors).toHaveCount(0);
 });
 
 test('a paper with a percent-encoded address imports whole, takes typing after it, and builds', async ({
