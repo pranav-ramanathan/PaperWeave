@@ -87,3 +87,65 @@ test('a multicite names the keys of every one of its groups', () => {
   const text = '\\textcites{a} [not part of it]';
   expect(citeIndex(text).map((u) => u.key)).toEqual(['a']);
 });
+
+test('a comment in a key list is not a key', () => {
+  const check = (src: string, keys: string[]) => {
+    const uses = [...labelIndex(src).refs, ...citeIndex(src)];
+    expect(uses.map((u) => u.key)).toEqual(keys);
+    for (const u of uses) {
+      expect(src.slice(u.keyAt, u.keyAt + u.key.length)).toBe(u.key);
+      expect(u.end).toBe(src.lastIndexOf('}') + 1);
+    }
+  };
+  check('\\cref{fig:a,% the first\n  fig:b}\n', ['fig:a', 'fig:b']);
+  check('\\cite{a,%\n b}\n', ['a', 'b']);
+  // A } inside the comment does not end the list.
+  check('\\cite{a,% see Smith}\n b}\n', ['a', 'b']);
+  // A key split by a comment cannot be one splice, so it is left out.
+  check('\\cite{fig:%\na}\n', []);
+});
+
+test('an escaped percent sign in a key list is not a comment, and nothing hangs', () => {
+  const src = '\\cite{a\\%b}\n';
+  expect(citeIndex(src)).toEqual([]);
+  expect(citeIndex('\\cite{a\\%b, c}\n').map((u) => u.key)).toEqual(['c']);
+});
+
+test('a line break before the braces does not hide a reference', () => {
+  expect(labelIndex('\\ref\n{a}').refs.map((r) => r.key)).toEqual(['a']);
+  expect(citeIndex('\\cite\n  {e}').map((r) => r.key)).toEqual(['e']);
+  expect(citeIndex('\\citep[see][]\n{f}').map((r) => r.key)).toEqual(['f']);
+  expect(labelIndex('\\crefrange{a}\n{b}').refs.map((r) => r.key)).toEqual(['a', 'b']);
+  expect(labelIndex('\\hyperref\n[a]{x}').refs.map((r) => r.key)).toEqual(['a']);
+  // A blank line ends the paragraph: TeX does not look past it.
+  expect(labelIndex('\\ref\n\n{a}').refs).toEqual([]);
+  expect(citeIndex('\\cite\n\n{a}')).toEqual([]);
+});
+
+test('cleveref, varioref, natbib and apacite forms name keys', () => {
+  const refs = [
+    ...['labelcpageref', 'nameCref', 'namecrefs', 'nameCrefs', 'lcnamecref', 'lcnamecrefs'],
+    ...['autopageref', 'fullref', 'prettyref', 'thref'],
+  ];
+  for (const name of refs)
+    expect(
+      labelIndex(`\\${name}{a,b}`).refs.map((r) => r.key),
+      name,
+    ).toEqual(['a', 'b']);
+  for (const name of ['cpagerefrange', 'Cpagerefrange', 'vrefrange', 'vpagerefrange'])
+    expect(
+      labelIndex(`\\${name}{a}{b}`).refs.map((r) => r.key),
+      name,
+    ).toEqual(['a', 'b']);
+  const cites = [
+    ...['Citealt', 'Citealp', 'citefullauthor', 'Citefullauthor', 'citetalias', 'citepalias'],
+    ...['footcitetext', 'Smartcite', 'citeurl', 'citedate', 'shortcite', 'citeA', 'citeNP'],
+    ...['citeN', 'shortciteA', 'shortciteNP', 'shortciteN', 'fullciteA', 'fullciteNP'],
+    ...['citeyearNP', 'citeasnoun', 'possessivecite', 'citeposs'],
+  ];
+  for (const name of cites)
+    expect(
+      citeIndex(`\\${name}{a,b}`).map((r) => r.key),
+      name,
+    ).toEqual(['a', 'b']);
+});

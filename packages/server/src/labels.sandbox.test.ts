@@ -210,6 +210,33 @@ test('hyperref, fref, Fref and zcref references follow a renamed label', async (
   );
 });
 
+test('a reference after a comment in a list, and the range and name forms, follow a renamed label', async () => {
+  const before = [
+    '\\documentclass{article}',
+    '\\begin{document}',
+    '\\section{A}\\label{fig:a}',
+    '\\section{B}\\label{fig:b}',
+    'See \\cref{fig:a,% the first}',
+    '  fig:b} and \\cpagerefrange{fig:a}{fig:b}.',
+    '\\vrefrange{fig:a}{fig:b} \\nameCref{fig:b} \\autopageref{fig:b}',
+    '\\end{document}',
+    '',
+  ].join('\n');
+  const zip = await writeZip([{ path: 'main.tex', bytes: Buffer.from(before) }]);
+  const [project] = await importZip(t.pool, store, owner.id, zip, 'Comment list');
+  const proposal = await proposeLabelRename(
+    t.pool,
+    store,
+    owner.id,
+    project.id,
+    'fig:b',
+    'fig:second',
+  );
+  await renameLabel(t.pool, store, owner.id, project.id, 'fig:b', 'fig:second', proposal.digest);
+  expect((await texts(project.id))['main.tex']).toBe(before.replaceAll('fig:b', 'fig:second'));
+  expect((await labelReport(t.pool, store, owner.id, project.id)).undefined).toEqual([]);
+});
+
 test("paperProse reads the root's preamble and the project's own packages, and only for members", async () => {
   const zip = await writeZip(
     Object.entries({

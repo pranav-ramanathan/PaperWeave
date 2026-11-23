@@ -5,7 +5,7 @@ import { mkdtempSync, readdirSync, readFileSync, statSync, writeFileSync } from 
 import { tmpdir } from 'node:os';
 import { join, relative } from 'node:path';
 import { writeZip } from '../../packages/server/src/archive';
-import { audit, person, run, showSource, signIn } from './helpers';
+import { audit, person, run, showSource, signIn, sourceText } from './helpers';
 
 const FIXTURE = join(import.meta.dirname, '../../fixtures/ieee-multifile');
 const source = (page: Page) => page.locator('.editor .cm-content');
@@ -97,4 +97,63 @@ test('a label is renamed with every reference, after the changes have been shown
   const reference = other.locator('.pw-ref[aria-label^="reference to sec:design:"]');
   await expect(reference).toHaveCount(2);
   await expect(reference.first()).toHaveText('II');
+});
+
+test('a label named after a comment in a list is renamed, and the bibliography lists what \\shortcite cites', async ({
+  browser,
+}) => {
+  test.setTimeout(120_000);
+  const { page, email } = await person(browser, 'label-comment');
+  const main = [
+    '\\documentclass{article}',
+    '\\begin{document}',
+    '\\section{A}\\label{fig:a}',
+    '\\section{B}\\label{fig:b}',
+    'See \\cref{fig:a,% first',
+    '  fig:b}.',
+    '\\cpagerefrange{fig:a}{fig:b} and \\shortcite{knuth1984}.',
+    '\\bibliography{refs}',
+    '\\end{document}',
+    '',
+  ].join('\n');
+  const bib = '@article{knuth1984, author = {Knuth, Donald E.}, title = {Literate Programming}}\n';
+  const zip = join(mkdtempSync(join(tmpdir(), 'paperweave-e2e-')), `Comment list ${run}.zip`);
+  writeFileSync(
+    zip,
+    await writeZip([
+      { path: 'main.tex', bytes: Buffer.from(main) },
+      { path: 'refs.bib', bytes: Buffer.from(bib) },
+    ]),
+  );
+  await page.goto('/sign-in');
+  await signIn(page, email);
+  await page.getByLabel('Or import a ZIP of a LaTeX project').setInputFiles(zip);
+  await page.getByRole('button', { name: 'Import ZIP' }).click();
+  const paper = page.url();
+  // The citation the paper makes with \shortcite counts: its entry is listed in the table.
+  await expect(page.getByText('1 entry. Every citation has one.')).toBeVisible();
+  await expect(page.getByText(/not cited in it/)).toHaveCount(0);
+  await expect(page.getByRole('row', { name: /^knuth1984/ })).toHaveCount(1);
+  await expect(page.getByText('2 labels. Every reference points to one of them.')).toBeVisible();
+
+  await page.getByLabel('Rename the label').selectOption('fig:b');
+  await page.getByLabel('to', { exact: true }).fill('fig:second');
+  await page.getByRole('button', { name: 'See what would change' }).click();
+  await expect(page.getByText('This would change 3 lines in 1 file')).toBeVisible();
+  const lines = page.getByRole('region', { name: 'main.tex' });
+  await expect(lines).toContainText('+ 4: \\section{B}\\label{fig:second}');
+  await expect(lines).toContainText('+ 6:   fig:second}.');
+  await expect(lines).toContainText('+ 7: \\cpagerefrange{fig:a}{fig:second}');
+  await audit(page, 'a label rename over a comment in a list');
+  await page.getByRole('button', { name: 'Rename in all of it' }).click();
+  await expect(page.getByRole('status')).toHaveText('Renamed to fig:second in 3 places.');
+
+  await page.goto(paper);
+  await page.getByRole('link', { name: 'main.tex' }).first().click();
+  await showSource(page);
+  await expect(page.locator('.editor .cm-content')).toContainText('fig:second}');
+  const text = await sourceText(page);
+  expect(text).toContain('% first');
+  expect(text).toContain('fig:second}');
+  expect(text).not.toContain('fig:b');
 });

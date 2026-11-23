@@ -640,14 +640,18 @@ function parseInto(
         let type: Piece['type'] = 'raw';
         if (REF.has(name)) {
           let k = src[j] === '*' ? j + 1 : j;
-          for (let b = 0; b < 2 && src[k] === '['; b++) {
-            const end = bracket(k);
+          for (let b = 0; b < 2; b++) {
+            const q = skipWs(k);
+            if (src[q] !== '[') break;
+            const end = bracket(q);
             if (end < 0) break;
             k = end;
           }
           // \crefrange{first}{last} names two labels, in two groups.
-          for (let g = 0; g < (name.endsWith('range') ? 2 : 1) && src[k] === '{'; g++) {
-            const end = group(k);
+          for (let g = 0; g < (name.endsWith('range') ? 2 : 1); g++) {
+            const q = skipWs(k);
+            if (src[q] !== '{') break;
+            const end = group(q);
             if (end < 0) {
               e = -1;
               break;

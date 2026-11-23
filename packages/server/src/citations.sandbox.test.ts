@@ -90,6 +90,31 @@ test('entries, missing keys and duplicate keys are found, and the .bib files are
   });
 });
 
+test('citations by shortcite, citetalias, over a comment and over a line break count as cited', async () => {
+  const main = [
+    '\\documentclass{article}',
+    '\\begin{document}',
+    'A \\shortcite{k1}, \\citetalias{k2}, \\cite{k3,% note',
+    ' k4} and \\cite',
+    '{k5}.',
+    '\\bibliography{refs}',
+    '\\end{document}',
+    '',
+  ].join('\n');
+  const bib =
+    ['k1', 'k2', 'k3', 'k4', 'k5', 'unused']
+      .map((k) => `@misc{${k}, title = {T ${k}}}`)
+      .join('\n') + '\n';
+  const zip = await writeZip([
+    { path: 'main.tex', bytes: Buffer.from(main) },
+    { path: 'refs.bib', bytes: Buffer.from(bib) },
+  ]);
+  const [project] = await importZip(t.pool, store, owner.id, zip, 'Odd cites');
+  const report = await citationReport(t.pool, store, owner.id, project.id);
+  expect(report.missing).toEqual([]);
+  expect(report.entries.filter((e) => !e.cited).map((e) => e.key)).toEqual(['unused']);
+});
+
 test('\\bibitem entries are entries: known keys with a place and a one-line description', async () => {
   const main = [
     '\\documentclass{article}',
