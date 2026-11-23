@@ -2483,8 +2483,9 @@ update` held the paper's file rows for **189.6 s** (until the proxy was cut; it 
   fixture is 39 of 41 lines, against 49 of 52 before: blank lines that only end a paragraph no
   longer count as making something.
 - **Not changed:** `\begin{tabular}` and `\end{tabular}` point at the table's first row. A
-  place inside a line is known to the nearest space. A line kept exactly is not said to be
-  approximate, though the PDF is behind.
+  place inside a line is known to the nearest space (the clicked word and the caret's share of
+  the line now narrow that: see "Between the PDF and the text, to the word"). A line kept exactly
+  is not said to be approximate, though the PDF is behind.
 - **How it was made.** Planned by one agent, probed and written by others, and the cause of
   the first fix's regression found by the planner from the records themselves; checked here.
 
@@ -5350,3 +5351,43 @@ closed: ...` (outermost first, at most 10). The log does not name the file: with
   chips show the number, as `\namecref` already does. A comment inside a `\hyperref[..]` key.
   Commands with other argument shapes (`\defcitealias`, `\citefield`, `\volcite`,
   `\citeaffixed`).
+
+## Between the PDF and the text, to the word
+
+- **What was wrong.** SyncTeX goes between the PDF and the text by the line, both ways, and a
+  paragraph typed in the visual view is one source line, so it was paragraph-only. Measured on
+  real builds of a two-column paper with 12 one-line paragraphs (156 marker words): "Show in PDF"
+  landed within one printed line for 12 and on the wrong page for 18, always at the paragraph's
+  first line. The band was as wide as the page, so on two columns it did not say which column; at
+  200% the place could be off to the side. A double-click in the PDF put the caret at the line's
+  start. On a hard-wrapped paper (`ieee-multifile`), 7 of 243 words (the first word of a source
+  line, or a paragraph's last) resolved to a neighbouring line, and the `synctex` tool agrees.
+- **Now.**
+
+  |                                                  | before              | now                                                        |
+  | ------------------------------------------------ | ------------------- | ---------------------------------------------------------- |
+  | Text to PDF, within one printed line (156 words) | 12                  | 155 (118 exact)                                            |
+  | Text to PDF, right page                          | 138                 | 155                                                        |
+  | PDF to text, caret                               | start of the line   | the clicked word, selected                                 |
+  | The band                                         | as wide as the page | as wide as the line's column, centred sideways when zoomed |
+  | First word of a hard-wrapped source line         | the line above      | its own line                                               |
+
+  Source to PDF: the editor sends the caret's share of its line (`share`, 0 to 1); `toPdf` takes
+  the record at that share of what the line made, over line boxes, columns and pages, and says
+  the box it is in (`left`, `width`). PDF to source: `toSource` says how far along its line the
+  clicked record is (`share`, over the line's own records, in file order); that share was within 7
+  characters (median) and 40 (greatest) of an occurrence of the clicked word over 2,748 words.
+  The clicked word is read from the PDF's text layer in the browser (`apps/web/lib/pdfword.ts`)
+  and looked for, whole, on the line, then the line below, then the line above; it is never in a
+  request, an address or a log. A place in another file is kept in the browser (`carry`/`taken` in
+  `pdfsync.ts`) while the address says only `?line=N`. A line edited since the build keeps the
+  line-only behaviour: `share` is neither used nor returned.
+
+- **Held by** `synctex.test.ts`, `pdfword.test.ts`, a sandbox test in `builds.sandbox.test.ts`
+  (a one-line paragraph that runs from page 1 to page 2 of a two-column paper) and two browser
+  tests in `synctex.spec` (words both ways in both views, the band's page, height and width, 200%,
+  another file, every `/sync?` request's shape, the audit; the first words of a hard-wrapped
+  paper). Each new test failed on the old code.
+- **Not done.** A word split by a hyphen or a ligature falls back to the share; the keyboard
+  route ("the middle of the pages") has no word, only the share; a moved line keeps line-only
+  behaviour.

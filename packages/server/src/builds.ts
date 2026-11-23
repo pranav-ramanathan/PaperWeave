@@ -477,6 +477,7 @@ export async function lineMap(
 /**
  * Where a line of a file, as it is now, is in a build's PDF: the page, and a place on it in PDF
  * points. `moved` is true if the PDF is of text that had no such line, so the place is the nearest.
+ * `share` is how far along the line (0 to 1) the place is wanted.
  */
 export async function sourceToPdf(
   db: Db,
@@ -486,6 +487,7 @@ export async function sourceToPdf(
   buildId: string,
   fileId: string,
   line: number,
+  share?: number,
 ) {
   if (!Number.isInteger(line) || line < 1) throw new AppError('invalid_input', 'No such line.');
   const { sync, files, revisionId } = await syncOf(db, store, userId, projectId, buildId);
@@ -495,7 +497,8 @@ export async function sourceToPdf(
   const map = await lineMap(db, store, projectId, revisionId, fileId);
   if (map === 'gone') throw nowhere();
   const built = map.toBuilt(line);
-  const place = toPdf(sync, path, built.line);
+  // How far along the line the place is means nothing once the line is not the one built.
+  const place = toPdf(sync, path, built.line, built.moved ? undefined : share);
   if (!place) throw nowhere();
   return { ...place, moved: built.moved };
 }
@@ -538,5 +541,11 @@ export async function pdfToSource(
   const map = await lineMap(db, store, projectId, revisionId, file.file_id);
   if (map === 'gone') throw gone();
   const now = map.toNow(found.line);
-  return { fileId: file.file_id, path, line: now.line, moved: now.moved };
+  return {
+    fileId: file.file_id,
+    path,
+    line: now.line,
+    moved: now.moved,
+    ...(!now.moved && found.share !== undefined && { share: found.share }),
+  };
 }

@@ -93,6 +93,7 @@ Where this stands, what holds it there, and what nobody has checked yet.
   for what is there, in whichever file it is.
   - It is coarser than a double-click, which picks a word: it picks what is nearest the middle
     of the pane. On a page with two columns it cannot say which column is meant.
+    It now lands near that place in the line, not at the line's start.
 
 - **The colours of a drawn chart** (`charts.test`). A chart is printed on white, and each of
   its eight colours is dark enough against white to be made out: at least 3 to 1.

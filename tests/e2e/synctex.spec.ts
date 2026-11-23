@@ -12,6 +12,7 @@ import {
   person,
   run,
   showSource,
+  showVisual,
   signIn,
   typingSaved,
 } from './helpers';
@@ -426,4 +427,225 @@ test('the pages of the PDF can be made larger, and stay right when the window ch
     })
     .toBe(true);
   await audit(page, 'the PDF pane with its size buttons');
+});
+
+// Words, not only lines. A two-column paper whose paragraphs are each one line of the source and
+// run over many lines of the PDF, with a marker in the middle of one and at the end of another.
+const filler = (from: number, n: number) =>
+  Array.from({ length: n }, (_, i) => `Sentence number ${from + i} is ordinary filler text.`);
+const longLine = (parts: string[]) => parts.join(' ');
+const WORDS_MAIN = [
+  '\\documentclass[twocolumn]{article}',
+  '\\begin{document}',
+  '\\section{Words}',
+  '',
+  longLine(filler(1, 40)),
+  '',
+  longLine([...filler(41, 20), 'Here WORDMID stands in the middle.', ...filler(61, 20)]),
+  '',
+  longLine([...filler(81, 40), 'The very last word is WORDEND']) + '.',
+  '',
+  '\\input{second}',
+  '\\end{document}',
+  '',
+].join('\n');
+const WORDS_SECOND = [
+  '\\section{Second}',
+  'A closing paragraph holding SECONDWORD and more.',
+  '',
+].join('\n');
+const WORDS_LINE = (word: string, text = WORDS_MAIN) =>
+  text.split('\n').findIndex((l) => l.includes(word)) + 1;
+
+async function openPaper(
+  browser: Parameters<typeof person>[0],
+  who: string,
+  files: Record<string, string>,
+) {
+  const { page, email } = await person(browser, who);
+  const zip = join(mkdtempSync(join(tmpdir(), 'paperweave-e2e-')), `Words ${run}.zip`);
+  writeFileSync(
+    zip,
+    await writeZip(Object.entries(files).map(([path, b]) => ({ path, bytes: Buffer.from(b) }))),
+  );
+  await page.goto('/sign-in');
+  await signIn(page, email);
+  await page.getByLabel('Or import a ZIP of a LaTeX project').setInputFiles(zip);
+  await page.getByRole('button', { name: 'Import ZIP' }).click();
+  await page.getByRole('link', { name: 'main.tex' }).first().click();
+  await expect(page.getByRole('region', { name: 'Editor for main.tex' })).toBeVisible();
+  await expect(build(page).getByRole('status')).toHaveText('The PDF is up to date.', {
+    timeout: 120_000,
+  });
+  return page;
+}
+
+/**
+ * Bring a word of the PDF's text into view, wherever it is, and say where it is: its page, and its
+ * rectangle as shares of the page's size, and in the window.
+ */
+async function wordOnPage(page: Page, word: string) {
+  // The pages are made once the PDF has been read: the first says how many there are.
+  const first = build(page).locator('.pdf-page[data-page="1"]');
+  await expect(first).toBeAttached({ timeout: 30_000 });
+  const pages = Number(/of (\d+)$/.exec((await first.getAttribute('aria-label')) ?? '')?.[1]);
+  for (let n = 1; n <= pages; n++) {
+    const holder = build(page).locator(`.pdf-page[data-page="${n}"]`);
+    await holder.evaluate((el) => el.scrollIntoView({ block: 'start' }));
+    await expect(holder).toHaveAttribute('data-drawn', 'yes', { timeout: 30_000 });
+    const found = await holder.evaluate((el, w) => {
+      const walker = document.createTreeWalker(el, NodeFilter.SHOW_TEXT);
+      for (let t = walker.nextNode(); t; t = walker.nextNode()) {
+        const i = t.textContent!.indexOf(w);
+        if (i < 0) continue;
+        (t.parentElement as HTMLElement).scrollIntoView({ block: 'center', inline: 'center' });
+        const range = document.createRange();
+        range.setStart(t, i);
+        range.setEnd(t, i + w.length);
+        const r = range.getBoundingClientRect();
+        const h = el.getBoundingClientRect();
+        return {
+          x: r.x + r.width / 2,
+          y: r.y + r.height / 2,
+          height: r.height,
+          top: (r.top - h.top) / h.height,
+          bottom: (r.bottom - h.top) / h.height,
+        };
+      }
+      return null;
+    }, word);
+    if (found) return { n, ...found };
+  }
+  throw new Error(`${word} is not in the PDF`);
+}
+/** Double-click the middle of a word of the PDF's text. */
+async function clickWord(page: Page, word: string) {
+  const at = await wordOnPage(page, word);
+  await page.mouse.dblclick(at.x, at.y);
+}
+/** What is selected in the editor (not what is selected in the PDF's own words). */
+const selected = (page: Page) =>
+  page.evaluate(() => {
+    const sel = getSelection();
+    const node = sel?.anchorNode;
+    const el = node instanceof Element ? node : node?.parentElement;
+    return el?.closest('.cm-content, .ProseMirror') ? sel!.toString() : '';
+  });
+
+test('a double-click on a word of the PDF selects that word, and a place in a line is shown at its word', async ({
+  browser,
+}) => {
+  test.setTimeout(300_000);
+  const page = await openPaper(browser, 'synctex-words', {
+    'main.tex': WORDS_MAIN,
+    'second.tex': WORDS_SECOND,
+  });
+  // What is asked of the server about a place never says which word it was.
+  const asked: string[] = [];
+  const urls: string[] = [];
+  page.on('request', (r) => {
+    urls.push(r.url());
+    if (r.url().includes('/sync?')) asked.push(new URL(r.url()).search.slice(1));
+  });
+  await showSource(page);
+  const mid = WORDS_LINE('WORDMID');
+
+  // A double-click in the middle of the word selects it in the source, and says its line.
+  await clickWord(page, 'WORDMID');
+  await expect.poll(() => selected(page)).toBe('WORDMID');
+  await expect(build(page).locator('.pdf-said')).toHaveText(`That is line ${mid} of main.tex.`);
+  await expect.poll(() => caretLine(page)).toBe(mid);
+  // And in the visual view.
+  await showVisual(page);
+  await clickWord(page, 'WORDEND');
+  await expect.poll(() => selected(page)).toBe('WORDEND');
+  await expect(build(page).locator('.pdf-said')).toHaveText(
+    `That is line ${WORDS_LINE('WORDEND')} of main.tex.`,
+  );
+
+  // From the caret after a word: the band is on that word's line, as wide as its column.
+  await showSource(page);
+  await clickAfter(page, '.editor .cm-content', 'WORDEND');
+  await page.getByRole('button', { name: 'Show in PDF' }).click();
+  const mark = build(page).locator('.pdf-mark');
+  await expect(build(page).locator('.pdf-said')).toHaveText(/^Shown on page \d+ of the PDF\.$/);
+  const end = await wordOnPage(page, 'WORDEND');
+  await expect(mark).toHaveAttribute('data-page', String(end.n));
+  const placed = () =>
+    mark.evaluate((el) => {
+      const h = el.parentElement!.getBoundingClientRect();
+      const m = el.getBoundingClientRect();
+      const pane = el.closest('.pdf')!.getBoundingClientRect();
+      return {
+        top: (m.top - h.top) / h.height,
+        bottom: (m.bottom - h.top) / h.height,
+        width: m.width / h.width,
+        inPane: m.left >= pane.left - 1 && m.right <= pane.right + 1,
+      };
+    });
+  const line = end.bottom - end.top;
+  const band = await placed();
+  expect(band.top).toBeLessThan(end.bottom + line);
+  expect(band.bottom).toBeGreaterThan(end.top - line);
+  expect(band.width).toBeLessThan(0.6);
+  await audit(page, 'the PDF pane with a place shown in its column');
+
+  // Enlarged to 200%, the band is still in view across the pane.
+  const larger = build(page).getByRole('button', { name: 'Larger' });
+  for (let i = 0; i < 3; i++) await larger.click();
+  await expect(build(page).getByRole('group', { name: 'Size of the pages' })).toContainText('200%');
+  await page.getByRole('button', { name: 'Show in PDF' }).click();
+  await expect(mark).toHaveAttribute('data-page', String(end.n));
+  await expect(mark).toBeInViewport();
+  await expect.poll(async () => (await placed()).inPane).toBe(true);
+  await build(page).getByRole('button', { name: 'Fit the width' }).click();
+
+  // A word of the other file opens it, and the address carries only the line.
+  await clickWord(page, 'SECONDWORD');
+  await expect(page.getByRole('region', { name: 'Editor for second.tex' })).toBeVisible();
+  const second = WORDS_LINE('SECONDWORD', WORDS_SECOND);
+  await expect(page).toHaveURL(new RegExp(`/files/[^/?]+\\?line=${second}$`));
+  await expect.poll(() => selected(page)).toBe('SECONDWORD');
+
+  // Nothing that was asked of the server, or fetched at all, names a word.
+  expect(asked.length).toBeGreaterThan(3);
+  for (const q of asked)
+    expect(q).toMatch(
+      /^(page=\d+&x=[\d.]+&y=[\d.]+(&nearest=1)?|file=[^&]+&line=\d+(&share=[\d.]+)?)$/,
+    );
+  expect(urls.filter((u) => /WORD|SECOND/.test(decodeURIComponent(u)))).toEqual([]);
+});
+
+// A paragraph typed in lines that do not end where the lines of the PDF do: the first word of a
+// source line is where the line above ends, as far as the PDF knows.
+const HARD = [
+  '\\documentclass{article}',
+  '\\begin{document}',
+  ...[
+    'First0Z of the method and system model data results approach analysis network Last0Z',
+    'First1Z in a paper study show using based new problem the of with that Last1Z',
+    'First2Z which from these between over into the system and method analysis Last2Z',
+    'First3Z the model results data network paper study show using based new Last3Z',
+    'First4Z problem in for with that this which from these between over into Last4Z',
+  ],
+  '',
+  '\\end{document}',
+  '',
+].join('\n');
+
+test('a double-click on the first word of a source line is on that line, not the one above', async ({
+  browser,
+}) => {
+  test.setTimeout(240_000);
+  const page = await openPaper(browser, 'synctex-hard', { 'main.tex': HARD });
+  await showSource(page);
+  for (const n of [1, 2, 3, 4]) {
+    const word = `First${n}Z`;
+    await clickWord(page, word);
+    await expect(build(page).locator('.pdf-said')).toHaveText(
+      `That is line ${WORDS_LINE(word, HARD)} of main.tex.`,
+    );
+    await expect.poll(() => caretLine(page)).toBe(WORDS_LINE(word, HARD));
+    await expect.poll(() => selected(page)).toBe(word);
+  }
 });

@@ -236,3 +236,139 @@ test('what a box that ends a paragraph holds is stale, and a heading that ends o
   // A blank line that only ended a paragraph made nothing: the next line that did.
   expect(toPdf(sync, 'a.tex', 5)).toMatchObject({ line: 7 });
 });
+
+// One line typed on line 4 that was set in three line boxes: two on page 1, one in each column,
+// and the last on page 2. Line 3 is a blank that made nothing.
+const COLUMNS = [
+  'SyncTeX Version:1',
+  'Input:1:/work/./main.tex',
+  'Output:pdf',
+  'Magnification:1000',
+  'Unit:1',
+  'Content:',
+  '{1',
+  `(1,4:${at(72, 100)}:${pt(150)},${pt(8)},${pt(2)}`,
+  `k1,4:${at(80, 100)}:${pt(4)}`,
+  `x1,4:${at(150, 100)}`,
+  ')',
+  `(1,4:${at(300, 100)}:${pt(150)},${pt(8)},${pt(2)}`,
+  `x1,4:${at(310, 100)}`,
+  `x1,4:${at(400, 100)}`,
+  ')',
+  '}1',
+  '{2',
+  `(1,4:${at(72, 200)}:${pt(150)},${pt(8)},${pt(2)}`,
+  `x1,4:${at(90, 200)}`,
+  ')',
+  '}2',
+  'Postamble:',
+  '',
+].join('\n');
+
+test("a line's place is inside the line box it is in, and a share of the line picks the box", () => {
+  const sync = parseSyncTeX(COLUMNS);
+  const rounded = (p: NonNullable<ReturnType<typeof toPdf>>) =>
+    [p.page, p.x, p.y, p.left, p.width].map((v) => Math.round(v!));
+  // Without a share, as before, but the box around the place is said.
+  expect(rounded(toPdf(sync, 'main.tex', 4)!)).toEqual([1, 80, 92, 72, 150]);
+  // The end of the line is on the second page, at its last record.
+  expect(rounded(toPdf(sync, 'main.tex', 4, 1)!)).toEqual([2, 90, 192, 72, 150]);
+  // The middle is the right column's.
+  expect(rounded(toPdf(sync, 'main.tex', 4, 0.5)!)).toEqual([1, 310, 92, 300, 150]);
+  expect(rounded(toPdf(sync, 'main.tex', 4, 0)!)).toEqual([1, 80, 92, 72, 150]);
+  // A share outside the line is the line's end or start; one that is not a number is nothing.
+  expect(toPdf(sync, 'main.tex', 4, 7)).toMatchObject({ page: 2 });
+  expect(toPdf(sync, 'main.tex', 4, -3)).toMatchObject({ page: 1, x: expect.closeTo(80) });
+  expect(toPdf(sync, 'main.tex', 4, Number.NaN)).toEqual(toPdf(sync, 'main.tex', 4));
+  // A line that made nothing leads to the next that did, and its share says nothing.
+  expect(toPdf(sync, 'main.tex', 3, 1)).toEqual(toPdf(sync, 'main.tex', 3));
+  expect(toPdf(sync, 'main.tex', 3, 1)).toMatchObject({ line: 4, page: 1 });
+  // The first test's file has boxes of a line that ends a paragraph: a place there has a box too.
+  expect(toPdf(parseSyncTeX(FILE), 'main.tex', 4)).toMatchObject({
+    left: expect.closeTo(72, 1),
+    width: expect.closeTo(300, 1),
+  });
+});
+
+test('a point leads to its line and how far along the line it is', () => {
+  const sync = parseSyncTeX(COLUMNS);
+  const share = (page: number, x: number, y: number) => toSource(sync, page, x, y)?.share;
+  expect(share(1, 82, 97)).toBe(0);
+  expect(share(1, 320, 97)).toBeCloseTo(0.5);
+  expect(share(1, 410, 97)).toBeCloseTo(0.75);
+  expect(share(2, 95, 197)).toBe(1);
+  // A line of one record has no share to give, and neither has what is stale.
+  const one = parseSyncTeX(FILE);
+  expect(toSource(one, 2, 100, 88)).toEqual({ path: 'sections/a.tex', line: 7 });
+  const stale = {
+    inputs: ['a.tex'],
+    records: [
+      {
+        page: 1,
+        file: 0,
+        line: 3,
+        x: 72,
+        y: 100,
+        w: 150,
+        h: 8,
+        d: 2,
+        box: true,
+        kind: '(',
+        stale: false,
+      },
+      {
+        page: 1,
+        file: 0,
+        line: 3,
+        x: 80,
+        y: 100,
+        w: 0,
+        h: 0,
+        d: 0,
+        box: false,
+        kind: 'x',
+        stale: true,
+      },
+      {
+        page: 1,
+        file: 0,
+        line: 3,
+        x: 90,
+        y: 100,
+        w: 0,
+        h: 0,
+        d: 0,
+        box: false,
+        kind: 'x',
+        stale: false,
+      },
+      {
+        page: 1,
+        file: 0,
+        line: 3,
+        x: 72,
+        y: 130,
+        w: 150,
+        h: 8,
+        d: 2,
+        box: true,
+        kind: '(',
+        stale: false,
+      },
+      {
+        page: 1,
+        file: 0,
+        line: 5,
+        x: 80,
+        y: 130,
+        w: 0,
+        h: 0,
+        d: 0,
+        box: false,
+        kind: 'x',
+        stale: true,
+      },
+    ],
+  };
+  expect(toSource(stale, 1, 85, 128)).toEqual({ path: 'a.tex', line: 5 });
+});

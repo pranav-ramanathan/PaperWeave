@@ -642,6 +642,69 @@ test('a point in the PDF and a line of the text are carried across the edits mad
   });
 }, 180_000);
 
+// A two-column paper whose second column on the first page has room for four lines before a
+// paragraph, typed as one line of the source, which runs on to the second page.
+const LONGLINE = Array.from(
+  { length: 40 },
+  (_, i) => `Sentence number ${i} of the long paragraph.`,
+).join(' ');
+const COLUMNS = [
+  '\\documentclass[twocolumn]{article}',
+  '\\begin{document}',
+  '\\noindent\\rule{0pt}{\\dimexpr\\textheight-4\\baselineskip\\relax}\\par',
+  '\\noindent\\rule{0pt}{\\dimexpr\\textheight-4\\baselineskip\\relax}\\par',
+  LONGLINE,
+  '',
+  'The last paragraph.',
+  '\\end{document}',
+  '',
+].join('\n');
+
+test('a place along a line is carried to where in the line it is, in a column and on a page', async () => {
+  const [made] = await importZip(
+    t.pool,
+    store,
+    owner.id,
+    await writeZip([{ path: 'main.tex', bytes: Buffer.from(COLUMNS) }]),
+    'along',
+  );
+  const project = made.id;
+  const file = (await listFiles(t.pool, owner.id, project)).find((f) => f.path === 'main.tex')!;
+  const b = await build(project);
+  expect(b.status).toBe('succeeded');
+  const line = COLUMNS.split('\n').findIndex((l) => l === LONGLINE) + 1;
+  const to = (n: number, share?: number) =>
+    sourceToPdf(t.pool, store, owner.id, project, b.id, file.id, n, share);
+  const from = (page: number, x: number, y: number) =>
+    pdfToSource(t.pool, store, owner.id, project, b.id, page, x, y);
+
+  // The line begins on the first page and ends on the second, each time in a column.
+  const start = await to(line, 0);
+  const end = await to(line, 1);
+  expect(start).toMatchObject({ page: 1, line, moved: false });
+  expect(end).toMatchObject({ page: 2, line, moved: false });
+  expect(start.width).toBeLessThan(300);
+  expect(end.width).toBeLessThan(300);
+  // Without a share it is as it was: where the line begins.
+  expect(await to(line)).toMatchObject({ page: 1, x: start.x, y: start.y });
+  // And from a place near the line's end on the second page, how far along it is comes back.
+  const back = await from(end.page, end.x + 1, end.y + end.height * 0.7);
+  expect(back).toMatchObject({ fileId: file.id, line, moved: false });
+  expect(back.share).toBeGreaterThan(0.8);
+  expect((await from(start.page, start.x + 1, start.y + start.height * 0.7)).share).toBeLessThan(
+    0.2,
+  );
+
+  // Once the line has been typed in, the build does not say where along it: only the line.
+  await edit(file.id, (tx) => tx.insert(COLUMNS.indexOf(LONGLINE), 'Added words. '));
+  const moved = await to(line, 1);
+  expect(moved.moved).toBe(true);
+  expect(moved.page).toBe(start.page);
+  const again = await from(end.page, end.x + 1, end.y + end.height * 0.7);
+  expect(again.moved).toBe(true);
+  expect(again).not.toHaveProperty('share');
+}, 180_000);
+
 // Papers as they come from elsewhere: imported as a ZIP, then built.
 const PNG = Buffer.from(
   'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mP8z8BQDwAEhQGAhKmMIQAAAABJRU5ErkJggg==',
