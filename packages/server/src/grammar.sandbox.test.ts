@@ -3,7 +3,13 @@ import { afterAll, beforeAll, expect, test } from 'vitest';
 import * as Y from 'yjs';
 import { writeZip } from './archive.ts';
 import { blobStore } from './blobs.ts';
-import { checkGrammar, languageSettings, setLanguageSettings } from './grammar.ts';
+import {
+  changeLanguageSettings,
+  checkGrammar,
+  languageChange,
+  languageSettings,
+  setLanguageSettings,
+} from './grammar.ts';
 import { importZip, listFiles } from './import.ts';
 import { recordGrammarOutcome } from './metrics.ts';
 import { acceptInvitation, invite } from './projects.ts';
@@ -462,4 +468,91 @@ test("a paper's own text macros are read as the words they print, from the packa
   const after = await ask();
   expect(calls).toBe(first + 1);
   expect(after.some((f) => f.words === 'is')).toBe(false);
+});
+
+// Joins a paper without an invitation: one person may send 30 an hour and this file's papers use them.
+const member = (p: { id: string }, who: keyof typeof users, role: string) =>
+  t.pool.query('insert into project_members (project_id, user_id, role) values ($1, $2, $3)', [
+    p.id,
+    users[who].id,
+    role,
+  ]);
+
+test('words and rules added since a page was drawn survive its save', async () => {
+  const p = await paper(MAIN, false);
+  const owner = users.owner.id;
+  const now = () => languageSettings(t.pool, owner, p.id);
+  await setLanguageSettings(t.pool, owner, p.id, { glossary: ['Alpha'], off: ['RULE_A'] });
+  const shown = await now();
+  // Elsewhere, since the page was drawn: a word is made the paper's own, a rule is switched off.
+  await changeLanguageSettings(t.pool, owner, p.id, { addWords: ['Weavely'] });
+  await changeLanguageSettings(t.pool, owner, p.id, { rulesOff: ['RULE_B'] });
+  // The page is saved: the person chose American spelling and added Beta.
+  await changeLanguageSettings(
+    t.pool,
+    owner,
+    p.id,
+    languageChange(shown, { language: 'en-US', glossary: ['Alpha', 'Beta'], off: ['RULE_A'] }),
+  );
+  expect(await now()).toEqual({
+    language: 'en-US',
+    glossary: ['Alpha', 'Beta', 'Weavely'],
+    off: ['RULE_A', 'RULE_B'],
+  });
+  // A word removed on the page, and a rule ticked off, are gone; the rest stays.
+  await changeLanguageSettings(t.pool, owner, p.id, { dropWords: ['Alpha'], rulesOn: ['RULE_A'] });
+  expect(await now()).toEqual({
+    language: 'en-US',
+    glossary: ['Beta', 'Weavely'],
+    off: ['RULE_B'],
+  });
+  // A language the person did not touch stays as it now is.
+  const drawn = await now();
+  await setLanguageSettings(t.pool, owner, p.id, { language: 'en-GB' });
+  await changeLanguageSettings(t.pool, owner, p.id, languageChange(drawn, drawn));
+  expect((await now()).language).toBe('en-GB');
+});
+
+test('twenty words added at once are all kept', async () => {
+  const p = await paper(MAIN, false);
+  await member(p, 'outsider', 'editor');
+  const words = Array.from({ length: 20 }, (_, i) => `Word${String.fromCharCode(97 + i)}`);
+  await Promise.all(
+    words.map((w, i) =>
+      changeLanguageSettings(t.pool, users[i % 2 ? 'owner' : 'outsider'].id, p.id, {
+        addWords: [w],
+      }),
+    ),
+  );
+  expect((await languageSettings(t.pool, users.owner.id, p.id)).glossary).toEqual(
+    [...words].sort((a, b) => a.localeCompare(b)),
+  );
+});
+
+test('changing language settings is for those who may write, and refuses what cannot be used', async () => {
+  const p = await paper(MAIN, false);
+  await member(p, 'reviewer', 'reviewer');
+  await member(p, 'viewer', 'viewer');
+  const now = () => languageSettings(t.pool, users.owner.id, p.id);
+  const change = (who: keyof typeof users, input: object) =>
+    code(changeLanguageSettings(t.pool, users[who].id, p.id, input));
+  expect(await change('reviewer', { addWords: ['x'] })).toBe('permission_denied');
+  expect(await change('viewer', { rulesOff: ['X'] })).toBe('permission_denied');
+  expect(await change('outsider', { addWords: ['x'] })).toBe('not_found');
+  const before = await now();
+  for (const input of [
+    { addWords: ['two words'] },
+    { rulesOff: ['bad; rule'] },
+    { language: 'fr' },
+    { addWords: 'Weavely' },
+  ]) {
+    expect(await change('owner', input)).toBe('invalid_input');
+    expect(await now()).toEqual(before);
+  }
+  const many = Array.from({ length: 2000 }, (_, i) => `w${i}`);
+  expect(await change('owner', { addWords: many })).toBe('ok');
+  expect(await change('owner', { addWords: ['one-more'] })).toBe('invalid_input');
+  expect((await now()).glossary).toHaveLength(2000);
+  // An old word stays removable, whatever it looks like now.
+  expect(await change('owner', { dropWords: ['no longer a word'] })).toBe('ok');
 });

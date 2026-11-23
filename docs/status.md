@@ -446,7 +446,9 @@ Read this first. Update it in every pull request.
     proposed change instead.
   - Per paper (migration 0016, "Language" on the paper's page): British or American spelling,
     the paper's own words (not reported as misspelt), and rules switched off. A finding offers
-    "It is a word of this paper" or "Do not check this in this paper".
+    "It is a word of this paper" or "Do not check this in this paper". Saving the page changes
+    only what was changed on it, and adding is done on what the paper holds then (see "A paper's
+    own words saved from a page left open").
   - `docs/grammar-benchmark.md`: on 25 sentences with a seeded mistake, 23 are pointed at; of
     20 correct sentences with LaTeX in them, 18 are left alone. Written by
     `packages/server/src/grammar-benchmark.sandbox.test.ts`, which fails if the checker stops
@@ -5022,7 +5024,7 @@ Found by a three-person walkthrough.
   which need a guard rule of their own; accents with no single-unit composition, `\t`, `\d`, `\b`, standalone `\i` and `\j`,
   `\dh`, `\th`; a paper that redefines these commands is not checked for; `\LaTeX`, `\ldots`,
   `--` and ``…'' are still chips; accents inside raw atoms are unchanged; typing `é`still writes
-UTF-8; the chip's double-click LaTeX window is gone for these. A paragraph made only of`\AA{}` is still a raw block, as before.
+  UTF-8; the chip's double-click LaTeX window is gone for these. A paragraph made only of`\AA{}` is still a raw block, as before.
 
 ## A reviewer can select text in the visual view with the keyboard
 
@@ -5450,3 +5452,23 @@ closed: ...` (outermost first, at most 10). The log does not name the file: with
   Resolved; the owner's Delete of a comment its author changed a moment earlier is not guarded;
   the mark does not cover the text under the thread; a draft is still lost when its thread
   disappears.
+
+## A paper's own words saved from a page left open
+
+- **What was wrong.** The Language form sent the whole word list and the whole list of switched-off
+  rules as the page had drawn them, and saving replaced what the paper held. With the paper's page
+  open in one tab, words made the paper's own (and rules switched off) in the editor were deleted
+  or switched back on by pressing Save there for any reason, and "Language settings saved." was
+  shown. The editor's two buttons read the lists and wrote them back, so two clicks at once could
+  lose a word (twenty at once kept one).
+- **Now.** `changeLanguageSettings` adds and removes words and rules on what the paper holds,
+  under a row lock; the editor's buttons add one word or one rule. The form carries what it showed
+  (`shownLanguage`, `shownGlossary`, `shownOff`) and `languageChange` turns the difference into
+  words to add, words to drop, rules to switch on and a language only if it was changed. A form
+  drawn before this change is saved whole as before. `setLanguageSettings` takes the same lock.
+  Nothing is refused and no message is new. Words are never logged.
+- **Held by** `grammar.test.ts`, three sandbox tests in `grammar.sandbox.test.ts` and a browser
+  test in `grammar.spec`. Each failed on the old code.
+- **Not done.** The page still does not show others' changes until it is saved or reloaded; a word
+  removed on the page while someone re-adds it in the editor follows whichever came last; the
+  editor's panel does not hear of a word removed on the page until its next check.

@@ -4,10 +4,9 @@
 // counts a finding taken up in the editor or proposed by a reviewer.
 import {
   AppError,
+  changeLanguageSettings,
   checkGrammar,
-  languageSettings,
   recordGrammarOutcome,
-  setLanguageSettings,
   withScope,
 } from '@paperweave/server';
 import { blobs, currentUser, db, readJson, sameOrigin } from '../../../../lib/server';
@@ -46,15 +45,14 @@ export async function POST(request: Request, { params }: Params) {
       await recordGrammarOutcome(db(), user.id, id, input.used, input.outcome);
       return Response.json({ ok: true });
     }
-    const now = await languageSettings(db(), user.id, id);
     if (input?.kind !== undefined && !['spelling', 'grammar', 'style'].includes(input.kind))
       throw new AppError('invalid_input', 'The kind is spelling, grammar or style.');
     let outcome: 'word' | 'rule_off';
     if (typeof input?.word === 'string') {
-      await setLanguageSettings(db(), user.id, id, { glossary: [...now.glossary, input.word] });
+      await changeLanguageSettings(db(), user.id, id, { addWords: [input.word] });
       outcome = 'word';
     } else if (typeof input?.rule === 'string') {
-      await setLanguageSettings(db(), user.id, id, { off: [...now.off, input.rule] });
+      await changeLanguageSettings(db(), user.id, id, { rulesOff: [input.rule] });
       outcome = 'rule_off';
     } else throw new AppError('invalid_input', 'Name a word or a rule.');
     // The change is made; a count that fails changes nothing about it.

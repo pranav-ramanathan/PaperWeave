@@ -938,6 +938,12 @@ async function Project({
       </h2>
       {query.language && <Result>Language settings saved.</Result>}
       <form action={languageAction.bind(null, id)}>
+        {/* What this page showed, so that a save changes only what the person changed. */}
+        <input type="hidden" name="shownLanguage" value={language.language} />
+        <input type="hidden" name="shownGlossary" value={language.glossary.join(' ')} />
+        {language.off.map((rule) => (
+          <input key={rule} type="hidden" name="shownOff" value={rule} />
+        ))}
         <label>
           Spelling
           <select name="language" defaultValue={language.language} disabled={!canWrite}>

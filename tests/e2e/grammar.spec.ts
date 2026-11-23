@@ -142,6 +142,66 @@ test('findings are shown in the prose, taken up, silenced, and proposed by a rev
   await expect(finding(owner.page, /“We we”/)).toBeVisible();
 });
 
+test('a paper page left open does not undo words and rules chosen in the editor', async ({
+  browser,
+}) => {
+  test.setTimeout(180_000);
+  const owner = await person(browser, 'grammar-stale');
+  const zip = join(mkdtempSync(join(tmpdir(), 'paperweave-e2e-')), `Stale ${run}.zip`);
+  writeFileSync(zip, await writeZip([{ path: 'main.tex', bytes: Buffer.from(MAIN) }]));
+  await owner.page.goto('/sign-in');
+  await signIn(owner.page, owner.email);
+  await owner.page.getByLabel('Or import a ZIP of a LaTeX project').setInputFiles(zip);
+  await owner.page.getByRole('button', { name: 'Import ZIP' }).click();
+  await expect(owner.page.getByRole('heading', { name: 'Language' })).toBeVisible();
+  const paper = owner.page.url();
+  const words = owner.page.getByLabel(/The paper.s own words/);
+  const rule = owner.page.getByRole('checkbox', { name: 'ENGLISH_WORD_REPEAT_RULE' });
+  await expect(words).toHaveValue('');
+
+  // The paper's page (A) stays open. In another tab (B) a name and a rule are dismissed.
+  const b = await owner.page.context().newPage();
+  await b.goto(paper);
+  await b.getByRole('link', { name: 'main.tex' }).first().click();
+  await expect(finding(b, 'Spelling: “Weavely”')).toBeVisible({ timeout: 30_000 });
+  const wordCount = counts(b);
+  await finding(b, 'Spelling: “Weavely”')
+    .getByRole('button', { name: 'It is a word of this paper' })
+    .click();
+  expect((await wordCount).ok()).toBe(true);
+  await expect(finding(b, 'Spelling: “Weavely”')).toHaveCount(0);
+  const ruleCount = counts(b);
+  await finding(b, /“We we”/)
+    .getByRole('button', { name: 'Do not check this in this paper' })
+    .click();
+  expect((await ruleCount).ok()).toBe(true);
+  await expect(finding(b, /“We we”/)).toHaveCount(0);
+
+  // A has not heard of either. Saving it for another reason keeps both, and shows them.
+  await expect(words).toHaveValue('');
+  await expect(rule).toHaveCount(0);
+  await owner.page.getByRole('combobox', { name: 'Spelling', exact: true }).selectOption('en-US');
+  await owner.page.getByRole('button', { name: 'Save language settings' }).click();
+  await expect(owner.page.getByRole('status')).toHaveText('Language settings saved.');
+  await expect(words).toHaveValue('Weavely');
+  await expect(rule).toBeChecked();
+
+  // In B the file is checked again: still the paper's own word, still without the rule, and
+  // American spelling is in force.
+  await b.reload();
+  await expect(finding(b, 'Spelling: “colour”')).toBeVisible({ timeout: 30_000 });
+  await expect(finding(b, 'Spelling: “Weavely”')).toHaveCount(0);
+  await expect(finding(b, /“We we”/)).toHaveCount(0);
+
+  // What a person removes on the page is removed.
+  await words.fill('');
+  await rule.uncheck();
+  await owner.page.getByRole('button', { name: 'Save language settings' }).click();
+  await expect(owner.page.getByRole('status')).toHaveText('Language settings saved.');
+  await expect(words).toHaveValue('');
+  await expect(rule).toHaveCount(0);
+});
+
 test('a suggestion is taken as LaTeX source, so the build keeps the rest of the line', async ({
   browser,
 }) => {
