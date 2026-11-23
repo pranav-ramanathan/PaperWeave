@@ -272,8 +272,9 @@ test('the main pages can be read in a narrow window without scrolling sideways',
   await page.getByRole('button', { name: 'Save revision' }).click();
   await page.getByRole('link', { name: 'Changes since 1' }).click();
   await expect(page.getByRole('heading', { name: 'Revision 1 to revision 2' })).toBeVisible();
-  // A line wider than the window makes the difference scroll sideways: that needs a tab stop.
-  expect(await page.locator('.diff').evaluate((e) => e.scrollWidth > e.clientWidth)).toBe(true);
+  // A long line now wraps, so the difference does not scroll sideways; the region keeps its name
+  // and tab stop for a narrow window or a long unbroken word.
+  expect(await page.locator('.diff').evaluate((e) => e.scrollWidth > e.clientWidth)).toBe(false);
   await look('differences between revisions');
   await audit(page, 'differences between revisions, a long line');
   const changes = page.getByRole('region', { name: 'Changes to refs.bib' });

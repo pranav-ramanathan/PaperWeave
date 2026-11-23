@@ -90,6 +90,83 @@ export function diffWords(
   return { was, now };
 }
 
+/** A line of a diff; a removed or added one paired with its counterpart has its text in pieces. */
+export type DiffRow = DiffLine & { words?: WordPiece[] };
+
+export type DiffHunk = {
+  /** Unchanged lines left out just before this hunk. */
+  skipped: number;
+  /** The line of the newer text the hunk's first row is at (a removed first row: the line the next newer line has). From 1. */
+  line: number;
+  rows: DiffRow[];
+};
+
+/** At most this many pairs of lines are compared word by word in one call. */
+const MAX_PAIRS = 200;
+
+/**
+ * Only the changed lines of `lines` (from `diffLines`) and `context` kept lines around each, in
+ * hunks, with how many unchanged lines were left out before each hunk and after the last. A
+ * removed line and an added line that are plain counterparts (equal numbers of each in a run, and
+ * mostly the same words) carry their words, marked changed or not. sum(skipped) + all rows + rest
+ * is `lines.length`.
+ */
+export function diffHunks(lines: DiffLine[], context = 3): { hunks: DiffHunk[]; rest: number } {
+  const keep = new Array<boolean>(lines.length).fill(false);
+  lines.forEach((l, i) => {
+    if (l.op === ' ') return;
+    for (let k = Math.max(0, i - context); k <= Math.min(lines.length - 1, i + context); k++)
+      keep[k] = true;
+  });
+  const hunks: DiffHunk[] = [];
+  let newer = 0; // lines of the newer text before index i
+  let last = 0; // index after the previous hunk
+  let pairs = 0;
+  let i = 0;
+  while (i < lines.length) {
+    if (!keep[i]) {
+      if (lines[i].op !== '-') newer++;
+      i++;
+      continue;
+    }
+    const start = i;
+    const hunk: DiffHunk = { skipped: start - last, line: newer + 1, rows: [] };
+    while (i < lines.length && keep[i]) {
+      hunk.rows.push({ ...lines[i] });
+      if (lines[i].op !== '-') newer++;
+      i++;
+    }
+    last = i;
+    // Pair the removed and added lines of each run of changed rows.
+    const rows = hunk.rows;
+    for (let r = 0; r < rows.length;) {
+      if (rows[r].op === ' ') {
+        r++;
+        continue;
+      }
+      const run: DiffRow[] = [];
+      while (r < rows.length && rows[r].op !== ' ') run.push(rows[r++]);
+      const gone = run.filter((x) => x.op === '-');
+      const added = run.filter((x) => x.op === '+');
+      if (gone.length !== added.length) continue;
+      for (let k = 0; k < gone.length && pairs < MAX_PAIRS; k++, pairs++) {
+        const d = diffWords(gone[k].text, added[k].text, 250_000);
+        if (!d) continue;
+        const kept = d.was.reduce(
+          (n, p) => (p.changed || !p.text.trim() ? n : n + p.text.length),
+          0,
+        );
+        if (kept * 3 < gone[k].text.trim().length || kept * 3 < added[k].text.trim().length)
+          continue;
+        gone[k].words = d.was;
+        added[k].words = d.now;
+      }
+    }
+    hunks.push(hunk);
+  }
+  return { hunks, rest: lines.length - last };
+}
+
 /**
  * Where a line of one text is in the other, over `diffLines`' result of (built text, text now).
  * A kept line maps exactly. A line that was removed (asking `toNow`) or added (asking `toBuilt`)

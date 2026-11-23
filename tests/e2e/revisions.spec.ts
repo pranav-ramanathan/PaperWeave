@@ -210,3 +210,45 @@ test("a second person's typing in an untouched paragraph survives a restore in o
   expect('abcdefgh'.endsWith(kept!)).toBe(true);
   expect(saved).toBe(main.replace('P3 gamma wolves ', `P3 gamma wolves ${kept}`));
 });
+
+test('a comparison shows only what changed, and which words', async ({ browser }) => {
+  test.setTimeout(120_000);
+  const owner = await person(browser, 'diff-owner');
+  const page = owner.page;
+  const long = `${'The delay stays low in every run we made. '.repeat(14)}After forty runs it was the same. ${'Nothing else moved at all. '.repeat(10)}`;
+  const body = Array.from({ length: 56 }, (_, i) => (i === 2 ? long : `Line number ${i + 3}.`));
+  const main = `\\documentclass{article}\n\\begin{document}\n${body.join('\n')}\n\\end{document}\n`;
+  const zip = join(mkdtempSync(join(tmpdir(), 'paperweave-e2e-')), `Words ${run}.zip`);
+  writeFileSync(zip, await writeZip([{ path: 'main.tex', bytes: Buffer.from(main) }]));
+  await page.goto('/sign-in');
+  await signIn(page, owner.email);
+  await page.getByLabel('Or import a ZIP of a LaTeX project').setInputFiles(zip);
+  await page.getByRole('button', { name: 'Import ZIP' }).click();
+  const paper = page.url();
+  await page.getByLabel('Name for the paper as it is now').fill('Forty');
+  await page.getByRole('button', { name: 'Save revision' }).click();
+  await expect(page.getByRole('status')).toHaveText('Saved as revision 1.');
+
+  await page.getByRole('link', { name: 'main.tex' }).first().click();
+  await showSource(page);
+  await selectWord(page, '.editor .cm-content', 'forty');
+  await page.keyboard.type('thirty');
+  await expect(editorStatus(page)).toHaveText('All edits saved.');
+  await page.goto(paper);
+  await page.getByLabel('Name for the paper as it is now').fill('Thirty');
+  await page.getByRole('button', { name: 'Save revision' }).click();
+  await page.getByRole('link', { name: 'Changes since 1' }).click();
+  await expect(page.getByRole('heading', { name: 'Revision 1 to revision 2' })).toBeVisible();
+
+  // Line 5 and three lines each side; the rest is counted, not shown.
+  await expect(page.locator('.diff .kept')).toHaveCount(6);
+  await expect(page.locator('.diff del')).toHaveText('forty');
+  await expect(page.locator('.diff ins')).toHaveText('thirty');
+  await expect(page.locator('.diff .gap').last()).toContainText('unchanged lines after this');
+  await expect(page.locator('.diff .gap').first()).toBeVisible();
+  await expect(page.locator('.diff .gap').first()).toHaveText('1 unchanged line, then line 2:\n');
+  // A long line wraps instead of scrolling sideways, and the changed word can be seen.
+  expect(await page.locator('.diff').evaluate((e) => e.scrollWidth <= e.clientWidth)).toBe(true);
+  await expect(page.locator('.diff ins')).toBeInViewport();
+  await audit(page, 'a comparison with words marked');
+});

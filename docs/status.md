@@ -4903,3 +4903,22 @@ Found by a three-person walkthrough.
   (ready with a `.bbl`; a guard that the same paper with no `.bbl` is still refused).
 - **Not done.** The stored diagnostic is still severity error (only the submit check reads it
   differently); the generic "LaTeX found it elsewhere" warning for the same `.bib` remains.
+
+## The comparison of two revisions showed the whole file and never said which words changed
+
+- **What was wrong.** The page listed every line of a changed file, so one number changed in a
+  400-line file meant reading 200 lines to find it, and a long line (a paragraph on one line)
+  scrolled sideways. A changed line was struck or bolded whole, so which word changed was a hunt.
+- **Now** `diffHunks` in `textdiff.ts` keeps the changed lines and three around each, says how
+  many unchanged lines were left out before each group and after the last, and for a removed line
+  and an added line that are counterparts marks the words that changed (`<del>` and `<ins>`).
+  Lines wrap, with the wrapped part hanging under the text. A file whose text is the same but for
+  line endings or encoding says so instead of showing an empty block.
+- **Held by** unit tests in `textdiff.test.ts` and a browser test in `revisions.spec`
+  ("a comparison shows only what changed, and which words"), which failed on the old page. One
+  expectation in `a11y.spec` changed: a long added line used to make the comparison scroll
+  sideways, now it wraps, so that test expects no sideways scroll (the region keeps its name and
+  tab stop, and the audit and focus check are unchanged).
+- **Not done.** The line-endings-only sentence was not looked at in a browser. At most 200 pairs of
+  lines per file are compared word by word. Lines are paired by position, only when a run has as
+  many removed lines as added ones; otherwise they stay whole-line changes.
