@@ -163,3 +163,20 @@ test('a stretch reads as the checker read it', () => {
   // A line break is read as a space.
   expect(readAs(src, segments, at('the\nthe'), at('the\nthe') + 7)).toBe('the the');
 });
+
+test('text commands read as what they print', () => {
+  const src = 'We ran 5\\,km, and so on \\ldots and more, in \\LaTeX{} and \\TeX\\ too.';
+  expect(read(src)).toContain('5\u2009km, and so on \u2026and more, in LaTeX and TeX too.');
+  expect(kindOf(src, '\\ldots')).toBe('soft');
+  expect(kindOf(src, '\\,')).toBe('soft');
+  expect(kindOf(src, '\\LaTeX')).toBe('hard');
+});
+
+test('a national letter followed by a space does not split the word', () => {
+  const src = 'See Vo\\ss ler here.\n';
+  const { segments } = prose(src);
+  const at = src.indexOf('Vo');
+  const to = src.indexOf(' here');
+  expect(inProse(segments, at, to)).toBe(true);
+  expect(readAs(src, segments, at, to)).toBe('Voßler');
+});

@@ -474,6 +474,39 @@ test('TeX accents and national letters are one shown character each', () => {
   ]);
 });
 
+test('text commands are one shown character each', () => {
+  const cases: [string, string, string, number?][] = [
+    ['a, \\ldots, z\n', '\u2026', '\\ldots'],
+    ['on \\ldots and\n', '\u2026', '\\ldots '],
+    ['on\\ldots{} and\n', '\u2026', '\\ldots{}'],
+    ['{\\ldots}\n', '\u2026', '{\\ldots}'],
+    ['x \\dots\\ y\n', '\u2026', '\\dots'],
+    ['5\\,km\n', '\u2009', '\\,'],
+    ['a \\textendash{} b\n', '\u2013', '\\textendash{}'],
+    ['\\copyright{} 2026\n', '\u00a9', '\\copyright{}'],
+    ['Gro\\ss e\n', '\u00df', '\\ss '],
+    ['\\o re\n', '\u00f8', '\\o '],
+  ];
+  for (const [src, ch, slice] of cases) expect(escs(src)[0], src).toEqual({ ch, src: slice });
+  // A newline is not eaten, so it still separates the words.
+  const p = parse('end \\ldots\nnext\n');
+  assertLossless(p);
+  const body = p.blocks[0]!.body as { pieces: { k: string; s: number; e: number }[]; text: string };
+  const at = body.pieces.findIndex((x) => x.k === 'esc');
+  expect(body.text.slice(body.pieces[at]!.s, body.pieces[at]!.e)).toBe('\\ldots');
+  expect(body.pieces[at + 1]!.k).toBe('ws');
+});
+
+test('logos, zero-width commands and maths stay atoms', () => {
+  for (const src of ['\\LaTeX{}', '\\TeX', '\\-', '\\/', '\\@', '\\ldotsx', '$a,\\ldots,b$'])
+    expect(escs(`a ${src} b\n`), src).toEqual([]);
+  const p = parse('a \\LaTeX{} b\n');
+  const atoms = p.blocks.flatMap((b) =>
+    b.body.kind === 'para' ? b.body.pieces.filter((x) => x.k === 'atom') : [],
+  );
+  expect(atoms.map((x) => x.type)).toEqual(['raw']);
+});
+
 test('accents that cannot be one character, or that swallow a space, stay raw', () => {
   for (const src of [
     "\\' e",
@@ -484,8 +517,6 @@ test('accents that cannot be one character, or that swallow a space, stay raw', 
     '\\t{oo}',
     '\\c c',
     '\\H o',
-    'Gro\\ss e',
-    '\\o re',
     'na\\"\\i ve',
     '\\c{x}',
     "\\'{\ud83d\ude00}",

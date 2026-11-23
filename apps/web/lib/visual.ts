@@ -17,6 +17,7 @@ import {
   escape,
   fieldText,
   floatParts,
+  logoOf,
   type Span,
   tableEdit,
   type TableOp,
@@ -399,6 +400,11 @@ export function createVisual(opts: {
       if (note !== null) {
         dom.textContent = `Footnote: ${note.length > 40 ? note.slice(0, 39).trimEnd() + '…' : note}`;
         dom.setAttribute('aria-label', `footnote: ${note}`);
+      }
+      const logo = logoOf(node.attrs.src);
+      if (logo) {
+        dom.textContent = logo;
+        dom.classList.add('pw-word');
       }
       opensAtom(dom, node, getPos);
       return { dom };

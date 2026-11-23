@@ -70,7 +70,20 @@ const TEXT_ESC: Record<string, string> = {
 };
 const ACCENT_SYM = /\\([`'^"~=.])(?:([a-zA-Z])|\{([a-zA-Z]|\\[ij])\})/y;
 const ACCENT_LET = /\\([cvHkur])\{([a-zA-Z]|\\[ij])\}/y;
-const NATIONAL = /\\(ss|ae|AE|oe|OE|aa|AA|o|O|l|L)(?:\{\}|(?![a-zA-Z\s]))/y;
+/**
+ * Commands that print one character and take nothing from the text around them: the national
+ * letters and a few symbols. Each is one display position.
+ */
+export const TEXT_WORDS = [
+  ...['ss', 'ae', 'AE', 'oe', 'OE', 'aa', 'AA', 'o', 'O', 'l', 'L'],
+  ...['ldots', 'dots', 'textellipsis', 'textendash', 'textemdash', 'slash', 'thinspace'],
+  ...['copyright', 'textcopyright', 'textregistered', 'texttrademark', 'textdegree'],
+  ...['texteuro', 'pounds', 'textsterling'],
+];
+/** The name, then `{}` or the spaces and tabs on the same line that TeX skips after a name. */
+const NATIONAL = new RegExp(`\\\\(${TEXT_WORDS.join('|')})(?![a-zA-Z])(?:\\{\\}|[ \\t]+)?`, 'y');
+/** What \, prints. */
+export const THIN = '\u2009';
 const ESC_SYM = new Set(['%', '&', '$', '#', '_', '{', '}', ' ']);
 const SPECIAL = new Set(['\\', '{', '}', '$', '%', '~', '&', '#', '^', '_', ' ', '\t', '\n']);
 export const MATH_ENV: ReadonlySet<string> = new Set(
@@ -227,9 +240,10 @@ function parseInto(
     return j;
   };
   /**
-   * A TeX accent or national letter at the backslash at i that is exactly one displayed character:
-   * \'e, \"{o}, \c{c}, \ss{}. Purely local; nothing with a space in it, and no pair without a
-   * single precomposed character.
+   * A TeX accent, national letter or text symbol at the backslash at i that is exactly one
+   * displayed character: \'e, \"{o}, \c{c}, \ss{}, \ldots. A name takes the {} or same-line
+   * spaces after it, as TeX does. Purely local; no accent with a space in it, and no pair without
+   * a single precomposed character.
    */
   const accentAt = (i: number): { end: number; ch: string } | null => {
     for (const re of [ACCENT_SYM, ACCENT_LET]) {
@@ -571,6 +585,7 @@ function parseInto(
         const name = src.slice(i + 1, j);
         if (!isL(name[0])) {
           if (ESC_SYM.has(name)) push('esc', i, j, { ch: name });
+          else if (name === ',') push('esc', i, j, { ch: THIN });
           else if (name === '(') {
             const k = mathEnd(j, (q) => src[q] === '\\' && src[q + 1] === ')');
             if (k < 0) throw new Unbalanced('para', 'unclosed \\(');

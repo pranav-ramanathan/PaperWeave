@@ -317,3 +317,21 @@ test('a name written with TeX accents is matched and offered as the checker read
   expect(after).not.toContain('Kov\u00e1\u010d');
   expect(after).toContain('sentense');
 });
+
+test('text commands are read as what they print, so they cause no false findings', async () => {
+  const p = await paper(
+    wrap(
+      'We ran 5\\,km and saw one sentense, two \\ldots and so on, written in \\LaTeX{}. See Vo\\ss ler for the the details.',
+    ),
+  );
+  const found = await check(p, 'owner');
+  const words = found.map((f) => f.words);
+  expect(words).toContain('sentense');
+  expect(words).toContain('the the');
+  expect(found.find((f) => f.words === 'Vo\\ss ler')).toMatchObject({
+    kind: 'spelling',
+    reads: 'Voßler',
+    addable: true,
+  });
+  expect(words).not.toContain('ler');
+});

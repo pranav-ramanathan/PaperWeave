@@ -1,6 +1,7 @@
 // The prose of a LaTeX file, for a grammar checker: what is running text, what stands in for
 // each thing that is not (a formula, a citation, a command), and where each is in the source.
 // A checker that is told "this is markup, read it as that" answers in source positions.
+import { logoOf } from './bib.ts';
 import { DEFAULT_TRANSPARENT, parse, textblocks } from './parse.ts';
 
 /** One stretch of the source, as LanguageTool's annotated text has it. */
@@ -64,7 +65,18 @@ export function prose(src: string, transparent: ReadonlySet<string> = DEFAULT_TR
         else if (p.k === 'ws') add(from, to, 'soft', ' ');
         else if (p.k === 'esc') add(from, to, code ? 'hard' : 'soft', p.ch ?? '');
         else if (p.k === 'atom')
-          add(from, to, 'hard', p.type === 'cite' ? '[1]' : p.type === 'ref' ? '1' : noun());
+          add(
+            from,
+            to,
+            'hard',
+            p.type === 'cite'
+              ? '[1]'
+              : p.type === 'ref'
+                ? '1'
+                : p.type === 'raw'
+                  ? (logoOf(src.slice(from, to)) ?? noun())
+                  : noun(),
+          );
         // The command that opens a heading or a style, and the brace that closes it.
         else add(from, to, 'hard', '');
       }
