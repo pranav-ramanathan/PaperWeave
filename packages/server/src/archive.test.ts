@@ -136,3 +136,14 @@ test('a .bbl is a usable name, whatever its case or folder; other build output i
   for (const bad of ['main.blg', 'main.aux', 'main.synctex.gz', '.git/x.bbl', '__MACOSX/main.bbl'])
     expect(checkPath(bad), bad).toBe('it is not a file type a paper uses');
 });
+
+test('with a .bib in the archive, the .bbl is set aside and handed back, not lost', async () => {
+  const { entries, skipped, bbl } = await read([
+    f('main.tex'),
+    f('main.bbl', '\\bibitem{k} A.'),
+    f('x.bib', '@book{a,title={T}}'),
+  ]);
+  expect(bbl.map((e) => e.path)).toEqual(['main.bbl']);
+  expect(entries.map((e) => e.path).sort()).toEqual(['main.tex', 'x.bib']);
+  expect(skipped.map((s) => s.path)).toEqual(['main.bbl']);
+});

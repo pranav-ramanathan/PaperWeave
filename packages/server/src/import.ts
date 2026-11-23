@@ -11,6 +11,7 @@ import {
   parse,
   proseEnvs,
   reachesClass,
+  readyMadeBbls,
   uncomment,
 } from '@paperweave/latex';
 import type pg from 'pg';
@@ -135,6 +136,43 @@ type ArchivePaper = {
   note?: string;
 };
 
+/** Every file that could be a paper's root: with \\begin{document} and a \\documentclass, or reaching one. */
+function rootCandidates(texts: Record<string, string>, paths: ReadonlySet<string>): string[] {
+  const tex = Object.keys(texts).filter((p) => /\.(tex|ltx)$/i.test(p));
+  const direct = tex.filter((p) => isRoot(texts[p]));
+  return direct.length ? direct : tex.filter((p) => reachesClass(texts, p, paths));
+}
+
+/**
+ * The .bbl files `readZip` set aside because the archive has a .bib, put back where a paper needs
+ * them: it reads one by name, or names a .bib that is not in the archive (so the .bbl cannot be
+ * made again). See `readyMadeBbls`. The rows for them leave `skipped`.
+ */
+export function keepBbls(
+  entries: Entry[],
+  bbl: Entry[],
+  skipped: Skipped[],
+): { entries: Entry[]; skipped: Skipped[] } {
+  if (!bbl.length) return { entries, skipped };
+  const all = [...entries, ...bbl];
+  const texts: Record<string, string> = {};
+  for (const e of entries) {
+    if (!TEXT_FILE.test(e.path)) continue;
+    const d = decodeFile(e.bytes);
+    if (d.editable) texts[e.path] = d.text;
+  }
+  const paths = all.map((e) => e.path);
+  const need = new Set<string>();
+  for (const r of rootCandidates(texts, new Set(paths)))
+    for (const b of readyMadeBbls(texts, r, paths)) need.add(b.path);
+  const keep = bbl.filter((e) => need.has(e.path));
+  if (!keep.length) return { entries, skipped };
+  return {
+    entries: [...entries, ...keep],
+    skipped: skipped.filter((s) => !keep.some((e) => e.path === s.path)),
+  };
+}
+
 /**
  * Split an archive into the papers it holds. One wrapping folder is removed. If root files sit in
  * different top-level folders (an "export all projects" archive), each folder is a paper. If one
@@ -153,13 +191,9 @@ export function papers(entries: Entry[], skipped: Skipped[]): ArchivePaper[] {
     if (d.editable) text.set(e.path, d.text);
     else if (d.reason === 'not-utf8' && /\.(tex|ltx)$/i.test(e.path)) unreadable.push(e.path);
   }
-  const texFiles = [...text].filter(([path]) => /\.(tex|ltx)$/i.test(path));
-  const direct = texFiles.filter(([, t]) => isRoot(t)).map(([p]) => p);
   const asObject = Object.fromEntries(text);
   const everything = new Set(entries.map((e) => e.path));
-  const roots = direct.length
-    ? direct
-    : texFiles.map(([p]) => p).filter((p) => reachesClass(asObject, p, everything));
+  const roots = rootCandidates(asObject, everything);
   if (!roots.length) {
     // A main file saved as Latin-1 is not text the editors can open. Look at it as Latin-1 for
     // this one question, so that the refusal can say what is wrong with it.
@@ -299,6 +333,15 @@ export function describeImport(
     notes.push(
       `The bibliography came ready-made (${bbls.map((p) => p.split('/').pop()).join(', ')}), with no .bib file: its entries can be cited. To change it, upload a new copy with "Replace the file of this name" ticked.`,
     );
+  if (bbls.length && entries.some((e) => /\.bib$/i.test(e.path)))
+    for (const b of readyMadeBbls(texts, root, paths)) {
+      const name = b.path.split('/').pop();
+      notes.push(
+        b.lacks.length
+          ? `${name} was kept as the bibliography: the paper names a .bib file that is not in this ZIP (${b.lacks.join(', ')}), so it cannot be made again here. Its entries can be cited. To change it, add that .bib file, or upload a new copy with "Replace the file of this name" ticked.`
+          : `${name} was kept: the paper reads it by name.`,
+      );
+    }
   if (skipped.some((s) => s.reason.startsWith('build script')))
     notes.push(
       'The project has a latexmkrc. PaperWeave never runs it, so anything it sets up is not applied.',
@@ -368,7 +411,9 @@ export async function importZip(
   fallbackName: string,
   limits: Limits = LIMITS,
 ): Promise<Project[]> {
-  const { entries, skipped, review } = await readZip(zip, limits);
+  const read = await readZip(zip, limits);
+  const { review } = read;
+  const { entries, skipped } = keepBbls(read.entries, read.bbl, read.skipped);
   const found = papers(entries, skipped).map((p) => ({
     ...p,
     ...describeImport(p.entries, p.skipped),

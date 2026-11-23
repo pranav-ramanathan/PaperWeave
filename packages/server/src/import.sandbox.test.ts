@@ -489,6 +489,42 @@ test('a .bbl is kept when the archive has no .bib file, and the report says so',
     { path: 'main.bbl', reason: 'build output, made again on compile' },
   ]);
   expect(both.report.notes.join(' ')).not.toMatch(/ready-made/);
+  // Guard: the paper names refs, and refs.bib is there, so the .bbl is still build output.
+  const named = await reportOf(owner.id, [
+    file('main.tex', doc('\\bibliography{refs}')),
+    file('main.bbl', bbl),
+    file('refs.bib', '@book{k, title={T}}'),
+  ]);
+  expect(named.paths).toEqual(['main.tex', 'refs.bib']);
+});
+
+test('a .bbl is kept when the paper names a .bib that is not in the archive, even with another .bib present', async () => {
+  const bbl = '\\begin{thebibliography}{1}\\bibitem{k} A.\\end{thebibliography}\n';
+  const { report, paths } = await reportOf(owner.id, [
+    file('main.tex', doc('\\cite{k}\\bibliography{library}')),
+    file('main.bbl', bbl),
+    file('sample-base.bib', '@book{z, title={T}}'),
+  ]);
+  expect(paths).toEqual(['main.bbl', 'main.tex', 'sample-base.bib']);
+  expect(report.skipped).toEqual([]);
+  expect(report.notes.join(' ')).toContain('main.bbl was kept as the bibliography');
+  expect(report.notes.join(' ')).toContain('(library)');
+});
+
+test("a paper's .bbl is not dropped for the .bib of another paper in the archive", async () => {
+  const bbl = '\\begin{thebibliography}{1}\\bibitem{k} A.\\end{thebibliography}\n';
+  const { made } = await reportOf(owner.id, [
+    file('a/main.tex', doc('\\bibliography{refs}')),
+    file('a/refs.bib', '@book{k, title={T}}'),
+    file('b/main.tex', doc('\\cite{k}\\bibliography{refs}')),
+    file('b/main.bbl', bbl),
+  ]);
+  expect(made).toHaveLength(2);
+  const second = made[1];
+  expect((await listFiles(t.pool, owner.id, second.id)).map((f) => f.path)).toContain('main.bbl');
+  expect((await importReport(t.pool, owner.id, second.id))!.notes.join(' ')).toContain(
+    'ready-made',
+  );
 });
 
 test('the file types real papers use are kept; pictures LaTeX cannot read are skipped, with a reason', async () => {

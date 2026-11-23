@@ -852,6 +852,19 @@ test('a paper from a Mac, with decomposed file names, builds against the compose
   );
 });
 
+test('a .bbl is used when the paper names a .bib that is not in the ZIP, though another .bib is', async () => {
+  const { built, text, errors } = await importAndBuild({
+    'main.tex': tex(cite('library')),
+    'main.bbl': BBL,
+    'sample.bib': '@book{other, author={O. Other}, title={Unrelated}, publisher={P}, year=1999}\n',
+  });
+  expect(errors).toEqual([]);
+  expect(built).toMatchObject({ status: 'succeeded', hasPdf: true });
+  expect(text).toContain('A Book');
+  expect(text).not.toContain('?');
+  expect(built.diagnostics.filter((d) => /undefined/.test(d.message))).toEqual([]);
+});
+
 test('the next build taken is the one whose requester has had the fewest done, not the oldest', async () => {
   const a = await t.signIn('fair-a@example.org');
   const b = await t.signIn('fair-b@example.org');

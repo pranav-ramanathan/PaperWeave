@@ -7,6 +7,7 @@ import {
   macroDefs,
   projectGraphicsPaths,
   proseEnvs,
+  readyMadeBbls,
 } from '@paperweave/latex';
 import type pg from 'pg';
 import * as Y from 'yjs';
@@ -110,26 +111,38 @@ async function readTexFiles(
 }
 
 /**
- * The text of the .bbl a paper with no .bib file came with: the root's own (`main.tex` has
- * `main.bbl`, as \\jobname.bbl), or with no root, every one. A .bbl is not an editable text
+ * The text of the .bbl files a paper cites from. With no .bib file: the root's own (`main.tex`
+ * has `main.bbl`, as \\jobname.bbl), or with no root, every one. With a .bib file: only the ones
+ * `readyMadeBbls` says the build uses, as the import keeps them: read by name by a file the root
+ * reaches, or the root's own when a named .bib is not in the paper. A .bbl is not an editable text
  * file, but one renamed from a text file has edits in its log, so it is read as it stands now.
  */
 export function bblFiles(pool: Db, store: BlobStore, projectId: string) {
   return remembered(pool, ['bbl', projectId], async () => {
     const { rows } = await pool.query(
-      `select f.id, f.path, f.digest, f.eol, f.bom, f.head_seq, (select r.path from files r where r.id = p.root_file_id) as root_path
+      `select f.id, f.path, f.digest, f.eol, f.bom, f.head_seq,
+         (select r.path from files r where r.id = p.root_file_id) as root_path,
+         exists (select 1 from files b where b.project_id = f.project_id and b.path ~* '\\.bib$') as has_bib
        from files f join projects p on p.id = f.project_id
        where f.project_id = $1 and f.path ~* '\\.bbl$'
-         and not exists (select 1 from files b where b.project_id = f.project_id and b.path ~* '\\.bib$')
        order by f.path`,
       [projectId],
     );
-    const wanted = rows[0]?.root_path
-      ? `${String(rows[0].root_path).replace(/\.(tex|ltx)$/i, '')}.bbl`
-      : null;
+    if (!rows.length) return [];
+    const root = rows[0].root_path as string | null;
+    let keep: string[] | null = null;
+    if (rows[0].has_bib) {
+      if (!root) return [];
+      const all = await pool.query(`select path from files where project_id = $1`, [projectId]);
+      const paths = all.rows.map((r) => r.path as string);
+      const tex = await texFiles(pool, store, projectId);
+      const texts = Object.fromEntries(tex.map((f) => [f.path, f.text]));
+      keep = readyMadeBbls(texts, root, paths).map((b) => b.path);
+    }
+    const wanted = root ? `${root.replace(/\.(tex|ltx)$/i, '')}.bbl` : null;
     const files: { id: string; path: string; text: string }[] = [];
     for (const f of rows) {
-      if (wanted && f.path !== wanted) continue;
+      if (keep ? !keep.includes(f.path) : wanted && f.path !== wanted) continue;
       const bytes = await currentBytes(pool, store, f);
       const decoded = decodeFile(bytes);
       files.push({

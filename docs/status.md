@@ -4839,8 +4839,7 @@ Found by a three-person walkthrough.
   upload a new copy with "Replace the file of this name" ticked".
 - **Held by** a unit test in `archive.test.ts`, sandbox tests in `files.sandbox.test.ts`,
   `citations.sandbox.test.ts` and `builds.sandbox.test.ts`.
-- **Not done.** Editing a `.bbl` in the source editor; the import rule that drops a `.bbl` when
-  the archive has any `.bib`; the "left out" reason does not say a `.bbl` can be uploaded.
+- **Not done.** Editing a `.bbl` in the source editor; the "left out" reason does not say a `.bbl` can be uploaded.
 
 ## A paper whose root is a `.ltx` file never built
 
@@ -4851,3 +4850,26 @@ Found by a three-person walkthrough.
   names drop `.ltx` the same way.
 - **Held by** a build test in `compile.sandbox.test.ts` (with SyncTeX mapping back to `main.ltx`).
 - **Not done.** Nothing known.
+
+## The import dropped a paper's ready-made `.bbl` whenever any `.bib` was in the archive
+
+- **What was wrong.** `readZip` set aside every `.bbl` if the archive held any `.bib`, whatever
+  the paper named: a paper with `\bibliography{library}`, its `main.bbl` and a leftover template
+  `.bib` lost the `.bbl` and could make no bibliography; a `.bib` in one paper's folder cost
+  another paper its `.bbl`; a paper that `\input`s `main.bbl` failed on a missing file. The
+  citation report read a `.bbl` only when the paper had no `.bib`.
+- **Now** `readZip` hands the set-aside `.bbl` files back, and the import (`keepBbls`) keeps the
+  ones a paper needs, found by `readyMadeBbls` in `graph.ts`: one a file the root reaches reads by
+  name, and the root's own (`main.tex`, `main.bbl`) when a file the root reaches names a `.bib`
+  that is not in the archive from the root's folder, or names one through a macro. The rest are
+  dropped as before. The import report says why a `.bbl` was kept. The citation report reads the
+  same set when the paper has a `.bib` (`bblFiles` in `labels.ts`). The build needs no change:
+  `latexmk -bibtex-cond` does not run BibTeX when a named `.bib` is missing, so the `.bbl` is used.
+- **Held by** unit tests in `graph.test.ts`, `archive.test.ts` and `import.test.ts`, sandbox tests
+  in `import.sandbox.test.ts`, `citations.sandbox.test.ts` and `builds.sandbox.test.ts`.
+- **Not done.** A `.bib` named only inside the paper's own `.cls` or `.sty` is not seen; a
+  biblatex paper with a kept `.bbl` still gets the "Biber could not find the bibliography file"
+  diagnostic; a named `.bib` that is present but incomplete still replaces the `.bbl`; a paper
+  that `\input`s its `.bbl` and has no `\bibliography` now imports with the `.bbl`, but still
+  does not build (BibTeX runs on the `\citation` lines and fails with no `\bibdata`, with or
+  without a `.bib` in the ZIP), so there is no build test for that shape.

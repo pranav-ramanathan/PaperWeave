@@ -6,6 +6,7 @@ import {
   includeGraph,
   includes,
   leftOut,
+  readyMadeBbls,
 } from './graph.ts';
 import { labelIndex } from './labels.ts';
 
@@ -427,4 +428,56 @@ test('an \\include in a file the body reads is found; other commands are not \\i
 test('a subfiles paper that includes only the chapter it names leaves nothing out', () => {
   const main = paper('\\includeonly{sections/discussion}', '\\include{sections/discussion}');
   expect(out(main, { 'sections/discussion.tex': 'x' })).toBeNull();
+});
+
+const docOf = (body: string) => `\\documentclass{article}\\begin{document}${body}\\end{document}`;
+
+test('readyMadeBbls: the own .bbl is needed when a named .bib is not in the project', () => {
+  const files = { 'main.tex': docOf('\\bibliography{refs,library}') };
+  const paths = ['main.tex', 'main.bbl', 'refs.bib'];
+  expect(readyMadeBbls(files, 'main.tex', paths)).toEqual([
+    { path: 'main.bbl', lacks: ['library'] },
+  ]);
+  expect(
+    readyMadeBbls({ 'main.tex': docOf('\\addbibresource{library.bib}') }, 'main.tex', paths),
+  ).toEqual([{ path: 'main.bbl', lacks: ['library.bib'] }]);
+});
+
+// Guard: every named .bib is there, so the .bbl is made again.
+test('readyMadeBbls: nothing when every named .bib is present or none is named', () => {
+  const paths = ['main.tex', 'main.bbl', 'refs.bib'];
+  expect(readyMadeBbls({ 'main.tex': docOf('\\bibliography{refs}') }, 'main.tex', paths)).toEqual(
+    [],
+  );
+  expect(readyMadeBbls({ 'main.tex': docOf('x') }, 'main.tex', paths)).toEqual([]);
+  expect(readyMadeBbls({ 'main.tex': docOf('% \\bibliography{gone}') }, 'main.tex', paths)).toEqual(
+    [],
+  );
+});
+
+test('readyMadeBbls: a .bbl a file reads by name is needed, wherever it is', () => {
+  const files = { 'main.tex': docOf('\\input{main.bbl}') };
+  expect(readyMadeBbls(files, 'main.tex', ['main.tex', 'main.bbl', 'old/refs.bib'])).toEqual([
+    { path: 'main.bbl', lacks: [] },
+  ]);
+});
+
+test('readyMadeBbls: a bibliography named by a macro cannot be checked, so the .bbl is needed', () => {
+  const files = { 'main.tex': docOf('\\bibliography{\\jobname}') };
+  expect(readyMadeBbls(files, 'main.tex', ['main.tex', 'main.bbl'])).toEqual([
+    { path: 'main.bbl', lacks: ['\\jobname'] },
+  ]);
+});
+
+test('readyMadeBbls: a root in a folder looks for the .bib from its own folder', () => {
+  const files = { 'src/main.tex': docOf('\\bibliography{refs}') };
+  // The .bib is beside another paper, not this root.
+  expect(
+    readyMadeBbls(files, 'src/main.tex', ['src/main.tex', 'src/main.bbl', 'refs.bib']),
+  ).toEqual([{ path: 'src/main.bbl', lacks: ['refs'] }]);
+  expect(
+    readyMadeBbls(files, 'src/main.tex', ['src/main.tex', 'main.bbl', 'src/refs.bib']),
+  ).toEqual([]);
+  // Not the root's own .bbl.
+  expect(readyMadeBbls(files, 'src/main.tex', ['src/main.tex', 'build/main.bbl'])).toEqual([]);
 });
