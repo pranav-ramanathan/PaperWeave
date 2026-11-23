@@ -252,3 +252,48 @@ test('a comparison shows only what changed, and which words', async ({ browser }
   await expect(page.locator('.diff ins')).toBeInViewport();
   await audit(page, 'a comparison with words marked');
 });
+
+test('a comparison still marks the changed word when a paragraph was added after it', async ({
+  browser,
+}) => {
+  test.setTimeout(120_000);
+  const owner = await person(browser, 'diff-added');
+  const page = owner.page;
+  const long = `${'The delay stays low in every run we made. '.repeat(14)}After forty runs it was the same. ${'Nothing else moved at all. '.repeat(10)}`;
+  const body = Array.from({ length: 10 }, (_, i) => (i === 2 ? long : `Line number ${i + 3}.`));
+  const main = `\\documentclass{article}\n\\begin{document}\n${body.join('\n')}\n\\end{document}\n`;
+  const zip = join(mkdtempSync(join(tmpdir(), 'paperweave-e2e-')), `Added ${run}.zip`);
+  writeFileSync(zip, await writeZip([{ path: 'main.tex', bytes: Buffer.from(main) }]));
+  await page.goto('/sign-in');
+  await signIn(page, owner.email);
+  await page.getByLabel('Or import a ZIP of a LaTeX project').setInputFiles(zip);
+  await page.getByRole('button', { name: 'Import ZIP' }).click();
+  const paper = page.url();
+  await page.getByLabel('Name for the paper as it is now').fill('Forty');
+  await page.getByRole('button', { name: 'Save revision' }).click();
+  await expect(page.getByRole('status')).toHaveText('Saved as revision 1.');
+
+  await page.getByRole('link', { name: 'main.tex' }).first().click();
+  await showSource(page);
+  await selectWord(page, '.editor .cm-content', 'forty');
+  await page.keyboard.type('thirty');
+  // End stops at each wrapped row of the long line first, then at the end of the paragraph.
+  for (let k = 0; k < 40; k++) await page.keyboard.press('End');
+  await page.keyboard.press('Enter');
+  await page.keyboard.press('Enter');
+  await page.keyboard.type('A new paragraph follows.');
+  await expect(editorStatus(page)).toHaveText('All edits saved.');
+  await page.goto(paper);
+  await page.getByLabel('Name for the paper as it is now').fill('Thirty');
+  await page.getByRole('button', { name: 'Save revision' }).click();
+  await page.getByRole('link', { name: 'Changes since 1' }).click();
+  await expect(page.getByRole('heading', { name: 'Revision 1 to revision 2' })).toBeVisible();
+
+  await expect(page.locator('.diff del')).toHaveText('forty');
+  await expect(page.locator('.diff ins')).toHaveText('thirty');
+  await expect(
+    page.locator('.diff .added:not(.part)').filter({ hasText: 'A new paragraph follows.' }),
+  ).toHaveCount(1);
+  expect(await page.locator('.diff').evaluate((e) => e.scrollWidth <= e.clientWidth)).toBe(true);
+  await audit(page, 'a comparison with a paragraph added after a marked line');
+});
