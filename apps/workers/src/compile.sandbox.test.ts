@@ -444,7 +444,24 @@ test('errors are reported with file and line', async () => {
     severity: 'error',
     file: 'sections/intro.tex',
     line: 8,
-    message: 'Undefined control sequence.',
+    message: 'Undefined control sequence. LaTeX does not know \\nosuchmacro.',
+  });
+});
+
+test('a paper that uses includegraphics without graphicx is told to add the package', async () => {
+  const project = tmp();
+  writeFileSync(
+    join(project, 'main.tex'),
+    '\\documentclass{article}\n\\begin{document}\nHello.\n\n\\includegraphics{x}\n\\end{document}\n',
+  );
+  const r = await compile(project, 'main.tex', tmp());
+  expect(r.ok).toBe(false);
+  expect(r.diagnostics).toContainEqual({
+    severity: 'error',
+    file: 'main.tex',
+    line: 5,
+    message:
+      'Undefined control sequence. LaTeX does not know \\includegraphics: the paper does not load the graphicx package. Add \\usepackage{graphicx} before \\begin{document}.',
   });
 });
 
@@ -557,7 +574,7 @@ test('a paper whose root is in a folder builds, with the paths of the project', 
     severity: 'error',
     file: 'paper/sections/intro.tex',
     line: 8,
-    message: 'Undefined control sequence.',
+    message: 'Undefined control sequence. LaTeX does not know \\nosuchmacro.',
   });
 });
 

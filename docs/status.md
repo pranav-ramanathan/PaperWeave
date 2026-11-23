@@ -4770,3 +4770,18 @@ Found by a three-person walkthrough.
 - **Held by** unit tests in `apps/web/lib/leaving.test.ts` and two tests in
   `tests/e2e/recover.spec.ts`.
 - **Not done.** Back/Forward cannot be cancelled and still drops unsaved edits silently.
+
+## A figure from the Figure dialog broke the build in the AMS template, and the error did not say why
+
+- **What was wrong.** The AMS template did not load `graphicx`, but the Figure dialog (and a drawn
+  chart) writes `\includegraphics`. The build failed with no PDF and the pane showed only
+  `Undefined control sequence.`, because the log line that names the command was dropped. Any
+  imported paper without `graphicx` behaved the same.
+- **Now** the AMS template loads `graphicx`, and an "Undefined control sequence." build error
+  names the command (`LaTeX does not know \nosuchmacro.`). For `\includegraphics` and `\eqref` it
+  also says which package to add (`graphicx`, `amsmath`). The message keeps its old first sentence.
+- **Held by** unit tests in `diagnostics.test.ts` and `templates.test.ts`, and sandbox tests in
+  `templates.sandbox.test.ts` (a dialog-written figure builds from every template) and
+  `compile.sandbox.test.ts` (real TeX log).
+- **Not done.** The dialog does not add the package itself, and other packages' commands get only
+  the generic sentence. A build that failed before keeps the bare message until it is rebuilt.

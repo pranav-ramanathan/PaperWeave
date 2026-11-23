@@ -26,8 +26,10 @@ import { compile, type Compiler, IMAGE } from './compile.ts';
  * '...-forcedate-unicode-nullfont': a stray character in a picture is no longer "Characters not
  * shown"; a cached good build would keep the paper not ready to submit. Both of the last two
  * were applied together, in the change that made the constant say so.
+ * '...-nullfont-csname': "Undefined control sequence." names the command now; a cached failed
+ * build keeps the bare message.
  */
-const TEX_TEXT = 'utf8-biber-eps-glyphs-strings-forcedate-unicode-nullfont';
+const TEX_TEXT = 'utf8-biber-eps-glyphs-strings-forcedate-unicode-nullfont-csname';
 
 /** The toolchain image's content ID: part of every cache key, so a new image rebuilds everything. */
 export const imageId = () =>
