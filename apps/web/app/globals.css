@@ -564,6 +564,19 @@ button[aria-disabled='true'] {
   background: var(--warn-wash);
   font-size: 0.9rem;
 }
+.diagnostics .place {
+  padding: 0;
+  border: 0;
+  background: none;
+  color: var(--accent);
+  font: inherit;
+  text-decoration: underline;
+  cursor: pointer;
+}
+.diagnostics .place:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 2px;
+}
 .build [role='alert'] {
   padding: 0.4rem 0.6rem;
   border: 1px solid var(--warn);

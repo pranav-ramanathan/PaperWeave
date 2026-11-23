@@ -5,7 +5,16 @@ import { mkdtempSync, readdirSync, readFileSync, statSync, writeFileSync } from 
 import { tmpdir } from 'node:os';
 import { join, relative } from 'node:path';
 import { writeZip } from '../../packages/server/src/archive';
-import { emailedLink, person, run, showSource, signIn, typingSaved } from './helpers';
+import {
+  audit,
+  caretLine,
+  emailedLink,
+  person,
+  run,
+  showSource,
+  signIn,
+  typingSaved,
+} from './helpers';
 
 const FIXTURE = join(import.meta.dirname, '../../fixtures/ieee-multifile');
 const build = (page: Page) => page.locator('.build');
@@ -108,6 +117,60 @@ test('the PDF builds by itself, a broken edit says where, and the last good PDF 
       })
     ).status(),
   ).toBe(403);
+});
+
+test('an error in the build pane is a way to its file and line', async ({ browser }) => {
+  test.setTimeout(180_000);
+  const owner = await person(browser, 'build-jump');
+  const { page } = owner;
+  await page.goto('/sign-in');
+  await signIn(page, owner.email);
+  await page
+    .getByLabel('Or import a ZIP of a LaTeX project')
+    .setInputFiles(await fixtureZip('Jump'));
+  await page.getByRole('button', { name: 'Import ZIP' }).click();
+  await page.getByRole('link', { name: 'sections/intro.tex' }).click();
+  await showSource(page);
+  await expect(buildStatus(page)).toHaveText('The PDF is up to date.', { timeout: 60_000 });
+  // Break the introduction, then look at the main file, whose page the error is not in.
+  await source(page).click();
+  await page.keyboard.press('ControlOrMeta+End');
+  await page.keyboard.type('\\nosuchmacro');
+  await typingSaved(page);
+  await page.getByRole('link', { name: 'main.tex', exact: true }).click();
+  await expect(page.getByRole('region', { name: 'Editor for main.tex' })).toBeVisible();
+  await expect(buildStatus(page)).toHaveText('The latest build failed.', { timeout: 60_000 });
+  const errors = build(page).getByRole('list', { name: 'Build errors' });
+  const place = errors.getByRole('button', { name: /^sections\/intro\.tex:\d+/ });
+  const line = Number(/:(\d+)/.exec((await place.textContent())!)![1]);
+
+  // Pressed: the file opens at the line.
+  await place.click();
+  await expect(page.getByRole('region', { name: 'Editor for sections/intro.tex' })).toBeVisible();
+  await expect(page).toHaveURL(new RegExp(`line=${line}$`));
+  await showSource(page);
+  await expect(source(page)).toContainText('\\nosuchmacro');
+  await expect.poll(() => caretLine(page)).toBe(line);
+
+  // With that file open already, the caret moves without leaving the page.
+  const url = page.url();
+  await source(page).click();
+  await page.keyboard.press('ControlOrMeta+Home');
+  await expect.poll(() => caretLine(page)).toBe(1);
+  await place.click();
+  await expect.poll(() => caretLine(page)).toBe(line);
+  expect(page.url()).toBe(url);
+
+  // And from the keyboard.
+  await source(page).click();
+  await page.keyboard.press('ControlOrMeta+Home');
+  await expect.poll(() => caretLine(page)).toBe(1);
+  await place.focus();
+  await page.keyboard.press('Enter');
+  await expect.poll(() => caretLine(page)).toBe(line);
+  // With the list showing, the page has nothing the audit finds.
+  await expect(errors).toBeVisible();
+  await audit(page, 'build errors as buttons');
 });
 
 test('a citation to nothing is listed on a build that worked, and a broken .bib says where', async ({

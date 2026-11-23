@@ -2122,8 +2122,7 @@ update` held the paper's file rows for **189.6 s** (until the proxy was cut; it 
   the file it was opened in. A mistake inside a command is placed where the command is used. A
   missing package or file is given its file but not its line. A package of TeX's own is named
   without the line that loads it. Biber's errors are read from latexmk's output, with the .bib and its line (a .bib that
-  is not there has no line); biber's own log, main.blg, is still not the build log shown. The lists are not links to the
-  lines. BibTeX's own words are not in the build log a person can open.
+  is not there has no line); biber's own log, main.blg, is still not the build log shown. BibTeX's own words are not in the build log a person can open.
 - **How it was made.** Planned by one agent, probed and written by others, checked here.
 
 ## A paper taken out and brought back
@@ -4936,3 +4935,25 @@ Found by a three-person walkthrough.
   an old revision is titled with the new name) and a browser test in `projects.spec`
   ("the owner renames a paper; a viewer cannot"), which failed before.
 - **Not done.** Editors cannot rename; no history of old names; no live update of open pages.
+
+## A brace left open in an input file was blamed on the root, and the build errors could not be followed
+
+- **What was wrong.** With `\input{sections/method}` in `main.tex` and an unclosed `\textbf{` in
+  `method.tex`, the pane said `main.tex:8 File ended while scanning use of \textbf`, the line of
+  the `\input`, not the file with the brace. The same for `\footnote{` and `\caption{`. And the
+  file and line of each build error were plain text: finding the place meant opening the file
+  and counting lines.
+- **Now** `runaway` in `apps/workers/src/compile.ts` reads which file TeX closed just before
+  "Runaway argument?" (`readingAt` also records the files it sees closed) and, when only
+  whitespace lies between, names that file, with no line, and says where it was read from ("read
+  from main.tex line 5"). A file from TeX's own installation, or the root itself, changes
+  nothing. `TEX_TEXT` in `builder.ts` is bumped, so a cached failed build is made again.
+  In the build pane, an error, a `??` warning or a "not in the PDF" entry whose file is one the
+  editor can open is a button that shows the file at the line (`showInEditor`, the same path as
+  a click in the PDF), in the open file or by going to another; the text is as before.
+- **Held by** unit tests on the real log (`diagnostics.test.ts`: file, folder root, footnote;
+  guards for text before the runaway and an installed file), a compile
+  (`compile.sandbox.test.ts`) and a browser test (`building.spec`: by pointer, in the open file,
+  by keyboard, audit), each failed before the change.
+- **Not done.** The unclosed-brace error has no line. `\begin{itemize} on input line 4 ended by
+\end{document}` still reads as if line 4 were in the main file.
