@@ -36,9 +36,11 @@ export async function POST(
   try {
     const input = await readJson(request);
     const action: unknown = input && typeof input === 'object' ? input.action : null;
-    if (action === 'accept') await acceptProposal(db(), blobs(), user.id, id, proposalId);
+    const seen: unknown = input && typeof input === 'object' ? input.seen : undefined;
+    if (action === 'accept') await acceptProposal(db(), blobs(), user.id, id, proposalId, seen);
     else if (action === 'undo') await undoAccept(db(), blobs(), user.id, id, proposalId);
-    else if (action === 'reject') await closeProposal(db(), user.id, id, proposalId, 'rejected');
+    else if (action === 'reject')
+      await closeProposal(db(), user.id, id, proposalId, 'rejected', seen);
     else if (action === 'withdraw') await closeProposal(db(), user.id, id, proposalId, 'dismissed');
     else if (action === 'revise')
       await reviseProposal(db(), blobs(), user.id, id, proposalId, input);

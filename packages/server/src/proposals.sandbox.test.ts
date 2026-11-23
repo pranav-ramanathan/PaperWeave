@@ -684,3 +684,84 @@ test('a proposal that would break as LaTeX says so, and can still be accepted', 
   await change(p.file, 'Nothing more', 'Nothing at all');
   expect(await latexOf(word)).toEqual([]);
 });
+
+test('a proposal changed since it was last seen is not accepted, rejected or overwritten', async () => {
+  const p = await paper();
+  const id = await propose(t.pool, store, users.reviewer.id, p.id, p.file, {
+    ...(await ends(p.file, 'below 40 ms')),
+    replacement: 'under 40 ms',
+  });
+  const seenNow = async () => {
+    const [{ expected, replacement }] = await proposals(p, 'owner');
+    return { expected, replacement };
+  };
+  const seen0 = await seenNow();
+  await reviseProposal(t.pool, store, users.reviewer.id, p.id, id, { replacement: 'above 400 ms' });
+
+  // The owner decides on what the card showed: nothing is written, and it stays open.
+  expect(await code(acceptProposal(t.pool, store, users.owner.id, p.id, id, seen0))).toBe(
+    'conflict',
+  );
+  expect(await saved(p)).toBe(MAIN);
+  expect((await proposals(p))[0].status).toBe('open');
+  expect(await code(closeProposal(t.pool, users.owner.id, p.id, id, 'rejected', seen0))).toBe(
+    'conflict',
+  );
+  expect((await proposals(p))[0].status).toBe('open');
+  // A second person's change over the one they never saw.
+  expect(
+    await code(
+      reviseProposal(t.pool, store, users.editor.id, p.id, id, {
+        replacement: 'x',
+        seen: seen0,
+      }),
+    ),
+  ).toBe('conflict');
+  expect((await proposals(p))[0].replacement).toBe('above 400 ms');
+  // Not a pair of strings.
+  for (const seen of ['nonsense', { expected: 'below 40 ms' }, null]) {
+    expect(
+      await code(
+        reviseProposal(t.pool, store, users.editor.id, p.id, id, { replacement: 'x', seen }),
+      ),
+    ).toBe('invalid_input');
+    expect(await code(acceptProposal(t.pool, store, users.owner.id, p.id, id, seen))).toBe(
+      'invalid_input',
+    );
+    expect(await code(closeProposal(t.pool, users.owner.id, p.id, id, 'rejected', seen))).toBe(
+      'invalid_input',
+    );
+  }
+  expect((await proposals(p))[0]).toMatchObject({ status: 'open', replacement: 'above 400 ms' });
+
+  // Having looked again, both go through, and what is written is exactly what was shown.
+  await reviseProposal(t.pool, store, users.editor.id, p.id, id, {
+    replacement: 'about 40 ms',
+    seen: await seenNow(),
+  });
+  expect((await proposals(p))[0].replacement).toBe('about 40 ms');
+  await acceptProposal(t.pool, store, users.owner.id, p.id, id, await seenNow());
+  expect(await saved(p)).toBe(MAIN.replace('below 40 ms', 'about 40 ms'));
+  // Asked again with what was seen before: the first time did it.
+  expect(await code(acceptProposal(t.pool, store, users.owner.id, p.id, id, seen0))).toBe('ok');
+  expect(await saved(p)).toBe(MAIN.replace('below 40 ms', 'about 40 ms'));
+
+  // Without `seen`, as before.
+  const other = await propose(t.pool, store, users.reviewer.id, p.id, p.file, {
+    ...(await ends(p.file, 'Nothing')),
+    replacement: 'Little',
+  });
+  await acceptProposal(t.pool, store, users.owner.id, p.id, other);
+  expect(await saved(p)).toContain('Little else is claimed.');
+
+  // An author withdraws their own proposal whatever they last saw.
+  const mine = await propose(t.pool, store, users.reviewer.id, p.id, p.file, {
+    ...(await ends(p.file, 'claimed')),
+    replacement: 'shown',
+  });
+  await closeProposal(t.pool, users.reviewer.id, p.id, mine, 'dismissed', {
+    expected: 'old',
+    replacement: 'older',
+  });
+  expect((await proposals(p)).find((x) => x.id === mine)?.status).toBe('dismissed');
+});

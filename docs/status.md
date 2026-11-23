@@ -4563,7 +4563,7 @@ Found by a three-person walkthrough.
   stays allowed. A `%` that opens a comment is found anywhere in the file (`commentOpen`, moved from
   the bridge into `@paperweave/latex`). An unfinished group or a bare `& # _ ^` is found by parsing
   only the paragraph around the edit before and after, and reporting what the change adds. The
-  change form says "This is LaTeX: write \% for %, \& for &, \_ for _."
+  change form says "This is LaTeX: write \% for %, \& for &, \_ for \_."
 - **Held by** `hazards.test` (table of cases), `proposals.sandbox.test` and `tests/e2e/proposals.spec.ts`
   (warning shown, Accept enabled, gone after the change is written with `\%`, axe audit).
 - **Not done.** `%` inside `verbatim` or `lstlisting` is flagged. Unfinished groups and bare
@@ -5021,9 +5021,8 @@ Found by a three-person walkthrough.
 - **Left out.** Forms with a space (`\' e`, `\c c`; `Gro\ss e` is done, see the text commands section below),
   which need a guard rule of their own; accents with no single-unit composition, `\t`, `\d`, `\b`, standalone `\i` and `\j`,
   `\dh`, `\th`; a paper that redefines these commands is not checked for; `\LaTeX`, `\ldots`,
-  `--` and ``…'' are still chips; accents inside raw atoms are unchanged; typing `é` still writes
-  UTF-8; the chip's double-click LaTeX window is gone for these. A paragraph made only of
-  `\AA{}` is still a raw block, as before.
+  `--` and ``…'' are still chips; accents inside raw atoms are unchanged; typing `é`still writes
+UTF-8; the chip's double-click LaTeX window is gone for these. A paragraph made only of`\AA{}` is still a raw block, as before.
 
 ## A reviewer can select text in the visual view with the keyboard
 
@@ -5409,3 +5408,24 @@ closed: ...` (outermost first, at most 10). The log does not name the file: with
 - **Not done.** Charts already drawn keep their old picture until "Draw it again" (they are not
   marked out of date; `chart_draws` has no rule version). A two-day date axis still shows one
   `12 PM` tick. The y axis still groups thousands and starts at zero.
+
+## A proposal changed after it was last seen
+
+- **What was wrong.** Accept applied whatever words the proposal held at that moment. If its
+  author (or another editor) changed the replacement after the card was drawn, the paper got text
+  nobody had looked at, and the "This changes more than the wording" flags on the card were for
+  the old words. Reject could turn down a revision unseen, and two people changing the same
+  proposal silently overwrote each other.
+- **Now** Accept, Reject and Save send the two texts the card showed (`seen`). If the proposal
+  reads differently, the server refuses with a conflict, writes nothing, and the card is read
+  again so it shows the proposal as it now reads. The update itself also names the texts it
+  expects, so a change between the check and the write is refused as well. A person changing a
+  proposal who is overtaken by someone else's change is told so beside the form, and keeps what
+  they wrote. A `seen` that is not a pair of texts is refused as invalid. No `TEX_TEXT` bump.
+- **Held by** a sandbox test in `proposals.sandbox.test.ts` (accept, reject and revise refused on
+  stale `seen`, malformed `seen`, success with fresh `seen`, retry, no `seen`, withdraw) and a
+  browser test in `proposals.spec` (Accept refused on a card that could not refresh, and the note
+  for a change overtaken while writing).
+- **Not done.** Withdraw is not checked (it is the author's own, and decides nothing about what
+  it says). A tab opened before this deploy sends no `seen` and behaves as before. The race
+  between the check and the write is closed by the update's `where` clause, which has no test.
