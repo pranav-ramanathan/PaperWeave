@@ -367,6 +367,8 @@ export function diagnostics(
     .map(({ at, d }) => unclosed(runaway(log, at, d, reading.ended), reading.opened(at), read, dir))
     // TeX says the same thing again when it comes to the same \end a second time.
     .filter((d, i, all) => all.findIndex((e) => JSON.stringify(e) === JSON.stringify(d)) === i);
+  // minted cannot run without shell escape: one error that says so, not the five it causes.
+  minted(out, read);
   // The paper ends before \end{document}: TeX's own words for it are about its input.
   // (Not when a runaway argument swallowed the \end{document}: that error is already the cause.)
   if (
@@ -748,6 +750,48 @@ function unclosed(
       message: `${d.message} Line ${line} may be in a file read in before this: ${others.slice(0, 3).join(' or ')}.`,
     };
   return d;
+}
+
+/**
+ * minted needs a program (Pygments) run during the build, which PaperWeave never allows. It
+ * then fails with five errors for one listing, the first on \begin{document}, none saying what
+ * to do. They are replaced, in place, by one error on the line that loads minted. Left alone
+ * unless minted's own shell-escape error is there. Changes `out`.
+ */
+function minted(out: Diagnostic[], read: ((file: string) => string | undefined) | undefined) {
+  const first = out.findIndex(
+    (d) =>
+      d.severity === 'error' &&
+      d.message.startsWith(
+        'Package minted Error: You must invoke LaTeX with the -shell-escape flag',
+      ),
+  );
+  if (first < 0) return;
+  const { file, line } = out[first];
+  const loads = (text: string) =>
+    text
+      .split(/\r\n|\r|\n/)
+      .findIndex((l) =>
+        [
+          ...uncommented(l).matchAll(
+            /\\(?:usepackage|RequirePackage)\s*(?:\[[^\]]*\]\s*)?\{([^}]*)\}/g,
+          ),
+        ].some((m) => m[1].split(',').some((name) => name.trim() === 'minted')),
+      );
+  const text = file === undefined ? undefined : read?.(file);
+  const at = text === undefined ? -1 : loads(text);
+  const error: Diagnostic = {
+    severity: 'error',
+    ...(file === undefined ? {} : { file }),
+    ...(at >= 0 ? { line: at + 1 } : line === undefined ? {} : { line }),
+    message:
+      'This paper loads the minted package, which runs a program (Pygments) during the build. PaperWeave never runs programs from a paper, so it cannot be built with minted. Set the code with the listings package instead (\\begin{lstlisting}).',
+  };
+  const mine = (d: Diagnostic) =>
+    d.severity === 'error' &&
+    /^Package minted Error: |^Package catchfile Error: File `_minted-/.test(d.message);
+  const kept = out.map((d, i) => (i === first ? error : mine(d) ? undefined : d));
+  out.splice(0, out.length, ...kept.filter((d): d is Diagnostic => d !== undefined));
 }
 
 /**

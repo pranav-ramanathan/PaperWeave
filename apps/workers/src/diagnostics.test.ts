@@ -1349,3 +1349,107 @@ test('an entry key that no .bib has is named without a file', () => {
     /^In the bibliography, in the reference smith2020 \(as LaTeX reads it\): Missing \$ inserted/,
   );
 });
+
+// What a build of a paper that loads minted writes with shell escape off (cut from a real log).
+const MINTED_SHELL = [
+  './main.tex:3: Package minted Error: You must invoke LaTeX with the -shell-escape flag.',
+  '',
+  'See the minted package documentation for explanation.',
+  'Type  H <return>  for immediate help.',
+  ' ...                                              ',
+  '',
+  'l.3 \\begin',
+  '          {document}',
+  'Pass the -shell-escape flag to LaTeX. Refer to the minted.sty documentation for more information.',
+  '',
+  'runsystem(command -v pygmentize && touch main.aex)...disabled.',
+  '',
+  "./main.tex:3: Package minted Error: You must have `pygmentize' installed to use this package.",
+  '',
+  'See the minted package documentation for explanation.',
+  'l.3 \\begin{document}',
+];
+const MINTED_LISTING = (line: number) => [
+  `./main.tex:${line}: Package catchfile Error: File \`_minted-main/default.pygstyle' not found.`,
+  '',
+  'See the catchfile package documentation for explanation.',
+  `l.${line} \\end{minted}`,
+  '',
+  `./main.tex:${line}: Package catchfile Error: File \`_minted-main/default.pygstyle' not found.`,
+  '',
+  `./main.tex:${line}: Package minted Error: Cannot find Pygments style default.`,
+  '',
+  `./main.tex:${line}: Package minted Error: Missing Pygments output; \\inputminted was`,
+  'probably given a file that does not exist--otherwise, you may need ',
+  '',
+  `l.${line} \\end{minted}`,
+];
+const MINTED_LOG = [...MINTED_SHELL, ...MINTED_LISTING(6)].join('\n');
+const MINTED_TEX = [
+  '\\documentclass{article}',
+  '\\usepackage[cache=false]{minted}',
+  '\\begin{document}',
+  '\\begin{minted}{python}',
+  'x=1',
+  '\\end{minted}',
+  '\\end{document}',
+].join('\n');
+
+test('a paper that loads minted gets one error, on the line that loads it', () => {
+  const out = diagnostics(MINTED_LOG, '', '', reader({ 'main.tex': MINTED_TEX }));
+  expect(out).toHaveLength(1);
+  expect(out[0]).toMatchObject({ severity: 'error', file: 'main.tex', line: 2 });
+  expect(out[0].message).toMatch(/minted.*listings/);
+  expect(out.map((d) => d.message).join('\n')).not.toMatch(/-shell-escape|pygmentize|catchfile/);
+});
+
+test('minted without a way to read the paper is reported at the line TeX gave', () => {
+  const out = diagnostics(MINTED_LOG);
+  expect(out).toHaveLength(1);
+  expect(out[0]).toMatchObject({ file: 'main.tex', line: 3 });
+  expect(out[0].message).toMatch(/minted.*listings/);
+});
+
+test('the minted error is placed in the root’s folder', () => {
+  const out = diagnostics(MINTED_LOG, '', 'paper/', reader({ 'main.tex': MINTED_TEX }));
+  expect(out).toHaveLength(1);
+  expect(out[0]).toMatchObject({ file: 'paper/main.tex', line: 2 });
+});
+
+test('a second listing adds nothing, and an error between them keeps its place in the log', () => {
+  const log = [
+    ...MINTED_SHELL,
+    ...MINTED_LISTING(6),
+    './main.tex:8: Undefined control sequence.',
+    'l.8 \\nosuchmacro',
+    '',
+    ...MINTED_LISTING(10),
+  ].join('\n');
+  const out = diagnostics(log, '', '', reader({ 'main.tex': MINTED_TEX }));
+  expect(out.map((d) => [d.line, d.message.split(' ')[0]])).toEqual([
+    [2, 'This'],
+    [8, 'Undefined'],
+  ]);
+});
+
+test('a commented-out \\usepackage{minted} is not the line that loads it', () => {
+  const tex = [
+    '% \\usepackage{minted}',
+    '\\documentclass{article}',
+    '\\usepackage{xcolor} % not \\usepackage{minted}',
+    '\\usepackage[cache=false]{graphicx,minted}',
+    '\\begin{document}',
+  ].join('\n');
+  const [d] = diagnostics(MINTED_LOG, '', '', reader({ 'main.tex': tex }));
+  expect(d.line).toBe(4);
+});
+
+test('a catchfile error with no minted shell-escape error is left as it is', () => {
+  const log = MINTED_LISTING(6).join('\n');
+  const out = diagnostics(log, '', '', reader({ 'main.tex': MINTED_TEX }));
+  expect(out.map((d) => d.message)).toEqual([
+    "Package catchfile Error: File `_minted-main/default.pygstyle' not found.",
+    'Package minted Error: Cannot find Pygments style default.',
+    'Package minted Error: Missing Pygments output; \\inputminted was',
+  ]);
+});

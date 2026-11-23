@@ -75,3 +75,26 @@ test('the report says which file a wrongly capitalised name is meant for', () =>
     ['gone', undefined],
   ]);
 });
+
+const notesFor = (pre: string) =>
+  describeImport([
+    f('main.tex', `\\documentclass{article}\n${pre}\n\\begin{document}Hi.\\end{document}`),
+  ]).report.notes.join('\n');
+
+test('a paper that loads minted is told it will not build until the code is set another way', () => {
+  const notes = notesFor('\\usepackage[cache=false]{minted}');
+  expect(notes).toMatch(/will not build until the code is set another way.*listings/);
+  expect(notes).not.toContain('those parts');
+});
+
+test('a paper that loads only pythontex keeps the sentence about shell escape', () => {
+  const notes = notesFor('\\usepackage{pythontex}');
+  expect(notes).toContain('That is turned off, so those parts will not build.');
+  expect(notes).not.toContain('will not build until');
+});
+
+test('a paper that loads both gets both notes', () => {
+  const notes = notesFor('\\usepackage{minted}\n\\usepackage{shellesc}');
+  expect(notes).toContain('will not build until');
+  expect(notes).toContain('those parts will not build');
+});

@@ -394,6 +394,27 @@ test('shell escape is off', async () => {
   expect(r.log).toMatch(/runsystem\(touch pwned\.txt\)\.\.\.disabled/);
 });
 
+test.each(['pdflatex', 'lualatex'] as const)(
+  'a paper that loads minted fails with one error that says what to do, under %s',
+  async (engine) => {
+    const project = tmp();
+    writeFileSync(
+      join(project, 'main.tex'),
+      '\\documentclass{article}\n\\usepackage{minted}\n\\begin{document}\n\\begin{minted}{python}\nx=1\n\\end{minted}\n\\end{document}\n',
+    );
+    const r = await compile(project, 'main.tex', tmp(), 60, engine);
+    expect(r.ok).toBe(false);
+    expect(r.timedOut).toBe(false);
+    const errors = r.diagnostics.filter((d) => d.severity === 'error');
+    expect(errors).toHaveLength(1);
+    expect(errors[0]).toMatchObject({ file: 'main.tex', line: 2 });
+    expect(errors[0].message).toMatch(/minted/);
+    // Still because shell escape is off, not because it was turned on and failed (LuaTeX does
+    // not log the refused command).
+    if (engine === 'pdflatex') expect(r.log).toMatch(/runsystem\(.*\)\.\.\.disabled/);
+  },
+);
+
 test('a project latexmkrc is never run', async () => {
   const project = tmp();
   cpSync(join(FIXTURES, 'article-basic'), project, { recursive: true });

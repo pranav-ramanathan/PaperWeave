@@ -367,11 +367,15 @@ export function describeImport(
     notes.push(
       'The project has a latexmkrc. PaperWeave never runs it, so anything it sets up is not applied.',
     );
-  if (
-    /\\usepackage(\[[^\]]*\])?\{[^}]*\b(minted|pythontex|shellesc)\b/.test(
+  const packages = (names: string) =>
+    new RegExp(`\\\\usepackage(\\[[^\\]]*\\])?\\{[^}]*\\b(${names})\\b`).test(
       Object.values(texts).join('\n'),
-    )
-  )
+    );
+  if (packages('minted'))
+    notes.push(
+      'The paper loads minted, which runs a program during the build. PaperWeave never runs one, so the paper will not build until the code is set another way, for example with the listings package.',
+    );
+  if (packages('pythontex|shellesc'))
     notes.push(
       'The project uses a package that runs external programs (shell escape). That is turned off, so those parts will not build.',
     );
