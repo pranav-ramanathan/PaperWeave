@@ -5939,3 +5939,19 @@ two`, cut at 40 characters, the source in the title, announced as "comment: ..."
   still named as TeX names it (`\iftrue`). The faulty line inside the `.sty` is not found. Still
   carried over: overfull boxes are not reported; "You have requested package" from an installed
   file is still listed; the build pane shows no compiler warnings.
+
+## The e2e tests' temporary folders
+
+- **What was wrong.** The Playwright tests make folders with `mkdtempSync(join(tmpdir(),
+'paperweave-e2e-'))` and never removed them. On one machine that was about 15,000 folders and
+  4.7 GB in `/tmp` (63 MB each for `large.spec.ts`), which filled the disk. CI starts fresh each
+  time, so only local runs suffered.
+- **Now** `tests/e2e-global-setup.ts` (the config's `globalSetup`) makes one
+  `paperweave-e2e-run-*` folder and sets `TMPDIR` to it, so `tmpdir()` in the test workers
+  returns it; it returns a function that removes the folder when the run ends. The web servers
+  start before `globalSetup`, so they keep the normal `TMPDIR`. No spec file changed. Running
+  `large.spec.ts` and `uploading.spec.ts` left the count of `/tmp/paperweave-e2e-*` unchanged.
+- **Not done.** Folders from earlier runs are not removed. A run killed with SIGKILL still leaves
+  its one `paperweave-e2e-run-*` folder. Existing servers reused from an earlier run keep their
+  own `TMPDIR`. `uploading.spec.ts:117` ("a page restored after a large upload...") fails here
+  with and without this change.
