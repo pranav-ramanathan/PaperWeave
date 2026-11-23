@@ -203,7 +203,14 @@ async function checksOf(
           `"${m.target}" is not among the paper's files; LaTeX found it elsewhere.`,
           place(m.from, m.at),
         );
-      else problem('file', `The paper has no file "${m.target}".`, place(m.from, m.at));
+      else
+        problem(
+          'file',
+          m.near
+            ? `The paper has no file "${m.target}". It has "${m.near}": only the capital letters differ, and they count here. Change the name to match.`
+            : `The paper has no file "${m.target}".`,
+          place(m.from, m.at),
+        );
     }
     for (const d of graph.dynamic)
       warning(

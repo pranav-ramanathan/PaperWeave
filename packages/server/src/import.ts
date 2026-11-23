@@ -49,7 +49,8 @@ export type ImportReport = {
   compiler: Compiler;
   files: FileReport[];
   skipped: Skipped[];
-  missing: { from: string; target: string }[];
+  /** `near`: a file of the paper the name matches but for letter case. Absent in reports stored before it existed. */
+  missing: { from: string; target: string; near?: string }[];
   dynamic: { from: string; target: string }[];
   cycles: string[][];
   notes: string[];

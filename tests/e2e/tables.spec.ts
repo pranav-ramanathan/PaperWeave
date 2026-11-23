@@ -244,6 +244,56 @@ test('commented rows and wrapped captions are left as they are', async ({ browse
   await expect.poll(sourceLines).toContain('\\caption{Scores on the new benchmark.}');
 });
 
+test('a row added to a one-column table shows, and its cell is edited alone', async ({
+  browser,
+}) => {
+  const { page, email } = await person(browser, 'table-one-column');
+  const tex = [
+    '\\documentclass{article}',
+    '\\begin{document}',
+    '\\begin{table}',
+    '\\begin{tabular}{l}',
+    '  alpha \\\\',
+    '  beta \\\\',
+    '\\end{tabular}',
+    '\\end{table}',
+    '\\end{document}',
+    '',
+  ].join('\n');
+  const zip = join(mkdtempSync(join(tmpdir(), 'paperweave-e2e-')), `One column ${run}.zip`);
+  writeFileSync(zip, await writeZip([{ path: 'main.tex', bytes: Buffer.from(tex) }]));
+  await page.goto('/sign-in');
+  await signIn(page, email);
+  await page.getByLabel('Or import a ZIP of a LaTeX project').setInputFiles(zip);
+  await page.getByRole('button', { name: 'Import ZIP' }).click();
+  await page.getByRole('link', { name: 'main.tex' }).click();
+  await expect(page.getByRole('region', { name: 'Editor for main.tex' })).toBeVisible();
+  const other = await page.context().newPage();
+  await other.goto(page.url());
+  await showSource(other);
+  await expect(source(other)).toContainText('alpha');
+  const lines = other.locator('.editor .cm-content .cm-line');
+  const sourceLines = async () => (await lines.allTextContents()).map((l) => l.trimEnd());
+
+  const table = page.locator(VISUAL).getByRole('group', { name: 'Table' });
+  // Two rows of the table, and one of buttons.
+  await expect(table.getByRole('row')).toHaveCount(3);
+  await table.getByRole('button', { name: 'Add a row below row 2' }).click();
+  await expect(table.getByRole('row')).toHaveCount(4);
+  // Pressing it again adds a second row, not another blank line under the same one.
+  await table.getByRole('button', { name: 'Add a row below row 3' }).click();
+  await expect(table.getByRole('row')).toHaveCount(5);
+  const cell = table.getByRole('button', { name: /^Row 3, column 1:/ });
+  await cell.click();
+  await table.getByLabel('Row 3, column 1', { exact: true }).fill('gamma');
+  await page.keyboard.press('Enter');
+  await expect(cell).toHaveText('gamma');
+  await expect.poll(sourceLines).toContain('  gamma \\\\');
+  const after = await sourceLines();
+  expect(after.filter((l) => l.trim() === '\\\\')).toHaveLength(1);
+  expect(after.filter((l) => /alpha|beta/.test(l))).toEqual(['  alpha \\\\', '  beta \\\\']);
+});
+
 test('a cell slow to be changed does not take the keyboard back', async ({ browser }) => {
   test.setTimeout(150_000);
   const { page, line } = await slowPaper(browser, 'table-slow');

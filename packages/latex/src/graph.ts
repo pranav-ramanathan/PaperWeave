@@ -278,17 +278,43 @@ export function resolveVia(
 ): { path: string; via: string } | undefined {
   if (inc.dynamic) return undefined;
   for (const v of inc.kind === 'graphics' ? ['', ...via] : ['']) {
-    const base = norm(dir + v + inc.target);
-    const tries =
-      inc.kind === 'graphics'
-        ? GRAPHICS.map((x) => base + x)
-        : inc.kind === 'support'
-          ? [...(inc.ext ? [base + inc.ext] : []), base]
-          : [base, base + (inc.kind === 'bib' ? '.bib' : '.tex')];
-    const path = tries.find((p) => all.has(p));
+    const path = candidates(inc, dir, v).find((p) => all.has(p));
     if (path) return { path, via: v };
   }
   return undefined;
+}
+
+/** The names `resolveVia` tries for an include looked up in `dir + via`, in its order. */
+function candidates(inc: Include, dir: string, v: string): string[] {
+  const base = norm(dir + v + inc.target);
+  return inc.kind === 'graphics'
+    ? GRAPHICS.map((x) => base + x)
+    : inc.kind === 'support'
+      ? [...(inc.ext ? [base + inc.ext] : []), base]
+      : [base, base + (inc.kind === 'bib' ? '.bib' : '.tex')];
+}
+
+/**
+ * The project path that is one of `names` but for letter case, or undefined when there is none or
+ * when a name is a path exactly. Several such paths: the first in `localeCompare` order.
+ */
+export function sameButCase(names: string[], paths: Iterable<string>): string | undefined {
+  const all = [...paths];
+  if (names.some((n) => all.includes(n))) return undefined;
+  const lower = new Set(names.map((n) => n.toLowerCase()));
+  return all.filter((p) => lower.has(p.toLowerCase())).sort((a, b) => a.localeCompare(b))[0];
+}
+
+/**
+ * For a name a build says it could not find (in `dir`, the root's folder): the project path that
+ * differs from it only in letter case, with or without the extension TeX would add.
+ */
+export function nearFile(name: string, paths: Iterable<string>, dir = ''): string | undefined {
+  const n = name.trim().replace(/^\.\//, '');
+  return sameButCase(
+    ['', '.tex', '.bib', ...GRAPHICS].map((x) => norm(dir + n) + x),
+    paths,
+  );
 }
 
 /** The import folder an `\\import`-family include sets for the file it reads; `base` is the one in force. */
@@ -315,8 +341,11 @@ export type Graph = {
    */
   preamble: string[];
   edges: { from: string; to: string; kind: Include['kind'] }[];
-  /** `at` is where in `from` the target is named. */
-  missing: { from: string; target: string; at: number }[];
+  /**
+   * `at` is where in `from` the target is named. `near` is a project file the name matches but
+   * for letter case: advice only, never followed.
+   */
+  missing: { from: string; target: string; at: number; near?: string }[];
   dynamic: { from: string; target: string }[];
   cycles: string[][];
   /** The import folder in force in each visited file, with its trailing slash: `''` at the root. */
@@ -374,7 +403,16 @@ export function includeGraph(
       if (!to) {
         // A package or class may be the system's: only a file of the paper is followed.
         if (inc.kind === 'support') continue;
-        g.missing.push({ from, target: inc.target, at: inc.targetAt });
+        const near = sameButCase(
+          [
+            ...(inc.kind !== 'bib' && base ? candidates(inc, dir + base, '') : []),
+            ...(inc.kind === 'graphics' ? ['', ...via] : ['']).flatMap((v) =>
+              candidates(inc, dir, v),
+            ),
+          ],
+          all,
+        );
+        g.missing.push({ from, target: inc.target, at: inc.targetAt, ...(near ? { near } : {}) });
         continue;
       }
       g.edges.push({ from, to, kind: inc.kind });

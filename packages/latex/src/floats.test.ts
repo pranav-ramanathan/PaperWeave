@@ -283,3 +283,67 @@ test('a part is shown as one line if that loses nothing', () => {
   expect(fieldText('a % note\nb')).toBeNull();
   expect(fieldText('a\n\nb')).toBeNull();
 });
+
+/** A table of one column: the text between \begin{tabular}{l} and \end{tabular}. */
+const one = (body: string) =>
+  `\\begin{table}\n\\begin{tabular}{l}\n${body}\n\\end{tabular}\n\\end{table}`;
+const column = (src: string) => rowsOf(src).map((r) => r.map((c) => c.trim()));
+
+test('a row added to a one-column table is a row: at the end, in the middle, at the start', () => {
+  for (const tail of [' \\\\', '']) {
+    const src = one(`  a \\\\\n  b \\\\\n  c${tail}`);
+    expect(column(src)).toEqual([['a'], ['b'], ['c']]);
+    // After the last row (with or without a \\ of its own), and again.
+    const end = editBy(src, { kind: 'row-after', row: 2 });
+    expect(column(end), tail).toEqual([['a'], ['b'], ['c'], ['']]);
+    const end2 = editBy(end, { kind: 'row-after', row: 3 });
+    expect(column(end2), tail).toEqual([['a'], ['b'], ['c'], [''], ['']]);
+    // In the middle.
+    const mid = editBy(src, { kind: 'row-after', row: 0 });
+    expect(column(mid), tail).toEqual([['a'], [''], ['b'], ['c']]);
+    // And a row can be taken away again, to the byte.
+    expect(editBy(mid, { kind: 'row-delete', row: 1 })).toBe(src);
+    // (A last row given a \\ to make room for the new one keeps it.)
+    expect(editBy(end, { kind: 'row-delete', row: 3 })).toBe(
+      tail ? src : src.replace('  c\n', '  c \\\\\n'),
+    );
+    // The new row's cell is edited alone.
+    for (const [made, at, rows] of [
+      [end, 3, ['a', 'b', 'c', 'X']],
+      [mid, 1, ['a', 'X', 'b', 'c']],
+    ] as const) {
+      const cell = floatParts(made)!.table!.rows[at][0];
+      const edited = made.slice(0, cell.at) + 'X' + made.slice(cell.end);
+      expect(column(edited)).toEqual(rows.map((t) => [t]));
+      expect(edited).toBe(made.slice(0, cell.at) + 'X' + made.slice(cell.at));
+    }
+  }
+});
+
+test('an empty first row of a one-column table is a row', () => {
+  // There is no "above" operation; an empty first row, made by hand, reads and takes a row after it.
+  const src = one('  \\\\\n  a \\\\');
+  expect(column(src)).toEqual([[''], ['a']]);
+  expect(column(editBy(src, { kind: 'row-after', row: 0 }))).toEqual([[''], [''], ['a']]);
+});
+
+test('a final \\\\ and rules after it do not make a row', () => {
+  expect(column(one('  a \\\\\n  b \\\\'))).toEqual([['a'], ['b']]);
+  expect(column(one('  \\hline\n  a \\\\ \\hline\n  b \\\\ \\hline'))).toEqual([['a'], ['b']]);
+  expect(column(one('  a \\\\ \\hline\n  b \\\\ % end'))).toEqual([['a'], ['b']]);
+  expect(rowsOf(tab('a & 1 \\\\ \\hline\nb & 2 \\\\ \\hline'))).toEqual([
+    ['a', '1'],
+    ['b', '2'],
+  ]);
+  expect(rowsOf(tab('a & 1 \\\\\nb & 2 \\\\'))).toHaveLength(2);
+});
+
+test('rows added to a multi-column table are read as before', () => {
+  const src = tab('a & 1 \\\\\nb & 2 \\\\');
+  const taller = editBy(src, { kind: 'row-after', row: 1 });
+  expect(rowsOf(taller).map((r) => r.map((c) => c.trim()))).toEqual([
+    ['a', '1'],
+    ['b', '2'],
+    ['', ''],
+  ]);
+});

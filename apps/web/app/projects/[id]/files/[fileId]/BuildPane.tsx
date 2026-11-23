@@ -1,5 +1,6 @@
 'use client';
 
+import { nearFile } from '@paperweave/latex';
 import type { Build } from '@paperweave/server';
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { setMarks } from '../../../../../lib/builds';
@@ -31,6 +32,9 @@ const refusal = (res: Response) =>
     .then((b: { error?: string }) => b.error ?? '')
     .catch(() => '');
 
+/** The name a build error says it could not find, if it says one. */
+const NOT_FOUND = [/[`'](.+?)' not found/, /could not find the bibliography file (.+?)\.$/];
+
 const time = (iso: string) =>
   new Date(iso).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
 
@@ -38,11 +42,17 @@ export default function BuildPane({
   projectId,
   canBuild,
   files,
+  paths,
+  rootDir,
 }: {
   projectId: string;
   canBuild: boolean;
   /** The paper's files that can be opened in the editor. */
   files: { id: string; path: string }[];
+  /** Every path in the paper, binary files too. */
+  paths: string[];
+  /** The root file's folder with its trailing slash, or ''. */
+  rootDir: string;
 }) {
   const [builds, setBuilds] = useState<Builds | null>(null);
   const [auto, setAuto] = useState(true);
@@ -220,6 +230,17 @@ export default function BuildPane({
   // In the status itself, so it is read out, and in words, not only a colour.
   const state =
     paused && !building && auto ? `${status} Automatic compiling is paused: ${paused}` : status;
+  // A file the build could not find that the paper has under another capitalisation.
+  const hint = (message: string) => {
+    const name = NOT_FOUND.map((re) => re.exec(message)?.[1]).find(Boolean);
+    const near = name ? nearFile(name, paths, rootDir) : undefined;
+    return near ? (
+      <>
+        {' '}
+        The paper has <code>{near}</code>: only the capital letters differ, and they count here.
+      </>
+    ) : null;
+  };
   const errors =
     latest?.status === 'failed' ? latest.diagnostics.filter((d) => d.severity === 'error') : [];
   // A build that worked but left ?? in the PDF: a citation or reference to nothing.
@@ -306,6 +327,7 @@ export default function BuildPane({
           {errors.map((d, i) => (
             <li key={i}>
               {place(d)} {d.message}
+              {hint(d.message)}
             </li>
           ))}
         </ul>

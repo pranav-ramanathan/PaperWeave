@@ -13,6 +13,7 @@ import {
 import Link from '../../../../Go';
 import { notFound } from 'next/navigation';
 import { blobs, db, filesOf, forTitle, paperOf, requireUser } from '../../../../../lib/server';
+import { rootDir } from '@paperweave/latex';
 import BuildPane from './BuildPane';
 import FileEditor from './FileEditor';
 
@@ -104,6 +105,8 @@ async function FilePage({
           projectId={id}
           canBuild={can(project.role, 'build.run')}
           files={files.filter((f) => !f.readonly).map((f) => ({ id: f.id, path: f.path }))}
+          paths={files.map((f) => f.path)}
+          rootDir={rootDir(report?.root ?? '')}
         />
       </div>
     </main>

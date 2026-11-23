@@ -492,9 +492,20 @@ async function Project({
             )}
             {report.missing.map((m) => (
               <li key={m.from + m.target}>
-                <code>{m.from}</code> refers to <code>{m.target}</code>, which is not among the
-                paper&apos;s files. It may come with the TeX installation, which only a build can
-                tell.
+                {m.near ? (
+                  <>
+                    <code>{m.from}</code> refers to <code>{m.target}</code>. The paper has{' '}
+                    <code>{m.near}</code>: only the capital letters differ, and here they count, as
+                    they do on arXiv. The build will not find it until the name in{' '}
+                    <code>{m.from}</code> matches the file.
+                  </>
+                ) : (
+                  <>
+                    <code>{m.from}</code> refers to <code>{m.target}</code>, which is not among the
+                    paper&apos;s files. It may come with the TeX installation, which only a build
+                    can tell.
+                  </>
+                )}
               </li>
             ))}
             {report.dynamic.map((m) => (

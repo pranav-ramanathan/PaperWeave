@@ -1,4 +1,4 @@
-import { expect, test } from 'vitest';
+import { describe, expect, test } from 'vitest';
 import {
   findRoot,
   graphicsPaths,
@@ -6,7 +6,9 @@ import {
   includeGraph,
   includes,
   leftOut,
+  nearFile,
   readyMadeBbls,
+  sameButCase,
 } from './graph.ts';
 import { labelIndex } from './labels.ts';
 
@@ -480,4 +482,51 @@ test('readyMadeBbls: a root in a folder looks for the .bib from its own folder',
   ).toEqual([]);
   // Not the root's own .bbl.
   expect(readyMadeBbls(files, 'src/main.tex', ['src/main.tex', 'build/main.bbl'])).toEqual([]);
+});
+
+describe('a name that differs from a file only in letter case', () => {
+  const near = (src: string, paths: string[], root = 'main.tex') =>
+    includeGraph({ [root]: src }, root, [root, ...paths]);
+
+  test('a picture, an input, a bibliography and an extension are each offered the file', () => {
+    const g = near(
+      '\\input{Sections/Intro}\\includegraphics{Figures/Plot}\\includegraphics{figures/second.PNG}\\bibliography{Refs}',
+      ['sections/intro.tex', 'figures/plot.png', 'figures/second.png', 'refs.bib'],
+    );
+    expect(g.missing.map((m) => [m.target, m.near])).toEqual([
+      ['Sections/Intro', 'sections/intro.tex'],
+      ['Figures/Plot', 'figures/plot.png'],
+      ['figures/second.PNG', 'figures/second.png'],
+      ['Refs', 'refs.bib'],
+    ]);
+    // Advisory only: nothing is followed.
+    expect(g.edges).toEqual([]);
+    expect(g.order).toEqual(['main.tex']);
+  });
+
+  test('through \\graphicspath, and from a root in a folder', () => {
+    const a = near('\\graphicspath{{Figs/}}\\includegraphics{A}', ['figs/a.pdf']);
+    expect(a.missing[0].near).toBe('figs/a.pdf');
+    const b = near('\\includegraphics{Figures/Plot}', ['paper/figures/plot.png'], 'paper/main.tex');
+    expect(b.missing[0].near).toBe('paper/figures/plot.png');
+  });
+
+  test('a file that is really missing has no near, and an exact find is not missing', () => {
+    const g = near('\\includegraphics{gone}', ['figures/plot.png']);
+    expect(g.missing).toEqual([{ from: 'main.tex', target: 'gone', at: 17 }]);
+    expect('near' in g.missing[0]).toBe(false);
+    const h = near('\\includegraphics{figures/plot}', ['figures/plot.png', 'Figures/Plot.png']);
+    expect(h.missing).toEqual([]);
+  });
+
+  test('sameButCase and nearFile', () => {
+    expect(sameButCase(['A/B'], ['b/x', 'A/b', 'a/b'])).toBe('a/b');
+    expect(sameButCase(['a/b'], ['a/b', 'A/B'])).toBeUndefined();
+    const paths = ['sections/intro.tex', 'figures/plot.png', 'paper/refs.bib'];
+    expect(nearFile('Figures/Plot', paths)).toBe('figures/plot.png');
+    expect(nearFile('./Sections/Intro.tex', paths)).toBe('sections/intro.tex');
+    expect(nearFile('Refs.bib', paths, 'paper/')).toBe('paper/refs.bib');
+    expect(nearFile('figures/plot', paths)).toBeUndefined();
+    expect(nearFile('nothing', paths)).toBeUndefined();
+  });
 });
