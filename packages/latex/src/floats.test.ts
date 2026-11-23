@@ -1,5 +1,13 @@
 import { expect, test } from 'vitest';
-import { altEdit, cellText, fieldText, floatParts, tableEdit, type TableOp } from './floats.ts';
+import {
+  altEdit,
+  captionText,
+  cellText,
+  fieldText,
+  floatParts,
+  tableEdit,
+  type TableOp,
+} from './floats.ts';
 import { fixtureFiles } from './testutil.ts';
 
 const text = (path: string) => Buffer.from(fixtureFiles()[path]).toString();
@@ -114,6 +122,59 @@ test('text that would break the grid is not accepted as a cell', () => {
     expect(cellText(good), good).toBe(true);
   for (const bad of ['a & b', 'a \\\\ b', 'two\nlines', 'open {brace', 'close} brace', 'a % b'])
     expect(cellText(bad), bad).toBe(false);
+});
+
+test('a lone trailing backslash is not accepted in a cell', () => {
+  for (const bad of ['ends \\', 'a \\\\\\']) expect(cellText(bad), bad).toBe(false);
+  for (const good of ['A \\& B', '100\\%']) expect(cellText(good), good).toBe(true);
+});
+
+test('text that would break a caption is not accepted', () => {
+  for (const good of [
+    'plain',
+    '95\\%',
+    'A \\& B',
+    'Title \\\\ subtitle',
+    '\\textbf{x}',
+    '$a_1$',
+    '{a & b}',
+    '',
+    'a \\\\',
+  ])
+    expect(captionText(good), good).toBe(true);
+  for (const bad of [
+    '95% of runs',
+    'open {brace',
+    'close} brace',
+    'a & b',
+    'two\nlines',
+    'ends \\',
+    'ends \\\\\\',
+  ])
+    expect(captionText(bad), bad).toBe(false);
+});
+
+test('a description written without braces gets them when it needs them', () => {
+  const src = '\\begin{figure}\\includegraphics[alt=A dot,width=3cm]{dot.png}\\end{figure}';
+  const g = floatParts(src)!.graphics[0];
+  expect(g.altBare).toBe(true);
+  const apply = (from: string, e: { at: number; length: number; insert: string }) =>
+    from.slice(0, e.at) + e.insert + from.slice(e.at + e.length);
+  for (const [typed, written] of [
+    ['Red, green and blue', 'alt={Red, green and blue}'],
+    ['a = b', 'alt={a = b}'],
+    ['A square', 'alt=A square'],
+  ]) {
+    const out = apply(src, altEdit(g, typed)!);
+    expect(out, typed).toBe(src.replace('alt=A dot', written));
+    expect(floatParts(out)!.graphics[0].alt?.text, typed).toBe(typed);
+  }
+  const braced = '\\begin{figure}\\includegraphics[alt={A, dot}]{dot.png}\\end{figure}';
+  const b = floatParts(braced)!.graphics[0];
+  expect(b.altBare).toBe(false);
+  expect(apply(braced, altEdit(b, 'x, y')!)).toBe(braced.replace('A, dot', 'x, y'));
+  const none = floatParts('\\begin{figure}\\includegraphics{dot.png}\\end{figure}')!.graphics[0];
+  expect(none.altBare).toBe(false);
 });
 
 test('rows and columns are added and removed, and adding then removing restores every byte', () => {

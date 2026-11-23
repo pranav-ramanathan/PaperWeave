@@ -247,7 +247,8 @@ Read this first. Update it in every pull request.
     part). Two people can edit two cells of one table at once; the same cell twice is a
     conflict. A test edits every cell of a fixture in turn and checks the file differs in those
     cells and nowhere else.
-  - Text that would break the grid (an unescaped `&`, a row break, a `%`) is refused.
+  - Text that would break the grid (an unescaped `&`, a row break, a `%`) is refused. A caption
+    is checked too (see "A caption or description typed in place can no longer stop the build").
   - If the table changes under an open field, the person is told, with the text they had typed.
   - A table that is not a plain grid (`\multicolumn`, `\multirow`, a nested table, rows of
     different lengths) is shown as source, with "Edit in source".
@@ -5512,3 +5513,26 @@ closed: ...` (outermost first, at most 10). The log does not name the file: with
 - **Held by** the one-column tests in `packages/latex/src/floats.test.ts` (end, middle, repeated,
   delete, edit of the new cell, trailing `\\ \hline` guards) and the one-column case in
   `tests/e2e/tables.spec.ts`.
+
+## A caption or description typed in place can no longer stop the build
+
+- **What was wrong.** A caption edited in place was not checked, so `50% of runs`, `Done}`,
+  `Cost {in` and `Ends \` were all written. Real pdflatex then stopped with
+  `! File ended while scanning use of \@xdblarg` and no PDF for the first, third and fourth, and
+  with `! Extra }` for `Done}`. With the brace no longer closing, the caption vanished from the visual view and could
+  not be repaired there. A lone trailing backslash also passed the cell and dialog checks. A
+  picture description written without braces (`alt=A dot`) broke on a comma:
+  `! Package keyval Error: green and blue undefined`.
+- **Now.** `captionText` (`packages/latex/src/floats.ts`) refuses a bare `%` or `&`, a line
+  break, unbalanced braces and a final backslash; `\\` is allowed in a caption. It guards the
+  in-place caption field and the Insert figure/table dialog. `cellText` also refuses a final
+  backslash, so the heading dialog's own check is gone. A description written without braces gets
+  them when the new text has a comma or `=`; the splice is still the value only. An unchanged
+  Enter writes nothing, so an existing odd caption is never rewritten. The refusal does not
+  quote what was typed.
+- **Held by** tests in `packages/latex/src/floats.test.ts` and the caption steps in
+  `tests/e2e/tables.spec.ts` (refusal, field kept open with the typed text, then a good caption;
+  the closing ZIP comparison shows nothing else changed).
+- **Not done.** A bare `#`, `_`, `^` or unbalanced `$` in a caption still gives a TeX error (a PDF
+  is still made; `#` is legitimate inside `\href`). Captions are edited as LaTeX, not escaped
+  for the person. `\verb|%|` in a caption is refused. No server-side check.

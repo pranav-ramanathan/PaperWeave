@@ -12,6 +12,7 @@ import {
 } from '@paperweave/bridge';
 import {
   altEdit,
+  captionText,
   DEFAULT_TRANSPARENT,
   cellText,
   escape,
@@ -35,6 +36,8 @@ import { pageNonce } from './nonce';
 import { labelKey, markerOf } from './marker';
 import { numbers, onNumbers } from './numbers';
 
+const CAPTION_PROBLEM =
+  'A caption cannot hold an unescaped & or %, its braces must match, and it cannot end in a backslash. Write \\% for a percent sign. Edit it in the source for anything else.';
 const ENV = /^\\begin\{(\w+)\*?\}([\s\S]*)\\end\{\1\*?\}$/;
 const MULTILINE = new Set(['align', 'gather', 'multline', 'eqnarray', 'flalign', 'alignat']);
 
@@ -608,7 +611,13 @@ export function createVisual(opts: {
       const caption = float.caption
         ? [
             el('span', 'pw-label', float.kind === 'table' ? 'Table: ' : 'Figure: '),
-            part(getPos, float.caption, 'Caption', undefined, opened),
+            part(
+              getPos,
+              float.caption,
+              'Caption',
+              (text) => (captionText(text) ? null : CAPTION_PROBLEM),
+              opened,
+            ),
           ]
         : [];
       /**
@@ -667,7 +676,7 @@ export function createVisual(opts: {
                 (text) =>
                   cellText(text)
                     ? null
-                    : 'A cell cannot hold an unescaped &, a row break or a %. Edit the table in the source for that.',
+                    : 'A cell cannot hold an unescaped &, a row break, a % or a final backslash. Edit the table in the source for that.',
                 opened,
               ),
             );

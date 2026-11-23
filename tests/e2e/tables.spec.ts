@@ -141,6 +141,13 @@ test('a table cell and a caption are edited in place, byte for byte', async ({ b
   await showVisual(page);
   const figure = page.locator(VISUAL).getByRole('group', { name: 'Figure' });
   await figure.getByRole('button', { name: /^Caption:/ }).click();
+  // Text that would stop the build is refused, and the field stays open with what was typed.
+  for (const bad of ['Latency for 95% of runs', 'Ends \\']) {
+    await figure.getByLabel('Caption', { exact: true }).fill(bad);
+    await page.keyboard.press('Enter');
+    await expect(note(page)).toContainText('A caption cannot hold');
+    await expect(figure.getByLabel('Caption', { exact: true })).toHaveValue(bad);
+  }
   await figure.getByLabel('Caption', { exact: true }).fill('Latency, to be measured.');
   await page.keyboard.press('Enter');
   await expect(figure.getByRole('button', { name: /^Caption:/ })).toHaveText(
