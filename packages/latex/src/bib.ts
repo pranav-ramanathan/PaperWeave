@@ -89,6 +89,36 @@ export function bibEntries(text: string): BibEntry[] {
   return out;
 }
 
+/**
+ * Where an entry holds a character TeX cannot take bare (`_`, `&`, `#`, `^`): the first such
+ * line, as a line of the whole file, with the field it is in. A `\x` pair and a `$...$` span
+ * are fine, and so is a field in `skip`. A value that runs over several lines keeps its field.
+ */
+export function bareIn(
+  text: string,
+  entry: BibEntry,
+  chars: string,
+  skip: readonly string[],
+): { line: number; field: string; char: string } | undefined {
+  const first = text.slice(0, entry.at).split('\n').length;
+  const lines = text.slice(entry.at, entry.end).split('\n');
+  let field = '';
+  // The first line is `@type{key,`: nothing of the author's text.
+  for (let i = 1; i < lines.length; i++) {
+    let line = lines[i];
+    const name = /^\s*([a-zA-Z][\w:-]*)\s*=/.exec(line);
+    if (name) {
+      field = name[1].toLowerCase();
+      line = line.slice(name[0].length);
+    }
+    if (skip.includes(field)) continue;
+    const bare = line.replace(/\\./g, '  ').replace(/\$[^$]*\$/g, (m) => ' '.repeat(m.length));
+    const char = [...chars].find((c) => bare.includes(c));
+    if (char) return { line: first + i, field, char };
+  }
+  return undefined;
+}
+
 export const LIGATURES: Record<string, string> = {
   oe: 'œ',
   OE: 'Œ',

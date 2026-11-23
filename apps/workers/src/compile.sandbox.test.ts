@@ -590,7 +590,14 @@ test('a bare & in a .bib title is not reported in the .bbl', async () => {
   const errors = r.diagnostics.filter((d) => d.severity === 'error');
   expect(errors.length).toBeGreaterThan(0);
   expect(errors.map((d) => d.file ?? '')).not.toContain('main.bbl');
-  expect(errors.some((d) => d.message.startsWith('In the bibliography'))).toBe(true);
+  // The error is in the .bib, at the title's line, and names the reference and the field.
+  expect(errors).toContainEqual(
+    expect.objectContaining({
+      file: 'refs.bib',
+      line: 3,
+      message: expect.stringMatching(/knuth1984.*title.*bare &/),
+    }),
+  );
 });
 
 test('a warning is reported with the file it is in, not only the line', async () => {
@@ -862,6 +869,28 @@ test.each(['bibtex', 'biber'] as const)(
     const r = await compile(abbrPaper(engine, 'second'), 'main.tex', tmp(), 120);
     expect(r.ok).toBe(true);
     expect(r.diagnostics.filter((d) => /^Abbreviation not defined: /.test(d.message))).toEqual([]);
+  },
+  180_000,
+);
+
+test.each(['bibtex', 'biber'] as const)(
+  'a bare _ in a %s .bib title is one error at its .bib line, not at the end of the paper',
+  async (engine) => {
+    const project = abbrPaper(engine);
+    writeFileSync(
+      join(project, 'refs.bib'),
+      '@article{he16,\n  author = {He, K.},\n  title = {A study of max_pool layers},\n  journal = {J},\n  year = {2016}\n}\n',
+    );
+    const r = await compile(project, 'main.tex', tmp(), 120);
+    expect(r.ok).toBe(false);
+    const errors = r.diagnostics.filter((d) => d.severity === 'error');
+    expect(errors).toEqual([
+      expect.objectContaining({
+        file: 'refs.bib',
+        line: 3,
+        message: expect.stringMatching(/he16.*title.*bare _/),
+      }),
+    ]);
   },
   180_000,
 );

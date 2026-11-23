@@ -282,6 +282,64 @@ test('a citation to nothing is listed on a build that worked, and a broken .bib 
   await expect(warnings).toHaveCount(0, { timeout: 60_000 });
 });
 
+test('a bare & in a .bib names the reference and field, and the error opens the .bib at its line', async ({
+  browser,
+}) => {
+  test.setTimeout(180_000);
+  const owner = await person(browser, 'build-bare');
+  await owner.page.goto('/sign-in');
+  await signIn(owner.page, owner.email);
+  await owner.page
+    .getByLabel('Or import a ZIP of a LaTeX project')
+    .setInputFiles(await fixtureZip('Bare'));
+  await owner.page.getByRole('button', { name: 'Import ZIP' }).click();
+  await owner.page.getByRole('link', { name: 'sections/intro.tex' }).click();
+  await showSource(owner.page);
+  await expect(buildStatus(owner.page)).toHaveText('The PDF is up to date.', { timeout: 60_000 });
+  await owner.page.getByRole('link', { name: 'refs.bib' }).click();
+  await expect(owner.page.getByRole('region', { name: 'Editor for refs.bib' })).toBeVisible();
+  await expect(source(owner.page)).toContainText('Knuth},');
+
+  // " & Sons" at the end of the title, before the "}," that closes the value. (In the author
+  // field IEEEtran writes it safely and the paper builds.)
+  const typed = ' & Sons';
+  await source(owner.page).click();
+  await owner.page.keyboard.press('ControlOrMeta+Home');
+  await owner.page.keyboard.press('ArrowDown');
+  await owner.page.keyboard.press('ArrowDown');
+  await owner.page.keyboard.press('End');
+  await owner.page.keyboard.press('ArrowLeft');
+  await owner.page.keyboard.press('ArrowLeft');
+  await owner.page.keyboard.type(typed);
+  await expect(buildStatus(owner.page)).toHaveText('The latest build failed.', { timeout: 60_000 });
+  const errors = build(owner.page).getByRole('list', { name: 'Build errors' });
+  await expect(errors).toContainText(
+    /refs\.bib:3 In the reference knuth1984, the title field has a bare &/,
+  );
+
+  // The error is a button into the .bib, from another file too.
+  await owner.page.getByRole('link', { name: 'sections/intro.tex' }).click();
+  await expect(
+    owner.page.getByRole('region', { name: 'Editor for sections/intro.tex' }),
+  ).toBeVisible();
+  await errors.getByRole('button', { name: /^refs\.bib:3/ }).click();
+  await expect(owner.page.getByRole('region', { name: 'Editor for refs.bib' })).toBeVisible();
+  await expect(source(owner.page)).toContainText(typed);
+
+  // Taking it out again builds.
+  await source(owner.page).click();
+  await owner.page.keyboard.press('ControlOrMeta+Home');
+  await owner.page.keyboard.press('ArrowDown');
+  await owner.page.keyboard.press('ArrowDown');
+  await owner.page.keyboard.press('End');
+  await owner.page.keyboard.press('ArrowLeft');
+  await owner.page.keyboard.press('ArrowLeft');
+  for (let i = 0; i < typed.length; i++) await owner.page.keyboard.press('Backspace');
+  await expect(source(owner.page)).not.toContainText(typed);
+  await expect(buildStatus(owner.page)).toHaveText('The PDF is up to date.', { timeout: 60_000 });
+  await expect(errors).toHaveCount(0);
+});
+
 test('the PDF is behind only when the paper has changed, and is built once for each change', async ({
   browser,
 }) => {

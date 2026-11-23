@@ -16,7 +16,15 @@ import {
 } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { LATEXMK_RULES, auxLabels, norm, rootDir, texText } from '@paperweave/latex';
+import {
+  LATEXMK_RULES,
+  auxLabels,
+  bareIn,
+  bibEntries,
+  norm,
+  rootDir,
+  texText,
+} from '@paperweave/latex';
 
 export const IMAGE = process.env.PAPERWEAVE_TEX_IMAGE ?? 'paperweave-tex';
 /** The image's unprivileged user. */
@@ -179,6 +187,135 @@ function undefinedCommand(message: string, next: string | undefined): string {
   return pkg
     ? `${message} LaTeX does not know ${name}: the paper does not load the ${pkg} package. Add \\usepackage{${pkg}} before \\begin{document}.`
     : `${message} LaTeX does not know ${name}.`;
+}
+
+/** What TeX says when a character in a .bib field is bare, and the characters that cause it. */
+const BARE_CHARS: [RegExp, string][] = [
+  [/^Missing \$ inserted/, '_^'],
+  [/^Misplaced alignment tab character &/, '&'],
+  [/macro parameter character #|^Illegal parameter number/, '#'],
+];
+const BBL_SKIP = ['abstract', 'keywords', 'file'];
+const BIBER_SKIP = [...BBL_SKIP, 'url', 'doi', 'eprint', 'urlraw'];
+
+/** The .bib files a build read, as the tools name them (relative to the root's folder). */
+function bibFiles(output: string) {
+  const names = [
+    ...output.matchAll(
+      /^(?:Database file #\d+: (.+?)|INFO - Found BibTeX data source '(.+?)')\r?$/gm,
+    ),
+  ].map((m) => (m[1] ?? m[2]).replace(/^\.\//, ''));
+  return [...new Set(names)];
+}
+
+type BibPlace = { file: string; line: number; field?: string; char?: string };
+
+/** Where a reference is in the .bib files: the line holding the bare character, else its own. */
+function bibPlace(
+  key: string,
+  chars: string,
+  skip: readonly string[],
+  files: string[],
+  read: (file: string) => string | undefined,
+): BibPlace | undefined {
+  for (const file of files) {
+    const text = read(file);
+    const entry = text === undefined ? undefined : bibEntries(text).find((e) => e.key === key);
+    if (text === undefined || !entry) continue;
+    const hit = bareIn(text, entry, chars, skip);
+    if (hit) return { file, ...hit };
+    return { file, line: text.slice(0, entry.at).split('\n').length };
+  }
+  return undefined;
+}
+
+/** What to tell the author about one reference, in the .bib where it is found. */
+function bibError(key: string, said: string, at: BibPlace | undefined): Diagnostic {
+  if (!at) {
+    return {
+      severity: 'error',
+      message: `In the bibliography, in the reference ${key} (as LaTeX reads it): ${said}`,
+    };
+  }
+  const { file, line, field, char } = at;
+  const fix = char === '^' ? 'Write \\^{} or put it in $…$.' : `Write \\${char} instead.`;
+  return {
+    severity: 'error',
+    file,
+    line,
+    message: char
+      ? `In the reference ${key}, the ${field} field has a bare ${char}: ${said} ${fix}`
+      : `In the reference ${key} (as LaTeX reads it): ${said}`,
+  };
+}
+
+/** The key of the reference a .bbl line is in: the last \bibitem or \entry at or before it. */
+function bblKeyAt(bbl: string, line: number) {
+  let key: string | undefined;
+  for (const l of bbl.split('\n').slice(0, line)) {
+    const m = /\\bibitem\s*(?:\[[^\]]*\]\s*)?\{([^{}]*)\}|\\entry\{([^{}]+)\}\{/.exec(l);
+    if (m) key = (m[1] ?? m[2]).trim();
+  }
+  return key || undefined;
+}
+
+/**
+ * An error TeX found in a .bbl, or at \printbibliography, is in a reference of a .bib: say which
+ * reference and field, in the .bib. Without `read` it stays the plain sentence further down.
+ */
+function bibliography(
+  out: Diagnostic[],
+  log: string,
+  output: string,
+  read: (file: string) => string | undefined,
+) {
+  const files = bibFiles(output);
+  const seen = new Set<string>();
+  // BibTeX: the error is in the .bbl, in the entry BibTeX wrote there.
+  for (let i = 0; i < out.length; i++) {
+    const d = out[i];
+    if (d.severity !== 'error' || !d.file?.endsWith('.bbl') || d.line === undefined) continue;
+    const bbl = read(d.file.replace(/^\.\//, ''));
+    const key = bbl === undefined ? undefined : bblKeyAt(bbl, d.line);
+    if (!key) continue;
+    // The rest of what one bad entry does ("Missing } inserted") is one more error of it.
+    if (seen.has(key)) out.splice(i--, 1);
+    else {
+      seen.add(key);
+      const chars = BARE_CHARS.find(([re]) => re.test(d.message))?.[1] ?? '';
+      out[i] = bibError(key, d.message, bibPlace(key, chars, BBL_SKIP, files, read));
+    }
+  }
+  // biblatex: the .bbl is read at \printbibliography and the error is reported in the paper, at
+  // that line or the next one with something on it.
+  const name = /\((?:\.\/)?([^\s()]+\.bbl)/.exec(log)?.[1];
+  const bbl = name === undefined ? undefined : read(name);
+  if (!bbl || !/\\entry\{/.test(bbl)) return;
+  const keys = [...new Set([...bbl.matchAll(/\\entry\{([^{}]+)\}\{/g)].map((m) => m[1].trim()))];
+  for (let i = 0; i < out.length; i++) {
+    const d = out[i];
+    const chars = BARE_CHARS.find(([re]) => re.test(d.message))?.[1];
+    if (d.severity !== 'error' || !chars || !d.file || d.line === undefined) continue;
+    if (d.file.startsWith('/') || d.file.endsWith('.bbl')) continue;
+    const lines = read(d.file.replace(/^\.\//, ''))?.split(/\r\n|\r|\n/);
+    if (!lines) continue;
+    // The line TeX says, or the last one with something on it before.
+    let at = d.line - 1;
+    if (!uncommented(lines[at] ?? '').includes('\\printbibliography')) {
+      for (at--; at >= 0 && !lines[at].trim(); at--);
+      if (!uncommented(lines[at] ?? '').includes('\\printbibliography')) continue;
+    }
+    const hits: Diagnostic[] = [];
+    for (const key of keys) {
+      const p = bibPlace(key, chars, BIBER_SKIP, files, read);
+      if (p?.char) hits.push(bibError(key, d.message, p));
+    }
+    if (!hits.length) continue;
+    // The same error comes again for each pass; its replacement is made once.
+    const have = (e: Diagnostic) => out.some((o) => JSON.stringify(o) === JSON.stringify(e));
+    out.splice(i, 1, ...hits.slice(0, 5).filter((h) => !have(h)));
+    i--;
+  }
 }
 
 /**
@@ -385,6 +522,8 @@ export function diagnostics(
     };
     if (!out.some((e) => e.message === d.message)) out.push(d);
   }
+  // A bare _, & or # in a .bib entry: which reference, and where it is in the .bib.
+  if (read) bibliography(out, log, output, read);
   // An error in a file that is not the author's is not placed in it.
   for (let i = 0; i < out.length; i++) {
     const { file, message } = out[i];

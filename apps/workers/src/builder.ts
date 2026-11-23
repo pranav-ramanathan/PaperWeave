@@ -36,9 +36,11 @@ import { compile, type Compiler, IMAGE } from './compile.ts';
  * cached failed build keeps naming the root.
  * '...-group': a brace or group left open is a warning, and a root runaway names no made-up
  * line; a cached silent build is rebuilt.
+ * '...-bibentry': a bare _, & or # in a .bib entry names the reference and its .bib line; a cached
+ * failed build keeps the sentence about "an entry of a .bib file".
  */
 const TEX_TEXT =
-  'utf8-biber-eps-glyphs-strings-forcedate-unicode-nullfont-csname-bbl-ended-unclosed-group';
+  'utf8-biber-eps-glyphs-strings-forcedate-unicode-nullfont-csname-bbl-ended-unclosed-group-bibentry';
 
 /** The toolchain image's content ID: part of every cache key, so a new image rebuilds everything. */
 export const imageId = () =>

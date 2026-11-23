@@ -1218,3 +1218,134 @@ test('guard: a paper with no \\end{document} still says so', () => {
     { severity: 'error', message: 'The paper ends without \\end{document}.' },
   ]);
 });
+
+// Real excerpts of what latexmk, bibtex and biber wrote for a bare _ or & in a .bib.
+const REFS_UNDER = [
+  '@article{first2019,',
+  '  author = {A. One},',
+  '  title = {First},',
+  '  journal = {J},',
+  '  year = {2019}',
+  '}',
+  '',
+  '@misc{smith2020,',
+  '  author = {B. Smith},',
+  '  title = {A study of max_pool layers},',
+  '  howpublished = {Tech report},',
+  '  year = {2020}',
+  '}',
+  '',
+].join('\n');
+const BBL_UNDER = [
+  '\\begin{thebibliography}{1}',
+  '',
+  '\\bibitem{first2019}',
+  'A.~One.',
+  '\\newblock First.',
+  '\\newblock {\\em J}, 2019.',
+  '',
+  '\\bibitem{smith2020}',
+  'B.~Smith.',
+  '\\newblock A study of max_pool layers.',
+  '\\newblock Tech report, 2020.',
+  '',
+  '\\end{thebibliography}',
+  '',
+].join('\n');
+const BIBTEX_OUT = 'The top-level auxiliary file: main.aux\nDatabase file #1: refs.bib\n';
+const BIBER_OUT = "INFO - Found BibTeX data source 'refs.bib'\n";
+const BIBTEX_LOG = [
+  '(./main.bbl',
+  './main.bbl:10: Missing $ inserted.',
+  '<inserted text> ',
+  '                $',
+  'l.10 \\newblock A study of max_',
+  '                              pool layers.',
+  './main.bbl:11: Missing $ inserted.',
+  './main.bbl:11: Missing } inserted.',
+  './main.bbl:11: Extra }, or forgotten \\endgroup.',
+  ')',
+].join('\n');
+const files = (map: Record<string, string>) => (name: string) => map[name];
+
+test('a bare _ in a .bib entry under BibTeX is placed on its line in the .bib, once', () => {
+  const out = diagnostics(
+    BIBTEX_LOG,
+    BIBTEX_OUT,
+    '',
+    files({ 'main.bbl': BBL_UNDER, 'refs.bib': REFS_UNDER }),
+  );
+  const errors = out.filter((d) => d.severity === 'error');
+  expect(errors).toHaveLength(1);
+  expect(errors[0]).toMatchObject({ file: 'refs.bib', line: 10 });
+  expect(errors[0].message).toMatch(/smith2020.*title.*bare _/);
+  expect(errors[0].message).toContain('Write \\_ instead.');
+});
+
+test("a bare & in a .bib entry is placed in the .bib in the root's folder", () => {
+  const refs = REFS_UNDER.replace('max_pool', 'max').replace('{J}', '{Science & Nature}');
+  const bbl = BBL_UNDER.replace('max_pool', 'max').replace('{\\em J}', '{\\em Science & Nature}');
+  const log = './main.bbl:6: Misplaced alignment tab character &.\n';
+  const out = diagnostics(log, BIBTEX_OUT, 'paper/', files({ 'main.bbl': bbl, 'refs.bib': refs }));
+  expect(out).toHaveLength(1);
+  // first2019 is the entry the error is in (bbl line 6), its journal on refs.bib line 4.
+  expect(out[0]).toMatchObject({ file: 'paper/refs.bib', line: 4 });
+  expect(out[0].message).toMatch(/first2019.*journal.*bare &.*Write \\& instead/);
+});
+
+const BIBER_LOG = [
+  ' (./main.bbl)',
+  './main.tex:7: Missing $ inserted.',
+  '<inserted text> ',
+  '                $',
+  'l.7 \\end',
+  '        {document}',
+  './main.tex:7: Missing $ inserted.',
+].join('\n');
+const BIBER_BBL =
+  '\\entry{first2019}{article}{}\n\\endentry\n\\entry{smith2020}{misc}{}\n\\endentry\n';
+const MAIN =
+  '\\documentclass{article}\n\\begin{document}\nSee.\n\\printbibliography\n\\end{document}\n';
+
+test('a biblatex error at the bibliography is placed in the .bib entry that has the character', () => {
+  const read = files({ 'main.bbl': BIBER_BBL, 'refs.bib': REFS_UNDER, 'main.tex': MAIN });
+  const out = diagnostics(BIBER_LOG.replaceAll('main.tex:7', 'main.tex:5'), BIBER_OUT, '', read);
+  expect(out).toHaveLength(1);
+  expect(out[0]).toMatchObject({ file: 'refs.bib', line: 10 });
+  expect(out.some((d) => d.file === 'main.tex')).toBe(false);
+});
+
+test('the same biblatex message away from \\printbibliography stays where TeX put it', () => {
+  const main = MAIN.replace('See.', 'See.\n\nMore text.\n\nMore.\n');
+  const read = files({ 'main.bbl': BIBER_BBL, 'refs.bib': REFS_UNDER, 'main.tex': main });
+  const out = diagnostics(BIBER_LOG.replaceAll('main.tex:7', 'main.tex:3'), BIBER_OUT, '', read);
+  expect(out.every((d) => d.file === 'main.tex')).toBe(true);
+});
+
+test('biblatex: an entry whose only _ is in math or a url is not accused', () => {
+  const refs = [
+    '@misc{smith2020,',
+    '  title = {Weights $w_i$ of layers},',
+    '  url = {http://example.org/data_set/v1},',
+    '  year = {2020}',
+    '}',
+  ].join('\n');
+  const read = files({ 'main.bbl': BIBER_BBL, 'refs.bib': refs, 'main.tex': MAIN });
+  const out = diagnostics(BIBER_LOG.replaceAll('main.tex:7', 'main.tex:5'), BIBER_OUT, '', read);
+  expect(out.every((d) => d.file === 'main.tex')).toBe(true);
+});
+
+test('an entry key that no .bib has is named without a file', () => {
+  const out = diagnostics(
+    BIBTEX_LOG,
+    BIBTEX_OUT,
+    '',
+    files({ 'main.bbl': BBL_UNDER, 'refs.bib': '@misc{other, title={x}}' }),
+  );
+  const errors = out.filter((d) => d.severity === 'error');
+  expect(errors).toHaveLength(1);
+  expect(errors[0]).not.toHaveProperty('file');
+  expect(errors[0].message).toMatch(
+    /^In the bibliography, in the reference smith2020 \(as LaTeX reads it\): Missing \$ inserted/,
+  );
+});
