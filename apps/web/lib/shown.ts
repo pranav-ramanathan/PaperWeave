@@ -17,11 +17,16 @@ export const notTheirs = (res: Response | null) => res?.status === 404;
  * function, asked each time, for something that wants asking sooner when more is going on.
  * When `work` gives back `STOP`, it is not done again: a page left open by someone taken off
  * the paper would otherwise ask, and be told "not found", for as long as it stayed open.
- * Returns how to stop.
+ * Returns how to stop; its `now` does `work` at once (when shown) and counts `ms` from then.
  */
-export function whileShown(work: () => unknown, ms: number | (() => number)): () => void {
+export function whileShown(
+  work: () => unknown,
+  ms: number | (() => number),
+): (() => void) & { now: () => void } {
   let done = false;
   let running = false;
+  // Asked for while `work` was under way: its answer may be from before the reason for asking.
+  let again = false;
   let timer: ReturnType<typeof setTimeout> | undefined;
   const off = () => {
     done = true;
@@ -45,10 +50,18 @@ export function whileShown(work: () => unknown, ms: number | (() => number)): ()
       )
       .finally(() => {
         running = false;
-        next();
+        if (again) {
+          again = false;
+          turn();
+        } else next();
       });
   }
   document.addEventListener('visibilitychange', turn);
   turn();
-  return off;
+  // Do it now, and count the wait from here: once more after the one under way, if one is.
+  const now = () => {
+    if (running) again = true;
+    else turn();
+  };
+  return Object.assign(off, { now });
 }
