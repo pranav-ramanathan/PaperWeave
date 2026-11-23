@@ -301,6 +301,123 @@ export const cellText = (text: string): boolean => fits(text, true);
  */
 export const captionText = (text: string): boolean => fits(text, false);
 
+/** Commands whose braces hold text that is set as it is typed, so that marks in it still count. */
+const TEXT_COMMANDS = new Set(
+  (
+    'textbf textit emph texttt textsc textsf textrm textmd textup textsl textnormal underline ' +
+    'mbox footnote multicolumn multirow makecell caption textcolor text'
+  ).split(' '),
+);
+
+/**
+ * The first mark in text that TeX would stop at: `_` or `^` outside a formula, `#` anywhere, or
+ * a `$` that opens a formula and never closes it. Null if there is none. Marks inside the
+ * argument of a command this does not know are not looked at.
+ */
+export function stray(text: string): '_' | '^' | '#' | '$' | null {
+  if (/\\(?:verb|lstinline|mintinline|path)(?![a-zA-Z])/.test(text)) return null;
+  // One entry per open group: whether maths was on when it opened.
+  const groups: { maths: boolean; text: boolean }[] = [];
+  let maths = false;
+  // Maths opened by `$$`.
+  let display = false;
+  // True just after a text command, so that the groups that follow it are read as text.
+  let argument = false;
+  // The offset just past an argument that opens at `from`, or `from` itself if there is none.
+  const skip = (from: number): number => {
+    let i = from;
+    for (;;) {
+      if (text[i] === '[') {
+        let depth = 0;
+        let j = i + 1;
+        for (; j < text.length; j++) {
+          if (text[j] === '\\') j++;
+          else if (text[j] === '{') depth++;
+          else if (text[j] === '}') depth--;
+          else if (text[j] === ']' && depth === 0) break;
+        }
+        if (j >= text.length) return i;
+        i = j + 1;
+      } else if (text[i] === '{') {
+        const close = closeOf(text, i);
+        if (close < 0) return text.length;
+        i = close;
+      } else return i;
+    }
+  };
+  for (let i = 0; i < text.length; i++) {
+    const c = text[i];
+    if (c === '[' && argument) {
+      i = skip(i) - 1;
+      continue;
+    }
+    const keep = argument && c === '{';
+    if (!keep && !/\s/.test(c)) argument = false;
+    if (c === '\\') {
+      const next = text[i + 1] ?? '';
+      if (!/[a-zA-Z]/.test(next)) {
+        i++;
+        if (next === '(' || next === '[') {
+          if (maths) return '$';
+          maths = true;
+        } else if (next === ')' || next === ']') {
+          if (!maths) return '$';
+          maths = false;
+        }
+        continue;
+      }
+      let j = i + 1;
+      while (/[a-zA-Z]/.test(text[j] ?? '')) j++;
+      const name = text.slice(i + 1, j);
+      if (text[j] === '*') j++;
+      if (TEXT_COMMANDS.has(name)) {
+        argument = true;
+        i = j - 1;
+      } else i = skip(j) - 1;
+    } else if (c === '{') {
+      groups.push({ maths, text: keep });
+      // Maths is off inside the argument of a text command; it comes back at its `}`.
+      if (keep) maths = false;
+    } else if (c === '}') {
+      const group = groups.pop();
+      if (group) {
+        // Maths opened inside the group and never closed.
+        if (maths && !group.maths) return '$';
+        maths = group.maths;
+        // Another argument right after, as in \multicolumn{2}{c}{...}.
+        if (group.text && text[i + 1] === '{') argument = true;
+      }
+    } else if (c === '$') {
+      // `$$` opens and closes display maths, which a single `$` does not end.
+      if (!maths) {
+        maths = true;
+        display = text[i + 1] === '$';
+        if (display) i++;
+      } else if (!display) maths = false;
+      else if (text[i + 1] === '$') {
+        maths = display = false;
+        i++;
+      }
+    } else if (c === '#') return '#';
+    else if ((c === '_' || c === '^') && !maths) return c;
+  }
+  return maths ? '$' : null;
+}
+
+/** What to tell someone whose text holds a mark `stray` found. Never quotes what they typed. */
+export function strayAdvice(kind: '_' | '^' | '#' | '$'): string {
+  switch (kind) {
+    case '_':
+      return 'An underscore outside a formula stops the build. Write \\_ for an underscore, or put the formula between $ signs.';
+    case '^':
+      return 'A ^ outside a formula stops the build. Put the formula between $ signs, or write \\textasciicircum{} for the sign itself.';
+    case '#':
+      return 'A # stops the build. Write \\# for the sign.';
+    case '$':
+      return 'A $ starts a formula, and this one does not end. Write \\$ for a dollar sign.';
+  }
+}
+
 export type TableOp =
   | { kind: 'row-after' | 'row-delete'; row: number }
   | { kind: 'column-after' | 'column-delete'; column: number };

@@ -3,7 +3,7 @@
 // The small windows the visual editor opens: a formula's LaTeX with its preview, the list of
 // labels to refer to, and the menu of things to do at a place in the text.
 import type { CommandResult } from '@paperweave/bridge';
-import { captionText, cellText } from '@paperweave/latex';
+import { captionText, cellText, stray, strayAdvice } from '@paperweave/latex';
 import { type RefObject, useEffect, useLayoutEffect, useRef, useState } from 'react';
 import { numbers } from '../../../../../lib/numbers';
 import { renderMath } from '../../../../../lib/visual';
@@ -277,6 +277,8 @@ export function FloatBox(props: {
       return setProblem(
         'A caption cannot hold an unescaped & or %, its braces must match, and it cannot end in a backslash.',
       );
+    const strayCap = stray(cap);
+    if (strayCap) return setProblem(strayAdvice(strayCap));
     if (figure && target && /[%#"{}]/.test(target))
       return setProblem("LaTeX cannot use this picture's name. Rename it first.");
     const label = `  \\label{${labelFor(figure ? 'fig' : 'tab', cap, labels)}}`;
@@ -460,6 +462,8 @@ export function HeadingBox(props: {
     if (!text) return setProblem('A heading needs a title.');
     if (!cellText(text))
       return setProblem('A title cannot hold an unescaped & or %, and its braces must match.');
+    const strayTitle = stray(text);
+    if (strayTitle) return setProblem(strayAdvice(strayTitle));
     setProblem('');
     setBusy(true);
     try {

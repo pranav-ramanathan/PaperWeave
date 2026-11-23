@@ -20,6 +20,8 @@ import {
   fieldText,
   floatParts,
   logoOf,
+  stray,
+  strayAdvice,
   textMacroOf,
   type Span,
   tableEdit,
@@ -474,7 +476,7 @@ export function createVisual(opts: {
     getPos: () => number | undefined,
     span: Span,
     name: string,
-    allowed: (text: string) => string | null = () => null,
+    allowed: (text: string, initial: string) => string | null = () => null,
     /** Told which field is open, or null when none is, so that its owner can speak for it. */
     opened: (field: HTMLInputElement | null) => void = () => {},
     /**
@@ -517,7 +519,7 @@ export function createVisual(opts: {
           button.focus();
           return;
         }
-        const problem = allowed(text);
+        const problem = allowed(text, initial);
         if (problem) return say(problem);
         const change = absent ? absent.edit(text) : { ...span, insert: text };
         if (typeof change === 'string') return say(change);
@@ -618,7 +620,12 @@ export function createVisual(opts: {
               getPos,
               float.caption,
               'Caption',
-              (text) => (captionText(text) ? null : CAPTION_PROBLEM),
+              (text, was) => {
+                if (!captionText(text)) return CAPTION_PROBLEM;
+                // A caption that already held such a mark is not locked by it.
+                const k = stray(text);
+                return k && !stray(was) ? strayAdvice(k) : null;
+              },
               opened,
             ),
           ]
@@ -676,10 +683,12 @@ export function createVisual(opts: {
                 getPos,
                 cell,
                 `Row ${i + 1}, column ${j + 1}`,
-                (text) =>
-                  cellText(text)
-                    ? null
-                    : 'A cell cannot hold an unescaped &, a row break, a % or a final backslash. Edit the table in the source for that.',
+                (text, was) => {
+                  if (!cellText(text))
+                    return 'A cell cannot hold an unescaped &, a row break, a % or a final backslash. Edit the table in the source for that.';
+                  const k = stray(text);
+                  return k && !stray(was) ? strayAdvice(k) : null;
+                },
                 opened,
               ),
             );
