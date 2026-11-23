@@ -727,6 +727,40 @@ test('a list with an option is an editable list in the visual view', async ({ br
   await audit(page, 'visual view, list with an option');
 });
 
+test('words in {\\em } and {\\bf } are typed into like any others', async ({ browser }) => {
+  test.setTimeout(180_000);
+  const { page, email } = await person(browser, 'vis-oldfont');
+  const main = [
+    '\\documentclass{article}',
+    '\\begin{document}',
+    'Alpha {\\em emphatic} beta {\\bf Stations.} gamma.',
+    '\\end{document}',
+    '',
+  ].join('\n');
+  const zip = join(mkdtempSync(join(tmpdir(), 'paperweave-e2e-')), `OldFont ${run}.zip`);
+  writeFileSync(zip, await writeZip([{ path: 'main.tex', bytes: Buffer.from(main) }]));
+  await page.goto('/sign-in');
+  await signIn(page, email);
+  await page.getByLabel('Or import a ZIP of a LaTeX project').setInputFiles(zip);
+  await page.getByRole('button', { name: 'Import ZIP' }).click();
+  await page.getByRole('link', { name: 'main.tex' }).first().click();
+  await expect(status(page)).toHaveText('All edits saved.');
+  await expect(page.locator(`${VISUAL} em`)).toHaveText('emphatic');
+  await expect(page.locator(`${VISUAL} strong`)).toHaveText('Stations.');
+  await expect(page.locator(`${VISUAL} .pw-raw_inline`)).toHaveCount(0);
+  await clickAfter(page, VISUAL, 'emphat');
+  await page.keyboard.type('XY');
+  await expect(status(page)).toHaveText('All edits saved.');
+  await showSource(page);
+  await page.waitForTimeout(800);
+  const src = (await sourceText(page)).replace(/\u2060/g, '');
+  expect(src).toContain('{\\em emphatXYic}');
+  expect(src).toContain('{\\bf Stations.}');
+  await showVisual(page);
+  await expect(page.locator(VISUAL)).toBeVisible();
+  await audit(page, 'visual view, old font groups');
+});
+
 test('a selection across list items is deleted or typed over; undo restores it; another person sees it', async ({
   browser,
 }) => {

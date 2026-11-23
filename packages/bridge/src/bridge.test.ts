@@ -864,11 +864,11 @@ test('a rewrite is refused once another replica deleted the text before the atom
 
 test('an inline atom is rewritten to exactly the new bytes, or the rewrite is refused', () => {
   const doc =
-    'See \\citep{a} here.\\footnote{Old note.} Use {\\bf x} and \\sys{}x now.\n\\newcommand{\\sys}{S}\n';
+    'See \\citep{a} here.\\footnote{Old note.} Use {\\sc x} and \\sys{}x now.\n\\newcommand{\\sys}{S}\n';
   const accepted: [string, string][] = [
     ['\\citep{a}', '\\citep[p.~3]{a,b}'],
     ['\\footnote{Old note.}', '\\footnote{New \\emph{note}.}'],
-    ['{\\bf x}', '\\textbf{x}'],
+    ['{\\sc x}', '\\textsc{x}'],
   ];
   for (const [old, now] of accepted) {
     const r = replica(doc);
@@ -2941,4 +2941,71 @@ test('Enter and typing in a list with an option change only their own bytes', ()
   expect(
     dropped('A\n\n\\begin{itemize}[noitemsep]\n  \\item \n\\end{itemize}\n\nB\n', 'list'),
   ).toBe('A\n\nB\n');
+});
+
+describe('old font groups in the visual view', () => {
+  const emTyped = (src: string, off: number, text: string, del = 0) => {
+    const r = replica(src);
+    const start = textblocks(r)[0].start + off;
+    expect(r.dispatch(r.state.tr.insertText(text, start, start + del)), src).toBe(true);
+    r.check();
+    return r;
+  };
+
+  test('typing, deleting and unstyling in a {\\em } group change only their own bytes', () => {
+    const A = 'A {\\em big} cat.\n';
+    expect(emTyped(A, 3, 'X').src).toBe('A {\\em bXig} cat.\n');
+    expect(emTyped(A, 5, 'X').src).toBe('A {\\em bigX} cat.\n');
+    expect(emTyped(A, 2, 'X').src).toBe('A X{\\em big} cat.\n');
+    expect(emTyped(A, 2, '', 3).src).toBe('A  cat.\n');
+    expect(marked(A, 2, 5, 'emph')!.src).toBe('A big cat.\n');
+    expect(marked(A, 2, 5, 'textbf')!.src).toBe('A {\\em \\textbf{big}} cat.\n');
+    expect(marked('A {\\bf big} cat.\n', 2, 5, 'textbf')!.src).toBe('A big cat.\n');
+    const q = emTyped("{\\it`x'} b.\n", 0, 'X');
+    expect(q.src).toBe("{\\it{}X`x'} b.\n");
+    expect(shown(q)).toBe("X`x' b.");
+  });
+
+  test('generated edits in and around old font groups stay inside their range', () => {
+    const DENSE =
+      "A {\\em a b} and {\\bf\n x} then {\\bf a {\\it b} c}, {\\it`q'} and {\\tt t}.\n\n" +
+      '\\section{A {\\bf T} x}\n\n' +
+      '\\begin{itemize}\n\\item one {\\em two} three\n\\item {\\bf four} and a longer tail of words\n\\end{itemize}\n\n' +
+      'Guards: {\\bf \\small x}, {\\em}, {\\em } , { \\em x}, {\\sc w}, {\\em x \\LaTeX\\ y}, {\\em cost $5} end.\n';
+    let done = 0;
+    for (let seed = 0; seed < 300; seed++) {
+      const r = rng(seed);
+      const rep = replica(DENSE);
+      for (let step = 0; step < 40; step++) {
+        const before = rep.src;
+        let op;
+        try {
+          op = visualOp(r, rep);
+          if (!op) continue;
+          rep.check();
+        } catch (err) {
+          throw new Error(`seed ${seed} step ${step}: ${(err as Error).message}`, { cause: err });
+        }
+        const where = `seed ${seed} step ${step} ${op.what}`;
+        if (!op.accepted) {
+          expect(rep.src, where).toBe(before);
+          continue;
+        }
+        done++;
+        if (rep.src === before) continue;
+        // Enter in an emptied list item ends the list, taking that item's line (as it always has).
+        if (
+          op.what === 'enter' &&
+          before.replace(/\\item[ \t]*\n(?=\\end\{itemize\})/, '') === rep.src
+        )
+          continue;
+        if (
+          before.slice(0, op.lo) !== rep.src.slice(0, op.lo) ||
+          !rep.src.endsWith(before.slice(op.hi))
+        )
+          throw new Error(`${where}: changed outside [${op.lo}, ${op.hi})`);
+      }
+    }
+    expect(done).toBeGreaterThan(1000);
+  });
 });

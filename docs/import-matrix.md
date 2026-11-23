@@ -50,7 +50,7 @@ All are in the toolchain image:
 These are kept byte for byte, build, and are shown in place as the LaTeX they are, with a way
 to their source. Measured on the `real-*` fixtures and on small samples:
 
-- `\footnote{}`, `{\bf ...}`, `\textsc{}`, `\SI{}{}`, `\qty{}{}`, `\num{}`, `\url{}`,
+- `\footnote{}`, `{\sc ...}`, `\textsc{}`, `\SI{}{}`, `\qty{}{}`, `\num{}`, `\url{}`,
   `\href{}{}` and `\foreignlanguage{}{}` inside a paragraph: one raw atom each. The words
   around them are editable; the words inside them are changed as LaTeX, in a box that a double
   click or Enter opens.

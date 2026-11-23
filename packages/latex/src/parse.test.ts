@@ -599,3 +599,105 @@ test('a list head that is not an option, a comment or a length stays a raw block
   ])
     expect(parse(src).blocks[0].body.kind, src).toBe('raw');
 });
+
+test('a group that opens with a font switch is styled text', () => {
+  const run = (src: string) => {
+    const p = parse(src);
+    assertLossless(p);
+    const b = p.blocks.find((x) => x.body.kind === 'para' || x.body.kind === 'heading');
+    const body = b!.body as { text: string; pieces: import('./index.ts').Piece[] };
+    return {
+      body,
+      pieces: body.pieces,
+      cut: (q: { s: number; e: number }) => body.text.slice(q.s, q.e),
+    };
+  };
+  const g = run('A {\\em big} cat.\n');
+  const at = g.pieces.findIndex((q) => q.k === 'open');
+  expect(g.pieces.slice(at, at + 3).map((q) => q.k)).toEqual(['open', 'text', 'close']);
+  expect(g.pieces[at].mark).toBe('emph');
+  expect(g.pieces[at + 1].marks).toEqual(['emph']);
+  expect(g.cut(g.pieces[at])).toBe('{\\em ');
+  expect(g.cut(g.pieces[at + 2])).toBe('}');
+  expect(g.pieces.filter((q) => q.k === 'atom')).toEqual([]);
+  // Every switch gives its group's style.
+  const names: [string, string][] = [
+    ['em', 'emph'],
+    ['it', 'textit'],
+    ['itshape', 'textit'],
+    ['bf', 'textbf'],
+    ['bfseries', 'textbf'],
+    ['tt', 'texttt'],
+    ['ttfamily', 'texttt'],
+  ];
+  for (const [name, mark] of names) {
+    const r = run(`A {\\${name} word} b.\n`);
+    expect(r.pieces.find((q) => q.k === 'open')?.mark, name).toBe(mark);
+    expect(
+      r.pieces.filter((q) => q.k === 'atom'),
+      name,
+    ).toEqual([]);
+  }
+  // The line break and indentation behind the name belong to the opening.
+  const nl = run('A {\\bf\n  two lines} b.\n');
+  expect(nl.cut(nl.pieces.find((q) => q.k === 'open')!)).toBe('{\\bf\n  ');
+  // The `{}` the bridge writes after the name keeps a typed letter out of it.
+  const empty = run('A {\\em{}x} b.\n');
+  expect(empty.cut(empty.pieces.find((q) => q.k === 'open')!)).toBe('{\\em{}');
+  // Nested groups.
+  const nest = run('A {\\bf a {\\it b} c} d.\n');
+  const seen = nest.pieces
+    .filter((q) => q.k === 'text')
+    .map((q) => q.marks.join('+'))
+    .filter((m, i, all) => m !== all[i - 1]);
+  expect(seen).toEqual(['', 'textbf', 'textbf+textit', 'textbf', '']);
+  // In a heading and in a list item.
+  expect(
+    run('\\section{{\\bf T} x}\n').pieces.some((q) => q.k === 'open' && q.mark === 'textbf'),
+  ).toBe(true);
+  const item = parse('\\begin{itemize}\n\\item a {\\em b} c\n\\end{itemize}\n');
+  assertLossless(item);
+  expect(JSON.stringify(item)).toContain('"mark":"emph"');
+  // The pieces tile the block.
+  for (const src of ['A {\\em big} cat.\n', 'A {\\bf\n  x {\\it y} z} b.\n', 'A {\\em{}x} b.\n']) {
+    const r = run(src);
+    let at = 0;
+    for (const q of r.pieces) {
+      expect(q.s, src).toBe(at);
+      at = q.e;
+    }
+    expect(at, src).toBeLessThanOrEqual(r.body.text.length);
+  }
+});
+
+test('a group with a bare command, an empty one or another command stays one raw atom', () => {
+  const atoms = (src: string) => {
+    const p = parse(src);
+    assertLossless(p);
+    const b = p.blocks.find((x) => x.body.kind === 'para')!;
+    return (b.body as { pieces: { k: string; type?: string }[] }).pieces.filter(
+      (q) => q.k === 'atom' || q.k === 'open',
+    );
+  };
+  for (const src of [
+    'a {\\bf \\small x} b.\n',
+    'a {\\em} b.\n',
+    'a {\\em } b.\n',
+    'a { \\em x} b.\n',
+    'a {\\sc w} b.\n',
+    'a {\\emph x} b.\n',
+    'a {\\em x\n\ny} b.\n',
+    'a {\\em x \\LaTeX\\ y} b.\n',
+  ]) {
+    const r = atoms(src);
+    expect(
+      r.map((q) => q.k),
+      src,
+    ).toEqual(['atom']);
+    expect(r[0].type, src).toBe('raw');
+  }
+  const cost = parse('a {\\em cost $5} b.\n');
+  expect(cost.blocks.map((b) => b.body.kind)).not.toContain('error');
+  expect(atoms('a {\\em cost $5} b.\n').map((q) => q.k)).toEqual(['atom']);
+  expect(parse('A {\\em x\n').blocks.map((b) => b.body.kind)).toContain('error');
+});
