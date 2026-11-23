@@ -49,6 +49,7 @@ import {
   restoreAction,
   roleAction,
   compilerAction,
+  renamePaperAction,
   rootAction,
   saveRevisionAction,
 } from '../actions';
@@ -80,6 +81,7 @@ async function Project({
     in?: string;
     root?: string;
     compiler?: string;
+    renamed?: string;
     relabelled?: string;
     moved?: string;
     before?: string;
@@ -242,6 +244,19 @@ async function Project({
       )}
       {root && <Result>Root file changed.</Result>}
       {compiler && <Result>Compiler changed.</Result>}
+      {query.renamed && <Result>This paper is now called “{project.name}”.</Result>}
+      {owner && (
+        <details>
+          <summary>Rename this paper</summary>
+          <form action={renamePaperAction.bind(null, id)}>
+            <label>
+              New name for this paper
+              <input name="name" defaultValue={project.name} required maxLength={200} />
+            </label>
+            <Once type="submit">Rename paper</Once>
+          </form>
+        </details>
+      )}
 
       {owner && !(steps.written && steps.built && steps.shared && steps.downloaded) && (
         <section aria-labelledby="first-steps">

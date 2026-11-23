@@ -123,6 +123,19 @@ export async function setCompiler(db: Db, userId: string, projectId: string, com
   );
 }
 
+/** Give the paper another name. The owner's decision alone. Every page, email and download reads the name as it is now. */
+export async function renameProject(
+  db: Db,
+  userId: string,
+  projectId: string,
+  name: unknown,
+): Promise<{ name: string }> {
+  await authorize(db, userId, id(projectId), 'project.settings');
+  const named = paperName(name);
+  await db.query('update projects set name = $2 where id = $1', [projectId, named]);
+  return { name: named };
+}
+
 export async function listMembers(db: Db, userId: string, projectId: string): Promise<Member[]> {
   await authorize(db, userId, id(projectId), 'project.read');
   const { rows } = await db.query(
