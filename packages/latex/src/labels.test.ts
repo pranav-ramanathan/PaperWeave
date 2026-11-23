@@ -149,3 +149,40 @@ test('cleveref, varioref, natbib and apacite forms name keys', () => {
       name,
     ).toEqual(['a', 'b']);
 });
+
+test('a label given as an option of a listing is a label', () => {
+  const keysOf = (src: string) => labelIndex(src).labels;
+  const exact = (src: string, key: string) => {
+    const found = keysOf(src).filter((l) => l.key === key);
+    expect(found, key).toHaveLength(1);
+    expect(src.slice(found[0].keyAt, found[0].keyAt + key.length)).toBe(key);
+  };
+  exact('\\begin{lstlisting}[caption={Hello}, label={lst:a}]\nx\n\\end{lstlisting}', 'lst:a');
+  exact('\\begin{lstlisting}[label=lst:b]\nx\n\\end{lstlisting}', 'lst:b');
+  exact('\\begin{lstlisting}[ label = lst:c , language=C]\nx\n\\end{lstlisting}', 'lst:c');
+  // Options over two lines, with a comment that mentions a label.
+  const two =
+    '\\begin{lstlisting}[caption=A,\n  % label=commented\n  label={lst:real}]\nx\n\\end{lstlisting}';
+  expect(keysOf(two).map((l) => l.key)).toEqual(['lst:real']);
+  exact(two, 'lst:real');
+  // A label inside a braced value is not an option of the listing.
+  expect(
+    keysOf('\\begin{lstlisting}[caption={Hello [x], label=no}]\nx\n\\end{lstlisting}'),
+  ).toEqual([]);
+  // A \label in the body is verbatim text.
+  expect(keysOf('\\begin{lstlisting}\n\\label{inside}\n\\end{lstlisting}')).toEqual([]);
+  exact('\\lstinputlisting[caption=F, label=lst:f]{code/a.py}\n\\label{sec:x}', 'lst:f');
+  expect(
+    keysOf('\\lstinputlisting[caption=F, label=lst:f]{code/a.py}\n\\label{sec:x}'),
+  ).toHaveLength(2);
+  // Not listings, or not keys.
+  expect(keysOf('\\begin{enumerate}[label=(\\alph*)]\\item a\\end{enumerate}')).toEqual([]);
+  expect(keysOf('\\begin{minted}[label=x]{py}\nx\n\\end{minted}')).toEqual([]);
+  expect(keysOf('\\begin{lstlisting}[label=lst:#1]\nx\n\\end{lstlisting}')).toEqual([]);
+  // An unclosed [ neither hangs nor gives a label.
+  expect(keysOf('\\begin{lstlisting}[label=lst:u\nx\n\\end{lstlisting}')).toEqual([]);
+  expect(keysOf('\\lstinputlisting[label=lst:u {a.py}')).toEqual([]);
+  // Citations are not affected.
+  const src = '\\begin{lstlisting}[label={lst:a}]\nx\n\\end{lstlisting} \\cite{k}';
+  expect(citeIndex(src).map((c) => c.key)).toEqual(['k']);
+});

@@ -210,6 +210,37 @@ test('hyperref, fref, Fref and zcref references follow a renamed label', async (
   );
 });
 
+test("a listing's label is listed, referenced and renamed", async () => {
+  const before = [
+    '\\documentclass{article}',
+    '\\usepackage{listings}',
+    '\\begin{document}',
+    '\\section{X}\\label{sec:x}',
+    '\\begin{lstlisting}[caption={C}, label={lst:a}]',
+    'print(1)',
+    '\\end{lstlisting}',
+    'See \\ref{lst:a}.',
+    '\\end{document}',
+    '',
+  ].join('\n');
+  const zip = await writeZip([{ path: 'main.tex', bytes: Buffer.from(before) }]);
+  const [project] = await importZip(t.pool, store, owner.id, zip, 'Listing label');
+  const report = await labelReport(t.pool, store, owner.id, project.id);
+  expect(report.labels.map((l) => [l.key, l.path, l.line])).toEqual([
+    ['sec:x', 'main.tex', 4],
+    ['lst:a', 'main.tex', 5],
+  ]);
+  expect(report.undefined).toEqual([]);
+  const proposal = await proposeLabelRename(t.pool, store, owner.id, project.id, 'lst:a', 'lst:b');
+  expect(proposal.changes.map((c) => c.line)).toEqual([5, 8]);
+  // Its name is taken: another label may not be renamed to it.
+  expect(
+    await code(proposeLabelRename(t.pool, store, owner.id, project.id, 'sec:x', 'lst:a')),
+  ).toBe('conflict');
+  await renameLabel(t.pool, store, owner.id, project.id, 'lst:a', 'lst:b', proposal.digest);
+  expect((await texts(project.id))['main.tex']).toBe(before.replaceAll('lst:a', 'lst:b'));
+});
+
 test('a reference after a comment in a list, and the range and name forms, follow a renamed label', async () => {
   const before = [
     '\\documentclass{article}',

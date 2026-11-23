@@ -5710,3 +5710,20 @@ forgotten \endgroup`. `\emph{R & D}`, `\textsc{a_b}` and `\mbox{#1}` failed the 
   macro are not seen. Lines are not removed or commented out for the person. There is no digest, so
   a line added between the page and the click is not shown. Restoring a revision remains the way
   back. The sync/API path, `deleteFile` itself, does not ask.
+
+## A label set on a code listing is a label
+
+- **What was wrong.** `\begin{lstlisting}[caption={Hello}, label={lst:hello}]` and
+  `\lstinputlisting[label=lst:file]{code/a.py}` give LaTeX a real label (the PDF prints its
+  number), but the reader of the paper skipped the listing's options. A `\ref` to it was reported
+  as "no label has that name", the Submit check blocked on it or said LaTeX had resolved it,
+  "Rename the label" did not offer it, and the reference picker left it out.
+- **Now** the `label=` option of `lstlisting` and `\lstinputlisting` is read like a `\label`: braced
+  or bare, with spaces round the `=`, over several lines, ignoring comments, the last one winning.
+  Rename changes exactly the key. A `\label` in the body of a listing is still verbatim text.
+- **Held by** a unit test in `labels.test.ts` (forms, comment, nested braces, `lstinputlisting`,
+  guards for `enumerate[label=]`, `minted[label=]`, `#1`, an unclosed `[`, `citeIndex`), a sandbox
+  test in `labels.sandbox.test.ts` (listed, no undefined reference, rename byte-exact, name taken)
+  and a browser test in `labels.spec.ts`.
+- **Not done.** `label=` on thmtools theorems, tcolorbox, `\lstset` and `\lstnewenvironment`
+  environments (the fresh-build "LaTeX resolved it" warning still applies).

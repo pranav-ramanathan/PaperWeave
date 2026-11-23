@@ -157,3 +157,46 @@ test('a label named after a comment in a list is renamed, and the bibliography l
   expect(text).toContain('fig:second}');
   expect(text).not.toContain('fig:b');
 });
+
+test("a code listing's label is a label: not reported, offered, renamed", async ({ browser }) => {
+  test.setTimeout(120_000);
+  const { page, email } = await person(browser, 'label-listing');
+  const main = [
+    '\\documentclass{article}',
+    '\\usepackage{listings}',
+    '\\begin{document}',
+    '\\section{A}\\label{sec:a}',
+    '\\begin{lstlisting}[caption={Hello}, label={lst:hello}]',
+    'print("hello")',
+    '\\end{lstlisting}',
+    'See Listing~\\ref{lst:hello}.',
+    '\\end{document}',
+    '',
+  ].join('\n');
+  const zip = join(mkdtempSync(join(tmpdir(), 'paperweave-e2e-')), `Listing label ${run}.zip`);
+  writeFileSync(zip, await writeZip([{ path: 'main.tex', bytes: Buffer.from(main) }]));
+  await page.goto('/sign-in');
+  await signIn(page, email);
+  await page.getByLabel('Or import a ZIP of a LaTeX project').setInputFiles(zip);
+  await page.getByRole('button', { name: 'Import ZIP' }).click();
+  const paper = page.url();
+  await expect(page.getByText('2 labels. Every reference points to one of them.')).toBeVisible();
+  await expect(page.getByText('no label has that name')).toHaveCount(0);
+  await expect(page.getByLabel('Rename the label')).toContainText('lst:hello');
+  await audit(page, 'a paper whose listing has a label');
+
+  await page.getByLabel('Rename the label').selectOption('lst:hello');
+  await page.getByLabel('to', { exact: true }).fill('lst:greeting');
+  await page.getByRole('button', { name: 'See what would change' }).click();
+  await expect(page.getByText('This would change 2 lines in 1 file')).toBeVisible();
+  await page.getByRole('button', { name: 'Rename in all of it' }).click();
+  await expect(page.getByRole('status')).toHaveText('Renamed to lst:greeting in 2 places.');
+
+  await page.goto(paper);
+  await page.getByRole('link', { name: 'main.tex' }).first().click();
+  await showSource(page);
+  const text = await sourceText(page);
+  expect(text).toContain('label={lst:greeting}]');
+  expect(text).toContain('\\ref{lst:greeting}');
+  expect(text).not.toContain('lst:hello');
+});

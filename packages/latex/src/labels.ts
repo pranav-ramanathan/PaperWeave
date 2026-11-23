@@ -77,6 +77,64 @@ function keyList(src: string, open: number): { close: number; body: string } | n
 }
 
 /**
+ * The `label=` given in the options of a listing, where `open` is the `[` that starts them: the
+ * key and where it starts, and the `]` that ends the options. Only `close` if the options name no
+ * usable key; null if they never end. The last `label=` wins, as in listings.
+ */
+function listingLabel(
+  src: string,
+  open: number,
+): { key?: string; keyAt: number; close: number } | null {
+  let depth = 0;
+  let close = -1;
+  const items: { from: number; to: number }[] = [];
+  let from = open + 1;
+  for (let i = open + 1; i < src.length; i++) {
+    const c = src[i];
+    if (c === '\\') i++;
+    else if (c === '%') {
+      while (i < src.length && src[i] !== '\n') i++;
+    } else if (c === '{') depth++;
+    else if (c === '}') depth--;
+    else if (depth === 0 && (c === ',' || c === ']')) {
+      items.push({ from, to: i });
+      from = i + 1;
+      if (c === ']') {
+        close = i;
+        break;
+      }
+    }
+  }
+  if (close < 0) return null;
+  let found: { key: string; keyAt: number } | null = null;
+  for (const { from: a, to: b } of items) {
+    // Comments are dropped from the item by blanking them, so offsets stay offsets in the source.
+    let text = src.slice(a, b);
+    text = text.replace(/%[^\n]*/g, (m) => ' '.repeat(m.length));
+    const head = /^\s*label\s*=\s*/.exec(text);
+    if (!head) continue;
+    let valueAt = a + head[0].length;
+    let value = text.slice(head[0].length);
+    if (value.startsWith('{')) {
+      const end = verbatimGroup(src, valueAt);
+      if (!end || end > b) {
+        found = null;
+        continue;
+      }
+      value = src.slice(valueAt + 1, end - 1);
+      valueAt += 1;
+    }
+    const key = value.trim();
+    const keyAt = valueAt + value.indexOf(key);
+    found =
+      key && !/[#\\{},%]/.test(key) && src.slice(keyAt, keyAt + key.length) === key
+        ? { key, keyAt }
+        : null;
+  }
+  return found ? { ...found, close } : { keyAt: -1, close };
+}
+
+/**
  * Every key given to the commands `wanted` names, with where it is. Comments and verbatim text
  * are skipped. A key built from a macro argument (`\\label{fig:#1}`) is not a key and is left out.
  */
@@ -102,6 +160,19 @@ function keyUses(src: string, wanted: (command: string) => boolean): Use[] {
     if (c !== '\\') continue;
     const verbatim = VERBATIM.exec(src.slice(i, i + 24));
     if (verbatim) {
+      if (verbatim[1] === 'lstlisting' && wanted('label')) {
+        let o = i + verbatim[0].length;
+        while (src[o] === ' ' || src[o] === '\t') o++;
+        const opts = src[o] === '[' ? listingLabel(src, o) : null;
+        if (opts && opts.key !== undefined)
+          out.push({
+            key: opts.key,
+            command: 'label',
+            at: i,
+            end: opts.close + 1,
+            keyAt: opts.keyAt,
+          });
+      }
       const close = src.indexOf(`\\end{${verbatim[1]}}`, i);
       i = close < 0 ? src.length : close;
       continue;
@@ -139,6 +210,22 @@ function keyUses(src: string, wanted: (command: string) => boolean): Use[] {
       const end = verbatimGroup(src, p);
       if (end) {
         i = end - 1;
+        continue;
+      }
+    }
+    if (name[1] === 'lstinputlisting' && wanted('label')) {
+      const o = skipWs(p);
+      const opts = src[o] === '[' ? listingLabel(src, o) : null;
+      if (opts) {
+        if (opts.key !== undefined)
+          out.push({
+            key: opts.key,
+            command: 'label',
+            at: i,
+            end: opts.close + 1,
+            keyAt: opts.keyAt,
+          });
+        i = opts.close;
         continue;
       }
     }
