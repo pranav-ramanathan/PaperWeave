@@ -1,15 +1,58 @@
 'use client';
 
 import { useEffect, useRef, useState } from 'react';
+import { wordIn, wordSpan } from '../../../../../lib/pdfword';
 
-/** A place on a page, in PDF points from the page's top-left corner. */
-export type Mark = { page: number; x: number; y: number; height: number };
+/**
+ * A place on a page, in PDF points from the page's top-left corner. `left` and `width` are the
+ * line of text's own extent, when known: a band is then only as wide as that, not the page.
+ */
+export type Mark = {
+  page: number;
+  x: number;
+  y: number;
+  height: number;
+  left?: number;
+  width?: number;
+};
 
 /** The sizes the pages can be shown at, as a share of the pane's width. */
 const ZOOMS = [1, 1.25, 1.5, 2, 3];
 const ZOOM_KEY = 'paperweave.pdfzoom';
 /** A page's picture is never more than this many pixels: a canvas beyond it fails or crawls. */
 const MAX_PIXELS = 12_000_000;
+
+/** The word under a double-click in a page's text layer, if the click was on a word itself. */
+function wordClicked(e: MouseEvent, holder: HTMLElement): string | undefined {
+  const doc = document as Document & {
+    caretPositionFromPoint?(x: number, y: number): { offsetNode: Node; offset: number } | null;
+    caretRangeFromPoint?(x: number, y: number): Range | null;
+  };
+  let node: Node | null | undefined;
+  let offset = 0;
+  const pos = doc.caretPositionFromPoint?.(e.clientX, e.clientY);
+  if (pos) [node, offset] = [pos.offsetNode, pos.offset];
+  else {
+    const r = doc.caretRangeFromPoint?.(e.clientX, e.clientY);
+    if (r) [node, offset] = [r.startContainer, r.startOffset];
+  }
+  if (!(node instanceof Text) || !holder.querySelector('.textLayer')?.contains(node)) return;
+  const span = wordSpan(node.data, offset);
+  if (!span) return;
+  // The caret is the nearest place to the click, also from a blank part of the page: only a
+  // click on the word's own words counts.
+  const range = document.createRange();
+  range.setStart(node, span.from);
+  range.setEnd(node, span.to);
+  const on = [...range.getClientRects()].some(
+    (q) =>
+      e.clientX >= q.left - 2 &&
+      e.clientX <= q.right + 2 &&
+      e.clientY >= q.top - 2 &&
+      e.clientY <= q.bottom + 2,
+  );
+  return (on && wordIn(node.data, offset)) || undefined;
+}
 
 /**
  * A PDF drawn page by page, so that a place on a page can be pointed at and a double-click on a
@@ -19,8 +62,11 @@ const MAX_PIXELS = 12_000_000;
 export default function PdfView(props: {
   src: string;
   mark: Mark | null;
-  /** `nearest`: the place is a guess at the middle of the pane, so the nearest thing will do. */
-  onPick(page: number, x: number, y: number, nearest?: boolean): void;
+  /**
+   * `nearest`: the place is a guess at the middle of the pane, so the nearest thing will do.
+   * `word`: the word that was clicked, which stays in the browser.
+   */
+  onPick(page: number, x: number, y: number, nearest?: boolean, word?: string): void;
   /** Set to a way of picking the place in the middle of what the pane is showing. */
   middle: { current: () => void };
 }) {
@@ -171,6 +217,8 @@ export default function PdfView(props: {
             n,
             ((e.clientX - box.left) / box.width) * size.width,
             ((e.clientY - box.top) / box.height) * size.height,
+            false,
+            wordClicked(e, holder),
           );
         });
         pages.append(holder);
@@ -266,9 +314,25 @@ export default function PdfView(props: {
     band.dataset.page = String(mark.page);
     band.style.top = `${(100 * mark.y) / height}%`;
     band.style.height = `${(100 * mark.height) / height}%`;
+    // As wide as the line's column, when that is known, not the whole page.
+    const wide = Number(holder.dataset.width);
+    const narrow = mark.left !== undefined && mark.width !== undefined && mark.width > 0;
+    if (narrow) {
+      band.style.left = `${(100 * mark.left!) / wide}%`;
+      band.style.right = 'auto';
+      band.style.width = `${(100 * mark.width!) / wide}%`;
+    }
     holder.append(band);
     const top = holder.offsetTop + (holder.offsetHeight * mark.y) / height;
-    el.scrollTo({ top: Math.max(0, top - el.clientHeight / 3) });
+    // Sideways too, when the pages are wider than the pane: the band's middle in the middle.
+    const across =
+      narrow && el.scrollWidth > el.clientWidth
+        ? holder.offsetLeft + (holder.offsetWidth * (mark.left! + mark.width! / 2)) / wide
+        : null;
+    el.scrollTo({
+      top: Math.max(0, top - el.clientHeight / 3),
+      ...(across !== null && { left: Math.max(0, across - el.clientWidth / 2) }),
+    });
     return () => band.remove();
   }, [mark, drawn, src]);
 

@@ -177,23 +177,26 @@ export default function BuildPane({
   );
   useEffect(() => {
     if (!pdf) return;
-    return onShow('pdf', async ({ fileId, line }) => {
+    return onShow('pdf', async ({ fileId, line, share }) => {
+      const along = share === undefined ? '' : `&share=${share.toFixed(4)}`;
       const place: (Mark & { moved?: boolean; error?: string }) | null = await ask(
-        `file=${fileId}&line=${line}`,
+        `file=${fileId}&line=${line}${along}`,
       );
       if (!place || place.error) return setSaid('The PDF does not say where that line is.');
       setMark({ ...place, pdf });
       setSaid(`Shown on page ${place.page} of the PDF.${place.moved ? NEAREST : ''}`);
     });
   }, [pdf, ask]);
-  const pick = async (page: number, x: number, y: number, nearest = false) => {
+  // The clicked word is looked for in the text by the editor, here in the browser: it is not
+  // part of what is asked of the server.
+  const pick = async (page: number, x: number, y: number, nearest = false, word?: string) => {
     const place = await ask(
       `page=${page}&x=${x.toFixed(2)}&y=${y.toFixed(2)}${nearest ? '&nearest=1' : ''}`,
     );
     if (place?.error && GONE.test(place.error)) return setSaid(place.error);
     if (!place || place.error) return setSaid('The PDF does not say where that came from.');
-    setSaid(`That is line ${place.line} of ${place.path}.${place.moved ? NEAREST : ''}`);
-    showInEditor(place);
+    const used = showInEditor({ ...place, word });
+    setSaid(`That is line ${used ?? place.line} of ${place.path}.${place.moved ? NEAREST : ''}`);
   };
   const building = latest?.status === 'queued';
   // A build that has waited this long is not being built: the worker that builds is busy with

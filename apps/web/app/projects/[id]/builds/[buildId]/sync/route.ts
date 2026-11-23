@@ -1,4 +1,4 @@
-// Between the source and a build's PDF: ?file=<id>&line=<n> gives a place on a page, and
+// Between the source and a build's PDF: ?file=<id>&line=<n>[&share=<0..1>] gives a place on a page, and
 // ?page=<n>&x=<pt>&y=<pt> gives a file and a line.
 import { AppError, pdfToSource, sourceToPdf } from '@paperweave/server';
 import { askedForEachTime, blobs, currentUser, db } from '../../../../../../lib/server';
@@ -12,9 +12,12 @@ export async function GET(
   const { id, buildId } = await params;
   const q = new URL(request.url).searchParams;
   const n = (name: string) => Number(q.get(name) ?? NaN);
+  // How far along its line a place is: only a number from 0 to 1 counts.
+  const share = n('share');
+  const along = share >= 0 && share <= 1 ? share : undefined;
   try {
     const found = q.has('file')
-      ? await sourceToPdf(db(), blobs(), user.id, id, buildId, q.get('file')!, n('line'))
+      ? await sourceToPdf(db(), blobs(), user.id, id, buildId, q.get('file')!, n('line'), along)
       : await pdfToSource(
           db(),
           blobs(),

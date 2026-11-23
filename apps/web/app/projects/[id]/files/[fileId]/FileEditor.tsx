@@ -33,7 +33,8 @@ import * as Y from 'yjs';
 import { setBibliography } from '../../../../../lib/bibliography';
 import { pageNonce } from '../../../../../lib/nonce';
 import { atRisk, LEAVE, leavesPage } from '../../../../../lib/leaving';
-import { onShow, showInPdf } from '../../../../../lib/pdfsync';
+import { carry, onShow, showInPdf, taken } from '../../../../../lib/pdfsync';
+import { wordAt } from '../../../../../lib/pdfword';
 import { createVisual, type Visual } from '../../../../../lib/visual';
 import type { LanguageFinding, Proposal, Thread } from '@paperweave/server';
 import Language from './Language';
@@ -181,9 +182,14 @@ export default function FileEditor(props: {
   // The editors are made once; they read which view is showing from here.
   const modeNow = useRef(mode);
   modeNow.current = mode;
-  /** Put the caret on a line of this file, and the line it is on now. Set once the editors exist. */
-  const jump = useRef<(line: number) => void>(() => {});
-  const lineNow = useRef<() => number>(() => 1);
+  /**
+   * Put the caret on a place of this file: the clicked `word` on the line, or else how far along
+   * the line (`share`), or else the line's start. Returns the line it went to. Set once the
+   * editors exist.
+   */
+  const jump = useRef<(line: number, share?: number, word?: string) => number>((line) => line);
+  /** The line the caret is on, and how far along it. */
+  const placeNow = useRef<() => { line: number; share: number }>(() => ({ line: 1, share: 0 }));
   /** The selected stretch as two places that move with the text, and how to select one again. */
   const stretch = useRef<(orCaret?: boolean) => Stretch | null>(() => null);
   const showStretch = useRef<(from: string, to: string) => boolean>(() => false);
@@ -204,12 +210,14 @@ export default function FileEditor(props: {
   // A double-click in the PDF asks for a line: of this file, or of another one of the paper.
   useEffect(
     () =>
-      onShow('source', (place) =>
-        place.fileId === fileId
-          ? jump.current(place.line)
-          : mayLeave.current() &&
-            router.push(`/projects/${projectId}/files/${place.fileId}?line=${place.line}`),
-      ),
+      onShow('source', (place) => {
+        if (place.fileId === fileId) return jump.current(place.line, place.share, place.word);
+        // The place goes on with the person, in the browser; the address says only the line.
+        if (mayLeave.current()) {
+          carry(place);
+          router.push(`/projects/${projectId}/files/${place.fileId}?line=${place.line}`);
+        }
+      }),
     [fileId, projectId, router],
   );
   // The paper's macros as they were when the page was made. Not a reason to rebuild the editors.
@@ -380,7 +388,11 @@ export default function FileEditor(props: {
         update({ loaded: true });
         // Arrived from a place in the PDF: go to the line it named, once, now that there is text.
         const line = Number(new URLSearchParams(location.search).get('line'));
-        if (line && !arrived) setTimeout(() => jump.current(line), 0);
+        if (line && !arrived) {
+          const came = taken(fileId);
+          const same = came && came.line === line ? came : null;
+          setTimeout(() => jump.current(line, same?.share, same?.word), 0);
+        }
         // The file is here: it can be typed in. (Not again on a later reconnect: by then
         // something else may be holding the editor shut.)
         if (!arrived) setLocked(false);
@@ -741,13 +753,43 @@ export default function FileEditor(props: {
       }
     };
     switchTo.current = show;
-    jump.current = (line) => {
-      const at = view.state.doc.line(Math.max(1, Math.min(Math.floor(line), view.state.doc.lines)));
-      // The first thing written on the line, past its indentation.
-      const from = at.from + (at.text.length - at.text.trimStart().length);
-      if (visual && modeNow.current === 'visual') return visual.select(from, from);
-      view.dispatch({ selection: { anchor: from }, scrollIntoView: true });
-      view.focus();
+    jump.current = (line, share, word) => {
+      const lines = view.state.doc;
+      const asked = Math.max(1, Math.min(Math.floor(line), lines.lines));
+      // The word as typed on a line, if it is there whole (a place, not a word, is no hit).
+      const found = (n: number, along?: number) => {
+        const at = lines.line(n);
+        const hit = word ? wordAt(at.text, word, along) : null;
+        return hit && hit.to > hit.from ? { from: at.from + hit.from, to: at.from + hit.to } : null;
+      };
+      let used = asked;
+      let range = found(asked, share);
+      // A word at the start or end of a line of the PDF may have been typed on a neighbouring
+      // line of a hard-wrapped paragraph: the one below first, then the one above.
+      if (!range && word)
+        for (const [n, along] of [
+          [asked + 1, undefined],
+          [asked - 1, 1],
+        ] as const)
+          if (n >= 1 && n <= lines.lines && (range = found(n, along))) {
+            used = n;
+            break;
+          }
+      const at = lines.line(used);
+      if (!range && share !== undefined) {
+        // Not a word: the start of the word nearest to how far along the line it was.
+        const near = wordAt(at.text, undefined, share);
+        if (near) range = { from: at.from + near.from, to: at.from + near.to };
+      }
+      // Otherwise the first thing written on the line, past its indentation.
+      const start = at.from + (at.text.length - at.text.trimStart().length);
+      const { from, to } = range ?? { from: start, to: start };
+      if (visual && modeNow.current === 'visual') visual.select(from, to);
+      else {
+        view.dispatch({ selection: { anchor: from, head: to }, scrollIntoView: true });
+        view.focus();
+      }
+      return used;
     };
     stretch.current = (orCaret = false) => {
       const inVisual = visual && modeNow.current === 'visual';
@@ -819,13 +861,14 @@ export default function FileEditor(props: {
         );
       return { from: place(from, 0), to: place(to, -1), words: text.toString().slice(from, to) };
     };
-    lineNow.current = () => {
+    placeNow.current = () => {
       if (visual && modeNow.current === 'visual') visual.catchUp();
-      return view.state.doc.lineAt(
+      const head =
         visual && modeNow.current === 'visual'
           ? visual.toSource(visual.editor.state.selection.head, -1)
-          : view.state.selection.main.head,
-      ).number;
+          : view.state.selection.main.head;
+      const at = view.state.doc.lineAt(head);
+      return { line: at.number, share: at.length ? (head - at.from) / at.length : 0 };
     };
 
     const setLocked = (on: boolean) => {
@@ -1084,7 +1127,7 @@ export default function FileEditor(props: {
               type="button"
               onClick={() =>
                 setNote(
-                  showInPdf({ fileId, line: lineNow.current() })
+                  showInPdf({ fileId, ...placeNow.current() })
                     ? ''
                     : 'There is no PDF to show it in yet.',
                 )

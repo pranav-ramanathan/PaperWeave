@@ -115,9 +115,12 @@ export function parseSyncTeX(text: string, base = '/work/'): SyncTeX {
 
 /**
  * Where a line of a file is in the PDF: the page, and the box around what it made there. A line
- * that made nothing (a comment, a blank line) gives the next line that did.
+ * that made nothing (a comment, a blank line) gives the next line that did. With `share`, how far
+ * along the line's own text the place is (0 its start, 1 its end), the place is that far along
+ * what the line made, which may run over several line boxes, columns or pages; the box of the
+ * line it is in is said as `left` and `width`.
  */
-export function toPdf(sync: SyncTeX, path: string, line: number) {
+export function toPdf(sync: SyncTeX, path: string, line: number, share?: number) {
   const file = sync.inputs.indexOf(path);
   if (file < 0) return null;
   // What a line only ended, or was stray in, is not what it made: a blank line that closed a
@@ -135,12 +138,39 @@ export function toPdf(sync: SyncTeX, path: string, line: number) {
   if (!made.length) return null;
   // Where the line's own text begins: the first thing it put inside a box, on the first page it
   // reached. (Its boxes alone can span columns, or a whole float.)
-  const page = Math.min(...made.map((r) => r.page));
+  let page = Math.min(...made.map((r) => r.page));
   const here = made.filter((r) => r.page === page);
-  const first = here.find((r) => !r.box) ?? here[0];
+  let first = here.find((r) => !r.box) ?? here[0];
+  // How far along: only for a line that made something itself, not the next one that did.
+  const inner = made.filter((r) => !r.box);
+  if (share !== undefined && Number.isFinite(share) && best === line && inner.length) {
+    first = inner[Math.round(Math.min(1, Math.max(0, share)) * (inner.length - 1))];
+    page = first.page;
+  }
+  // The smallest line box the place is in: where the line's text is, as wide as its column.
+  let box: SyncRecord | null = null;
+  for (const r of sync.records)
+    if (
+      r.page === page &&
+      r.box &&
+      r.w > 0 &&
+      r.h + r.d <= 30 &&
+      first.x >= r.x - 1 &&
+      first.x <= r.x + r.w + 1 &&
+      Math.abs(r.y - first.y) < 1 &&
+      (!box || r.w < box.w)
+    )
+      box = r;
   // Glue and kerns have no height of their own: allow for a line of text.
   const up = Math.max(first.h, 8);
-  return { page, x: first.x, y: first.y - up, height: up + Math.max(first.d, 2), line: best };
+  return {
+    page,
+    x: first.x,
+    y: first.y - up,
+    height: up + Math.max(first.d, 2),
+    line: best,
+    ...(box && { left: box.x, width: box.w }),
+  };
 }
 
 /** The paper's own records inside a line box, in the order TeX wrote them. */
@@ -172,7 +202,19 @@ export function toSource(sync: SyncTeX, page: number, x: number, y: number, near
     if (r.box && r.w > 0 && x >= r.x && x <= r.x + r.w && y >= r.y - r.h - 2 && y <= r.y + r.d + 2)
       if (!box || r.w * (r.h + r.d) < box.w * (box.h + box.d)) box = r;
   const text = box && box.h + box.d <= 30 ? box : null;
-  const answer = (r: SyncRecord) => ({ path: sync.inputs[r.file], line: r.line });
+  // How far along its line's own text a record is: from 0 at the first to 1 at the last. Said
+  // only when the line has more than one, and the record is one of them.
+  const answer = (r: SyncRecord) => {
+    const own = sync.records.filter(
+      (o) => o.file === r.file && o.line === r.line && !o.box && !o.stale,
+    );
+    const at = own.indexOf(r);
+    return {
+      path: sync.inputs[r.file],
+      line: r.line,
+      ...(at >= 0 && own.length > 1 && { share: at / (own.length - 1) }),
+    };
+  };
   if (text) {
     // Reading order: the last record at or left of the click, else the first one to its right.
     let left: SyncRecord | null = null;
