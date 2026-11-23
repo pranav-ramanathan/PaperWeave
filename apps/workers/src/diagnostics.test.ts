@@ -1673,3 +1673,146 @@ test('a catchfile error with no minted shell-escape error is left as it is', () 
     'Package minted Error: Missing Pygments output; \\inputminted was',
   ]);
 });
+
+// Which file a group or conditional was opened in is not in the log; the paper's own text says.
+const readFrom = (files: Record<string, string>) => {
+  const map = new Map(Object.entries(files));
+  return (name: string) => map.get(name);
+};
+const NEVER_GROUP =
+  'Never closed: the { opened on line 3 has no }. What it changes (a font, a size) runs on to the end of the paper.';
+
+test("a conditional a package left open is not the paper's", () => {
+  const log = [
+    '(./main.tex',
+    '(./naaclhlt2019.sty',
+    'Package: naaclhlt2019',
+    ')',
+    '(./abstract.tex',
+    ') [1{/usr/share/texlive/texmf-dist/fonts/map/pdftex/updmap/pdftex.map}]',
+    ' )',
+    '(\\end occurred when \\ifx on line 3 was incomplete) ',
+    "Here is how much of TeX's memory you used:",
+  ].join('\n');
+  const read = readFrom({
+    'main.tex': '\\documentclass{article}\n\\usepackage{naaclhlt2019}\n\n\\begin{document}\n',
+    'naaclhlt2019.sty':
+      '\\ProvidesPackage{naaclhlt2019}\n\\newif\\ifaclfinal\n\\RequirePackage{times}\n',
+    'abstract.tex': 'Words.\nMore words.\nStill words.\n',
+  });
+  const out = diagnostics(log, '', '', read);
+  expect(out.some((d) => d.message.startsWith('Never closed'))).toBe(false);
+});
+
+test("a group an installed package opened is not placed on the paper's line", () => {
+  const log = [
+    '(./main.tex',
+    ') (../texmf/leaky.sty',
+    'Package: leaky ',
+    ') (/usr/share/texlive/texmf-dist/tex/latex/l3backend/l3backend-pdftex.def',
+    ') (./main.aux)',
+    '(\\end occurred inside a group at level 1)',
+    '',
+    '### semi simple group (level 1) entered at line 5 (\\begingroup)',
+    '### bottom level',
+  ].join('\n');
+  const read = readFrom({
+    'main.tex': 'a\nb\nc\nd\n{\\itshape fine}\n',
+    'main.aux': '\\relax\n',
+  });
+  const out = diagnostics(log, '', '', read);
+  expect(out.some((d) => d.message.startsWith('Never closed'))).toBe(false);
+});
+
+const BODY_LOG = (entered: string) =>
+  [
+    '(./main.tex (./sections/body.tex)',
+    '(\\end occurred inside a group at level 1)',
+    '',
+    entered,
+    '### bottom level',
+  ].join('\n');
+
+test('one left open in a file read in is placed there', () => {
+  const read = readFrom({
+    'main.tex': '\\documentclass{article}\n\\begin{document}\n\n\\input{sections/body}\n',
+    'sections/body.tex': 'Intro.\n\nHello {\\bfseries world.\n',
+  });
+  expect(
+    diagnostics(BODY_LOG('### simple group (level 1) entered at line 3 ({)'), '', '', read),
+  ).toEqual([{ severity: 'warning', file: 'sections/body.tex', line: 3, message: NEVER_GROUP }]);
+});
+
+test('a folder for the root file is part of the place', () => {
+  const read = readFrom({
+    'main.tex': 'x\ny\n\n',
+    'sections/body.tex': 'Intro.\n\nHello {\\bfseries world.\n',
+  });
+  expect(
+    diagnostics(BODY_LOG('### simple group (level 1) entered at line 3 ({)'), '', 'paper/', read),
+  ).toEqual([
+    { severity: 'warning', file: 'paper/sections/body.tex', line: 3, message: NEVER_GROUP },
+  ]);
+});
+
+test('an \\ifdraft typed on the line is kept, though TeX names it \\iftrue', () => {
+  const log = [
+    '(./main.tex (./sections/body.tex)',
+    '(\\end occurred when \\iftrue on line 3 was incomplete)',
+  ].join('\n');
+  const read = readFrom({
+    'main.tex': 'a\nb\n\n',
+    'sections/body.tex': 'a\nb\n\\ifdraft x\n',
+  });
+  expect(diagnostics(log, '', '', read)).toEqual([
+    {
+      severity: 'warning',
+      file: 'sections/body.tex',
+      line: 3,
+      message: 'Never closed: \\iftrue on line 3 has no \\fi.',
+    },
+  ]);
+});
+
+test('guard: two files with an opener on the line stay unplaced', () => {
+  const read = readFrom({
+    'main.tex': 'a\nb\n{\\bf x\n',
+    'sections/body.tex': 'a\nb\nHello {\\bfseries world.\n',
+  });
+  const out = diagnostics(
+    BODY_LOG('### simple group (level 1) entered at line 3 ({)'),
+    '',
+    '',
+    read,
+  );
+  expect(out).toEqual([
+    {
+      severity: 'warning',
+      message: NEVER_GROUP.replace('on line 3', 'on line 3 (in the main file or one it reads in)'),
+    },
+  ]);
+});
+
+test('guard: a file that cannot be read leaves the warning as it was', () => {
+  const read = readFrom({ 'main.tex': 'a\nb\n\n' });
+  const out = diagnostics(
+    BODY_LOG('### simple group (level 1) entered at line 3 ({)'),
+    '',
+    '',
+    read,
+  );
+  expect(out).toEqual([
+    {
+      severity: 'warning',
+      message: NEVER_GROUP.replace('on line 3', 'on line 3 (in the main file or one it reads in)'),
+    },
+  ]);
+});
+
+test('guard: a brace only in a comment, or an escaped one, does not open a group', () => {
+  const entered = '### simple group (level 1) entered at line 3 ({)';
+  const comment = readFrom({ 'main.tex': 'a\nb\n\n', 'sections/body.tex': 'a\nb\nText % {\n' });
+  expect(diagnostics(BODY_LOG(entered), '', '', comment)).toEqual([]);
+  const escaped = readFrom({ 'main.tex': 'a\nb\n\n', 'sections/body.tex': 'a\nb\nText \\{ x\n' });
+  expect(diagnostics(BODY_LOG(entered), '', '', escaped)).toEqual([]);
+});

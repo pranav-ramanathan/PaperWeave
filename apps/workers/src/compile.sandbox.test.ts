@@ -526,6 +526,44 @@ test('a group left open builds, with a warning on the line that opened it', asyn
   ]);
 });
 
+test('a conditional a style file leaves open is not held against the paper', async () => {
+  const project = tmp();
+  writeFileSync(
+    join(project, 'venue.sty'),
+    // The faulty line is the style's line 5, and its line 3 opens nothing; TeX reports the kernel's \ifx at the main file's line 3.
+    '\\ProvidesPackage{venue}\n% A venue style.\n\\def\\venue{x}\n\\newif\\ifvenuefinal\n\\ifvenuefinal\\else\\pagenumbering{arabic}\n',
+  );
+  writeFileSync(
+    join(project, 'main.tex'),
+    '\\documentclass{article}\n\\usepackage{venue}\n\n\\begin{document}\nHello.\n\\end{document}\n',
+  );
+  const r = await compile(project, 'main.tex', tmp());
+  expect(r.ok).toBe(true);
+  expect(r.diagnostics.filter((d) => d.message.startsWith('Never closed'))).toEqual([]);
+});
+
+test('a group left open in a file read in is placed in that file', async () => {
+  const project = tmp();
+  mkdirSync(join(project, 'sections'));
+  writeFileSync(
+    join(project, 'main.tex'),
+    '\\documentclass{article}\n\\begin{document}\n\n\\input{sections/body}\n\\end{document}\n',
+  );
+  writeFileSync(join(project, 'sections/body.tex'), 'Intro.\n\nHello {\\bfseries world.\n');
+  const r = await compile(project, 'main.tex', tmp());
+  expect(r.ok).toBe(true);
+  const open = r.diagnostics.filter((d) => d.message.startsWith('Never closed'));
+  expect(open).toEqual([
+    {
+      severity: 'warning',
+      file: 'sections/body.tex',
+      line: 3,
+      message: expect.stringMatching(/^Never closed: the \{ opened on line 3 has no \}\./),
+    },
+  ]);
+  expect(open[0].message).not.toContain('in the main file');
+});
+
 test('a brace left open in the root file names no line it does not have', async () => {
   const project = tmp();
   writeFileSync(

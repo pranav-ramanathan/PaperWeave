@@ -45,9 +45,11 @@ import { compile, type Compiler, IMAGE } from './compile.ts';
  * be made."
  * '...-merged': one warning per heading for PDF bookmarks, one for font sizes; a LaTeX
  * warning's second line is read.
+ * '...-opened': a group or conditional left open by a package is not reported as the paper's;
+ * one left open in a file read in is placed in that file.
  */
 const TEX_TEXT =
-  'utf8-biber-eps-glyphs-strings-forcedate-unicode-nullfont-csname-bbl-ended-unclosed-group-bibentry-minted-nobib-merged';
+  'utf8-biber-eps-glyphs-strings-forcedate-unicode-nullfont-csname-bbl-ended-unclosed-group-bibentry-minted-nobib-merged-opened';
 
 /** The toolchain image's content ID: part of every cache key, so a new image rebuilds everything. */
 export const imageId = () =>

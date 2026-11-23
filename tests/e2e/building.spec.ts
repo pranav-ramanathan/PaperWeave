@@ -671,6 +671,80 @@ test('a group left open is listed on a build that worked, with a way to its line
   await audit(page, 'a group left open, in the build pane');
 });
 
+test('a style file that leaves a conditional open is not held against the paper', async ({
+  browser,
+}) => {
+  test.setTimeout(180_000);
+  const owner = await person(browser, 'build-sty-open');
+  const { page } = owner;
+  await page.goto('/sign-in');
+  await signIn(page, owner.email);
+  const zip = join(mkdtempSync(join(tmpdir(), 'paperweave-e2e-')), `Venue ${run}.zip`);
+  writeFileSync(
+    zip,
+    await writeZip([
+      {
+        path: 'main.tex',
+        bytes: Buffer.from(
+          '\\documentclass{article}\n\\usepackage{venue}\n\n\\begin{document}\nHello.\n\\end{document}\n',
+        ),
+      },
+      {
+        path: 'venue.sty',
+        bytes: Buffer.from(
+          '\\ProvidesPackage{venue}\n% A venue style.\n\\def\\venue{x}\n\\newif\\ifvenuefinal\n\\ifvenuefinal\\else\\pagenumbering{arabic}\n',
+        ),
+      },
+    ]),
+  );
+  await page.getByLabel('Or import a ZIP of a LaTeX project').setInputFiles(zip);
+  await page.getByRole('button', { name: 'Import ZIP' }).click();
+  await page.getByRole('link', { name: 'main.tex', exact: true }).click();
+  await showSource(page);
+  await expect(buildStatus(page)).toHaveText('The PDF is up to date.', { timeout: 60_000 });
+  await expect(page.getByText('Built, but something is left open:')).toHaveCount(0);
+  await expect(build(page).getByRole('list', { name: 'Left open' })).toHaveCount(0);
+  await audit(page, 'a style file that leaves a conditional open, in the build pane');
+});
+
+test('a brace left open in a section is shown at that file and line', async ({ browser }) => {
+  test.setTimeout(180_000);
+  const owner = await person(browser, 'build-sec-open');
+  const { page } = owner;
+  await page.goto('/sign-in');
+  await signIn(page, owner.email);
+  const zip = join(mkdtempSync(join(tmpdir(), 'paperweave-e2e-')), `Section ${run}.zip`);
+  writeFileSync(
+    zip,
+    await writeZip([
+      {
+        path: 'main.tex',
+        bytes: Buffer.from(
+          '\\documentclass{article}\n\\begin{document}\n\n\\input{sections/body}\n\\end{document}\n',
+        ),
+      },
+      {
+        path: 'sections/body.tex',
+        bytes: Buffer.from('Intro.\n\nHello {\\bfseries world.\n'),
+      },
+    ]),
+  );
+  await page.getByLabel('Or import a ZIP of a LaTeX project').setInputFiles(zip);
+  await page.getByRole('button', { name: 'Import ZIP' }).click();
+  await page.getByRole('link', { name: 'main.tex', exact: true }).click();
+  await showSource(page);
+  await expect(buildStatus(page)).toHaveText('The PDF is up to date.', { timeout: 60_000 });
+  const open = build(page).getByRole('list', { name: 'Left open' });
+  await expect(open).toContainText(/sections\/body\.tex:3 the \{ opened on line 3 has no \}/);
+  await expect(open).not.toContainText('in the main file');
+
+  // The button opens that file, with the caret on the line.
+  await open.getByRole('button', { name: /^sections\/body\.tex:3/ }).click();
+  await expect(page.getByRole('region', { name: 'Editor for sections/body.tex' })).toBeVisible();
+  await expect.poll(() => caretLine(page)).toBe(3);
+  await audit(page, 'a brace left open in a section, in the build pane');
+});
+
 test('a paper built with the wrong engine is given another on its page, and then builds', async ({
   browser,
 }) => {
