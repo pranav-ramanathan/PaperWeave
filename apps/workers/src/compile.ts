@@ -575,7 +575,8 @@ export async function compile(
       // \input, as the rest of the app reads paths.
       [
         ...['latexmk', '-norc', ...(dashed ? [] : ['-cd']), ENGINE[compiler], '-no-shell-escape'],
-        // -bibtex-cond: BibTeX only where there is a .bib file, so a ready-made .bbl is left be.
+        // -bibtex-cond: no BibTeX where a named .bib is missing; LATEXMK_RULES' pw_bib also skips
+        // it where the .aux names no .bib at all (a paper that \input's its own .bbl).
         ...['-bibtex-cond', '-interaction=nonstopmode'],
         // Our own rules for glossaries and nomenclature: -norc leaves latexmk with none.
         ...['-e', LATEXMK_RULES],

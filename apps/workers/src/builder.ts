@@ -28,8 +28,10 @@ import { compile, type Compiler, IMAGE } from './compile.ts';
  * were applied together, in the change that made the constant say so.
  * '...-nullfont-csname': "Undefined control sequence." names the command now; a cached failed
  * build keeps the bare message.
+ * '...-bbl': a paper that reads its own .bbl and has no \bibliography builds now; a cached
+ * failed build would keep it failed.
  */
-const TEX_TEXT = 'utf8-biber-eps-glyphs-strings-forcedate-unicode-nullfont-csname';
+const TEX_TEXT = 'utf8-biber-eps-glyphs-strings-forcedate-unicode-nullfont-csname-bbl';
 
 /** The toolchain image's content ID: part of every cache key, so a new image rebuilds everything. */
 export const imageId = () =>

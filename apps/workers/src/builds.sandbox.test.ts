@@ -865,6 +865,41 @@ test('a .bbl is used when the paper names a .bib that is not in the ZIP, though 
   expect(built.diagnostics.filter((d) => /undefined/.test(d.message))).toEqual([]);
 });
 
+test.each([
+  ['no .bib in the ZIP', {}],
+  [
+    'an unrelated .bib in the ZIP',
+    {
+      'sample.bib':
+        '@book{other, author={O. Other}, title={Unrelated}, publisher={P}, year=1999}\n',
+    },
+  ],
+])(
+  "a paper that \\input's its own .bbl and has no \\bibliography builds (%s)",
+  async (_n, extra) => {
+    const { built, text, errors } = await importAndBuild({
+      'main.tex': tex('Hi \\cite{k}\n\\input{main.bbl}'),
+      'main.bbl': BBL,
+      ...extra,
+    });
+    expect(errors).toEqual([]);
+    expect(built).toMatchObject({ status: 'succeeded', hasPdf: true });
+    expect(text).toContain('A Book');
+    expect(text).not.toContain('?');
+    expect(built.diagnostics.filter((d) => /undefined|bibliography/i.test(d.message))).toEqual([]);
+  },
+);
+
+test("a paper that \\nocite{*}s and \\input's its own .bbl builds", async () => {
+  const { built, text, errors } = await importAndBuild({
+    'main.tex': tex('Hi\n\\nocite{*}\n\\input{main.bbl}'),
+    'main.bbl': BBL,
+  });
+  expect(errors).toEqual([]);
+  expect(built).toMatchObject({ status: 'succeeded', hasPdf: true });
+  expect(text).toContain('A Book');
+});
+
 test('the next build taken is the one whose requester has had the fewest done, not the oldest', async () => {
   const a = await t.signIn('fair-a@example.org');
   const b = await t.signIn('fair-b@example.org');
