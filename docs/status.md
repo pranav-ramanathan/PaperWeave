@@ -5429,3 +5429,24 @@ closed: ...` (outermost first, at most 10). The log does not name the file: with
 - **Not done.** Withdraw is not checked (it is the author's own, and decides nothing about what
   it says). A tab opened before this deploy sends no `seen` and behaves as before. The race
   between the check and the write is closed by the update's `where` clause, which has no test.
+
+## Resolve hides a reply that was never seen
+
+- **What was wrong.** Ana replies "Don't close this, Table 2 is wrong". Ben's card still shows the
+  old thread, so he presses Resolve, and the thread drops into "Resolved (n)" with the objection
+  unread and no notice. Smaller: a reply sent just after the last comment of a thread was deleted
+  brought the thread back holding only an answer to nothing.
+- **Now.** Each thread carries a `mark`, a digest of its live comments and when each was last
+  changed. Resolve sends the mark the card was drawn from; if anyone has written, changed or
+  deleted a comment since, the server refuses (`conflict`) in the same statement that would have
+  resolved it, the page reads the thread again, and says "Someone wrote in this thread after you
+  last saw it". The reply stays in the open list, the Resolve button keeps the keyboard, and the
+  next press sends the new mark. Opening again is never guarded; an older page that sends no mark
+  behaves as before. A reply to a thread with no live comment is refused. No schema change; the
+  mark is never logged.
+- **Held by** two sandbox tests in `threads.sandbox.test.ts` and `threads.spec` ("Resolve refuses
+  a thread someone wrote in after it was drawn"). Each failed on the old code.
+- **Not done.** A reply sent to a thread resolved a moment earlier is still taken and lands in
+  Resolved; the owner's Delete of a comment its author changed a moment earlier is not guarded;
+  the mark does not cover the text under the thread; a draft is still lost when its thread
+  disappears.

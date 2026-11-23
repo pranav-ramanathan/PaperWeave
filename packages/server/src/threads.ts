@@ -46,6 +46,8 @@ export type Thread = {
   status: 'open' | 'resolved';
   startedBy: string | null;
   createdAt: string;
+  /** Stands for the comments as listed. Sent back with Resolve, which refuses if they have changed. */
+  mark: string;
   comments: ThreadComment[];
 };
 
@@ -54,6 +56,12 @@ export const MENTION_EMAILS_PER_HOUR = 60;
 
 const EXCERPT = 500;
 const CONTEXT = 80;
+/**
+ * A SQL expression, over a threads row aliased `t`, that stands for its live comments and when
+ * each was last changed. It differs after a reply, a change or a deletion.
+ */
+const MARK = `(select md5(coalesce(string_agg(c.id::text || ':' || coalesce(extract(epoch from c.edited_at)::text, ''), ',' order by c.created_at, c.id), ''))
+  from thread_comments c where c.thread_id = t.id and c.deleted_at is null)`;
 const bad = (why: string) => new AppError('invalid_input', why);
 
 /** A file's text as the log has it. */
@@ -202,12 +210,19 @@ export async function reply(
   await authorize(db, userId, id(projectId), 'comment.write');
   await mayWrite(db, userId, projectId);
   const thread = (
-    await db.query('select file_id from threads where id = $1 and project_id = $2', [
-      id(threadId),
-      projectId,
-    ])
+    await db.query(
+      `select t.file_id,
+              exists(select 1 from thread_comments c where c.thread_id = t.id and c.deleted_at is null) as live
+       from threads t where t.id = $1 and t.project_id = $2`,
+      [id(threadId), projectId],
+    )
   ).rows[0];
   if (!thread) throw new AppError('not_found', 'No such thread.');
+  if (!thread.live)
+    throw new AppError(
+      'conflict',
+      'Every comment in this thread has been deleted. Start a new thread on the text.',
+    );
   const said = body(input.body);
   const mentions = await members(db, projectId, input.mentions);
   await db.query(
@@ -277,23 +292,39 @@ export async function deleteComment(
   ]);
 }
 
-/** Mark a thread as dealt with, or open it again. */
+/**
+ * Mark a thread as dealt with, or open it again. Resolving may carry `seen`, the thread's `mark`
+ * as the resolver was shown it: if anyone has written in the thread since, it is refused.
+ */
 export async function setThreadStatus(
   db: Db,
   userId: string,
   projectId: string,
   threadId: string,
   status: unknown,
+  seen?: unknown,
 ): Promise<void> {
   await authorize(db, userId, id(projectId), 'comment.write');
   if (status !== 'open' && status !== 'resolved') throw bad('A thread is open or resolved.');
+  if (seen !== undefined && (typeof seen !== 'string' || !/^[0-9a-f]{32}$/.test(seen)))
+    throw bad('Say which thread you were looking at.');
+  const shown = status === 'resolved' ? (seen ?? null) : null;
   const done = await db.query(
-    `update threads set status = $3, resolved_by = case when $3 = 'resolved' then $4::uuid end,
+    `update threads t set status = $3, resolved_by = case when $3 = 'resolved' then $4::uuid end,
        resolved_at = case when $3 = 'resolved' then now() end
-     where id = $1 and project_id = $2`,
-    [id(threadId), projectId, status, userId],
+     where t.id = $1 and t.project_id = $2 and ($5::text is null or ${MARK} = $5)`,
+    [id(threadId), projectId, status, userId, shown],
   );
-  if (!done.rowCount) throw new AppError('not_found', 'No such thread.');
+  if (done.rowCount) return;
+  const there = await db.query('select 1 from threads where id = $1 and project_id = $2', [
+    id(threadId),
+    projectId,
+  ]);
+  if (!there.rowCount) throw new AppError('not_found', 'No such thread.');
+  throw new AppError(
+    'conflict',
+    'Someone wrote in this thread after you last saw it. It is shown as it now reads: read it before resolving.',
+  );
 }
 
 /**
@@ -391,7 +422,7 @@ export async function listThreads(
   const role = await authorize(pool, userId, id(projectId), 'project.read');
   const { rows } = await pool.query(
     `select t.id, t.file_id, f.path, t.anchor_from, t.anchor_to, t.excerpt, t.context_before,
-            t.context_after, t.fingerprint, t.status, t.created_at,
+            t.context_after, t.fingerprint, t.status, t.created_at, ${MARK} as mark,
             coalesce(u.email, t.imported_author) as email
      from threads t join files f on f.id = t.file_id left join "user" u on u.id = t.created_by
      where t.project_id = $1 and ($2::uuid is null or t.file_id = $2)
@@ -436,6 +467,7 @@ export async function listThreads(
       status: r.status,
       startedBy: r.email,
       createdAt: r.created_at.toISOString(),
+      mark: r.mark,
       comments: comments
         .filter((c) => c.thread_id === r.id)
         .map((c) => ({

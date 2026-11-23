@@ -41,6 +41,8 @@ const MAIN =
 async function paper() {
   const zip = await writeZip([{ path: 'main.tex', bytes: Buffer.from(MAIN) }]);
   const [project] = await importZip(t.pool, store, users.owner.id, zip, 'Threads');
+  // Each paper invites two people; many papers in this file would reach the hourly limit.
+  await t.pool.query("update invitations set created_at = now() - interval '2 hours'");
   for (const who of ['reviewer', 'viewer'] as const) {
     const { token } = await invite(t.pool, users.owner.id, project.id, users[who].email, who);
     await acceptInvitation(t.pool, users[who].id, token);
@@ -539,6 +541,79 @@ test('a paper whose only thread has no comment left has no unfinished review', a
   const [{ comments }] = await threads(p);
   await deleteComment(t.pool, users.reviewer.id, p.id, made.id, comments[0].id);
   expect(await warned()).toEqual([]);
+});
+
+test('a thread is not resolved over a comment its resolver was not shown', async () => {
+  const p = await paper();
+  const made = await startThread(t.pool, store, users.reviewer.id, p.id, p.file, {
+    ...(await ends(p.file, 'below 40 ms')),
+    body: 'Is that measured?',
+  });
+  const mark = async () => (await threads(p))[0].mark;
+  const resolve = (seen?: unknown, who = users.owner, paper = p.id, thread = made.id) =>
+    setThreadStatus(t.pool, who.id, paper, thread, 'resolved', seen);
+  const m0 = await mark();
+  expect(m0).toMatch(/^[0-9a-f]{32}$/);
+
+  // Someone writes in the thread after the resolver's page was drawn.
+  await reply(t.pool, users.reviewer.id, p.id, made.id, { body: 'Wait: the number is wrong.' });
+  expect(await code(resolve(m0))).toBe('conflict');
+  const row = () =>
+    t.pool
+      .query('select status, resolved_at from threads where id = $1', [made.id])
+      .then((r) => r.rows[0]);
+  expect(await row()).toMatchObject({ status: 'open', resolved_at: null });
+  const m1 = await mark();
+  expect(m1).not.toBe(m0);
+
+  // A change to a comment, and the deletion of one, each move the mark.
+  const [{ comments }] = await threads(p);
+  await editComment(t.pool, users.reviewer.id, p.id, made.id, comments[1].id, {
+    body: 'Wait: the number is wrong, twice.',
+  });
+  const m2 = await mark();
+  expect(m2).not.toBe(m1);
+  await deleteComment(t.pool, users.reviewer.id, p.id, made.id, comments[1].id);
+  const m3 = await mark();
+  expect(m3).not.toBe(m2);
+  expect(await code(resolve(m2))).toBe('conflict');
+
+  // Bad marks are refused as input; a valid-looking mark on another paper or thread is not found.
+  expect(await code(resolve('x'))).toBe('invalid_input');
+  expect(await code(resolve(5))).toBe('invalid_input');
+  const other = await paper();
+  expect(await code(resolve(m3, users.owner, other.id))).toBe('not_found');
+  expect(await code(resolve(m3, users.owner, p.id, '00000000-0000-4000-8000-000000000000'))).toBe(
+    'not_found',
+  );
+  expect((await row()).status).toBe('open');
+
+  // The current mark resolves; opening again is never guarded; no mark behaves as it did.
+  expect(await code(resolve(m3))).toBe('ok');
+  expect((await row()).status).toBe('resolved');
+  expect(await code(setThreadStatus(t.pool, users.owner.id, p.id, made.id, 'open', m0))).toBe('ok');
+  expect((await row()).status).toBe('open');
+  expect(await code(resolve())).toBe('ok');
+  expect((await row()).status).toBe('resolved');
+});
+
+test('a reply to a thread with no comment left is refused', async () => {
+  const p = await paper();
+  const made = await startThread(t.pool, store, users.reviewer.id, p.id, p.file, {
+    ...(await ends(p.file, 'below 40 ms')),
+    body: 'Oops, wrong paper.',
+  });
+  const [{ comments }] = await threads(p);
+  await deleteComment(t.pool, users.reviewer.id, p.id, made.id, comments[0].id);
+  expect(
+    await code(reply(t.pool, users.owner.id, p.id, made.id, { body: 'An answer to nothing.' })),
+  ).toBe('conflict');
+  const { rows } = await t.pool.query(
+    'select count(*)::int as n from thread_comments where thread_id = $1',
+    [made.id],
+  );
+  expect(rows[0].n).toBe(1);
+  expect(await threads(p)).toEqual([]);
 });
 
 test('deleting comments does not reset the limit on mention emails', async () => {
