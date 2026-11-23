@@ -1816,3 +1816,231 @@ test('guard: a brace only in a comment, or an escaped one, does not open a group
   const escaped = readFrom({ 'main.tex': 'a\nb\n\n', 'sections/body.tex': 'a\nb\nText \\{ x\n' });
   expect(diagnostics(BODY_LOG(entered), '', '', escaped)).toEqual([]);
 });
+
+// BibTeX's words for errors that name no line of a .bib, as a real run (TeX Live 2022) wrote them
+// for small made-up papers.
+const BIBTEX_RUN = (said: string[], style = 'plain.bst') =>
+  [
+    'This is BibTeX, Version 0.99d (TeX Live 2022/Debian)',
+    'The top-level auxiliary file: main.aux',
+    `The style file: ${style}`,
+    'Database file #1: refs.bib',
+    ...said,
+    `(There ${said.length > 2 ? 'were 2 error messages' : 'was 1 error message'})`,
+    'Latexmk: Errors, so I did not complete making targets',
+    'Collected error summary (may duplicate other messages):',
+    "  bibtex main: Bibtex errors: See file 'main.blg'",
+  ].join('\n');
+const GENERIC = 'The bibliography could not be made. The build log has the details.';
+const COMMA_END = [
+  'Name 2 in "Bo Chen and Di Wu, and Ed Poe" has a comma at the end for entry b',
+  'while executing---line 1049 of file plain.bst',
+  'Name 2 in "Bo Chen and Di Wu, and Ed Poe" has a comma at the end for entry b',
+  'while executing---line 1090 of file plain.bst',
+];
+const COMMA_END_BIB = [
+  '@article{a, author = {Ann Lee}, title = {One}, journal = {J}, year = 2001}',
+  '@article{b,',
+  '  title = {Two},',
+  '  author = {Bo Chen and Di Wu, and Ed Poe},',
+  '  journal = {J}, year = 2002}',
+  '',
+].join('\n');
+const ENDS_WITH_A_COMMA =
+  'In the reference b, name 2 of the author field ends with a comma. Put only "and" between names, with no comma before it.';
+
+test('a comma before and is placed at the author line of the reference', () => {
+  const out = diagnostics('', BIBTEX_RUN(COMMA_END), '', readFrom({ 'refs.bib': COMMA_END_BIB }));
+  expect(out).toEqual([
+    { severity: 'error', file: 'refs.bib', line: 4, message: ENDS_WITH_A_COMMA },
+  ]);
+});
+
+test('too many commas names the field it is in', () => {
+  const lines = [
+    ...[1, 2].flatMap(() => [
+      'Too many commas in name 1 of "Lee, Ann, Jr, Dr, X" for entry b',
+      'while executing---line 1347 of file plainnat.bst',
+    ]),
+    'Too many commas in name 1 of "Roe, Cy, Jr, Dr, X and Al Poe," for entry c',
+    'while executing---line 1347 of file plainnat.bst',
+    'Name 2 in "Roe, Cy, Jr, Dr, X and Al Poe," has a comma at the end for entry c',
+    'while executing---line 1347 of file plainnat.bst',
+    'Too many commas in name 1 of "Lee, Ann, Jr, Dr, X" for entry b',
+    'while executing---line 1429 of file plainnat.bst',
+    'Name 2 in "Roe, Cy, Jr, Dr, X and Al Poe," has a comma at the end for entry c',
+    'while executing---line 1429 of file plainnat.bst',
+  ];
+  const bib = [
+    '@article{a, author = {Ann Lee}, title = {One}, journal = {J}, year = 2001}',
+    '@article{b, author = {Lee, Ann, Jr, Dr, X}, title = {Two}, journal = {J}, year = 2002}',
+    '@book{c, editor = {Roe, Cy, Jr, Dr, X and Al Poe,}, title = {Three}, publisher = {P}, year = 2003}',
+    '',
+  ].join('\n');
+  const many = (n: number, f: string) =>
+    `In the reference ${n === 2 ? 'b' : 'c'}, name 1 of the ${f} field has too many commas. Write each name as "First Last" or "Last, First", with "and" between names.`;
+  const out = diagnostics('', BIBTEX_RUN(lines, 'plainnat.bst'), '', readFrom({ 'refs.bib': bib }));
+  expect(out).toEqual([
+    { severity: 'error', file: 'refs.bib', line: 2, message: many(2, 'author') },
+    { severity: 'error', file: 'refs.bib', line: 3, message: many(3, 'editor') },
+    {
+      severity: 'error',
+      file: 'refs.bib',
+      line: 3,
+      message:
+        'In the reference c, name 2 of the editor field ends with a comma. Put only "and" between names, with no comma before it.',
+    },
+  ]);
+});
+
+test('without the .bib it still names the reference', () => {
+  expect(diagnostics('', BIBTEX_RUN(COMMA_END))).toEqual([
+    {
+      severity: 'error',
+      message: ENDS_WITH_A_COMMA.replace('author field', 'author or editor field'),
+    },
+  ]);
+});
+
+test('a paper in a folder has its .bib named with the folder', () => {
+  const out = diagnostics(
+    '',
+    BIBTEX_RUN(COMMA_END),
+    'paper/',
+    readFrom({ 'refs.bib': COMMA_END_BIB }),
+  );
+  expect(out).toEqual([
+    { severity: 'error', file: 'paper/refs.bib', line: 4, message: ENDS_WITH_A_COMMA },
+  ]);
+});
+
+test('a crossref to nothing is placed at the crossref line', () => {
+  const bib = [
+    '@article{a, author = {Ann Lee}, title = {One}, journal = {J}, year = 2001}',
+    '@inproceedings{b, author = {Bo Chen and Di Wu}, title = {Two}, crossref = {nope}, year = 2002}',
+    '',
+  ].join('\n');
+  const said = [
+    'A bad cross reference---entry "b"',
+    'refers to entry "nope", which doesn\'t exist',
+    'Warning--I didn\'t find a database entry for "nope"',
+    'Warning--empty booktitle in b',
+  ];
+  expect(diagnostics('', BIBTEX_RUN(said), '', readFrom({ 'refs.bib': bib }))).toEqual([
+    {
+      severity: 'error',
+      file: 'refs.bib',
+      line: 2,
+      message:
+        "In the reference b, crossref names nope, which is in none of the paper's .bib files.",
+    },
+  ]);
+});
+
+test.each([
+  [
+    'key-space',
+    [
+      'White space in argument---line 3 of file main.aux',
+      ' : \\citation{b',
+      ' :             c}',
+      "I'm skipping whatever remains of this command",
+    ],
+    'A citation key has a space in it ("b c"). A key is one word; put a comma between two keys.',
+  ],
+  [
+    'two-bibs',
+    [
+      'Illegal, another \\bibdata command---line 7 of file main.aux',
+      ' : \\bibdata',
+      ' :         {refs}',
+      "I'm skipping whatever remains of this command",
+    ],
+    'The paper has more than one \\bibliography{\u2026}, and BibTeX reads only one. Name every .bib file in one \\bibliography, with commas between them.',
+  ],
+  [
+    'two-styles',
+    [
+      'Illegal, another \\bibstyle command---line 6 of file main.aux',
+      ' : \\bibstyle',
+      ' :          {abbrv}',
+      "I'm skipping whatever remains of this command",
+    ],
+    'The paper has more than one \\bibliographystyle{\u2026}, and BibTeX takes only one.',
+  ],
+  [
+    'case',
+    [
+      'Case mismatch error between cite keys B and b',
+      '---line 5 of file main.aux',
+      ' : \\citation{B',
+      ' :            }',
+      "I'm skipping whatever remains of this command",
+    ],
+    'The paper cites B and b, which BibTeX reads as one key spelt two ways. Use one spelling.',
+  ],
+  [
+    'twice',
+    [
+      'This database file appears more than once: refs.bib',
+      '---line 6 of file main.aux',
+      ' : \\bibdata{refs,refs',
+      ' :                   }',
+      "I'm skipping whatever remains of this command",
+    ],
+    '\\bibliography{\u2026} names refs.bib more than once.',
+  ],
+])(
+  "a command of the paper BibTeX cannot take (%s) is said in the paper's terms",
+  (_, said, message) => {
+    const out = diagnostics('', BIBTEX_RUN(said), '', readFrom({ 'refs.bib': COMMA_END_BIB }));
+    expect(out).toEqual([{ severity: 'error', message }]);
+  },
+);
+
+test("a style file of the paper's that BibTeX cannot read is named at its line", () => {
+  const said = [
+    'Illegal end of style file in command: function---line 400 of file mine.bst',
+    ' : { chapter empty$',
+    ' :                 ',
+  ];
+  const out = (read?: (f: string) => string | undefined) =>
+    diagnostics('', BIBTEX_RUN(said, 'mine.bst'), '', read);
+  expect(out(readFrom({ 'mine.bst': 'FUNCTION {x}\n' }))).toEqual([
+    {
+      severity: 'error',
+      file: 'mine.bst',
+      line: 400,
+      message:
+        'BibTeX cannot read the bibliography style mine.bst: Illegal end of style file in command: function.',
+    },
+  ]);
+  expect(out()).toEqual([
+    {
+      severity: 'error',
+      message:
+        'BibTeX cannot read the bibliography style mine.bst: Illegal end of style file in command: function (line 400).',
+    },
+  ]);
+});
+
+test('more than ten bad names are ten errors', () => {
+  const names = Array.from({ length: 12 }, (_, i) => `Bo${'x'.repeat(i)} Chen and Di Wu,`);
+  const bib = names.map((n, i) => `@article{k${i}, author = {${n}}, title = {T}}\n`).join('');
+  const said = names.flatMap((n, i) => [
+    `Name 2 in "${n}" has a comma at the end for entry k${i}`,
+    'while executing---line 1049 of file plain.bst',
+  ]);
+  const out = diagnostics('', BIBTEX_RUN(said), '', readFrom({ 'refs.bib': bib }));
+  expect(out).toHaveLength(10);
+  expect(out.map((d) => d.line)).toEqual([1, 2, 3, 4, 5, 6, 7, 8, 9, 10]);
+});
+
+test('guard: a BibTeX warning alone is not an error', () => {
+  expect(diagnostics('', 'Warning--empty journal in a\n(There was 1 warning)\n')).toEqual([]);
+});
+
+test('guard: a failure BibTeX gave no reason for still gets the old sentence', () => {
+  const out = diagnostics('', BIBTEX_RUN([]).replace('(There was 1 error message)\n', ''));
+  expect(out).toEqual([{ severity: 'error', message: GENERIC }]);
+});

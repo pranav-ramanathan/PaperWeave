@@ -340,6 +340,58 @@ test('a bare & in a .bib names the reference and field, and the error opens the 
   await expect(errors).toHaveCount(0);
 });
 
+test('a comma before and in a .bib is shown at that reference, and the error opens the .bib there', async ({
+  browser,
+}) => {
+  test.setTimeout(180_000);
+  const owner = await person(browser, 'build-comma-and');
+  const { page } = owner;
+  await page.goto('/sign-in');
+  await signIn(page, owner.email);
+  const zip = join(mkdtempSync(join(tmpdir(), 'paperweave-e2e-')), `Comma ${run}.zip`);
+  writeFileSync(
+    zip,
+    await writeZip([
+      {
+        path: 'main.tex',
+        bytes: Buffer.from(
+          '\\documentclass{article}\n\\begin{document}\nSee \\cite{a,b,c}.\n\\bibliographystyle{plain}\n\\bibliography{refs}\n\\end{document}\n',
+        ),
+      },
+      {
+        path: 'refs.bib',
+        bytes: Buffer.from(
+          [
+            '@article{a, author = {Ann Lee}, title = {One}, journal = {J}, year = 2001}',
+            '@article{b,',
+            '  title = {Two},',
+            '  author = {Bo Chen and Di Wu, and Ed Poe},',
+            '  journal = {J}, year = 2002}',
+            '@article{c, author = {Cy Roe}, title = {Three}, journal = {J}, year = 2003}',
+            '',
+          ].join('\n'),
+        ),
+      },
+    ]),
+  );
+  await page.getByLabel('Or import a ZIP of a LaTeX project').setInputFiles(zip);
+  await page.getByRole('button', { name: 'Import ZIP' }).click();
+  await page.getByRole('link', { name: 'main.tex', exact: true }).click();
+  await showSource(page);
+  await expect(buildStatus(page)).toHaveText('The latest build failed.', { timeout: 60_000 });
+  const errors = build(page).getByRole('list', { name: 'Build errors' });
+  await expect(errors).toContainText(
+    /refs\.bib:4 In the reference b, name 2 of the author field ends with a comma/,
+  );
+  await expect(errors).not.toContainText('The bibliography could not be made');
+
+  // The error is a button into the .bib, with the caret on the author line.
+  await errors.getByRole('button', { name: /^refs\.bib:4/ }).click();
+  await expect(page.getByRole('region', { name: 'Editor for refs.bib' })).toBeVisible();
+  await expect.poll(() => caretLine(page)).toBe(4);
+  await audit(page, 'a BibTeX error placed at a reference, in the build pane');
+});
+
 test('the PDF is behind only when the paper has changed, and is built once for each change', async ({
   browser,
 }) => {

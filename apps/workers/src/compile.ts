@@ -392,6 +392,121 @@ export function diagnostics(
     };
     if (!out.some((e) => JSON.stringify(e) === JSON.stringify(d))) out.push(d);
   }
+  // The rest of BibTeX's errors name no line of a .bib; the build still fails on each. Three shapes:
+  // one found while the style runs ("Name 2 in "..." has a comma at the end for entry b", then
+  // "while executing---line 1049 of file plain.bst") names the reference, which is looked up in
+  // the .bib files; one in the .aux ("White space in argument---line 3 of file main.aux") is about
+  // a command of the paper's; one in a style file is placed there if the style is the paper's.
+  const said = (d: Diagnostic) => {
+    if (!out.some((e) => JSON.stringify(e) === JSON.stringify(d))) out.push(d);
+  };
+  // The line of a field of a reference (else the reference's own), in the .bib that has it.
+  const inBib = (key: string, field: (fields: Record<string, string>) => string | undefined) => {
+    for (const file of read ? bibFiles(output) : []) {
+      const text = read?.(file);
+      const entry = text === undefined ? undefined : bibEntries(text).find((e) => e.key === key);
+      if (text === undefined || !entry) continue;
+      const name = field(entry.fields);
+      const first = text.slice(0, entry.at).split('\n').length;
+      const at = name
+        ? text
+            .slice(entry.at, entry.end)
+            .split('\n')
+            .findIndex((l) => new RegExp(`^\\s*${name}\\s*=`, 'i').test(l))
+        : -1;
+      return { file, line: first + Math.max(at, 0), field: name };
+    }
+    return undefined;
+  };
+  let nameErrors = 0;
+  for (const m of output.matchAll(
+    /^(.+?)(?: for entry (\S+))?\r?\nwhile executing-+line \d+ of file \S+\r?$/gm,
+  )) {
+    const name =
+      /^Name (\d+) in "(.*)" has (a comma at the end)$/.exec(m[1]) ??
+      /^(Too many commas) in name (\d+) of "(.*)"$/.exec(m[1]);
+    if (!name || !m[2]) {
+      said({
+        severity: 'error',
+        message: `BibTeX: ${m[1]}${m[2] ? ` (in the reference ${m[2]})` : ''}.`,
+      });
+      continue;
+    }
+    const ends = name[1] !== 'Too many commas';
+    const [n, quoted] = ends ? [name[1], name[2]] : [name[2], name[3]];
+    const value = quoted.replace(/\s+/g, ' ').trim();
+    const at = inBib(m[2], (fields) =>
+      Object.keys(fields).find((f) => fields[f].replace(/\s+/g, ' ').trim() === value),
+    );
+    const d: Diagnostic = {
+      severity: 'error',
+      ...(at ? { file: at.file, line: at.line } : {}),
+      message:
+        `In the reference ${m[2]}, name ${n} of the ${at?.field ?? 'author or editor'} field ` +
+        (ends
+          ? 'ends with a comma. Put only "and" between names, with no comma before it.'
+          : 'has too many commas. Write each name as "First Last" or "Last, First", with "and" between names.'),
+    };
+    if (out.some((e) => JSON.stringify(e) === JSON.stringify(d))) continue;
+    if (++nameErrors <= 10) out.push(d);
+  }
+  for (const m of output.matchAll(
+    /^A bad cross reference-+entry "(.+?)"\r?\nrefers to entry "(.+?)", which doesn't exist\r?$/gm,
+  )) {
+    const at = inBib(m[1], (fields) => ('crossref' in fields ? 'crossref' : undefined));
+    said({
+      severity: 'error',
+      ...(at ? { file: at.file, line: at.line } : {}),
+      message: `In the reference ${m[1]}, crossref names ${m[2]}, which is in none of the paper's .bib files.`,
+    });
+  }
+  const AUX: [RegExp, (m: RegExpExecArray, shown: string) => string][] = [
+    [
+      /^White space in argument$/,
+      (_, shown) =>
+        `A citation key has a space in it${shown ? ` ("${shown}")` : ''}. A key is one word; put a comma between two keys.`,
+    ],
+    [
+      /^Illegal, another \\bibdata command$/,
+      () =>
+        'The paper has more than one \\bibliography{\u2026}, and BibTeX reads only one. Name every .bib file in one \\bibliography, with commas between them.',
+    ],
+    [
+      /^Illegal, another \\bibstyle command$/,
+      () => 'The paper has more than one \\bibliographystyle{\u2026}, and BibTeX takes only one.',
+    ],
+    [
+      /^Case mismatch error between cite keys (\S+) and (\S+)$/,
+      (k) =>
+        `The paper cites ${k[1]} and ${k[2]}, which BibTeX reads as one key spelt two ways. Use one spelling.`,
+    ],
+    [
+      /^This database file appears more than once: (.+)$/,
+      (k) => `\\bibliography{\u2026} names ${k[1]} more than once.`,
+    ],
+  ];
+  for (const m of output.matchAll(
+    /^(.+?)\r?\n?-+line \d+ of file \S+\.aux\r?\n : (.*)\r?\n : \s*(.*)\r?$/gm,
+  )) {
+    // Said further down, as a file that is missing.
+    if (/^I couldn't open (?:database|style) file /.test(m[1])) continue;
+    const hit = AUX.map(([re, say]) => [re.exec(m[1]), say] as const).find(([k]) => k);
+    const key = /^\\citation\{(.*)\}$/.exec(`${m[2]} ${m[3]}`)?.[1];
+    said({
+      severity: 'error',
+      message: hit?.[0] ? hit[1](hit[0], key ?? '') : `BibTeX: ${m[1]}.`,
+    });
+  }
+  for (const m of output.matchAll(
+    /^(?!while executing)(.+?)-+line (\d+) of file (?:\.\/)?(\S+\.bst)\r?$/gm,
+  )) {
+    const own = read?.(m[3]) !== undefined;
+    said({
+      severity: 'error',
+      ...(own ? { file: m[3], line: Number(m[2]) } : {}),
+      message: `BibTeX cannot read the bibliography style ${m[3]}: ${m[1]}${own ? '' : ` (line ${m[2]})`}.`,
+    });
+  }
   // An abbreviation no @string defines (journal = cvpr): both tools go on and print the
   // reference without the field, exit 0. BibTeX says "Warning--string name "cvpr" is undefined"
   // and, on the next line, "--line 4 of file refs.bib" (once per run, so latexmk repeats it);

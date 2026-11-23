@@ -47,9 +47,11 @@ import { compile, type Compiler, IMAGE } from './compile.ts';
  * warning's second line is read.
  * '...-opened': a group or conditional left open by a package is not reported as the paper's;
  * one left open in a file read in is placed in that file.
+ * '...-bibsaid': a BibTeX error about a name, a cross reference, the citations or the style says
+ * what and where; a cached failed build keeps "The bibliography could not be made."
  */
 const TEX_TEXT =
-  'utf8-biber-eps-glyphs-strings-forcedate-unicode-nullfont-csname-bbl-ended-unclosed-group-bibentry-minted-nobib-merged-opened';
+  'utf8-biber-eps-glyphs-strings-forcedate-unicode-nullfont-csname-bbl-ended-unclosed-group-bibentry-minted-nobib-merged-opened-bibsaid';
 
 /** The toolchain image's content ID: part of every cache key, so a new image rebuilds everything. */
 export const imageId = () =>

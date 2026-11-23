@@ -5974,3 +5974,38 @@ two`, cut at 40 characters, the source in the title, announced as "comment: ..."
   could not run locally because the local blob store was out of disk; CI builds the real image from the
   Dockerfile and runs the whole suite against it.
 - **Not done.** `pstricks` and `CJKutf8` are still not installed (`docs/import-matrix.md` already says so). The import report does not say that a paper loads a package the image lacks; the build says "File 'X.sty' not found". The other fresh-corpus failures: 1909.11942 (one author field with a comma before "and" makes BibTeX report errors; latexmk stops and the only message is "The bibliography could not be made. The build log has the details."), 1509.05363 (the paper's own class loads `lastpage` and `totpages`, which the installed `totpages` refuses), 1912.01703 (minted with `frozencache`), 1411.4028 (PSTricks and EPS). 2203.15556 loads minted but never uses it and builds; its import note still says it "will not build until the code is set another way". Carried over: overfull boxes; "You have requested package"; the build pane shows no other compiler warnings.
+
+## A BibTeX error says what BibTeX said, and where
+
+- **What was wrong.** Only a syntax error at a line of a `.bib` and a missing `.bib` or `.bst`
+  were read from BibTeX. Any other error gave "The bibliography could not be made. The build log
+  has the details.", and the build log (TeX's) never has BibTeX's words. Of thirteen small
+  papers, one per kind of BibTeX error, eleven gave only that sentence; so did 1909.11942, where
+  one reference of 62 has a comma before "and".
+- **Now** (`diagnostics()` in `apps/workers/src/compile.ts`):
+  - A name BibTeX cannot read names the reference and the field, at that field's line of the
+    `.bib`: `refs.bib:4 In the reference b, name 2 of the author field ends with a comma. Put only
+"and" between names, with no comma before it.` (or "has too many commas"). The names
+    themselves are not quoted.
+  - A `crossref` to nothing: `refs.bib:2 In the reference b, crossref names nope, which is in none
+of the paper's .bib files.`
+  - Said in the paper's terms, with no file or line (BibTeX gives a line of the `.aux` only): a
+    space in a citation key, a second `\bibliography`, a second `\bibliographystyle`, one key
+    spelt with different capitals, a `.bib` named twice.
+  - A style file BibTeX cannot read is named, at its line if it is the paper's.
+  - Each is said once however often BibTeX repeats it; at most ten name errors a build. `TEX_TEXT`
+    gained `-bibsaid`, so every paper rebuilds once.
+- **Unchanged:** the build still fails and keeps no PDF on any BibTeX error, also when BibTeX
+  wrote every entry (1909.11942 would be 17 pages). Whether to go on in that case is the owner's
+  decision.
+- **Held by** the new tests in `diagnostics.test.ts`, two in `compile.sandbox.test.ts` and one in
+  `building.spec.ts`. The unit and sandbox tests were run on the development machine; the
+  Playwright test was written but run only in CI.
+- **Not done.** The errors about the paper's commands (`\bibliography` twice, a key with a space)
+  have no file or line. A kind of BibTeX error not listed still gives the old sentence, which
+  still points at a build log that does not have the details; BibTeX's output is not kept.
+  BibTeX's warnings other than an undefined abbreviation are not shown. Carry over: 1509.05363
+  (own class loads `lastpage` and `totpages`), 1912.01703 (minted `frozencache`), the 2203.15556
+  import note, PSTricks/EPS/CJK; overfull boxes; "You have requested package"; the build pane
+  shows no other compiler warnings; nested lists, `\item[]` and `description` raw in the visual
+  editor; Enter at the start of a list item after an empty one.
