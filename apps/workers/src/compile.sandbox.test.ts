@@ -692,6 +692,59 @@ test('a .bib that biber cannot read fails the build and names the .bib and its l
   );
 });
 
+// Small made-up papers, one BibTeX fault each; what BibTeX says is read from latexmk's output.
+const BIB_PAPER = (cites: string, tail: string, refs: string) => ({
+  'main.tex': `\\documentclass{article}\n\\begin{document}\nSee \\cite{${cites}}.\n${tail}\\end{document}\n`,
+  'refs.bib': refs,
+});
+const REFS_COMMA_END = [
+  '@article{a, author = {Ann Lee}, title = {One}, journal = {J}, year = 2001}',
+  '@article{b,',
+  '  title = {Two},',
+  '  author = {Bo Chen and Di Wu, and Ed Poe},',
+  '  journal = {J}, year = 2002}',
+  '@article{c, author = {Cy Roe}, title = {Three}, journal = {J}, year = 2003}',
+  '',
+].join('\n');
+const GENERIC_BIB = 'The bibliography could not be made. The build log has the details.';
+
+test("a comma before and in a .bib fails the build at that reference's author line", async () => {
+  const project = tmp();
+  const files = BIB_PAPER(
+    'a,b,c',
+    '\\bibliographystyle{plain}\n\\bibliography{refs}\n',
+    REFS_COMMA_END,
+  );
+  for (const [name, text] of Object.entries(files)) writeFileSync(join(project, name), text);
+  const r = await compile(project, 'main.tex', tmp());
+  expect(r.ok).toBe(false);
+  expect(r.diagnostics).toContainEqual({
+    severity: 'error',
+    file: 'refs.bib',
+    line: 4,
+    message:
+      'In the reference b, name 2 of the author field ends with a comma. Put only "and" between names, with no comma before it.',
+  });
+  expect(r.diagnostics.map((d) => d.message)).not.toContain(GENERIC_BIB);
+});
+
+test("two \\bibliography commands are said in the paper's terms", async () => {
+  const project = tmp();
+  const files = BIB_PAPER(
+    'a,b,c',
+    '\\bibliographystyle{plain}\n\\bibliography{refs}\n\\bibliography{refs}\n',
+    REFS_COMMA_END.replace('Di Wu, and', 'Di Wu and'),
+  );
+  for (const [name, text] of Object.entries(files)) writeFileSync(join(project, name), text);
+  const r = await compile(project, 'main.tex', tmp());
+  expect(r.ok).toBe(false);
+  const messages = r.diagnostics.map((d) => d.message);
+  expect(messages).toContain(
+    'The paper has more than one \\bibliography{\u2026}, and BibTeX reads only one. Name every .bib file in one \\bibliography, with commas between them.',
+  );
+  expect(messages).not.toContain(GENERIC_BIB);
+});
+
 test('a bare & in a .bib title is not reported in the .bbl', async () => {
   const project = tmp();
   cpSync(join(FIXTURES, 'ieee-multifile'), project, { recursive: true });
