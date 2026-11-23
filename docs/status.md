@@ -5324,3 +5324,29 @@ closed: ...` (outermost first, at most 10). The log does not name the file: with
 - **Stale.** Macros are read when the page loads, as before.
 - **Held by** `macros.test`, `apps/web/lib/mathmacros.test` (the renderer drops the argument),
   the `paperMacros` sandbox test in `labels.sandbox.test`, and `maths.spec`.
+
+## The key index misses references and citations TeX reads
+
+- **What was wrong.** A comment inside a key list (`\cref{fig:a,% the first` then `fig:b}`) made
+  the index read the comment as part of a key, and a `}` in the comment ended the list early. Renaming
+  `fig:b` left that reference behind, the label report showed a bogus undefined label, and the
+  citation report said the paper "cites `% b`" with no entry. Some commands were not read at all
+  (`\cpagerefrange`, `\vrefrange`, `\nameCref`, `\autopageref`, `\shortcite`, `\citetalias`,
+  `\citeN`, ...), so their entries counted as uncited and were left out of the Bibliography table.
+  A line break between a command and its braces (`\ref` then `{fig:a}`) was not read, though the
+  visual view already read it.
+- **Now** a key list is read with its comments blanked out (same offsets, so a rename splices
+  the real key and leaves the comment bytes alone); a `}` in a comment does not close it. A key
+  split by a comment is left out. Spaces, tabs and one line break (never a blank line) may stand
+  before every argument, as in `parse.ts`; the parser's `\ref` reading does the same. More
+  cleveref, varioref, prettyref, natbib and apacite names are references or citations. No
+  `TEX_TEXT` bump.
+- **Held by** `labels.test.ts` (comments in a list, escaped percent, line breaks, every new name),
+  `parse.test.ts` (a `\ref` over a line break is one atom, and the existing invariant test over
+  every name), sandbox tests in `labels.sandbox.test.ts` and `citations.sandbox.test.ts`, and a
+  browser test in `labels.spec` (rename over a comment, `\shortcite` listed in the Bibliography).
+- **Not done.** The visual chip for `\cref{a,%` + line break + `b}` still splits its own source
+  and shows `??` for the second key (`visual.ts`, left alone because of pending work). `\nameCref`
+  chips show the number, as `\namecref` already does. A comment inside a `\hyperref[..]` key.
+  Commands with other argument shapes (`\defcitealias`, `\citefield`, `\volcite`,
+  `\citeaffixed`).

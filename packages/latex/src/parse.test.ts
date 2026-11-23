@@ -277,6 +277,11 @@ test('every reference and citation the label index finds is a ref or cite atom',
   }
 });
 
+test('a line break before the braces of a reference is part of the reference', () => {
+  expect(atomsOf('See \\ref\n{a} now.\n').atoms).toEqual(['ref:\\ref\n{a}']);
+  expect(atomsOf('See \\crefrange{a}\n{b} now.\n').atoms).toEqual(['ref:\\crefrange{a}\n{b}']);
+});
+
 test('\\crefrange is one atom with both of its groups', () => {
   expect(atomsOf('From \\crefrange{a}{b} on, \\Cref{c}.').atoms).toEqual([
     'ref:\\crefrange{a}{b}',
