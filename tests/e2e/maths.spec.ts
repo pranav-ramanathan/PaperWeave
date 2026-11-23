@@ -105,6 +105,15 @@ test('a formula is edited in place, with a preview, and without overwriting anyo
   await expect(box).toBeVisible();
   await box.getByRole('button', { name: 'Cancel' }).click();
   await expect(box).toBeHidden();
+  // Braces that do not close are not read as a change in the text around them, but they stop
+  // the build all the same.
+  await inline.dblclick();
+  await box.getByLabel('LaTeX').fill('$\\frac{T}{2$');
+  await box.getByRole('button', { name: 'Apply' }).click();
+  await expect(box.getByRole('alert')).toContainText('make the change in the source');
+  await expect(box).toBeVisible();
+  await box.getByRole('button', { name: 'Cancel' }).click();
+  await expect(box).toBeHidden();
   await display.dblclick();
   await box.getByLabel('LaTeX').fill(align.replace('\\end{align}', ''));
   await box.getByRole('button', { name: 'Apply' }).click();

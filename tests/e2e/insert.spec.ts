@@ -12,8 +12,10 @@ import {
   person,
   run,
   showSource,
+  showVisual,
   signIn,
   slowPaper,
+  sourceText,
 } from './helpers';
 
 const FIXTURE = join(import.meta.dirname, '../../fixtures/ieee-multifile');
@@ -192,6 +194,64 @@ test('references and equations are inserted from the toolbar, the keyboard and t
       .replace('characters', 'characters$n \\le 3$')
       .replace('organised', 'organised\n\\begin{equation}\n  a^2 + b^2 = c^2\n\\end{equation}\n'),
   );
+});
+
+test('an equation that would break the build is refused in the Insert window', async ({
+  browser,
+}) => {
+  const { page, email } = await person(browser, 'insert-formula');
+  const zip = join(mkdtempSync(join(tmpdir(), 'paperweave-e2e-')), `Formula ${run}.zip`);
+  const main =
+    '\\documentclass{article}\n\\begin{document}\nHello world here.\n\nSecond paragraph.\n\\end{document}\n';
+  writeFileSync(zip, await writeZip([{ path: 'main.tex', bytes: Buffer.from(main) }]));
+  await page.goto('/sign-in');
+  await signIn(page, email);
+  await page.getByLabel('Or import a ZIP of a LaTeX project').setInputFiles(zip);
+  await page.getByRole('button', { name: 'Import ZIP' }).click();
+  await page.getByRole('link', { name: 'main.tex' }).first().click();
+  const status = page.getByRole('region', { name: /^Editor for/ }).getByRole('status');
+  await expect(status).toHaveText('All edits saved.');
+  const box = page.getByRole('dialog', { name: 'Insert an equation' });
+  await showSource(page);
+  const before = await sourceText(page);
+  await showVisual(page);
+
+  // A % in a formula comments out the rest of the line, and the preview does not show it.
+  await clickAfter(page, VISUAL, 'world');
+  await page.keyboard.press('Alt+=');
+  await box.getByLabel('LaTeX').fill('p = 50%');
+  await expect(box.locator('.preview .katex')).toBeVisible();
+  await box.getByRole('button', { name: 'Insert' }).click();
+  await expect(box.getByRole('alert')).toContainText('make the change in the source');
+  await expect(box).toBeVisible();
+  await expect(box.getByLabel('LaTeX')).toHaveValue('p = 50%');
+  await audit(page, 'equation window, with a refusal');
+  // An unclosed brace, on a line of its own.
+  await box.getByLabel('On a line of its own, numbered').check();
+  await box.getByLabel('LaTeX').fill('\\frac{a}{b');
+  await box.getByRole('button', { name: 'Insert' }).click();
+  await expect(box.getByRole('alert')).toContainText('make the change in the source');
+  await expect(box).toBeVisible();
+  await box.getByRole('button', { name: 'Cancel' }).click();
+  await expect(box).toBeHidden();
+  await expect(status).toHaveText('All edits saved.');
+  await showSource(page);
+  expect(await sourceText(page)).toBe(before);
+  await showVisual(page);
+
+  // Put right, it goes in, and the caret is after it.
+  await clickAfter(page, VISUAL, 'world');
+  await page.keyboard.press('Alt+=');
+  await box.getByLabel('LaTeX').fill('p = 50%');
+  await box.getByRole('button', { name: 'Insert' }).click();
+  await expect(box.getByRole('alert')).toBeVisible();
+  await box.getByLabel('LaTeX').fill('p = 50\\%');
+  await box.getByRole('button', { name: 'Insert' }).click();
+  await expect(box).toBeHidden();
+  await page.keyboard.type('Z');
+  await expect(status).toHaveText('All edits saved.');
+  await showSource(page);
+  expect(await sourceText(page)).toContain('$p = 50\\%$Z');
 });
 
 test('after an equation is put on a line of its own, typing carries on after it', async ({

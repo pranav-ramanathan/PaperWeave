@@ -196,6 +196,8 @@ Read this first. Update it in every pull request.
     its file; typing narrows the list. A label that starts `eq:` is inserted as `\eqref`.
   - An equation goes in the line (`$...$`) or on a line of its own, numbered
     (`\begin{equation}`), with a preview as it is typed.
+    Text that would not stand alone (an unclosed brace, a blank line, a `%` at the end) is refused
+    in the window; see "An equation typed into the Insert window can no longer stop the build".
   - Insertions go through the server, at the place the caret was when the window opened, even
     if the text has moved since (`Bridge.insertCommand`). Afterwards the caret is just after
     what was inserted.
@@ -4080,7 +4082,7 @@ An inline atom's replacement was checked for spilling (`contained`) only against
 
 ## Formulas are checked for spilling too
 
-`openMath` (the formula box) now goes through `Bridge.rewriteCommand`, as `openAtom` does, so an edit that would change how the text around the formula is read is refused in the box ("This would change how the text around it is read ... make the change in the source") and the command that does go out carries `contained: true`, which the server checks again. Before, `$x$` to `$x`, to `$x$ %` or to `$x$\end{document}`, and a `\begin{equation}` with no `\end{equation}`, were all applied: the paragraph froze, the rest of a line became a comment, the paper became one raw block, or the formula and the next paragraph merged.
+`openMath` (the formula box) now goes through `Bridge.rewriteCommand`, as `openAtom` does, so an edit that would change how the text around the formula is read is refused in the box ("This would change how the text around it is read ... make the change in the source") and the command that does go out carries `contained: true`, which the server checks again. Before, `$x$` to `$x`, to `$x$ %` or to `$x$\end{document}`, and a `\begin{equation}` with no `\end{equation}`, were all applied: the paragraph froze, the rest of a line became a comment, the paper became one raw block, or the formula and the next paragraph merged. (Unclosed braces and blank lines, which still passed here, were closed later: see "An equation typed into the Insert window can no longer stop the build".)
 
 `contained` (`packages/latex/src/contained.ts`) accepts a display-math block as well as an inline atom, so it requires exactly one math block at the same block index, covering exactly the replacement. A formula the browser cannot draw (`$\frac{a}{b$`, an unknown macro) still applies if it is contained.
 
@@ -5536,3 +5538,31 @@ closed: ...` (outermost first, at most 10). The log does not name the file: with
 - **Not done.** A bare `#`, `_`, `^` or unbalanced `$` in a caption still gives a TeX error (a PDF
   is still made; `#` is legitimate inside `\href`). Captions are edited as LaTeX, not escaped
   for the person. `\verb|%|` in a caption is refused. No server-side check.
+
+## An equation typed into the Insert window can no longer stop the build
+
+- **What was wrong.** The Insert window handed what was typed straight to the server, wrapped in
+  `$...$` or `\begin{equation}`. Real pdflatex stopped on `p = 50%` (`! Missing $ inserted`),
+  `\frac{a}{b` (`! File ended while scanning use of \frac`, no PDF), `a } b` (`! Extra }`),
+  `a $ b`, a blank line inside the formula, and a display holding its own `\end{equation}`. The
+  preview drew `p = 50%` without complaint, because KaTeX reads `%` as a comment. The Edit path
+  had been given a check earlier, but it only compares how the text around the formula is parsed,
+  and the parser does not count braces inside maths, so `$\frac{a}{b$` and a display with a blank
+  line or an unclosed brace passed there too.
+- **Now.** `formulaText` (`packages/bridge/src/clipboard.ts`) is `pasteable` plus no blank line.
+  `Bridge.formulaCommand` refuses ('spills', nothing written) a formula that fails it, and one
+  that would change how what is around it, or its own block, is read (checked against the full
+  and the incremental parse, with a stand-in of the same shape). Where even a plain formula is
+  not a block of its own (a list item, a heading) only the text check applies, so a display
+  equation in a list item still goes in. The window shows its existing "make the change in the
+  source" note and stays open with what was typed. The Edit window gets the same text check
+  before `rewriteCommand`. Only the formula's own splice reaches the source; the typed formula is
+  never logged or put in a message. Other insertions and `openAtom` are unchanged (`\verb|%|`
+  and `\url{...%20...}` are legitimately not pasteable).
+- **Held by** `formulaText` and "an equation typed into the Insert window" in
+  `packages/bridge/src/bridge.test.ts` (eight places, eleven refused, seven accepted, conflicts),
+  the new test in `tests/e2e/insert.spec.ts` and the extra step in `tests/e2e/maths.spec.ts`.
+- **Not done.** `&` or `#` in an inline formula and `_`/`^` misuse still give TeX errors. `a = 50%`
+  at the end of a line of a display equation is accepted and prints without the percent sign.
+  Footnote and other atom edits get no brace check beyond `contained`. No server-side check for
+  insertions. No TEX_TEXT bump.

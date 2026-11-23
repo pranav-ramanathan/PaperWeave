@@ -239,12 +239,17 @@ export default function FileEditor(props: {
     edit?: { name: string; run(): void };
   } | null>(null);
   /** Start inserting something where the caret is. The place is fixed now, not when it is done. */
-  const insertHere = (then: (apply: FormulaRequest['apply']) => void, block = false) => {
-    const apply = live.current?.visual?.insertion({ block });
+  const insertHere = (
+    then: (apply: FormulaRequest['apply']) => void,
+    block = false,
+    formula = false,
+  ) => {
+    const apply = live.current?.visual?.insertion({ block, formula });
     if (apply) then(apply);
     else setNote('Put the caret in the text where it should go, then try again.');
   };
-  const askEquation = () => insertHere((apply) => setFormula({ src: '', place: 'inline', apply }));
+  const askEquation = () =>
+    insertHere((apply) => setFormula({ src: '', place: 'inline', apply }), false, true);
   const askReference = () => insertHere((apply) => setPicker({ apply }));
   const askCitation = () => insertHere((apply) => setCiting({ apply }));
   const askFigure = () => insertHere((apply) => setFloat({ kind: 'figure', apply }), true);
