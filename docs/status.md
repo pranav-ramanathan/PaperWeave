@@ -441,8 +441,8 @@ Read this first. Update it in every pull request.
     set up, and everything else works.
   - `packages/latex/src/prose.ts` turns a file into prose plus markup: running text is sent as
     text; formulas, references, citations, commands, code (`\texttt`, listings), comments and
-    the preamble are sent as markup with a stand-in ("Dummy", "[1]") so that the sentence still
-    reads. The checker answers in source positions.
+    the preamble are sent as markup with a stand-in ("Dummy", "[1]"; a comment in a paragraph reads
+    as nothing) so that the sentence still reads. The checker answers in source positions.
   - A finding is shown only if all of it lies in prose (`inProse`). So none is ever in a
     formula, a unit, code, a path or a citation; a service test seeds the same misspelling in
     each of those and holds that.
@@ -5776,3 +5776,32 @@ forgotten \endgroup`. `\emph{R & D}`, `\textsc{a_b}` and `\mbox{#1}` failed the 
   where LaTeX prints italic only. A space typed first in a group is eaten, as TeX eats it.
   Emphasis or Bold on part of a group nests `\emph{}` inside it. Nested lists, `\item[..]` and
   `description` stay raw blocks.
+
+## Comment lines inside a paragraph are one quiet note, and read as nothing to the grammar check
+
+- **What was wrong.** Each comment line inside a paragraph was its own dashed monospace chip, cut
+  at 28 characters. In the 17-paper corpus that was 369 chips in 14 papers (284 whole comment
+  lines, 74 a bare `%`, 11 trailing words), inside 154 of 1,685 text blocks, in 197 runs; 44 runs
+  were 2 to 10 or more consecutive lines. The grammar check read each as the noun "Dummy":
+  `that\n% old\nthe` was sent as `that Dummy the`, and `word%\n next` as `wordDummy next`.
+- **Now** comment lines that follow one another are one raw atom, as they already were between
+  paragraphs, and the visual view shows it as one small italic note (`% old claim one old claim
+two`, cut at 40 characters, the source in the title, announced as "comment: ..." or "empty
+  comment"). The grammar check reads a comment as nothing, and the line break and indentation
+  after it as nothing, as TeX does. Corpus comment chips fall from 369 to 197. A generated-edit
+  run over the corpus (35,853 accepted edits on 38 documents) changed no byte outside its range.
+- **Held by** parse tests (one atom for a run, a bare `%`, a trailing comment, guards for
+  comments between paragraphs, a blank line ending a run, and `50\%`), a prose test, a web unit
+  test for the note's text, bridge tests (typing and deleting around the note change only their
+  own bytes; a 300-seed generated-edit run, which now includes a list item with a comment, and
+  a bridge test for Enter at the start of an item) and a browser test in `visual.spec.ts` that also
+  runs the accessibility check.
+- **Note.** Enter at the start of an item after the first splices `\n\item ` at the end of the item
+  before, the same document as Enter there, and leaves the item's own bytes alone. The
+  generated-edit run models that range (the end of the item before), where it had used the range of
+  the item the caret was in.
+- **Not done.** The space shown after a bare `%` (TeX prints none). `\noindent`, `\-` and `\\`
+  are still chips read as "Dummy"; maths macros (`\hgg`) and reference wrappers (`\sref{}`) are
+  not rendered. A grammar finding across a comment is still dropped. Enter at the start of an
+  item whose previous item is empty is accepted and does nothing (`translate.ts` returns no
+  edits there); the source is untouched, so it is harmless.

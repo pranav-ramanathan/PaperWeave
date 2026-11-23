@@ -701,3 +701,37 @@ test('a group with a bare command, an empty one or another command stays one raw
   expect(atoms('a {\\em cost $5} b.\n').map((q) => q.k)).toEqual(['atom']);
   expect(parse('A {\\em x\n').blocks.map((b) => b.body.kind)).toContain('error');
 });
+
+test('comment lines that follow one another in a paragraph are one atom', () => {
+  const para = (src: string) => {
+    const p = parse(src);
+    assertLossless(p);
+    return p.blocks.filter((b) => b.body.kind === 'para');
+  };
+  const pieces = (src: string) =>
+    (para(src)[0].body as { pieces: { k: string; s: number; e: number; type?: string }[] }).pieces;
+  const A = 'We show that\n% old one\n  % old two\nthe result holds.\n';
+  const [b] = para(A);
+  expect(para(A)).toHaveLength(1);
+  const ps = pieces(A);
+  const raws = ps.filter((q) => q.k === 'atom' && q.type === 'raw');
+  expect(raws).toHaveLength(1);
+  expect(A.slice(raws[0].s + b.start, raws[0].e + b.start)).toBe('% old one\n  % old two');
+  const at = ps.indexOf(raws[0]);
+  expect(A.slice(ps[at - 1].s + b.start, ps[at - 1].e + b.start)).toBe('\n');
+  expect(A.slice(ps[at + 1].s + b.start, ps[at + 1].e + b.start)).toBe('\n');
+  expect(ps[at - 1].k).toBe('ws');
+  expect(ps[at + 1].k).toBe('ws');
+  for (let k = 1; k < ps.length; k++) expect(ps[k].s).toBe(ps[k - 1].e);
+  const one = pieces('a % x\nb\n').filter((q) => q.k === 'atom');
+  expect(one).toHaveLength(1);
+  expect('a % x\nb\n'.slice(one[0].s, one[0].e)).toBe('% x');
+  const bare = pieces('word%\n next\n').filter((q) => q.k === 'atom');
+  expect(bare).toHaveLength(1);
+  expect('word%\n next\n'.slice(bare[0].s, bare[0].e)).toBe('%');
+  // Guards.
+  const apart = parse('% a\n\n% b\n');
+  expect(apart.blocks.filter((x) => x.body.kind === 'raw')).toHaveLength(2);
+  expect(para('A\n% c\n\nB\n')).toHaveLength(2);
+  expect(pieces('50\\% of\n').filter((q) => q.k === 'atom')).toHaveLength(0);
+});

@@ -1250,6 +1250,50 @@ test('Enter in a list item opens a new \\item with the same indentation', () => 
   r.check();
 });
 
+test('Enter at the start of a list item opens the new item at the end of the item before', () => {
+  const B = '\\begin{itemize}\n';
+  const E = '\\end{itemize}\n';
+  // [source, item index, display offset, result, caret in the item that follows]
+  const cases: [string, number, number, string, number | null][] = [
+    [B + '\\item one\n\\item  it\n' + E, 1, 0, B + '\\item one\n\\item \n\\item  it\n' + E, 9],
+    [
+      B + '  \\item one\n  \\item   it\n' + E,
+      1,
+      0,
+      B + '  \\item one\n  \\item \n  \\item   it\n' + E,
+      9,
+    ],
+    [
+      B + '\\item one % c\n\\item  it\n' + E,
+      1,
+      0,
+      B + '\\item one % c\n\\item \n\\item  it\n' + E,
+      11,
+    ],
+    [B + '\\item one\n\\item on  e\n' + E, 1, 2, B + '\\item one\n\\item on\n\\item   e\n' + E, 11],
+    [B + '\\item one\n\\item on  e\n' + E, 1, 3, B + '\\item one\n\\item on \n\\item  e\n' + E, 12],
+    [B + '\\item one\n\\item  it  \n' + E, 1, 2, B + '\\item one\n\\item  it\n\\item   \n' + E, 11],
+  ];
+  for (const [src, k, off, out, caret] of cases) {
+    const r = replica(src);
+    const li = items(r);
+    expect(enterAt(r, li[k].start + off)).toBe(true);
+    expect(r.src).toBe(out);
+    r.check();
+    if (off === 0) expect(r.state.selection.from).toBe(caret);
+  }
+  // The first item has nothing before it: refused, nothing changes.
+  let r = replica(B + '\\item  it\n\\item two\n' + E);
+  expect(enterAt(r, items(r)[0].start)).toBe(false);
+  expect(r.src).toBe(B + '\\item  it\n\\item two\n' + E);
+  r.check();
+  // After an empty item the Enter is accepted and the source stays as it was.
+  r = replica(B + '\\item \n\\item  it\n' + E);
+  expect(enterAt(r, items(r)[1].start)).toBe(true);
+  expect(r.src).toBe(B + '\\item \n\\item  it\n' + E);
+  r.check();
+});
+
 test('text typed in the item Enter opened goes after \\item, and Backspace undoes the Enter', () => {
   const r = replica(LIST);
   const li = items(r);
@@ -2994,6 +3038,82 @@ describe('old font groups in the visual view', () => {
         done++;
         if (rep.src === before) continue;
         // Enter in an emptied list item ends the list, taking that item's line (as it always has).
+        if (
+          op.what === 'enter' &&
+          before.replace(/\\item[ \t]*\n(?=\\end\{itemize\})/, '') === rep.src
+        )
+          continue;
+        if (
+          before.slice(0, op.lo) !== rep.src.slice(0, op.lo) ||
+          !rep.src.endsWith(before.slice(op.hi))
+        )
+          throw new Error(`${where}: changed outside [${op.lo}, ${op.hi})`);
+      }
+    }
+    expect(done).toBeGreaterThan(1000);
+  });
+});
+
+describe('comments in a paragraph in the visual view', () => {
+  const A = 'We show that\n% old one\n  % old two\nthe result holds.\n';
+  const typed = (off: number, text: string, del = 0) => {
+    const r = replica(A);
+    const start = textblocks(r)[0].start + off;
+    expect(r.dispatch(r.state.tr.insertText(text, start, start + del))).toBe(true);
+    r.check();
+    return r;
+  };
+
+  test('typing and deleting around a comment in a paragraph change only their own bytes', () => {
+    expect(shown(replica(A))).toBe('We show that \ufffc the result holds.');
+    expect(typed(12, 'X').src).toBe('We show thatX\n% old one\n  % old two\nthe result holds.\n');
+    expect(typed(14, 'X').src).toBe('We show that\n% old one\n  % old two\nX\nthe result holds.\n');
+    expect(typed(15, 'X').src).toBe('We show that\n% old one\n  % old two\nXthe result holds.\n');
+    expect(typed(13, '', 1).src).toBe('We show that\nthe result holds.\n');
+    const r = replica(A);
+    const chip = inlineAtoms(r).find((x) => x.src.startsWith('%'))!;
+    const c = r.bridge.atomCommand(r.state, chip.pos, chip.src)!;
+    expect(c.expected).toBe('% old one\n  % old two');
+    expect(r.bridge.rewriteCommand(c, '% a\n\n% b')).toBe('spills');
+    // In a list item.
+    const L =
+      '\\begin{itemize}\n\\item first item\n% in item\n  % again\nmore of it\n\\item second\n\\end{itemize}\n';
+    const l = replica(L);
+    const at = textblocks(l)[0].start + 'first item'.length;
+    expect(l.dispatch(l.state.tr.insertText('X', at, at))).toBe(true);
+    l.check();
+    expect(l.src).toBe(L.replace('first item', 'first itemX'));
+  });
+
+  test('generated edits in and around comments stay inside their range', () => {
+    const DENSE =
+      'Start % why\nmore words here % and\n% one\n  % two\nthen end.\n\n' +
+      'Mid with word%\n continues and\n%\nalso {\\em old\n% inner\n} done.\n\n' +
+      'Trailing words here. % last\n\n' +
+      '\\emph{inside\n% in emph\nthe emph} text.\n\n' +
+      '\\begin{itemize}\n\\item first item\n% in item\n  % again\nmore of it\n\\item second\n\\end{itemize}\n\n' +
+      'Before a heading\n% remark\n\\section{Next}\n\nEnd words.\n';
+    let done = 0;
+    for (let seed = 0; seed < 300; seed++) {
+      const r = rng(seed);
+      const rep = replica(DENSE);
+      for (let step = 0; step < 40; step++) {
+        const before = rep.src;
+        let op;
+        try {
+          op = visualOp(r, rep);
+          if (!op) continue;
+          rep.check();
+        } catch (err) {
+          throw new Error(`seed ${seed} step ${step}: ${(err as Error).message}`, { cause: err });
+        }
+        const where = `seed ${seed} step ${step} ${op.what}`;
+        if (!op.accepted) {
+          expect(rep.src, where).toBe(before);
+          continue;
+        }
+        done++;
+        if (rep.src === before) continue;
         if (
           op.what === 'enter' &&
           before.replace(/\\item[ \t]*\n(?=\\end\{itemize\})/, '') === rep.src

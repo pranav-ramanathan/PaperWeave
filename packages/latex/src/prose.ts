@@ -1,6 +1,7 @@
 // The prose of a LaTeX file, for a grammar checker: what is running text, what stands in for
 // each thing that is not (a formula, a citation, a command), and where each is in the source.
 // The command that opens a list item reads as a bullet, so an item is not taken for a sentence.
+// A comment inside a paragraph reads as nothing, and the line break after it as nothing either.
 // A list the parser keeps raw (a description, an item with an option or a nested list in it) is
 // read from inside: its items read as bullets, and the term of a description item is not prose.
 // A checker that is told "this is markup, read it as that" answers in source positions.
@@ -105,6 +106,7 @@ export function prose(
         continue;
       }
       for (const pieces of blocks) {
+        let commented = false;
         for (const p of pieces) {
           const [from, to] = [start + p.s, start + p.e];
           // What lies between pieces (there should be nothing) is not prose.
@@ -112,8 +114,16 @@ export function prose(
           at = to;
           // Code is written in a typewriter face; it is not English.
           const code = p.marks.includes('texttt');
+          // TeX reads a comment up to the first thing written on the next line: the line break
+          // and the indentation after it print nothing.
+          const afterComment = commented;
+          commented = p.k === 'atom' && src[from] === '%';
+          if (commented) {
+            add(from, to, 'hard', '');
+            continue;
+          }
           if (p.k === 'text') add(from, to, code ? 'hard' : 'text', code ? noun() : undefined);
-          else if (p.k === 'ws') add(from, to, 'soft', ' ');
+          else if (p.k === 'ws') add(from, to, 'soft', afterComment ? '' : ' ');
           else if (p.k === 'esc') add(from, to, code ? 'hard' : 'soft', p.ch ?? '');
           else if (p.k === 'atom' && inList && ITEM.test(src.slice(from, to))) {
             add(from, to, 'hard', bullet(src.slice(from, to)));

@@ -761,6 +761,48 @@ test('words in {\\em } and {\\bf } are typed into like any others', async ({ bro
   await audit(page, 'visual view, old font groups');
 });
 
+test('commented-out lines in a paragraph are one quiet note', async ({ browser }) => {
+  test.setTimeout(180_000);
+  const { page, email } = await person(browser, 'vis-comment');
+  const main = [
+    '\\documentclass{article}',
+    '\\begin{document}',
+    'Alpha one that',
+    '% old claim one',
+    '% old claim two',
+    'beta gamma. % why',
+    'Delta end.',
+    '\\end{document}',
+    '',
+  ].join('\n');
+  const zip = join(mkdtempSync(join(tmpdir(), 'paperweave-e2e-')), `Comment ${run}.zip`);
+  writeFileSync(zip, await writeZip([{ path: 'main.tex', bytes: Buffer.from(main) }]));
+  await page.goto('/sign-in');
+  await signIn(page, email);
+  await page.getByLabel('Or import a ZIP of a LaTeX project').setInputFiles(zip);
+  await page.getByRole('button', { name: 'Import ZIP' }).click();
+  await page.getByRole('link', { name: 'main.tex' }).first().click();
+  await expect(status(page)).toHaveText('All edits saved.');
+  await expect(page.locator(`${VISUAL} .pw-comment`)).toHaveCount(2);
+  await expect(page.locator(`${VISUAL} .pw-comment`).first()).toHaveText(
+    '% old claim one old claim two',
+  );
+  await expect(page.locator(`${VISUAL} .pw-comment`).nth(1)).toHaveText('% why');
+  await clickAfter(page, VISUAL, 'Alpha one');
+  await page.keyboard.type('XY');
+  await expect(status(page)).toHaveText('All edits saved.');
+  await showSource(page);
+  await page.waitForTimeout(800);
+  const src = (await sourceText(page)).replace(/\u2060/g, '');
+  expect(src).toContain(
+    // The source view's text has no line breaks, so the lines run together.
+    'Alpha oneXY that% old claim one% old claim twobeta gamma. % whyDelta end.',
+  );
+  await showVisual(page);
+  await expect(page.locator(VISUAL)).toBeVisible();
+  await audit(page, 'visual view, comments in a paragraph');
+});
+
 test('a selection across list items is deleted or typed over; undo restores it; another person sees it', async ({
   browser,
 }) => {

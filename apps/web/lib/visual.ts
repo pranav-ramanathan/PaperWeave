@@ -35,6 +35,7 @@ import { Decoration, DecorationSet, type EditorView } from '@tiptap/pm/view';
 import katex from 'katex';
 import * as Y from 'yjs';
 import { bibliography, onBibliography } from './bibliography';
+import { commentText } from './comment';
 import { footnoteText } from './footnote';
 import { pageNonce } from './nonce';
 import { labelKey, markerOf } from './marker';
@@ -173,7 +174,7 @@ export function createVisual(opts: {
    * would change how the text around it is read.
    */
   editAtom?(
-    what: 'citation' | 'reference' | 'footnote' | 'LaTeX',
+    what: 'citation' | 'reference' | 'footnote' | 'comment' | 'LaTeX',
     src: string,
     apply: (replacement: string) => Promise<CommandResult | 'spills' | { problem: string }>,
   ): void;
@@ -280,7 +281,9 @@ export function createVisual(opts: {
         ? 'reference'
         : node.type.name === 'raw_inline' && node.attrs.src.startsWith('\\footnote')
           ? 'footnote'
-          : 'LaTeX';
+          : node.type.name === 'raw_inline' && node.attrs.src.startsWith('%')
+            ? 'comment'
+            : 'LaTeX';
   /** Open the inline atom at `pos` for editing as LaTeX; what it says now is what an edit must find. */
   const openAtom = (pos: number, node: PMNode) => {
     const src: string = node.attrs.src;
@@ -442,6 +445,16 @@ export function createVisual(opts: {
     (label: (src: string) => string) => (node: PMNode, getPos: () => number | undefined) => {
       const dom = el('span', `pw-atom pw-${node.type.name}`, label(node.attrs.src));
       dom.title = node.attrs.src;
+      const said = commentText(node.attrs.src);
+      if (said !== null) {
+        // A comment prints nothing: it is a quiet note, its source in the title.
+        dom.classList.add('pw-comment');
+        dom.textContent =
+          said === '' ? '%' : `% ${said.length > 40 ? said.slice(0, 39).trimEnd() + '…' : said}`;
+        dom.setAttribute('aria-label', said === '' ? 'empty comment' : `comment: ${said}`);
+        opensAtom(dom, node, getPos);
+        return { dom };
+      }
       const note = footnoteText(node.attrs.src);
       if (note !== null) {
         dom.textContent = `Footnote: ${note.length > 40 ? note.slice(0, 39).trimEnd() + '…' : note}`;
