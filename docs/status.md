@@ -5188,3 +5188,25 @@ closed: ...` (outermost first, at most 10). The log does not name the file: with
   (list, keyboard to the line, audit).
 - **Not done.** The file in a multi-file paper; the line of an unclosed argument brace; groups
   opened by a package; a submit problem rather than a warning.
+
+## Lower-case list items in the grammar check
+
+- **What was wrong.** The grammar check read each `\item` as the end of a paragraph and the
+  command itself as nothing, so a list item that starts in lower case (`\item open-source code.`,
+  `\item first, we parse it.`) was flagged "sentence should start with an upper-case letter" when
+  the item before it ended in `.` or `, and`, or when it was the first item after a paragraph
+  ending in `.`. Lower-case items are normal in papers.
+- **Now** the command that opens an item is read as the bullet it prints (`• `), so each item is
+  a bulleted line and is not taken for the start of a sentence. A real sentence inside an item
+  (`\item first, we parse it. it is fast.`) is still checked. The command stays marked as not
+  prose, so no finding can touch it. Enumerate items read as bullets too: numbers hid real
+  findings in a prototype.
+- **Held by** a unit test on the reading of itemize and enumerate (`prose.test.ts`) and a test
+  against the real checker (`grammar.sandbox.test.ts`: lower-case items in both kinds of list are
+  left alone, a lower-case sentence is not, a repeated word in an item is still found); both
+  failed before the change. The grammar benchmark is unchanged.
+- **Not done.** `description` lists (`\item[Term]`) and nested lists are still not checked at all
+  (the whole environment is one raw block). A lower-case continuation paragraph straight after a
+  list whose last item ends in `.` is still flagged. Side effect: the repeated-beginning rule no
+  longer spans items, and `\item this are wrong.` now gives one finding (the plural verb after
+  "this") instead of two.

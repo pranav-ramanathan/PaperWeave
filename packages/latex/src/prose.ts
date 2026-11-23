@@ -1,5 +1,6 @@
 // The prose of a LaTeX file, for a grammar checker: what is running text, what stands in for
 // each thing that is not (a formula, a citation, a command), and where each is in the source.
+// The command that opens a list item reads as a bullet, so an item is not taken for a sentence.
 // A checker that is told "this is markup, read it as that" answers in source positions.
 import { logoOf } from './bib.ts';
 import { DEFAULT_TRANSPARENT, parse, textblocks } from './parse.ts';
@@ -77,10 +78,12 @@ export function prose(src: string, transparent: ReadonlySet<string> = DEFAULT_TR
                   ? (logoOf(src.slice(from, to)) ?? noun())
                   : noun(),
           );
-        // The command that opens a heading or a style, and the brace that closes it.
-        else add(from, to, 'hard', '');
+        // The command that opens a list item reads as the bullet it prints. Any other command
+        // that opens a heading or a style, and the brace that closes it, reads as nothing.
+        else add(from, to, 'hard', body.kind === 'list' && p.k === 'pre' ? '• ' : '');
       }
-      // Between the items of a list, and after a heading.
+      // Between the items of a list, and after a heading. Each item is a line of its own, opened
+      // by a bullet, so that it may start in lower case.
       const next = pieces === blocks.at(-1) ? end : at;
       add(at, next, 'hard', '');
       at = next;

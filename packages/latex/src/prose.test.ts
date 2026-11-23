@@ -180,3 +180,25 @@ test('a national letter followed by a space does not split the word', () => {
   expect(inProse(segments, at, to)).toBe(true);
   expect(readAs(src, segments, at, to)).toBe('Voßler');
 });
+
+test('a list item reads as a bulleted line', () => {
+  for (const env of ['itemize', 'enumerate']) {
+    const src = `\\begin{document}\n\\section{Aims}\n\nWe aim at two things.\n\n\\begin{${env}}\n\\item A fast parser.\n\\item open-source code.\n\\item\n\\end{${env}}\n\\end{document}\n`;
+    const text = read(src);
+    expect(text, env).toContain('\n\n• A fast parser.');
+    expect(text, env).toContain('\n\n• open-source code.');
+    // Only the items print a bullet; a heading does not.
+    expect(text.split('•').length - 1, env).toBe(3);
+    expect(kindOf(src, 'fast'), env).toBe('text');
+    expect(kindOf(src, 'open'), env).toBe('text');
+    // The command itself is never prose, so a finding on it is dropped.
+    const { segments } = prose(src);
+    for (const m of src.matchAll(/\\item/g)) {
+      const hits = segments.filter((s) => s.from < m.index + 5 && s.to > m.index);
+      expect(
+        hits.every((s) => s.kind === 'hard'),
+        env,
+      ).toBe(true);
+    }
+  }
+});
