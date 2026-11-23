@@ -173,6 +173,53 @@ test('an error in the build pane is a way to its file and line', async ({ browse
   await audit(page, 'build errors as buttons');
 });
 
+test('an environment left open in an input file is a way to its own line, not the root', async ({
+  browser,
+}) => {
+  test.setTimeout(180_000);
+  const owner = await person(browser, 'build-unclosed');
+  const { page } = owner;
+  await page.goto('/sign-in');
+  await signIn(page, owner.email);
+  await page
+    .getByLabel('Or import a ZIP of a LaTeX project')
+    .setInputFiles(await fixtureZip('Unclosed'));
+  await page.getByRole('button', { name: 'Import ZIP' }).click();
+  await page.getByRole('link', { name: 'sections/intro.tex' }).click();
+  await showSource(page);
+  await expect(buildStatus(page)).toHaveText('The PDF is up to date.', { timeout: 60_000 });
+  // Open an environment at the end of the introduction and never close it.
+  await source(page).click();
+  await page.keyboard.press('ControlOrMeta+End');
+  await page.keyboard.type('\\begin{quote}');
+  await page.keyboard.press('Enter');
+  await page.keyboard.type('words');
+  await typingSaved(page);
+  await page.getByRole('link', { name: 'main.tex', exact: true }).click();
+  await expect(page.getByRole('region', { name: 'Editor for main.tex' })).toBeVisible();
+  await expect(buildStatus(page)).toHaveText('The latest build failed.', { timeout: 60_000 });
+  const errors = build(page).getByRole('list', { name: 'Build errors' });
+  const place = errors.getByRole('button', { name: /^sections\/intro\.tex:\d+/ });
+  await expect(
+    errors
+      .getByRole('listitem')
+      .filter({ has: page.getByRole('button', { name: /^sections\/intro\.tex:\d+/ }) }),
+  ).toContainText('never closed');
+  const line = Number(/:(\d+)/.exec((await place.textContent())!)![1]);
+
+  await place.click();
+  await expect(page.getByRole('region', { name: 'Editor for sections/intro.tex' })).toBeVisible();
+  await showSource(page);
+  await expect.poll(() => caretLine(page)).toBe(line);
+  await expect(
+    source(page)
+      .locator('.cm-line')
+      .nth(line - 1),
+  ).toContainText('\\begin{quote}');
+  await expect(errors).toBeVisible();
+  await audit(page, 'an environment left open, in the build errors');
+});
+
 test('a citation to nothing is listed on a build that worked, and a broken .bib says where', async ({
   browser,
 }) => {
