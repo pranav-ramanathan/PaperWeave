@@ -5069,7 +5069,8 @@ Found by a three-person walkthrough.
   encrypted entry among the wanted files still refuses the archive without naming the file. The
   existing hostile-archive sandbox test's "password-protected entry" row has a stored size that
   yauzl rejects as damaged, so it passes without reaching the encryption check; the new
-  `archive.test` guard builds the entry properly.
+  `archive.test` guard builds the entry properly. Fixed: the sandbox `rawZip` now writes the
+  12-byte encryption header, and that row asserts the "password-protected" message.
 
 ## ZIP entry names with `./` or `//` are cleaned
 

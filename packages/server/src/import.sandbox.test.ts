@@ -60,7 +60,9 @@ function rawZip(files: Raw[]): Buffer {
   let offset = 0;
   for (const f of files) {
     const name = Buffer.from(f.name);
-    const data = f.deflated ?? f.data ?? Buffer.alloc(0);
+    const body = f.deflated ?? f.data ?? Buffer.alloc(0);
+    // An encrypted entry carries a 12-byte header that yauzl counts in the compressed size.
+    const data = ((f.flags ?? 0) & 1) !== 0 ? Buffer.concat([Buffer.alloc(12), body]) : body;
     const real = f.data ?? Buffer.alloc(0);
     const head = Buffer.alloc(30);
     head.writeUInt32LE(0x04034b50, 0);
@@ -268,6 +270,10 @@ test('hostile and broken archives are refused whole', async () => {
     expect(await code(importZip(t.pool, store, fresh.id, zip, 'x', small)), what).toBe(
       'invalid_input',
     );
+  // The encrypted entry must be refused for being encrypted, not for some other damage.
+  await expect(
+    importZip(t.pool, store, fresh.id, hostile['password-protected entry'], 'x', small),
+  ).rejects.toThrow(/password-protected/);
   expect(
     await code(importZip(t.pool, store, fresh.id, Buffer.alloc(LIMITS.archiveBytes + 1), 'x')),
   ).toBe('invalid_input');
