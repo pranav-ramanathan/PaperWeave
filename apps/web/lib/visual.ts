@@ -1070,6 +1070,9 @@ export function createVisual(opts: {
           if (
             bridge &&
             (transaction.selectionSet || transaction.docChanged) &&
+            // Someone who cannot edit does not show their caret to the others. The read-only
+            // view can now take focus (it is a tab stop), so this has to be said.
+            opts.editable &&
             editor.view.hasFocus()
           ) {
             // The state now, not the transaction's: applying it can have changed the document
