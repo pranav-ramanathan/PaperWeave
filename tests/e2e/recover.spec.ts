@@ -659,7 +659,8 @@ test('someone whose role changes while a file is open is told, and does not type
   // It can be reached and scrolled with the keyboard alone, though nothing in it can be typed.
   const paper = page.locator('.editor .visual .ProseMirror');
   await expect(paper).toHaveAttribute('tabindex', '0');
-  await expect(paper).toHaveAttribute('contenteditable', 'false');
+  await expect(paper).toHaveAttribute('aria-readonly', 'true');
+  await expect(paper).toHaveAttribute('contenteditable', 'true');
   await page.getByRole('group', { name: 'View' }).getByRole('button', { name: 'Visual' }).focus();
   for (let i = 0; i < 30 && !(await paper.evaluate((el) => el === document.activeElement)); i++) {
     await page.keyboard.press('Tab');

@@ -521,6 +521,12 @@ async function Project({
                 Left out: <code>{k.path}</code> ({k.reason}).
               </li>
             ))}
+            {report.skippedMore ? (
+              <li>
+                And {report.skippedMore} more {report.skippedMore === 1 ? 'file was' : 'files were'}{' '}
+                left out.
+              </li>
+            ) : null}
           </ul>
         </>
       )}

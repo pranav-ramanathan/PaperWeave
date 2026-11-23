@@ -55,6 +55,8 @@ export type ImportReport = {
   notes: string[];
   /** Files LaTeX cannot name (% # " { or } in the path), sorted. Absent in reports stored before it existed. */
   unnamable?: string[];
+  /** How many more files were left out than `skipped` lists (it holds `SKIPPED_SHOWN`). Absent when none, and in reports stored before it existed. */
+  skippedMore?: number;
   /** What was brought in of the review data the archive held, if it held any. */
   review?: ReviewImport;
 };
@@ -297,6 +299,10 @@ export function summarizeImport(r: ImportReport): string {
   return `Imported ${r.files.length} ${r.files.length === 1 ? 'file' : 'files'}: root ${r.root}, compiler ${r.compiler}, ${share}% of body prose editable visually, ${sourceOnly} source-only ${sourceOnly === 1 ? 'file' : 'files'}.`;
 }
 
+/** The most rows of left-out files a report lists; the rest are only counted. */
+export const SKIPPED_SHOWN = 200;
+const GENERIC_REASON = 'not a file type a paper uses';
+
 /** What an archive's files amount to as a paper: its root, compiler, and what can be edited how. */
 export function describeImport(
   entries: Entry[],
@@ -342,7 +348,21 @@ export function describeImport(
           : `${name} was kept: the paper reads it by name.`,
       );
     }
-  if (skipped.some((s) => s.reason.startsWith('build script')))
+  // Read from the full list, before it is cut for the report.
+  const hasLatexmkrc = skipped.some((s) => s.reason.startsWith('build script'));
+  let shown = skipped;
+  let skippedMore = 0;
+  if (skipped.length > SKIPPED_SHOWN) {
+    // Rows with a reason worth reading come first; the stable sort keeps archive order otherwise.
+    const rank = (s: Skipped) => (s.reason === GENERIC_REASON ? 1 : 0);
+    shown = skipped
+      .map((s, i) => ({ s, i }))
+      .sort((a, b) => rank(a.s) - rank(b.s) || a.i - b.i)
+      .slice(0, SKIPPED_SHOWN)
+      .map((x) => x.s);
+    skippedMore = skipped.length - SKIPPED_SHOWN;
+  }
+  if (hasLatexmkrc)
     notes.push(
       'The project has a latexmkrc. PaperWeave never runs it, so anything it sets up is not applied.',
     );
@@ -392,7 +412,8 @@ export function describeImport(
       otherRoots: candidates.slice(1),
       compiler,
       files,
-      skipped,
+      skipped: shown,
+      ...(skippedMore ? { skippedMore } : {}),
       missing: graph.missing,
       dynamic: graph.dynamic,
       cycles: graph.cycles,

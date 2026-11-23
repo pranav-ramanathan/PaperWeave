@@ -60,7 +60,9 @@ function rawZip(files: Raw[]): Buffer {
   let offset = 0;
   for (const f of files) {
     const name = Buffer.from(f.name);
-    const data = f.deflated ?? f.data ?? Buffer.alloc(0);
+    const body = f.deflated ?? f.data ?? Buffer.alloc(0);
+    // An encrypted entry carries a 12-byte header that yauzl counts in the compressed size.
+    const data = ((f.flags ?? 0) & 1) !== 0 ? Buffer.concat([Buffer.alloc(12), body]) : body;
     const real = f.data ?? Buffer.alloc(0);
     const head = Buffer.alloc(30);
     head.writeUInt32LE(0x04034b50, 0);
@@ -268,6 +270,10 @@ test('hostile and broken archives are refused whole', async () => {
     expect(await code(importZip(t.pool, store, fresh.id, zip, 'x', small)), what).toBe(
       'invalid_input',
     );
+  // The encrypted entry must be refused for being encrypted, not for some other damage.
+  await expect(
+    importZip(t.pool, store, fresh.id, hostile['password-protected entry'], 'x', small),
+  ).rejects.toThrow(/password-protected/);
   expect(
     await code(importZip(t.pool, store, fresh.id, Buffer.alloc(LIMITS.archiveBytes + 1), 'x')),
   ).toBe('invalid_input');
@@ -292,6 +298,43 @@ test('a zipped working folder with .git imports as the paper alone', async () =>
       .sort(),
   );
   expect((await importReport(t.pool, owner.id, made[0].id))!.skipped).toEqual([]);
+});
+
+test('a working folder full of files the import leaves out imports as the paper alone', async () => {
+  const paper = fixture('article-basic', 'My Paper/');
+  const junk = [
+    ...Array.from({ length: 301 }, (_, i) => file(`My Paper/.venv/lib/m${i}.pyc`, `p${i}`)),
+    { path: 'My Paper/data/raw.h5', bytes: Buffer.alloc(20_000) },
+  ];
+  const zip = await writeZip([...paper, ...junk]);
+  const limits = { ...LIMITS, files: paper.length + 1, fileBytes: 10_000 };
+  const made = await importZip(t.pool, store, owner.id, zip, 'x', limits);
+  expect(made).toHaveLength(1);
+  const paths = (await listFiles(t.pool, owner.id, made[0].id)).map((f) => f.path).sort();
+  expect(paths).toEqual(
+    fixture('article-basic')
+      .map((e) => e.path)
+      .sort(),
+  );
+  const report = (await importReport(t.pool, owner.id, made[0].id))!;
+  expect(report.skipped).toHaveLength(200);
+  expect(report.skippedMore).toBe(102);
+});
+
+test('a ZIP made by tar, with ./ and // in names, imports with its \\input found', async () => {
+  const zip = rawZip([
+    {
+      name: './main.tex',
+      data: Buffer.from(
+        '\\documentclass{article}\n\\begin{document}\n\\input{sec/a}\n\\end{document}\n',
+      ),
+    },
+    { name: 'sec//a.tex', data: Buffer.from('Some text.\n') },
+  ]);
+  const [made] = await importZip(t.pool, store, owner.id, zip, 'x');
+  const report = (await importReport(t.pool, owner.id, made.id))!;
+  expect(report.root).toBe('main.tex');
+  expect(report.missing).toEqual([]);
 });
 
 test('a symbolic link inside .git does not refuse the archive', async () => {

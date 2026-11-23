@@ -1,5 +1,5 @@
 import { expect, test } from 'vitest';
-import { inProse, prose } from './prose.ts';
+import { inProse, prose, readAs } from './prose.ts';
 import { fixtureFiles } from './testutil.ts';
 
 // The fixtures that are UTF-8 LaTeX, as text.
@@ -148,4 +148,18 @@ test('a TeX accent reads as its character, and is prose', () => {
   expect(annotation).toContainEqual({ markup: "\\'e", interpretAs: '\u00e9' });
   const at = src.indexOf('Caf');
   expect(inProse(segments, at, at + 6)).toBe(true);
+});
+
+test('a stretch reads as the checker read it', () => {
+  const src = "By Kov\\'a\\v{c} here.\nthe\nthe 50\\% of";
+  const { segments } = prose(src);
+  const at = (w: string) => src.indexOf(w);
+  const name = at('Kov');
+  expect(readAs(src, segments, name, at(' here'))).toBe('Kov\u00e1\u010d');
+  expect(segments.find((s) => s.from === at("\\'a"))).toMatchObject({ kind: 'soft', as: '\u00e1' });
+  expect(readAs(src, segments, at('50'), at('50') + 7)).toBe('50% of');
+  // Part of one piece of text.
+  expect(readAs(src, segments, at('here') + 1, at('here') + 4)).toBe('ere');
+  // A line break is read as a space.
+  expect(readAs(src, segments, at('the\nthe'), at('the\nthe') + 7)).toBe('the the');
 });

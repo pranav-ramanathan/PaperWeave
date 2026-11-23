@@ -1240,6 +1240,29 @@ Two things about tests, found on the way and not about the product:
   build fails, the pane does not try again by itself; the message and "Compile now" are
   there.
 
+## The PDF beside the text could not be made larger, and a resized window left its words off the picture
+
+- **What was wrong.** Every page was drawn at the width of the pane, one of two columns beside
+  the file list: about 500 px at a 1280 px window, so 10 pt text was about 8 px. There was no way
+  to enlarge it short of opening the PDF by itself, which loses double-click-to-source and
+  "Show in PDF". And when the pane's width changed (a window resized, a panel opened) the
+  invisible words stayed at the old size and the picture at its old resolution, so a selection
+  or a double-click landed beside the words it was made on. Measured at 1280 then 1600 px: the
+  picture stayed 502 px wide in a 662 px page, and a word's share of the page's width fell to
+  0.76 of what it was.
+- **Now** the pane has "Smaller", "Larger" and "Fit the width" (100%, 125%, 150%, 200%, 300%),
+  with the size said beside them. The choice is remembered in the browser. An enlarged page
+  scrolls sideways inside the pane, not the window, and the middle of what was being read stays
+  in the middle. Whenever the pane's width changes the words are put right at once and the
+  pictures of the pages near are drawn again at the new width (`PdfView.tsx`). A picture is
+  capped at 12 million pixels.
+- **Held by** a browser test (`synctex.spec`): larger, the words still on the picture,
+  double-click and "Show in PDF" while larger, a wider window, a reload, back to fit, and the
+  accessibility audit. It fails without the change at the first step, and a resize alone,
+  tried on the old code, showed the fault above.
+- **Not done:** no page-number box, no fit-whole-page, the reading place is not kept when the
+  window is resized, a page is softer above 12 million pixels, tried in Chromium only.
+
 ## A chart whose files have left the paper
 
 - **What was wrong.** A drawn chart is two files of the paper. If one was deleted by hand, or
@@ -4512,7 +4535,7 @@ Found by a three-person walkthrough.
   imports as the paper alone; a symlink inside `.git` imports). The hostile-archive test's
   symbolic link row (`link.tex`) is still refused.
 - **Not done.** Other unwanted folders such as `node_modules` or `.venv` still count and can
-  refuse.
+  refuse. (Fixed in "Files the import leaves out no longer refuse the ZIP".)
 
 ## The import report names files LaTeX cannot use
 
@@ -4998,3 +5021,83 @@ Found by a three-person walkthrough.
   `--` and ``…'' are still chips; accents inside raw atoms are unchanged; typing `é` still writes
   UTF-8; the chip's double-click LaTeX window is gone for these. A paragraph made only of
   `\AA{}` is still a raw block, as before.
+
+## A reviewer can select text in the visual view with the keyboard
+
+- **What was wrong.** The visual view was `contenteditable="false"` for anyone who cannot write,
+  so a reviewer using only the keyboard had no caret and could not select the text that "Comment
+  on the selected text" and "Propose a change here" act on. Only the source view selected.
+- **Now** the visual view stays editable for reviewers and viewers (`setLocked` in
+  `FileEditor.tsx` no longer shuts it for a non-writer) and refuses every change in
+  `lib/visual.ts`: `filterTransaction` turns away any document change that is not a remote
+  update (`projection`), a keydown guard refuses typing, Enter, Backspace, Delete and undo, redo,
+  bold and emphasis, and paste, drop, cut and the mark commands refuse with the note "You can
+  read this paper but not edit it. Nothing was changed." The text carries `aria-readonly="true"`,
+  `inputmode="none"` and no spell-checking. A writer who is locked (file not arrived, refused,
+  too large, role lowered) is still `contenteditable="false"`. The server's role check is
+  unchanged and remains the guarantee.
+- **Presence.** A reviewer's caret in the visual view is not shared with the others (as before):
+  `moved` is only called for editors that can edit.
+- **Tests.** `keys.spec` "a reviewer selects words in the visual view with keys alone..." (fails
+  before: no selection). The reviewer assertions in `visual.spec`, `insert.spec` and
+  `recover.spec` now expect `aria-readonly="true"` and `contenteditable="true"`.
+
+## Files the import leaves out no longer refuse the ZIP
+
+- **What was wrong.** `readZip` ran every entry that is not a system entry through the symbolic
+  link, encryption, name, duplicate, count and size checks before looking at its type. Entries the
+  import never opens (`node_modules`, `.venv`, data files, videos, pictures LaTeX cannot read, the
+  toolchain file, build output, `latexmkrc`) could therefore refuse the whole archive: a 60 MB
+  `data/raw.h5` ("too large"), 2,001 `.pyc` files ("too many files"), a symbolic link `Makefile`,
+  a long path under `node_modules`, seven 45 MB videos ("too much data"). A report with thousands
+  of left-out files was also thousands of list items.
+- **Now** the type is decided first (`archive.ts`). An entry whose type the import leaves out is
+  never read, checked or counted, except toward the 50,000-entry bound; it is listed in `skipped`
+  once, with the same reason as before, and not at all if its name has a control character or is
+  too long to show. Wanted files, `.bbl` files and `paperweave-review.json` keep every check, so
+  `link.tex` as a symbolic link or an encrypted `.tex` is still refused. The 100 MB archive bound
+  is unchanged. The report (`describeImport`) lists at most 200 left-out files (`SKIPPED_SHOWN`),
+  the ones with a reason worth reading (picture, duplicate folder, name length) before the generic
+  "not a file type a paper uses", and sets `skippedMore` to the rest; the page ends the list with
+  "And N more files were left out." The latexmkrc note still reads the whole list.
+- **Held by** `archive.test` (junk of every kind imports; picture, symbolic link, encrypted and
+  duplicate entries of a left-out type import; names that cannot be shown are not listed; wanted
+  symbolic link, encrypted and too-many-files entries and the entry bound are still refused),
+  `compiler.test` (the cut and the count), a sandbox test (a folder with 301 `.pyc` files and a
+  data file imports as the paper alone), and `import.spec` (200 rows, picture first, "And 6 more").
+- **Not done.** An archive over 50,000 entries or 100 MB is still refused. A symbolic link or
+  encrypted entry among the wanted files still refuses the archive without naming the file. The
+  existing hostile-archive sandbox test's "password-protected entry" row has a stored size that
+  yauzl rejects as damaged, so it passes without reaching the encryption check; the new
+  `archive.test` guard builds the entry properly. Fixed: the sandbox `rawZip` now writes the
+  12-byte encryption header, and that row asserts the "password-protected" message.
+
+## ZIP entry names with `./` or `//` are cleaned
+
+- **What was wrong.** `bsdtar -a -cf paper.zip .` and some other tools write entry names as
+  `./main.tex`, and some write `sec//a.tex`. `readZip` kept them as they were, so the paper's root
+  was `./main.tex` and `\input{sec/a}` was reported missing.
+- **Now** `entryName` (`archive.ts`) removes `.` and empty parts of a name (`./main.tex` becomes
+  `main.tex`, `sec//a.tex` becomes `sec/a.tex`, `a/./b.tex` becomes `a/b.tex`). Only whole parts
+  are removed, so a name never gains a `..` or a leading `/` (yauzl still refuses those before
+  this runs). `./` alone is a folder. Two names that become one file (`./a.tex` and `a.tex`) are
+  refused as "the same file twice".
+- **Held by** `archive.test` (the names, the folder, the clash, and a loop of hostile names that
+  must be refused or come out safe) and a sandbox test (a tar-style ZIP imports with root
+  `main.tex` and nothing missing).
+- **Not done.** A ZIP whose every name starts with `./` was already imported correctly (the common
+  folder is stripped); this only matters for mixed or doubled-slash names.
+
+## Names written with TeX accents can be dismissed as paper words
+
+- **What was wrong.** `Kov\'a\v{c}` and `H\"older` were sent to the checker as "Kováč" and
+  "Hölder" and flagged, but the glossary and "It is a word of this paper" used the source text,
+  which the glossary's word rule can never hold. The finding could not be dismissed.
+- **Now** `readAs` (`packages/latex/src/prose.ts`) gives a stretch as the checker read it (accents
+  and escapes as their characters, a line break as a space), and each finding carries it as
+  `reads`. A spelling finding is matched against the glossary by `reads` (NFC, case-insensitive)
+  or by its source, and is addable when `reads` fits. `words` stays the source, as the text of the
+  change. The panel adds and drops by `reads`, so the UTF-8 and TeX spellings go together.
+- **Held by** `prose.test`, the grammar sandbox test (real checker) and `grammar.spec`.
+- **Not done.** The panel still quotes the source form (`Kov\'a\v{c}`). Accents that stay raw
+  (`\' e`, `\t`, `\d`, `Gro\ss e`) are never checked, as before.

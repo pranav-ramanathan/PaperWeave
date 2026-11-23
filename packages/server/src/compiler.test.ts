@@ -135,3 +135,32 @@ test('a main file with one CRLF among LF lines is a paper, and the report says i
   const plain = describeImport([{ path: 'main.tex', bytes: Buffer.from(doc('')) }]).report;
   expect(plain.notes.join('\n')).not.toMatch(/Line endings are mixed/);
 });
+
+test('a report lists at most 200 left-out files, the ones worth reading first, and counts the rest', () => {
+  const generic = 'not a file type a paper uses';
+  const rows = Array.from({ length: 250 }, (_, i) => ({ path: `n${i}.docx`, reason: generic }));
+  const picture = {
+    path: 'x.svg',
+    reason: 'LaTeX cannot use this picture as it is: convert it to PDF or PNG',
+  };
+  const entries = [{ path: 'main.tex', bytes: Buffer.from(doc('', 'Hi.')) }];
+  const { report } = describeImport(entries, [...rows, picture]);
+  expect(report.skipped).toHaveLength(200);
+  expect(report.skipped[0]).toEqual(picture);
+  expect(report.skippedMore).toBe(51);
+  const few = describeImport(entries, [rows[0], picture, rows[1]]).report;
+  expect(few.skipped.map((s) => s.path)).toEqual(['n0.docx', 'x.svg', 'n1.docx']);
+  expect(few.skippedMore).toBeUndefined();
+});
+
+test('the latexmkrc note is kept when the list is cut', () => {
+  const rows = Array.from({ length: 250 }, (_, i) => ({
+    path: `n${i}.docx`,
+    reason: 'not a file type a paper uses',
+  }));
+  const { report } = describeImport(
+    [{ path: 'main.tex', bytes: Buffer.from(doc('', 'Hi.')) }],
+    [...rows, { path: 'latexmkrc', reason: 'build script, never run' }],
+  );
+  expect(report.notes.join(' ')).toMatch(/latexmkrc/); // guard
+});

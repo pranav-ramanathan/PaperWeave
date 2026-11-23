@@ -779,7 +779,9 @@ export default function FileEditor(props: {
 
     const setLocked = (on: boolean) => {
       view.dispatch({ effects: writable.reconfigure(lock(on || !canWrite)) });
-      visual?.editor.setEditable(!on && canWrite);
+      // Someone who cannot edit still gets a caret to select with (to comment or propose); the
+      // visual view itself refuses their changes. A writer who is locked stays shut.
+      visual?.editor.setEditable(!on);
     };
     // Typing into a file that is no longer served would go nowhere, so it stops.
     let gone = false;

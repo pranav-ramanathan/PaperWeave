@@ -5,7 +5,16 @@ import { mkdtempSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { writeZip } from '../../packages/server/src/archive';
-import { caretLine, clickAfter, person, run, showSource, signIn, typingSaved } from './helpers';
+import {
+  audit,
+  caretLine,
+  clickAfter,
+  person,
+  run,
+  showSource,
+  signIn,
+  typingSaved,
+} from './helpers';
 
 // Two pages: the second section starts the second page, and is in a file of its own.
 const MAIN = [
@@ -321,4 +330,100 @@ test('with the PDF not rebuilt after typing above, a click goes to the line the 
     `That is line ${lineOf('MARKERB') + 10} of main.tex.`,
   );
   await expect.poll(() => caretLine(page)).toBe(lineOf('MARKERB') + 10);
+});
+
+/**
+ * How page 1 of the PDF sits in its pane: the widths of the page, the pane and the picture, and
+ * how much of the page's width a word of the text layer takes (the same share while the words
+ * lie on the picture, whatever the width).
+ */
+const shape = (page: Page) =>
+  build(page)
+    .locator('.pdf-page[data-page="1"]')
+    .evaluate((el) => {
+      const pane = el.closest('.pdf') as HTMLElement;
+      let share = 0;
+      const walker = document.createTreeWalker(el, NodeFilter.SHOW_TEXT);
+      for (let n = walker.nextNode(); n; n = walker.nextNode()) {
+        const i = n.textContent!.indexOf('MARKERA');
+        if (i < 0) continue;
+        const range = document.createRange();
+        range.setStart(n, i);
+        range.setEnd(n, i + 'MARKERA'.length);
+        share = range.getBoundingClientRect().width / el.clientWidth;
+        break;
+      }
+      return {
+        holderW: el.clientWidth,
+        paneW: pane.clientWidth,
+        paneScrollW: pane.scrollWidth,
+        canvasW: el.querySelector('canvas')!.width,
+        wordShare: share,
+      };
+    });
+
+test('the pages of the PDF can be made larger, and stay right when the window changes', async ({
+  browser,
+}) => {
+  test.setTimeout(240_000);
+  const page = await openWrapped(browser, 'synctex-zoom');
+  const sizes = build(page).getByRole('group', { name: 'Size of the pages' });
+  const state = sizes.locator('[aria-live="polite"]');
+  const smaller = sizes.getByRole('button', { name: 'Smaller' });
+  const larger = sizes.getByRole('button', { name: 'Larger' });
+  const fit = sizes.getByRole('button', { name: 'Fit the width' });
+  const base = (await shape(page)).wordShare;
+  expect(base).toBeGreaterThan(0);
+  await expect(state).toHaveText('Fits the width');
+  await expect(smaller).toHaveAttribute('aria-disabled', 'true');
+  await expect(fit).toHaveAttribute('aria-disabled', 'true');
+
+  await larger.click();
+  await expect(state).toHaveText('125%');
+  await expect
+    .poll(async () => {
+      const s = await shape(page);
+      return Math.abs(s.holderW / s.paneW - 1.25) < 0.03 && Math.abs(s.canvasW - s.holderW) <= 2;
+    })
+    .toBe(true);
+  expect(Math.abs((await shape(page)).wordShare - base)).toBeLessThan(0.01);
+  expect(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth + 1)).toBe(
+    true,
+  );
+
+  // Still larger: a double-click leads to the line, and "Show in PDF" comes back to it.
+  await pickLeftEdge(page, 'MARKERB');
+  await expect(build(page).locator('.pdf-said')).toHaveText(
+    `That is line ${lineOf('MARKERB')} of main.tex.`,
+  );
+  await expect.poll(() => caretLine(page)).toBe(lineOf('MARKERB'));
+  await page.getByRole('button', { name: 'Show in PDF' }).click();
+  await expect(build(page).locator('.pdf-mark')).toBeInViewport();
+
+  // A wider window: the picture is drawn again at the new width and the words follow it.
+  await page.setViewportSize({ width: 1600, height: 720 });
+  await expect
+    .poll(async () => {
+      const s = await shape(page);
+      return Math.abs(s.canvasW - s.holderW) <= 2 && Math.abs(s.wordShare - base) < 0.01;
+    })
+    .toBe(true);
+
+  await page.reload();
+  await expect(build(page).locator('.pdf-page[data-page="1"]')).toHaveAttribute(
+    'data-drawn',
+    'yes',
+    { timeout: 60_000 },
+  );
+  await expect(state).toHaveText('125%');
+
+  await fit.click();
+  await expect(state).toHaveText('Fits the width');
+  await expect
+    .poll(async () => {
+      const s = await shape(page);
+      return s.paneScrollW <= s.paneW + 1 && Math.abs(s.holderW - s.paneW) <= 2;
+    })
+    .toBe(true);
+  await audit(page, 'the PDF pane with its size buttons');
 });

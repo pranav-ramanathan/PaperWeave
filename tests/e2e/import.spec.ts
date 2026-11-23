@@ -76,6 +76,37 @@ test('import a ZIP, read the report, and download the same bytes', async ({ brow
   expect((await viewer.page.request.get(`${paper}/export`)).status()).toBe(403);
 });
 
+test('a long list of left-out files is cut to 200 rows, the picture first, with a count of the rest', async ({
+  browser,
+}) => {
+  const owner = await person(browser, 'import-many-skipped');
+  const dir = mkdtempSync(join(tmpdir(), 'paperweave-e2e-'));
+  const name = `Many left out ${run}`;
+  const junk = Array.from({ length: 205 }, (_, i) => ({
+    path: `${name}/scratch/n${i}.docx`,
+    bytes: Buffer.from(`n${i}`),
+  }));
+  const zip = join(dir, `${name}.zip`);
+  writeFileSync(
+    zip,
+    await writeZip([
+      ...fixtureFiles(`${name}/`),
+      ...junk,
+      { path: `${name}/fig.svg`, bytes: Buffer.from('<svg xmlns="http://www.w3.org/2000/svg"/>') },
+    ]),
+  );
+  await owner.page.goto('/sign-in');
+  await signIn(owner.page, owner.email);
+  await owner.page.getByLabel('Or import a ZIP of a LaTeX project').setInputFiles(zip);
+  await owner.page.getByRole('button', { name: 'Import ZIP' }).click();
+  await expect(owner.page.getByRole('heading', { name })).toBeVisible();
+  const left = owner.page.locator('.report:not(.first-steps) li', { hasText: /^Left out:/ });
+  await expect(left).toHaveCount(200);
+  await expect(left.first()).toContainText('fig.svg');
+  await expect(left.first()).toContainText('convert it to PDF or PNG');
+  await expect(owner.page.getByText('And 6 more files were left out.')).toBeVisible();
+});
+
 test('a ZIP that is not a LaTeX project is refused and creates nothing', async ({ browser }) => {
   const visitor = await person(browser, 'bad-zip');
   const dir = mkdtempSync(join(tmpdir(), 'paperweave-e2e-'));

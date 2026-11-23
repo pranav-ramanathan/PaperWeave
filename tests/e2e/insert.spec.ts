@@ -725,7 +725,8 @@ test('an equation, a heading, a list and a figure are removed from the visual vi
 
   // A reviewer sees the figure and a way to its source, but no way to remove it.
   await reviewer.page.goto(page.url());
-  await expect(reviewer.page.locator(VISUAL)).toHaveAttribute('contenteditable', 'false');
+  await expect(reviewer.page.locator(VISUAL)).toHaveAttribute('aria-readonly', 'true');
+  await expect(reviewer.page.locator(VISUAL)).toHaveAttribute('contenteditable', 'true');
   const there = reviewer.page.locator(VISUAL).getByRole('group', { name: 'Figure' });
   await expect(there.getByRole('button', { name: 'Edit in source' })).toBeVisible();
   await expect(reviewer.page.getByRole('button', { name: 'Remove figure' })).toHaveCount(0);

@@ -1,7 +1,7 @@
 // Spelling and grammar. The prose of a file is sent to a LanguageTool server we run ourselves
 // (GRAMMAR_URL); nothing goes to anyone else. Formulas, references, citations, commands and
 // code are sent as markup the checker skips, and a finding that touches any of them is dropped.
-import { DEFAULT_TRANSPARENT, escape, inProse, prose } from '@paperweave/latex';
+import { DEFAULT_TRANSPARENT, escape, inProse, prose, readAs } from '@paperweave/latex';
 import type pg from 'pg';
 import * as Y from 'yjs';
 import { authorize } from './authz.ts';
@@ -29,6 +29,8 @@ export type LanguageFinding = {
   to: string;
   /** What the stretch says. */
   words: string;
+  /** The stretch as the checker read it: \'e as é, \% as %. What the glossary holds. */
+  reads: string;
   message: string;
   /** What it could say instead, best first, as LaTeX source: ready to put in the text. May be empty. */
   replacements: string[];
@@ -191,7 +193,7 @@ export async function checkGrammar(
     matches = await pending;
   }
 
-  const known = new Set(settings.glossary.map((w) => w.toLowerCase()));
+  const known = new Set(settings.glossary.map((w) => w.normalize('NFC').toLowerCase()));
   const place = (index: number, side: number) =>
     Buffer.from(
       Y.encodeRelativePosition(Y.createRelativePositionFromTypeIndex(text, index, side)),
@@ -202,16 +204,18 @@ export async function checkGrammar(
     // Never in a formula, a unit, code, a path or a citation: only where all of it is prose.
     if (to <= from || !inProse(segments, from, to)) continue;
     const words = src.slice(from, to);
+    const reads = readAs(src, segments, from, to).normalize('NFC');
     const spelling = m.rule.category.id === 'TYPOS';
-    if (spelling && known.has(words.toLowerCase())) continue;
+    if (spelling && (known.has(reads.toLowerCase()) || known.has(words.toLowerCase()))) continue;
     findings.push({
       from: place(from, 0),
       to: place(to, -1),
       words,
+      reads,
       message: m.message,
       // The checker sees plain text: "R&D", "50%". The source needs \& and \%.
       replacements: m.replacements.slice(0, 5).map((r) => escape(r.value)),
-      addable: fits(words),
+      addable: fits(reads),
       rule: m.rule.id,
       kind: spelling
         ? 'spelling'
