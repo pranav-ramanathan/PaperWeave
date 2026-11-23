@@ -419,3 +419,32 @@ export function leftOut(
     }
   return out.size ? { at: only.index, names: [...out] } : null;
 }
+
+/**
+ * The ready-made `.bbl` files among `paths` that the paper needs: one a file the root reaches
+ * reads by name, and the root's own `.bbl` (same folder and base name) when a file the root
+ * reaches names a `.bib` that is not in the project (from the root's folder), or names one through
+ * a macro, so BibTeX or biber cannot make it again. `lacks` lists those `.bib` names.
+ */
+export function readyMadeBbls(
+  files: Record<string, string>,
+  root: string,
+  paths: string[],
+): { path: string; lacks: string[] }[] {
+  const g = includeGraph(files, root, paths);
+  const out = new Map<string, string[]>();
+  for (const e of g.edges) if (/\.bbl$/i.test(e.to)) out.set(e.to, []);
+  const own = root.replace(/\.(tex|ltx)$/i, '') + '.bbl';
+  if (paths.includes(own)) {
+    const all = new Set(paths);
+    const dir = rootDir(root);
+    const lacks: string[] = [];
+    for (const p of g.order)
+      for (const inc of includes(files[p] ?? '')) {
+        if (inc.kind !== 'bib') continue;
+        if (inc.dynamic || !resolveInclude(inc, dir, all)) lacks.push(inc.target);
+      }
+    if (lacks.length) out.set(own, [...new Set([...(out.get(own) ?? []), ...lacks])]);
+  }
+  return [...out].map(([path, lacks]) => ({ path, lacks }));
+}

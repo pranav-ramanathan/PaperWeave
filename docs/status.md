@@ -3830,6 +3830,7 @@ sigconf PDF embeds a Libertine font (`pdffonts`). The 11 of them failed on the o
   no shell reads a file name, and the string has no single quote. The worker and the command in a
   revision download's `paperweave-toolchain.json` both use it, so the ZIP rebuilds the same PDF
   (a sandbox test runs the manifest command as written in the image, and compares bytes).
+- It also wraps BibTeX (`pw_bib`): see "A paper that `\input`s its own `.bbl` and has no `\bibliography` failed to build".
 - A failed rule is now an error: "The glossary could not be made. The build log has the details."
   (latexmk's "Collected error summary" names a `cusdep` rule).
 - **With `\usepackage[xindy]{glossaries}` the build now fails.** xindy is not in the image. It used
@@ -4839,8 +4840,7 @@ Found by a three-person walkthrough.
   upload a new copy with "Replace the file of this name" ticked".
 - **Held by** a unit test in `archive.test.ts`, sandbox tests in `files.sandbox.test.ts`,
   `citations.sandbox.test.ts` and `builds.sandbox.test.ts`.
-- **Not done.** Editing a `.bbl` in the source editor; the import rule that drops a `.bbl` when
-  the archive has any `.bib`; the "left out" reason does not say a `.bbl` can be uploaded.
+- **Not done.** Editing a `.bbl` in the source editor; the "left out" reason does not say a `.bbl` can be uploaded.
 
 ## A paper whose root is a `.ltx` file never built
 
@@ -4850,4 +4850,42 @@ Found by a three-person walkthrough.
 - **Now** the builder accepts a `.ltx` root as it does a `.tex` one, and the PDF, log and SyncTeX
   names drop `.ltx` the same way.
 - **Held by** a build test in `compile.sandbox.test.ts` (with SyncTeX mapping back to `main.ltx`).
+- **Not done.** Nothing known.
+
+## The import dropped a paper's ready-made `.bbl` whenever any `.bib` was in the archive
+
+- **What was wrong.** `readZip` set aside every `.bbl` if the archive held any `.bib`, whatever
+  the paper named: a paper with `\bibliography{library}`, its `main.bbl` and a leftover template
+  `.bib` lost the `.bbl` and could make no bibliography; a `.bib` in one paper's folder cost
+  another paper its `.bbl`; a paper that `\input`s `main.bbl` failed on a missing file. The
+  citation report read a `.bbl` only when the paper had no `.bib`.
+- **Now** `readZip` hands the set-aside `.bbl` files back, and the import (`keepBbls`) keeps the
+  ones a paper needs, found by `readyMadeBbls` in `graph.ts`: one a file the root reaches reads by
+  name, and the root's own (`main.tex`, `main.bbl`) when a file the root reaches names a `.bib`
+  that is not in the archive from the root's folder, or names one through a macro. The rest are
+  dropped as before. The import report says why a `.bbl` was kept. The citation report reads the
+  same set when the paper has a `.bib` (`bblFiles` in `labels.ts`). The build needs no change:
+  `latexmk -bibtex-cond` does not run BibTeX when a named `.bib` is missing, so the `.bbl` is used.
+- **Held by** unit tests in `graph.test.ts`, `archive.test.ts` and `import.test.ts`, sandbox tests
+  in `import.sandbox.test.ts`, `citations.sandbox.test.ts` and `builds.sandbox.test.ts`.
+- **Not done.** A `.bib` named only inside the paper's own `.cls` or `.sty` is not seen; a
+  biblatex paper with a kept `.bbl` still gets the "Biber could not find the bibliography file"
+  diagnostic; a named `.bib` that is present but incomplete still replaces the `.bbl`; a paper
+  that `\input`s its `.bbl` and has no `\bibliography` imported with the `.bbl` but did not
+  build; fixed below (the cause was the root's own `.bbl` being read, not the `\citation` lines).
+
+## A paper that `\input`s its own `.bbl` and has no `\bibliography` failed to build
+
+- **What was wrong.** latexmk makes a BibTeX rule (`bibtex main`, source `main.aux`) for any `.bbl`
+  TeX reads. `-bibtex-cond` skips BibTeX only when the rule's `.bib` is missing; with no
+  `\bibdata` there is no `.bib` to be missing, so BibTeX ran, said "I found no \bibdata command",
+  truncated `main.bbl` to 0 bytes and latexmk exited 12, so no PDF. `\input{refs.bbl}` escaped only
+  because `refs.aux` does not exist.
+- **Now** `LATEXMK_RULES` sets latexmk's BibTeX command to `pw_bib`. It runs real `bibtex` unless the
+  `.aux` exists and neither it nor any `.aux` it `\@input`s has a `\bibdata` line; then it writes a
+  stub `.blg` (latexmk reads the log) and returns 0, leaving the `.bbl` alone. Real BibTeX errors
+  (bad `.bst`, `\bibliography` without `\bibliographystyle`) still fail. The download command
+  uses the same rules. `TEX_TEXT` is bumped so a cached failed build is not reused.
+- **Held by** `builds.sandbox.test.ts` (no `.bib`, an unrelated `.bib`, and `\nocite{*}`); the existing
+  BibTeX-error, missing-`.bib` and manifest-command sandbox tests pass unchanged.
 - **Not done.** Nothing known.

@@ -1,0 +1,58 @@
+import { expect, test } from 'vitest';
+import type { Entry, Skipped } from './archive.ts';
+import { keepBbls } from './import.ts';
+
+const f = (path: string, text: string): Entry => ({ path, bytes: Buffer.from(text) });
+const doc = (body: string) => `\\documentclass{article}\\begin{document}${body}\\end{document}`;
+const REASON = 'build output, made again on compile';
+
+/** What the import holds after keepBbls, for the archive `files` with the .bbl set aside as readZip does. */
+const run = (files: Entry[]) => {
+  const bbl = files.filter((e) => /\.bbl$/i.test(e.path));
+  const entries = files.filter((e) => !bbl.includes(e));
+  const skipped: Skipped[] = bbl.map((e) => ({ path: e.path, reason: REASON }));
+  const out = keepBbls(entries, bbl, skipped);
+  return { paths: out.entries.map((e) => e.path).sort(), skipped: out.skipped.map((s) => s.path) };
+};
+
+test('a .bbl stays when the paper names a .bib that is not in the archive', () => {
+  expect(
+    run([
+      f('main.tex', doc('\\bibliography{library}')),
+      f('main.bbl', 'x'),
+      f('sample-base.bib', '@misc{a,title={T}}'),
+    ]),
+  ).toEqual({ paths: ['main.bbl', 'main.tex', 'sample-base.bib'], skipped: [] });
+});
+
+test("another paper's .bib does not take a paper's .bbl away", () => {
+  expect(
+    run([
+      f('a/main.tex', doc('\\bibliography{refs}')),
+      f('a/refs.bib', '@misc{a,title={T}}'),
+      f('b/main.tex', doc('\\bibliography{refs}')),
+      f('b/main.bbl', 'x'),
+    ]),
+  ).toEqual({ paths: ['a/main.tex', 'a/refs.bib', 'b/main.bbl', 'b/main.tex'], skipped: [] });
+});
+
+test('a .bbl the paper reads by name stays', () => {
+  expect(
+    run([
+      f('main.tex', doc('\\input{main.bbl}')),
+      f('main.bbl', 'x'),
+      f('old/refs.bib', '@misc{a,title={T}}'),
+    ]),
+  ).toEqual({ paths: ['main.bbl', 'main.tex', 'old/refs.bib'], skipped: [] });
+});
+
+// Guard: the .bib it names is there, so the .bbl is build output.
+test('a .bbl is still dropped when every .bib the paper names is in the archive', () => {
+  expect(
+    run([
+      f('main.tex', doc('\\bibliography{refs}')),
+      f('main.bbl', 'x'),
+      f('refs.bib', '@misc{a,title={T}}'),
+    ]),
+  ).toEqual({ paths: ['main.tex', 'refs.bib'], skipped: ['main.bbl'] });
+});

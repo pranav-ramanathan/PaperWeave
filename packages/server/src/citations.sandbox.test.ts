@@ -265,3 +265,19 @@ test('a text file renamed to main.bbl is read with its edits', async () => {
   expect(report.missing).toEqual([]);
   expect(report.entries.map((e) => e.key)).toContain('late');
 });
+
+test('a .bbl is the bibliography when the paper names a .bib that is not in the ZIP', async () => {
+  const project = await importFiles(
+    {
+      'main.tex': MAIN('\\cite{k}.').replace('{refs}', '{library}'),
+      'main.bbl': BBL_BIBTEX,
+      'sample-base.bib': '@misc{unrelated, title={T}}\n',
+    },
+    'Bbl and stray bib',
+  );
+  const report = await citationReport(t.pool, store, owner.id, project.id);
+  expect(
+    report.entries.filter((e) => e.path === 'main.bbl').map((e) => `${e.key} | ${e.cited}`),
+  ).toEqual(['k | true', 'two | false']);
+  expect(report.missing).toEqual([]);
+});

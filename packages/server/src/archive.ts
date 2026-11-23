@@ -45,7 +45,9 @@ const BUILD =
   /\.(aux|log|out|toc|lof|lot|bbl|blg|fls|fdb_latexmk|synctex\.gz|synctex|nav|snm|vrb)$/i;
 /**
  * A .bbl is build output, made again from the .bib files. An archive with no .bib file at all
- * (as arXiv gives them) has no other way to its bibliography, so there it is kept.
+ * (as arXiv gives them) has no other way to its bibliography, so there it is kept. When there is
+ * a .bib, the .bbl is set aside and returned as `bbl`, so the import can keep the ones a paper
+ * needs: it reads one by name, or names a .bib that is not in the archive.
  */
 const BBL = /\.bbl$/i;
 const BBL_REASON = 'build output, made again on compile';
@@ -165,7 +167,7 @@ export function texName(path: string): string | null {
 export function readZip(
   zip: Uint8Array,
   limits: Limits = LIMITS,
-): Promise<{ entries: Entry[]; skipped: Skipped[]; review: Entry[] }> {
+): Promise<{ entries: Entry[]; skipped: Skipped[]; review: Entry[]; bbl: Entry[] }> {
   if (zip.length > limits.archiveBytes) throw bad('it is too large');
   const other = notZip(zip);
   if (other) throw new AppError('invalid_input', other);
@@ -203,6 +205,7 @@ export function readZip(
           entries: entries.filter((e) => !dropped.includes(e) && !folders.has(e.path)),
           skipped,
           review,
+          bbl: dropped.filter((e) => !folders.has(e.path)),
         });
       });
       file.on('entry', (entry: yauzl.Entry) => {
