@@ -728,6 +728,9 @@ async function sharedPaper(
   await editor.page.goto(await emailedLink(editor.email, '/invitations/'));
   await signIn(editor.page, editor.email);
   await editor.page.getByRole('button', { name: 'Join this paper' }).click();
+  // Wait for the join to land: a test that goes to the paper next would otherwise cut the
+  // request off, and the editor would arrive as someone not on the paper.
+  await expect(editor.page.getByText('You are an editor')).toBeVisible();
   const restore = async () => {
     await owner.page.goto(paper);
     await owner.page.getByRole('button', { name: 'Restore revision 1' }).click();
