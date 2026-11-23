@@ -4739,7 +4739,7 @@ Found by a three-person walkthrough.
 - **Held by** unit tests in `bib.test.ts` and sandbox tests in `citations.sandbox.test.ts`,
   `evidence.sandbox.test.ts`, `import.sandbox.test.ts` and `submit.sandbox.test.ts`.
 - **Not done.** A `]` inside a braced `\bibitem` label; a key BibTeX broke across lines with `%`;
-  a biblatex `.bbl` whose format version differs from the image's (a build error, separate); a DOI
+  a biblatex `.bbl` whose header names another format version (a warning here, not a build error); a DOI
   lookup for `.bbl` entries.
 
 ## Renaming a chapter left `\includeonly` on the old name, and the chapter dropped out of the PDF
@@ -4869,8 +4869,7 @@ Found by a three-person walkthrough.
 - **Held by** unit tests in `graph.test.ts`, `archive.test.ts` and `import.test.ts`, sandbox tests
   in `import.sandbox.test.ts`, `citations.sandbox.test.ts` and `builds.sandbox.test.ts`.
 - **Not done.** A `.bib` named only inside the paper's own `.cls` or `.sty` is not seen; a
-  biblatex paper with a kept `.bbl` still gets the "Biber could not find the bibliography file"
-  diagnostic; a named `.bib` that is present but incomplete still replaces the `.bbl`; a paper
+  named `.bib` that is present but incomplete still replaces the `.bbl`; a paper
   that `\input`s its `.bbl` and has no `\bibliography` imported with the `.bbl` but did not
   build; fixed below (the cause was the root's own `.bbl` being read, not the `\citation` lines).
 
@@ -4889,3 +4888,37 @@ Found by a three-person walkthrough.
 - **Held by** `builds.sandbox.test.ts` (no `.bib`, an unrelated `.bib`, and `\nocite{*}`); the existing
   BibTeX-error, missing-`.bib` and manifest-command sandbox tests pass unchanged.
 - **Not done.** Nothing known.
+
+## A biblatex paper with a ready-made `.bbl` and no `.bib` built, but the submit check refused it
+
+- **What was wrong.** With `\addbibresource{refs.bib}`, a biber-made `main.bbl` and no `refs.bib`,
+  the build succeeded and the PDF was right, but the worker's "Biber could not find the
+  bibliography file refs.bib." diagnostic has severity error, and the submit check made every
+  error a problem: not ready, no revision, no ZIP or PDF to download.
+- **Now** the submit check reads that diagnostic as a warning when the last build succeeded
+  (`readyMadeMessage` in `submit.ts`), saying the bibliography was not made again and the PDF
+  shows the ready-made `.bbl`. On a failed build (no `.bbl`) it stays a problem. A citation the
+  `.bbl` lacks is still a citation problem.
+- **Held by** a unit test in `submit.test.ts` and a sandbox test in `submit.sandbox.test.ts`
+  (ready with a `.bbl`; a guard that the same paper with no `.bbl` is still refused).
+- **Not done.** The stored diagnostic is still severity error (only the submit check reads it
+  differently); the generic "LaTeX found it elsewhere" warning for the same `.bib` remains.
+
+## The comparison of two revisions showed the whole file and never said which words changed
+
+- **What was wrong.** The page listed every line of a changed file, so one number changed in a
+  400-line file meant reading 200 lines to find it, and a long line (a paragraph on one line)
+  scrolled sideways. A changed line was struck or bolded whole, so which word changed was a hunt.
+- **Now** `diffHunks` in `textdiff.ts` keeps the changed lines and three around each, says how
+  many unchanged lines were left out before each group and after the last, and for a removed line
+  and an added line that are counterparts marks the words that changed (`<del>` and `<ins>`).
+  Lines wrap, with the wrapped part hanging under the text. A file whose text is the same but for
+  line endings or encoding says so instead of showing an empty block.
+- **Held by** unit tests in `textdiff.test.ts` and a browser test in `revisions.spec`
+  ("a comparison shows only what changed, and which words"), which failed on the old page. One
+  expectation in `a11y.spec` changed: a long added line used to make the comparison scroll
+  sideways, now it wraps, so that test expects no sideways scroll (the region keeps its name and
+  tab stop, and the audit and focus check are unchanged).
+- **Not done.** The line-endings-only sentence was not looked at in a browser. At most 200 pairs of
+  lines per file are compared word by word. Lines are paired by position, only when a run has as
+  many removed lines as added ones; otherwise they stay whole-line changes.

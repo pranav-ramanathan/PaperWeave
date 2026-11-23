@@ -584,18 +584,40 @@ button[aria-disabled='true'] {
   outline: 2px solid var(--accent);
   outline-offset: 2px;
 }
-.diff span {
+.diff > span {
   display: block;
-  padding: 0 0.75rem;
-  white-space: pre;
+  /* A wrapped line hangs under its text, not under the + or -. */
+  padding: 0 0.75rem 0 calc(0.75rem + 2ch);
+  text-indent: -2ch;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+.diff .gap {
+  padding-left: 0.75rem;
+  text-indent: 0;
+  color: var(--muted);
+  font-weight: 400;
 }
 .diff .added {
   background: #e3f6e8;
+}
+.diff .added:not(.part) {
   font-weight: 600;
 }
 .diff .removed {
   background: var(--warn-wash);
+}
+.diff .removed:not(.part) {
   text-decoration: line-through;
+}
+.diff del {
+  background: #fde7e7;
+  text-decoration: line-through;
+}
+.diff ins {
+  background: #c9ecd2;
+  font-weight: 600;
+  text-decoration: none;
 }
 .page details {
   display: inline-block;

@@ -1,5 +1,5 @@
 import { expect, test } from 'vitest';
-import { carryLine, diffLines, diffWords } from './textdiff.ts';
+import { carryLine, diffHunks, diffLines, diffWords } from './textdiff.ts';
 
 const show = (a: string, b: string) => diffLines(a, b)!.map((l) => l.op + l.text);
 
@@ -127,5 +127,95 @@ test('random word lists: the pieces join back to both texts', () => {
     const was = d.was.map((p) => p.text).join('');
     const now = d.now.map((p) => p.text).join('');
     if (was !== a || now !== b) throw new Error(`seed ${seed}: ${JSON.stringify([a, b, d])}`);
+  }
+});
+
+const numbered = (n: number, change: Record<number, string> = {}) =>
+  Array.from({ length: n }, (_, i) => change[i + 1] ?? `line ${i + 1}`).join('\n');
+const hunks = (a: string, b: string, context?: number) => diffHunks(diffLines(a, b)!, context);
+
+test('a hunk is the changed lines with three around them, and what was left out is counted', () => {
+  const { hunks: h, rest } = hunks(numbered(400), numbered(400, { 200: 'changed' }));
+  expect(h).toHaveLength(1);
+  expect(h[0].skipped).toBe(196);
+  expect(h[0].line).toBe(197);
+  expect(h[0].rows.map((r) => r.op + r.text)).toEqual([
+    ' line 197',
+    ' line 198',
+    ' line 199',
+    '-line 200',
+    '+changed',
+    ' line 201',
+    ' line 202',
+    ' line 203',
+  ]);
+  expect(rest).toBe(197);
+});
+
+test('changes whose context touches are one hunk; far apart they are two', () => {
+  const near = hunks(numbered(60), numbered(60, { 10: 'a', 16: 'b' }));
+  expect(near.hunks).toHaveLength(1);
+  const far = hunks(numbered(60), numbered(60, { 10: 'a', 40: 'b' }));
+  expect(far.hunks).toHaveLength(2);
+  // Lines 14 to 36 lie between the two hunks.
+  expect(far.hunks[1].skipped).toBe(36 - 14 + 1);
+  expect(far.hunks[1].line).toBe(37);
+});
+
+test('a change on the first and the last line leaves nothing before or after', () => {
+  const r = hunks(numbered(30), numbered(30, { 1: 'first', 30: 'last' }));
+  expect(r.hunks[0].skipped).toBe(0);
+  expect(r.hunks[0].line).toBe(1);
+  expect(r.rest).toBe(0);
+});
+
+test('one number changed in a long line marks just that number in both rows', () => {
+  const long = (n: string) =>
+    `${'The latency of the system stays low. '.repeat(20)}after ${n} runs ${'and so on. '.repeat(20)}`;
+  const { hunks: h } = hunks(`a\n${long('forty')}\nb`, `a\n${long('thirty')}\nb`);
+  const [gone, added] = h[0].rows.filter((r) => r.op !== ' ');
+  expect(gone.words!.filter((p) => p.changed).map((p) => p.text)).toEqual(['forty']);
+  expect(added.words!.filter((p) => p.changed).map((p) => p.text)).toEqual(['thirty']);
+  expect(gone.words!.map((p) => p.text).join('')).toBe(gone.text);
+  expect(added.words!.map((p) => p.text).join('')).toBe(added.text);
+});
+
+test('lines that are not counterparts stay whole-line changes', () => {
+  const words = (a: string, b: string) =>
+    hunks(a, b)
+      .hunks[0].rows.filter((r) => r.op !== ' ')
+      .map((r) => r.words);
+  expect(words('alpha beta gamma', 'one two three')).toEqual([undefined, undefined]);
+  // One removed against two added: no pairing by position.
+  expect(words('keep this text', 'keep this text\nand this')).toEqual([undefined]);
+  expect(words('', 'x')).toEqual([undefined, undefined]);
+  expect(words('a\nb', 'a\nb x\nb y').every((w) => w === undefined)).toBe(true);
+});
+
+test('with no changed line there are no hunks, and every line is the rest', () => {
+  expect(diffHunks(diffLines(numbered(5), numbered(5))!)).toEqual({ hunks: [], rest: 5 });
+});
+
+test('random texts: nothing is lost between hunks, and rows are in order', () => {
+  const N = Number(process.env.FUZZ ?? 500);
+  for (let seed = 1; seed <= N; seed++) {
+    let s = seed;
+    const next = (n: number) => {
+      s = (Math.imul(s, 1664525) + 1013904223) >>> 0;
+      return (s >>> 8) % n;
+    };
+    const text = () => Array.from({ length: next(40) }, () => `l${next(6)}`).join('\n');
+    const all = diffLines(text(), text())!;
+    const { hunks: h, rest } = diffHunks(all, next(4));
+    const count = h.reduce((n, x) => n + x.skipped + x.rows.length, 0) + rest;
+    if (count !== all.length) throw new Error(`seed ${seed}: ${count} of ${all.length}`);
+    let at = 0;
+    for (const x of h) {
+      at += x.skipped;
+      for (const r of x.rows) {
+        const l = all[at++];
+        if (l.op !== r.op || l.text !== r.text) throw new Error(`seed ${seed}: row out of order`);
+      }
+    }
   }
 });
