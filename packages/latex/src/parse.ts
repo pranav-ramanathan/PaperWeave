@@ -115,6 +115,12 @@ export const DEFAULT_TRANSPARENT: ReadonlySet<string> = new Set([
 export const HARD =
   /\\(?:part|chapter|(?:sub){0,2}section|(?:sub)?paragraph)(?![a-zA-Z])|\\end\{document\}/g;
 export const BRK = /\n[ \t]*\n/g;
+const BRK_AT = /\n[ \t]*\n/;
+const LEN_NAME = String.raw`\\(?:itemsep|parskip|parsep|topsep|partopsep|itemindent|leftmargin|labelsep|labelwidth)`;
+const LIST_LENGTH = new RegExp(
+  String.raw`(?:\\setlength\s*(?:\{${LEN_NAME}\}|${LEN_NAME})\s*\{[^{}%\n]*\}|${LEN_NAME}\s*=?\s*-?[\d.]+\s*(?:pt|em|ex|mm|cm|in|bp|sp|pc))`,
+  'y',
+);
 const ENV = /\{([^{}\\%\n]+)\}/y;
 const DOC = '\\begin{document}';
 /** How a tie (~) is shown: a non-breaking space. */
@@ -738,10 +744,46 @@ function parseInto(
     label,
   });
 
+  /**
+   * What may stand between \\begin{itemize} and the first \\item and prints nothing: an option on
+   * the same line (`[noitemsep]`, `[label=(\\alph*)]`), comment lines, and a length set for the
+   * list (`\\setlength\\itemsep{0pt}`, `\\itemsep 0pt`). The index after it, or `from`.
+   */
+  const listHead = (from: number) => {
+    let j = from;
+    let o = j;
+    while (isS(src[o])) o++;
+    if (src[o] === '[') {
+      let depth = 0;
+      let c = o + 1;
+      for (; c < n && c - o <= 300; c++) {
+        const ch = src[c];
+        if (ch === '\\') c++;
+        else if (ch === '{') depth++;
+        else if (ch === '}') depth--;
+        else if (ch === '%' || ch === '\n' || depth < 0) return from;
+        else if (ch === ']' && !depth) break;
+      }
+      if (src[c] !== ']' || depth) return from;
+      j = c + 1;
+    }
+    for (;;) {
+      const k = wsEnd(j);
+      if (BRK_AT.test(src.slice(j, k))) return j;
+      if (src[k] === '%') j = lineEnd(k);
+      else {
+        LIST_LENGTH.lastIndex = k;
+        const m = LIST_LENGTH.exec(src);
+        if (!m) return j;
+        j = k + m[0].length;
+      }
+    }
+  };
+
   const list = (i: number, bodyStart: number, close: number, name: string): Body | null => {
     const shut = `\\end{${name}}`.length;
     try {
-      let k = wsEnd(bodyStart);
+      let k = wsEnd(listHead(bodyStart));
       if (!cmdAt(k, 'item')) return null;
       const items: { pieces: Piece[] }[] = [];
       let pre = i;

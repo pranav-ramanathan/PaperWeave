@@ -5727,3 +5727,26 @@ forgotten \endgroup`. `\emph{R & D}`, `\textsc{a_b}` and `\mbox{#1}` failed the 
   and a browser test in `labels.spec.ts`.
 - **Not done.** `label=` on thmtools theorems, tcolorbox, `\lstset` and `\lstnewenvironment`
   environments (the fresh-build "LaTeX resolved it" warning still applies).
+
+## A list with an option, a comment or a length before its first item is an editable list
+
+- **What was wrong.** Of the 25 `itemize`, `enumerate` and `description` lists in the corpus,
+  only 14 were editable lists in the visual view; the other 11 were one dashed raw block with
+  "Edit in source". Four of them had an option on the environment (`[noitemsep,leftmargin=0.4cm]`,
+  `[leftmargin=1em]`, `[noitemsep]`), one a comment line and one a `\setlength\itemsep{0em}`
+  before the first `\item`. All of these print nothing, but the parser only accepted `\item`
+  straight after `\begin{..}`.
+- **Now** an option on the `\begin` line, comment lines and a list length (`\setlength{\itemsep}{..}`,
+  `\setlength\itemsep{..}`, `\itemsep0pt`, also `parskip`, `parsep`, `topsep`, `partopsep`,
+  `itemindent`, `leftmargin`, `labelsep`, `labelwidth`) may stand between `\begin{..}` and the
+  first `\item`. They are part of the first item's `pre` piece, so they are kept byte for byte and
+  never shown as prose. Editable lists in the corpus go from 14 to 19 of 25.
+- **Held by** parse tests (eight heads, each a list with the right item count and the head in the
+  first `pre`; five guards that stay raw), a prose test (a commented-out `\item` is not prose),
+  a bridge test (Enter and typing change only their own bytes, with an option, a comment and a
+  tab-indented length head, and deleting a list with an option) and a browser test in
+  `visual.spec.ts` that also runs the accessibility check.
+- **Not done.** The visual list shows 1, 2, 3 or bullets whatever `label=`, `resume` or `start=`
+  say. An option on the line after `\begin`, and `\small` or other commands before the first
+  `\item`, stay raw. Deleting a list's only empty item removes its option and head comments with
+  it. Nested lists, `\item[..]`, `description` and display maths in items stay raw blocks.
