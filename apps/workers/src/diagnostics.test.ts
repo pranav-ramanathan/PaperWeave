@@ -1119,3 +1119,102 @@ test('guard: a file of the TeX installation is never asked for', () => {
   diagnostics(log, '', '', (f) => (asked.push(f), undefined));
   expect(asked.filter((f) => f.startsWith('/'))).toEqual([]);
 });
+
+// A brace or group left open in the root file.
+const ROOT_RUNAWAY = [
+  '(./main.tex',
+  ')',
+  'Runaway argument?',
+  '{world. \\par More \\end {document} ',
+  '! File ended while scanning use of \\textbf .',
+  '<inserted text> ',
+  '                \\par ',
+  '<*> main.tex',
+  '            ',
+  "I suspect you have forgotten a `}', causing me",
+  '',
+  '! Emergency stop.',
+  '<*> main.tex',
+  '            ',
+  '*** (job aborted, no legal \\end found)',
+].join('\n');
+
+test('a brace left open in the root file is said so, without a made-up place', () => {
+  const out = diagnostics(ROOT_RUNAWAY);
+  expect(out).toEqual([
+    {
+      severity: 'error',
+      file: 'main.tex',
+      message:
+        'File ended while scanning use of \\textbf . It began: “{world.”. The { is never closed in this file.',
+    },
+  ]);
+  expect(JSON.stringify(out)).not.toContain('undefined');
+});
+
+const GROUPS = (...entered: string[]) =>
+  ['(./main.tex', ' (./sections/body.tex)', '(\\end occurred inside a group at level 4)', '']
+    .concat(entered, ['### bottom level'])
+    .join('\n');
+
+test('a group left open in the only file is a warning placed on that file and line', () => {
+  const log =
+    '(./main.tex\n(\\end occurred inside a group at level 1)\n\n### simple group (level 1) entered at line 3 ({)\n### bottom level\n';
+  expect(diagnostics(log)).toEqual([
+    {
+      severity: 'warning',
+      file: 'main.tex',
+      line: 3,
+      message:
+        'Never closed: the { opened on line 3 has no }. What it changes (a font, a size) runs on to the end of the paper.',
+    },
+  ]);
+});
+
+test('groups and conditionals left open are listed outermost first, unplaced across files', () => {
+  const log = [
+    GROUPS(
+      '### simple group (level 4) entered at line 7 ({)',
+      '### semi simple group (level 3) entered at line 3 (\\begingroup)',
+      '### simple group (level 2) entered at line 1 ({)',
+      '### simple group (level 1) entered at line 3 ({)',
+    ),
+    '(\\end occurred when \\ifnum on line 6 was incomplete)',
+    '(\\end occurred when \\iftrue on line 5 was incomplete)',
+  ].join('\n');
+  const out = diagnostics(log);
+  expect(out).toHaveLength(6);
+  expect(out.every((d) => d.severity === 'warning' && d.file === undefined)).toBe(true);
+  expect(out.every((d) => d.line === undefined)).toBe(true);
+  expect(out.map((d) => d.message.replace(/ What it changes.*$/, ''))).toEqual([
+    'Never closed: the { opened on line 3 (in the main file or one it reads in) has no }.',
+    'Never closed: the { opened on line 1 (in the main file or one it reads in) has no }.',
+    'Never closed: \\begingroup on line 3 (in the main file or one it reads in) has no \\endgroup.',
+    'Never closed: the { opened on line 7 (in the main file or one it reads in) has no }.',
+    'Never closed: \\ifnum on line 6 (in the main file or one it reads in) has no \\fi.',
+    'Never closed: \\iftrue on line 5 (in the main file or one it reads in) has no \\fi.',
+  ]);
+});
+
+test('LuaTeX names \\iftrue as \\if', () => {
+  const log = '(./main.tex\n(\\end occurred when \\if on line 5 was incomplete)\n';
+  expect(diagnostics(log).map((d) => d.message)).toEqual([
+    'Never closed: \\if on line 5 has no \\fi.',
+  ]);
+});
+
+test('guard: a build that failed says nothing of groups', () => {
+  const log = [
+    '(./main.tex',
+    './main.tex:5: LaTeX Error: Something is wrong.',
+    '(\\end occurred inside a group at level 1)',
+    '### semi simple group (level 1) entered at line 3 (\\begin)',
+  ].join('\n');
+  expect(diagnostics(log).some((d) => d.message.startsWith('Never closed'))).toBe(false);
+});
+
+test('guard: a paper with no \\end{document} still says so', () => {
+  expect(diagnostics('*** (job aborted, no legal \\end found)')).toEqual([
+    { severity: 'error', message: 'The paper ends without \\end{document}.' },
+  ]);
+});

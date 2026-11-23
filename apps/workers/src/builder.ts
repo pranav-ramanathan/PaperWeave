@@ -34,9 +34,11 @@ import { compile, type Compiler, IMAGE } from './compile.ts';
  * build keeps naming the root file.
  * '...-ended-unclosed': an environment left open in an \input-ed file is placed in that file; a
  * cached failed build keeps naming the root.
+ * '...-group': a brace or group left open is a warning, and a root runaway names no made-up
+ * line; a cached silent build is rebuilt.
  */
 const TEX_TEXT =
-  'utf8-biber-eps-glyphs-strings-forcedate-unicode-nullfont-csname-bbl-ended-unclosed';
+  'utf8-biber-eps-glyphs-strings-forcedate-unicode-nullfont-csname-bbl-ended-unclosed-group';
 
 /** The toolchain image's content ID: part of every cache key, so a new image rebuilds everything. */
 export const imageId = () =>

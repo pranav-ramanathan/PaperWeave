@@ -797,6 +797,24 @@ test('a stray character in a TikZ picture is worth a look, and the paper is read
   );
 }, 300_000);
 
+test('a group left open is worth a look, and the paper is ready', async () => {
+  const v = await verdict('Group paper', {
+    'main.tex':
+      '\\documentclass{article}\n\\begin{document}\nHello {\\bfseries world.\n\nMore.\n\\end{document}\n',
+  });
+  expect(v.problems).toEqual([]);
+  expect(v.ready).toBe(true);
+  expect(v.findings).toContainEqual(
+    expect.objectContaining({
+      level: 'warning',
+      kind: 'compiler',
+      path: 'main.tex',
+      line: 3,
+      message: expect.stringMatching(/^Never closed: the \{/),
+    }),
+  );
+}, 300_000);
+
 test('the XeLaTeX paper of the fixtures is still ready', async () => {
   const dir = join(FIXTURES, 'real-xelatex');
   const v = await verdict(

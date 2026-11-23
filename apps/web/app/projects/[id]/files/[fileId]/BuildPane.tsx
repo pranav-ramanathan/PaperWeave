@@ -240,6 +240,14 @@ export default function BuildPane({
             /^(?:Picture|Characters) not shown: |^Abbreviation not defined: /.test(d.message),
         )
       : [];
+  // A build that worked but left a brace, a group or a conditional open: the rest of the paper is
+  // in whatever it changed.
+  const open =
+    latest && latest.status !== 'failed' && latest.status !== 'queued'
+      ? latest.diagnostics.filter(
+          (d) => d.severity === 'warning' && /^Never closed: /.test(d.message),
+        )
+      : [];
   const place = (d: { file?: string; line?: number }) => {
     const text = (
       <code>
@@ -329,6 +337,20 @@ export default function BuildPane({
           {notShown.length > 10 && (
             <p>and {notShown.length - 10} more: see the paper&apos;s page.</p>
           )}
+        </>
+      )}
+      {open.length > 0 && (
+        <>
+          <p>Built, but something is left open:</p>
+          <ul className="diagnostics" aria-label="Left open">
+            {open.slice(0, 10).map((d, i) => (
+              <li key={i}>
+                {d.file && <>{place(d)} </>}
+                {d.message.replace(/^Never closed: /, '')}
+              </li>
+            ))}
+          </ul>
+          {open.length > 10 && <p>and {open.length - 10} more: see the paper&apos;s page.</p>}
         </>
       )}
       {latest && latest.status !== 'queued' && (
