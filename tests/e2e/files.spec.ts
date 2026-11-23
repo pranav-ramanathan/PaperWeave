@@ -139,7 +139,20 @@ test('a paper is started from nothing, and a deleted file comes back by restorin
   await other.keyboard.type('Typed before the delete.');
   await expect(editorStatus(other)).toHaveText('All edits saved.');
 
+  // The paper reads the file, so the first click shows the line instead of deleting.
   await intro.getByRole('button', { name: 'Delete sections/intro.tex' }).click();
+  await expect(page).toHaveURL(/\/files\/[^/]+\/delete$/);
+  await expect(page.getByRole('heading', { name: 'Delete sections/intro.tex' })).toBeVisible();
+  await expect(page.getByText('1 line names this file')).toBeVisible();
+  await expect(page.getByText('Nothing has been deleted yet')).toBeVisible();
+  await expect(page.locator('section[aria-label="paper.tex"]')).toContainText(
+    '4: \\input{sections/intro}',
+  );
+  await expect(editorStatus(other)).toHaveText('All edits saved.');
+  await page.getByRole('link', { name: 'Back to the paper' }).click();
+  await expect(page.getByRole('link', { name: 'sections/intro.tex' })).toHaveCount(1);
+  await intro.getByRole('button', { name: 'Delete sections/intro.tex' }).click();
+  await page.getByRole('button', { name: 'Delete sections/intro.tex anyway' }).click();
   await expect(page.getByRole('status')).toContainText('Deleted sections/intro.tex.');
   const kept = /Revision (\d+) still has it/.exec(await page.getByRole('status').innerText())![1];
   await expect(page.getByRole('link', { name: 'sections/intro.tex' })).toHaveCount(0);
@@ -153,6 +166,14 @@ test('a paper is started from nothing, and a deleted file comes back by restorin
   await showSource(page);
   await expect(source(page)).toContainText('Uploaded words.');
   await expect(source(page)).toContainText('Typed before the delete.');
+
+  // A file nothing names is still deleted at one click.
+  await page.goto(paper);
+  await page.getByLabel('Name, with folders if you like').fill('notes.tex');
+  await page.getByRole('button', { name: 'Add file' }).click();
+  await expect(page.getByRole('status')).toHaveText('Added notes.tex.');
+  await page.getByRole('button', { name: 'Delete notes.tex' }).click();
+  await expect(page.getByRole('status')).toContainText('Deleted notes.tex.');
 });
 
 test('a page come back to says what is so now', async ({ browser }) => {
@@ -198,7 +219,10 @@ test('a page come back to says what is so now', async ({ browser }) => {
 
   // A file deleted meanwhile is gone from the page reached with Back.
   await page.getByRole('button', { name: 'Delete body.tex' }).click();
+  await page.getByRole('button', { name: 'Delete body.tex anyway' }).click();
   await expect(page.getByRole('status')).toContainText('Deleted body.tex');
+  // Back from the paper reaches the page that showed the lines, and once more the paper's page.
+  await page.goBack();
   await page.goBack();
   await expect(page.getByRole('link', { name: 'body.tex', exact: true })).toHaveCount(0);
 

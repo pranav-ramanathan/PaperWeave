@@ -80,6 +80,8 @@ Read this first. Update it in every pull request.
     be deleted. Restoring a revision removes files added since and brings back files deleted
     since, and can swap two files' names.
   - The first .tex file added to an empty paper becomes its root.
+  - Deleting a file the paper reads first shows the lines that name it; see "Deleting a file the
+    paper reads was done at one click".
   - When the server stops serving a file (deleted, or access removed) it says so, and the open
     editor locks and shows why. Before this the editor went on saying "All edits saved".
 - **C6: commands and compaction.**
@@ -5681,3 +5683,30 @@ forgotten \endgroup`. `\emph{R & D}`, `\textsc{a_b}` and `\mbox{#1}` failed the 
   is not checked once the text has any `\begin{`; a `\begin` inside a comment is counted; text
   commands outside the known set; a paper using the `underscore` package is told to write `\_`;
   no server-side check; the formula window is unchanged. No TEX_TEXT bump.
+
+## Deleting a file the paper reads was done at one click
+
+- **What was wrong.** "Delete" sat beside "Rename" in each file row, but Rename shows the lines
+  that name the file first and Delete went straight through. Built afterwards with local TeX:
+
+  | Line left behind                 | Result                                                 |
+  | -------------------------------- | ------------------------------------------------------ |
+  | `\input{sections/intro}`         | exit 12, no PDF, `File 'sections/intro.tex' not found` |
+  | `\include{sections/intro}`       | exit 12, no PDF                                        |
+  | `\includegraphics{figures/plot}` | exit 12, no PDF                                        |
+  | `\bibliography{refs}`            | exit 0, PDF made, citations unchecked                  |
+
+  On a shared paper one misclick stopped everyone's build; the only message was "Revision N still
+  has it", and restoring rolls back co-authors' edits too.
+
+- **Now** "Delete" on a file that some line names opens a page ("Delete <path>") that lists those
+  lines, file by file, with their numbers, says nothing has been deleted yet, and has a button
+  "Delete <path> anyway". The lines are found by the same reading Rename uses (`fileUses` in
+  `packages/server/src/files.ts`). The root file says it must be replaced first, with no button.
+- **Held by** `files.sandbox.test.ts` ("the lines that name a file are found before it is
+  deleted"), `files.spec.ts` (the page, the other tab untouched, then "anyway"; a file nothing
+  names still goes at one click) and the page in the `a11y.spec.ts` walk.
+- **Not changed.** A file nothing visible names is still deleted at once. Names written through a
+  macro are not seen. Lines are not removed or commented out for the person. There is no digest, so
+  a line added between the page and the click is not shown. Restoring a revision remains the way
+  back. The sync/API path, `deleteFile` itself, does not ask.

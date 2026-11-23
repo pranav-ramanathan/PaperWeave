@@ -379,7 +379,7 @@ async function renamePlan(
   store: BlobStore,
   projectId: string,
   fileId: string,
-  to: string,
+  to?: string,
   lock = false,
 ) {
   const files = await texFiles(db, store, projectId, lock);
@@ -387,6 +387,7 @@ async function renamePlan(
     .rows;
   const from: string | undefined = all.find((f) => f.id === fileId)?.path;
   if (!from) throw new AppError('not_found', 'No such file.');
+  const target = to ?? from;
   const paths = new Set<string>(all.map((f) => f.path));
   // TeX resolves every path against the root file's directory.
   const rootFile = files.find((f) => f.root);
@@ -411,9 +412,9 @@ async function renamePlan(
       // Written without its extension before, and the extension has not changed: leave it off.
       // TeX adds .sty, .cls and .bst itself, so a new name for one is written without it.
       const bare = inc.ext
-        ? to.endsWith(inc.ext)
-        : !inc.target.endsWith(ext(from)) && ext(from) === ext(to);
-      const newPath = bare ? to.slice(0, to.length - ext(to).length) : to;
+        ? target.endsWith(inc.ext)
+        : !inc.target.endsWith(ext(from)) && ext(from) === ext(target);
+      const newPath = bare ? target.slice(0, target.length - ext(target).length) : target;
       // Found through a \\graphicspath folder: say it as relative to that folder, if it is
       // still inside it. Otherwise relative to the root's folder, which always works.
       const folder = dir + found.via;
@@ -435,9 +436,9 @@ async function renamePlan(
   const changes = listChanges(files, splices);
   const proposal: RenameProposal = {
     from,
-    to,
+    to: target,
     changes,
-    digest: changesDigest([from, to], changes),
+    digest: changesDigest([from, target], changes),
   };
   return { proposal, splices, files };
 }
@@ -476,6 +477,26 @@ export async function proposeFileRename(
   );
   if (clash) throw new AppError('invalid_input', clashMessage(clash));
   return plan.proposal;
+}
+
+/**
+ * The lines that name a file, for showing before it is deleted. Nothing is changed. `root` says
+ * the file is the paper's root, which cannot be deleted.
+ */
+export async function fileUses(
+  pool: pg.Pool,
+  store: BlobStore,
+  userId: string,
+  projectId: string,
+  fileId: string,
+): Promise<{ path: string; root: boolean; lines: { path: string; line: number; text: string }[] }> {
+  await authorize(pool, userId, id(projectId), 'file.write');
+  const { proposal, files } = await renamePlan(pool, store, projectId, id(fileId));
+  return {
+    path: proposal.from,
+    root: files.find((f) => f.root)?.path === proposal.from,
+    lines: proposal.changes.map((c) => ({ path: c.path, line: c.line, text: c.before })),
+  };
 }
 
 /**

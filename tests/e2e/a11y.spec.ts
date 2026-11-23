@@ -75,6 +75,12 @@ test('the main pages have no accessibility failures a machine can find', async (
   const paper = page.url();
   await audit(page, 'paper');
 
+  // The page that shows the lines naming a file before it is deleted.
+  await page.getByRole('button', { name: 'Delete refs.bib' }).click();
+  await expect(page.getByRole('heading', { name: 'Delete refs.bib' })).toBeVisible();
+  await audit(page, 'delete a file the paper reads');
+  await page.goto(paper);
+
   await page.getByRole('link', { name: 'Describe it' }).click();
   await expect(page.getByRole('button', { name: 'Approve this description' })).toBeVisible();
   await audit(page, 'data file');
