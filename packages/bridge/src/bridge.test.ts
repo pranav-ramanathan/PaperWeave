@@ -1250,6 +1250,50 @@ test('Enter in a list item opens a new \\item with the same indentation', () => 
   r.check();
 });
 
+test('Enter at the start of a list item opens the new item at the end of the item before', () => {
+  const B = '\\begin{itemize}\n';
+  const E = '\\end{itemize}\n';
+  // [source, item index, display offset, result, caret in the item that follows]
+  const cases: [string, number, number, string, number | null][] = [
+    [B + '\\item one\n\\item  it\n' + E, 1, 0, B + '\\item one\n\\item \n\\item  it\n' + E, 9],
+    [
+      B + '  \\item one\n  \\item   it\n' + E,
+      1,
+      0,
+      B + '  \\item one\n  \\item \n  \\item   it\n' + E,
+      9,
+    ],
+    [
+      B + '\\item one % c\n\\item  it\n' + E,
+      1,
+      0,
+      B + '\\item one % c\n\\item \n\\item  it\n' + E,
+      11,
+    ],
+    [B + '\\item one\n\\item on  e\n' + E, 1, 2, B + '\\item one\n\\item on\n\\item   e\n' + E, 11],
+    [B + '\\item one\n\\item on  e\n' + E, 1, 3, B + '\\item one\n\\item on \n\\item  e\n' + E, 12],
+    [B + '\\item one\n\\item  it  \n' + E, 1, 2, B + '\\item one\n\\item  it\n\\item   \n' + E, 11],
+  ];
+  for (const [src, k, off, out, caret] of cases) {
+    const r = replica(src);
+    const li = items(r);
+    expect(enterAt(r, li[k].start + off)).toBe(true);
+    expect(r.src).toBe(out);
+    r.check();
+    if (off === 0) expect(r.state.selection.from).toBe(caret);
+  }
+  // The first item has nothing before it: refused, nothing changes.
+  let r = replica(B + '\\item  it\n\\item two\n' + E);
+  expect(enterAt(r, items(r)[0].start)).toBe(false);
+  expect(r.src).toBe(B + '\\item  it\n\\item two\n' + E);
+  r.check();
+  // After an empty item the Enter is accepted and the source stays as it was.
+  r = replica(B + '\\item \n\\item  it\n' + E);
+  expect(enterAt(r, items(r)[1].start)).toBe(true);
+  expect(r.src).toBe(B + '\\item \n\\item  it\n' + E);
+  r.check();
+});
+
 test('text typed in the item Enter opened goes after \\item, and Backspace undoes the Enter', () => {
   const r = replica(LIST);
   const li = items(r);
@@ -3047,6 +3091,7 @@ describe('comments in a paragraph in the visual view', () => {
       'Mid with word%\n continues and\n%\nalso {\\em old\n% inner\n} done.\n\n' +
       'Trailing words here. % last\n\n' +
       '\\emph{inside\n% in emph\nthe emph} text.\n\n' +
+      '\\begin{itemize}\n\\item first item\n% in item\n  % again\nmore of it\n\\item second\n\\end{itemize}\n\n' +
       'Before a heading\n% remark\n\\section{Next}\n\nEnd words.\n';
     let done = 0;
     for (let seed = 0; seed < 300; seed++) {

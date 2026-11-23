@@ -5793,11 +5793,15 @@ two`, cut at 40 characters, the source in the title, announced as "comment: ..."
 - **Held by** parse tests (one atom for a run, a bare `%`, a trailing comment, guards for
   comments between paragraphs, a blank line ending a run, and `50\%`), a prose test, a web unit
   test for the note's text, bridge tests (typing and deleting around the note change only their
-  own bytes; a 300-seed generated-edit run) and a browser test in `visual.spec.ts` that also
+  own bytes; a 300-seed generated-edit run, which now includes a list item with a comment, and
+  a bridge test for Enter at the start of an item) and a browser test in `visual.spec.ts` that also
   runs the accessibility check.
+- **Note.** Enter at the start of an item after the first splices `\n\item ` at the end of the item
+  before, the same document as Enter there, and leaves the item's own bytes alone. The
+  generated-edit run models that range (the end of the item before), where it had used the range of
+  the item the caret was in.
 - **Not done.** The space shown after a bare `%` (TeX prints none). `\noindent`, `\-` and `\\`
   are still chips read as "Dummy"; maths macros (`\hgg`) and reference wrappers (`\sref{}`) are
-  not rendered. A grammar finding across a comment is still dropped. The generated-edit run has
-  no list item with a comment in it: Enter at the start of an item whose text begins with a space
-  inserts its new item one byte before the range the run reports, with or without comments, so
-  that case is held by a typing test instead.
+  not rendered. A grammar finding across a comment is still dropped. Enter at the start of an
+  item whose previous item is empty is accepted and does nothing (`translate.ts` returns no
+  edits there); the source is untouched, so it is harmless.

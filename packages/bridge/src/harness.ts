@@ -162,6 +162,14 @@ export function visualOp(r: Rng, rep: Replica, only?: 'ins'): Op | null {
     );
   } else if (roll < 84) {
     what = 'enter';
+    // Enter at the start of a list item after the first opens the new item at the end of the
+    // item before (the same document as Enter there), and leaves this item's bytes alone.
+    const $p = state.doc.resolve(pos);
+    if (off === 0 && $p.parent.type.name === 'list_item' && $p.index(1) > 0) {
+      const prev = locate(rep.bridge.model, state.doc, pos - 2)!;
+      lo = prev.base + unit(prev.pieces, prev.off - 1)[0];
+      hi = prev.base + unit(prev.pieces, prev.off)[1];
+    }
     accepted = rep.dispatch(caret(state.tr.split(pos), pos + 2));
   } else if (roll < 92) {
     what = 'join';
