@@ -21,6 +21,7 @@ import {
   floatParts,
   atomProblem,
   logoOf,
+  quietOf,
   stray,
   strayAdvice,
   textMacroOf,
@@ -452,6 +453,15 @@ export function createVisual(opts: {
         dom.textContent =
           said === '' ? '%' : `% ${said.length > 40 ? said.slice(0, 39).trimEnd() + '…' : said}`;
         dom.setAttribute('aria-label', said === '' ? 'empty comment' : `comment: ${said}`);
+        opensAtom(dom, node, getPos);
+        return { dom };
+      }
+      const quiet = quietOf(node.attrs.src);
+      if (quiet) {
+        // A command that prints nothing: a small quiet mark, its source in the title.
+        dom.classList.add('pw-quiet');
+        dom.textContent = quiet.mark;
+        dom.setAttribute('aria-label', quiet.says);
         opensAtom(dom, node, getPos);
         return { dom };
       }

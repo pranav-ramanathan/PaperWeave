@@ -441,8 +441,8 @@ Read this first. Update it in every pull request.
     set up, and everything else works.
   - `packages/latex/src/prose.ts` turns a file into prose plus markup: running text is sent as
     text; formulas, references, citations, commands, code (`\texttt`, listings), comments and
-    the preamble are sent as markup with a stand-in ("Dummy", "[1]"; a comment in a paragraph reads
-    as nothing) so that the sentence still reads. The checker answers in source positions.
+    the preamble are sent as markup with a stand-in ("Dummy", "[1]"; a comment in a paragraph, `\noindent`,
+    `\-` and `\/` read as nothing, and `\\` as a space) so that the sentence still reads. The checker answers in source positions.
   - A finding is shown only if all of it lies in prose (`inProse`). So none is ever in a
     formula, a unit, code, a path or a citation; a service test seeds the same misspelling in
     each of those and holds that.
@@ -5801,7 +5801,36 @@ two`, cut at 40 characters, the source in the title, announced as "comment: ..."
   generated-edit run models that range (the end of the item before), where it had used the range of
   the item the caret was in.
 - **Not done.** The space shown after a bare `%` (TeX prints none). `\noindent`, `\-` and `\\`
-  are still chips read as "Dummy"; maths macros (`\hgg`) and reference wrappers (`\sref{}`) are
-  not rendered. A grammar finding across a comment is still dropped. Enter at the start of an
+  were still chips read as "Dummy" (see "Commands that print nothing are quiet marks"); maths
+  macros (`\hgg`) and reference wrappers (`\sref{}`) are not rendered. A grammar finding across a comment is still dropped. Enter at the start of an
   item whose previous item is empty is accepted and does nothing (`translate.ts` returns no
   edits there); the source is untouched, so it is harmless.
+
+## Commands that print nothing are quiet marks, and read as nothing to the grammar check
+
+- **What was wrong.** `\noindent`, `\-`, `\/`, `\@`, `\\`, `\newline`, `\allowbreak` and a
+  backslash at the end of a line were raw chips, and the grammar check read each as the noun
+  "Dummy". In the 17-paper corpus that was 272 chips in 41 of 1,685 text blocks, in 6 papers: `\\`
+  222 (217 in one author list), `\noindent` 26 (25 paragraphs; 24 are `\noindent\textbf{..}`
+  run-in headings), `\-` 13, backslash-newline 11. 31 blocks held a raw chip only because of
+  these. `\noindent{\bf Setup.}` was one chip with the heading inside it. On a live LanguageTool the
+  stand-in hid real findings: `\noindent we adopt` gave no sentence-start finding and
+  `baseline.\\` then `An other` no compound finding.
+- **Now.** Each is an atom of its own (`\noindent{}` with its empty braces; any other braces after
+  it are a group of their own, so `\noindent{\bf Setup.}` is a chip plus an editable bold group).
+  The visual view shows a small quiet mark (`¶` no indent or indent, `↵` line break, `·` for the
+  rest), the source in the title, an accessible name such as "no indent". A backslash at the end of
+  a line is TeX's control space, as `\ ` is. The grammar check reads them as nothing, `\\`,
+  `\newline` and `\linebreak` as a space, and `\-` as part of its word (`Schmid\-huber` reads
+  `Schmidhuber`, and a finding may cover it). Stand-ins fall from 7,267 to 6,995 and "Dummy"
+  glued to a letter from 3,438 to 3,173. A generated-edit run over the corpus (10,164 accepted
+  edits on 12 documents, all 272 sites) changed no byte outside its range. `TEX_TEXT` is not
+  bumped.
+- **Held by** `quiet.test.ts`, parse tests (`\noindent` and its braces, control space, guards), a
+  prose test, bridge tests (typing and deleting around each kind change only their own bytes; a
+  600-seed generated-edit run) and a browser test in `visual.spec.ts` that also runs the
+  accessibility check.
+- **Not done.** The visual view does not break the line at `↵`; the space shown after
+  `\noindent ` (TeX drops it); `\vskip`, `\vspace`, `\smallskip`, `\;` and `\quad` stay chips
+  (7 in the corpus); `\\` in captions and table cells; the import coverage figure still counts
+  these atoms as raw.

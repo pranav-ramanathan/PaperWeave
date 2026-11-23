@@ -2,12 +2,14 @@
 // each thing that is not (a formula, a citation, a command), and where each is in the source.
 // The command that opens a list item reads as a bullet, so an item is not taken for a sentence.
 // A comment inside a paragraph reads as nothing, and the line break after it as nothing either.
+// So do the commands that print nothing (`\noindent`, `\-`, `\/`); a forced line break is a space.
 // A list the parser keeps raw (a description, an item with an option or a nested list in it) is
 // read from inside: its items read as bullets, and the term of a description item is not prose.
 // A checker that is told "this is markup, read it as that" answers in source positions.
 import { logoOf } from './bib.ts';
 import { textMacroOf } from './macros.ts';
 import { DEFAULT_TRANSPARENT, parse, textblocks } from './parse.ts';
+import { quietOf } from './quiet.ts';
 
 /** One stretch of the source, as LanguageTool's annotated text has it. */
 export type Annotated = { text: string } | { markup: string; interpretAs: string };
@@ -125,6 +127,8 @@ export function prose(
           if (p.k === 'text') add(from, to, code ? 'hard' : 'text', code ? noun() : undefined);
           else if (p.k === 'ws') add(from, to, 'soft', afterComment ? '' : ' ');
           else if (p.k === 'esc') add(from, to, code ? 'hard' : 'soft', p.ch ?? '');
+          else if (p.k === 'atom' && p.type === 'raw' && quietOf(src.slice(from, to))?.inWord)
+            add(from, to, code ? 'hard' : 'soft', '');
           else if (p.k === 'atom' && inList && ITEM.test(src.slice(from, to))) {
             add(from, to, 'hard', bullet(src.slice(from, to)));
             read = '';
@@ -138,7 +142,10 @@ export function prose(
                 : p.type === 'ref'
                   ? '1'
                   : p.type === 'raw'
-                    ? (logoOf(src.slice(from, to)) ?? reading(from, to) ?? noun())
+                    ? (quietOf(src.slice(from, to))?.reads ??
+                      logoOf(src.slice(from, to)) ??
+                      reading(from, to) ??
+                      noun())
                     : noun(),
             );
           // The command that opens a list item reads as the bullet it prints. Any other command

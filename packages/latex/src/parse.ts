@@ -3,6 +3,7 @@
 
 import { accented, LIGATURES } from './bib.ts';
 import { CITES, MULTICITES, REFS } from './labels.ts';
+import { QUIET_BARE } from './quiet.ts';
 
 export type Mark = 'emph' | 'textbf' | 'textit' | 'texttt';
 
@@ -631,6 +632,8 @@ function parseInto(
         if (!isL(name[0])) {
           if (ESC_SYM.has(name)) push('esc', i, j, { ch: name });
           else if (name === ',') push('esc', i, j, { ch: THIN });
+          // A backslash at the end of a line is the space `\ ` is.
+          else if (name === '\n') push('esc', i, j, { ch: ' ' });
           else if (name === '(') {
             const k = mathEnd(j, (q) => src[q] === '\\' && src[q + 1] === ')');
             if (k < 0) throw new Unbalanced('para', 'unclosed \\(');
@@ -731,7 +734,8 @@ function parseInto(
           }
         }
         if (e < 0) {
-          e = unit(i);
+          // \noindent takes nothing: the braces after it are a group of their own.
+          e = QUIET_BARE.has(name) ? (src.startsWith('{}', j) ? j + 2 : j) : unit(i);
           type = DEFS.has(name) ? 'def' : 'raw';
         }
         push('atom', i, e, { type });

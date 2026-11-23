@@ -735,3 +735,35 @@ test('comment lines that follow one another in a paragraph are one atom', () => 
   expect(para('A\n% c\n\nB\n')).toHaveLength(2);
   expect(pieces('50\\% of\n').filter((q) => q.k === 'atom')).toHaveLength(0);
 });
+
+test('a command that prints nothing is an atom of its own', () => {
+  const pieces = (src: string) => {
+    const p = parse(src);
+    assertLossless(p);
+    const b = p.blocks.find((x) => x.body.kind === 'para')!;
+    const ps = (
+      b.body as { pieces: { k: string; s: number; e: number; type?: string; ch?: string }[] }
+    ).pieces;
+    for (let k = 1; k < ps.length; k++) expect(ps[k].s).toBe(ps[k - 1].e);
+    return ps.map((q) => [q.k, src.slice(b.start + q.s, b.start + q.e), q.ch ?? '']);
+  };
+  const a = pieces('\\noindent{\\bf Setup.} We train.\n');
+  expect(a.slice(0, 4)).toEqual([
+    ['atom', '\\noindent', ''],
+    ['open', '{\\bf ', ''],
+    ['text', 'Setup.', ''],
+    ['close', '}', ''],
+  ]);
+  expect(pieces('\\noindent{}\\textbf{S}\n')[0]).toEqual(['atom', '\\noindent{}', '']);
+  const e = pieces('Smith et al.\\\nshow it.\n');
+  expect(e.filter((q) => q[0] === 'esc')).toEqual([['esc', '\\\n', ' ']]);
+  expect(e.map((q) => q[0])).not.toContain('ws');
+  const two = parse('Smith et al.\\\n\nNext\n');
+  assertLossless(two);
+  expect(two.blocks.filter((b) => b.body.kind === 'para')).toHaveLength(2);
+  const br = pieces('one \\\\[2pt]\ntwo\n');
+  const at = br.findIndex((q) => q[1] === '\\\\[2pt]');
+  expect(br[at][0]).toBe('atom');
+  expect(br[at + 1][0]).toBe('ws');
+  expect(pieces('a\\ b\n').filter((q) => q[0] === 'esc')).toEqual([['esc', '\\ ', ' ']]);
+});

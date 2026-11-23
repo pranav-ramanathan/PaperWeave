@@ -803,6 +803,48 @@ test('commented-out lines in a paragraph are one quiet note', async ({ browser }
   await audit(page, 'visual view, comments in a paragraph');
 });
 
+test('commands that print nothing are quiet marks', async ({ browser }) => {
+  test.setTimeout(180_000);
+  const { page, email } = await person(browser, 'vis-quiet');
+  const main = [
+    '\\documentclass{article}',
+    '\\begin{document}',
+    '\\noindent\\textbf{Setup.} Alpha one\\\\',
+    'beta hy\\-phen gamma.',
+    '\\end{document}',
+    '',
+  ].join('\n');
+  const zip = join(mkdtempSync(join(tmpdir(), 'paperweave-e2e-')), `Quiet ${run}.zip`);
+  writeFileSync(zip, await writeZip([{ path: 'main.tex', bytes: Buffer.from(main) }]));
+  await page.goto('/sign-in');
+  await signIn(page, email);
+  await page.getByLabel('Or import a ZIP of a LaTeX project').setInputFiles(zip);
+  await page.getByRole('button', { name: 'Import ZIP' }).click();
+  await page.getByRole('link', { name: 'main.tex' }).first().click();
+  await expect(status(page)).toHaveText('All edits saved.');
+  const quiet = page.locator(`${VISUAL} .pw-quiet`);
+  await expect(quiet).toHaveCount(3);
+  await expect(quiet.nth(0)).toHaveText('¶');
+  await expect(quiet.nth(1)).toHaveText('↵');
+  await expect(quiet.nth(2)).toHaveText('·');
+  await expect(quiet.first()).toHaveAttribute('aria-label', 'no indent');
+  await expect(quiet.first()).toHaveAttribute('title', '\\noindent');
+  await expect(page.locator(`${VISUAL} .pw-raw_inline:not(.pw-quiet)`)).toHaveCount(0);
+  await clickAfter(page, VISUAL, 'Alpha');
+  await page.keyboard.type('XY');
+  await expect(status(page)).toHaveText('All edits saved.');
+  await showSource(page);
+  await page.waitForTimeout(800);
+  const src = (await sourceText(page)).replace(/\u2060/g, '');
+  expect(src).toContain(
+    // The source view's text has no line breaks, so the lines run together.
+    '\\noindent\\textbf{Setup.} AlphaXY one\\\\beta hy\\-phen gamma.',
+  );
+  await showVisual(page);
+  await expect(page.locator(VISUAL)).toBeVisible();
+  await audit(page, 'visual view, quiet commands');
+});
+
 test('a selection across list items is deleted or typed over; undo restores it; another person sees it', async ({
   browser,
 }) => {
