@@ -288,6 +288,46 @@ test('an error that ran on says how the argument began', () => {
   ]);
 });
 
+const ENDED = [
+  ' (./sections/method.tex)',
+  'Runaway argument?',
+  '{never closed \\par More text. ',
+  './main.tex:5: File ended while scanning use of \\textbf .',
+  '<inserted text> ',
+  '                \\par ',
+  'l.5 \\input{sections/method}',
+].join('\n');
+
+test('a brace left open in an input file is blamed on that file', () => {
+  const [d] = diagnostics(ENDED);
+  expect(d.file).toBe('sections/method.tex');
+  expect(d.line).toBeUndefined();
+  expect(d.message).toContain('It began: \u201c{never closed\u201d');
+  expect(d.message).toContain('main.tex line 5');
+});
+
+test('the file that ended is placed under the folder of a root in a folder', () => {
+  expect(diagnostics(ENDED, '', 'paper/')[0].file).toBe('paper/sections/method.tex');
+});
+
+test('a footnote left open reports the file whose bracket sits alone on the line before', () => {
+  const log = ENDED.replace(' (./sections/method.tex)', '(./sections/method.tex\n)').replace(
+    'textbf',
+    'footnote',
+  );
+  expect(diagnostics(log)[0].file).toBe('sections/method.tex');
+});
+
+test('guard: text between the closing bracket and the runaway keeps the root file', () => {
+  const log = ENDED.replace('method.tex)', 'method.tex) and more');
+  expect(diagnostics(log)[0]).toMatchObject({ file: 'main.tex', line: 5 });
+});
+
+test('guard: a file from the TeX installation that closed is not blamed', () => {
+  const log = ENDED.replace('(./sections/method.tex)', '(/usr/share/texlive/foo.sty)');
+  expect(diagnostics(log)[0]).toMatchObject({ file: 'main.tex', line: 5 });
+});
+
 test('guard: an ordinary error in the paper, and a package of its own, keep their place', () => {
   const log = [
     './sections/intro.tex:12: Undefined control sequence.',
