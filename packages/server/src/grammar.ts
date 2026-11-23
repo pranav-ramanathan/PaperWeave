@@ -11,7 +11,7 @@ import { AppError } from './errors.ts';
 import { envCount } from './limits.ts';
 import { boundedJson } from './outbound.ts';
 import { id } from './projects.ts';
-import { proseOf } from './labels.ts';
+import { proseOf, textMacrosOf } from './labels.ts';
 import { loadUpdates, TEXT } from './sync.ts';
 
 export const LANGUAGES = ['en-GB', 'en-US'] as const;
@@ -139,10 +139,13 @@ export async function checkGrammar(
   const src = text.toString();
   // The paper's own theorem environments are prose here as in the editor. At most 64 names.
   const own = await proseOf(pool, store, projectId);
-  const { annotation, segments } = prose(src, new Set([...DEFAULT_TRANSPARENT, ...own]));
+  // So are the paper's macros that only print words: the checker reads what they print.
+  const words = await textMacrosOf(pool, store, projectId);
+  const { annotation, segments } = prose(src, new Set([...DEFAULT_TRANSPARENT, ...own]), words);
   const disabled = [...NEVER, ...settings.off].join(',');
-  // The same text, language and rules give the same answer.
-  const key = `${sha256(Buffer.from(src))}:${settings.language}:${disabled}:${own.join(',')}`;
+  // The same annotation, language and rules give the same answer: the annotation holds the text,
+  // and what every macro and environment of the paper makes of it. Only its hash is kept.
+  const key = `${sha256(Buffer.from(JSON.stringify(annotation)))}:${settings.language}:${disabled}`;
   let matches = answers.get(key);
   if (!matches) {
     let pending = asking.get(key);

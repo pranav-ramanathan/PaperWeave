@@ -4,10 +4,11 @@ import {
   decodeFile,
   includeGraph,
   labelIndex,
-  macroDefs,
+  mathMacros,
   projectGraphicsPaths,
   proseEnvs,
   readyMadeBbls,
+  textMacros,
 } from '@paperweave/latex';
 import type pg from 'pg';
 import * as Y from 'yjs';
@@ -192,8 +193,9 @@ export async function labelReport(
 }
 
 /**
- * The simple macros the paper defines before its text begins: in the root file's preamble and in
- * the files that preamble reads. The editor gives them to its maths renderer.
+ * The simple macros the paper defines before its text begins, for the editor's maths renderer:
+ * from the root file's preamble, the files it reads and the project's own packages it loads, in
+ * the order TeX reads them (`mathMacros`).
  */
 export async function paperMacros(
   pool: pg.Pool,
@@ -202,17 +204,37 @@ export async function paperMacros(
   projectId: string,
 ): Promise<Record<string, string>> {
   await authorize(pool, userId, id(projectId), 'project.read');
-  const files = await texFiles(pool, store, projectId);
+  const files = await texFiles(pool, store, projectId, false, '\\.(tex|ltx|sty|cls)$');
   const root = files.find((f) => f.root);
   if (!root) return {};
-  const texts = Object.fromEntries(files.map((f) => [f.path, f.text]));
-  const begins = root.text.indexOf('\\begin{document}');
-  const preamble = begins < 0 ? root.text : root.text.slice(0, begins);
-  // In the order TeX reads them, so that a later definition of a name wins.
-  let macros = macroDefs(preamble);
-  for (const path of includeGraph(texts, root.path).preamble)
-    macros = { ...macros, ...macroDefs(texts[path] ?? '') };
-  return macros;
+  return mathMacros(Object.fromEntries(files.map((f) => [f.path, f.text])), root.path);
+}
+
+/**
+ * The macros of the paper that only print words (`\\newcommand{\\sys}{PaperWeave}`): the editor
+ * shows them as those words. Read in the order TeX reads them, from the root's preamble, the files
+ * it reads and the project's own packages it loads (`textMacros`).
+ */
+export async function paperTextMacros(
+  pool: pg.Pool,
+  store: BlobStore,
+  userId: string,
+  projectId: string,
+): Promise<Record<string, string>> {
+  await authorize(pool, userId, id(projectId), 'project.read');
+  return textMacrosOf(pool, store, projectId);
+}
+
+/** `paperTextMacros` for a caller that has already checked the person's access. */
+export async function textMacrosOf(
+  pool: Db,
+  store: BlobStore,
+  projectId: string,
+): Promise<Record<string, string>> {
+  const files = await texFiles(pool, store, projectId, false, '\\.(tex|ltx|sty|cls)$');
+  const root = files.find((f) => f.root);
+  if (!root) return {};
+  return textMacros(Object.fromEntries(files.map((f) => [f.path, f.text])), root.path);
 }
 
 /**

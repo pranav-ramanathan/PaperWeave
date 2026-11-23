@@ -18,6 +18,7 @@ import {
   fieldText,
   floatParts,
   logoOf,
+  textMacroOf,
   type Span,
   tableEdit,
   type TableOp,
@@ -106,6 +107,31 @@ function el<K extends keyof HTMLElementTagNameMap>(tag: K, className: string, te
   return e;
 }
 
+/**
+ * `latex` with each of the paper's own word macros (`\\sys`, `\\sys{}`) as the word it prints,
+ * except in a formula. A space the word ends in is not said twice when a space follows.
+ */
+function spoken(latex: string, words: Record<string, string>): string {
+  const names = Object.keys(words);
+  if (!names.length || !latex.includes('\\')) return latex;
+  const found = new RegExp(
+    `(${names.map((n) => n.replace(/\\/g, '\\\\')).join('|')})(?![a-zA-Z@])(?:\\{\\})?`,
+    'g',
+  );
+  // \$ is a dollar sign; the rest of the pieces alternate between text and a formula.
+  return latex
+    .split(/(\\\$|\$[^$]*\$)/)
+    .map((piece, i) =>
+      i % 2
+        ? piece
+        : piece.replace(found, (all, name: string, at: number) => {
+            const said = words[name]!;
+            return /\s/.test(piece[at + all.length] ?? ' ') ? said.trimEnd() : said;
+          }),
+    )
+    .join('');
+}
+
 export function createVisual(opts: {
   element: HTMLElement;
   ytext: Y.Text;
@@ -124,6 +150,8 @@ export function createVisual(opts: {
   macros?: Record<string, string>;
   /** Environments the paper declares as theorems (`\\newtheorem`): prose, like `lemma`. */
   prose?: string[];
+  /** The paper's macros that only print words, and what each prints: shown as those words. */
+  words?: Record<string, string>;
   /** The address of a picture, given the name an \\includegraphics uses for it. */
   picture?(target: string): string;
   /**
@@ -417,12 +445,20 @@ export function createVisual(opts: {
       if (logo) {
         dom.textContent = logo;
         dom.classList.add('pw-word');
+      } else if (note === null && key === null) {
+        // One of the paper's own words (`\\sys`): it reads as the word it prints. Its title is
+        // the source, and a double click edits that.
+        const word = textMacroOf(node.attrs.src, opts.words ?? {});
+        if (word !== null) {
+          dom.textContent = word.trim();
+          dom.classList.add('pw-word');
+        }
       }
       opensAtom(dom, node, getPos);
       return { dom };
     };
   /** Text as it reads, for showing: `100\\%` as 100%. What is edited is always the LaTeX itself. */
-  const shown = (latex: string) => latex.replace(/\\([%&_#$])/g, '$1');
+  const shown = (latex: string) => spoken(latex, opts.words ?? {}).replace(/\\([%&_#$])/g, '$1');
   /**
    * One part of a figure or table that is edited where it stands: a cell, a caption. Pressing
    * it turns it into a field holding its LaTeX; Enter puts the new text in its place, by way of

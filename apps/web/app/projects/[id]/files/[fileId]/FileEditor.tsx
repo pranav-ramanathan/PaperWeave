@@ -164,6 +164,8 @@ export default function FileEditor(props: {
   macros: Record<string, string>;
   /** Environments the paper declares with \\newtheorem: prose in the visual view. */
   prose: string[];
+  /** The paper's macros that only print words (\\newcommand{\\sys}{PaperWeave}), and what each prints. */
+  words: Record<string, string>;
   /** Whether this person may comment, and the others on the paper, whom they can mention. */
   canComment: boolean;
   members: Member[];
@@ -214,6 +216,8 @@ export default function FileEditor(props: {
   const macros = useRef(props.macros);
   // The same for the paper's own theorem environments: a \\newtheorem added since shows raw until reload.
   const prose = useRef(props.prose);
+  // And the macros that print words: one defined since shows as a command until reload.
+  const words = useRef(props.words);
   /** A formula being edited or inserted, a reference being chosen, and the menu, when open. */
   const [formula, setFormula] = useState<FormulaRequest | null>(null);
   const [picker, setPicker] = useState<{ apply: FormulaRequest['apply'] } | null>(null);
@@ -662,6 +666,7 @@ export default function FileEditor(props: {
           run,
           macros: macros.current,
           prose: prose.current,
+          words: words.current,
           picture: (target) =>
             `/projects/${projectId}/picture?target=${encodeURIComponent(target)}`,
           editMath: (src, apply) => setFormula({ src, place: null, apply }),

@@ -1,4 +1,5 @@
 import { expect, test } from 'vitest';
+import { DEFAULT_TRANSPARENT } from './parse.ts';
 import { inProse, prose, readAs } from './prose.ts';
 import { fixtureFiles } from './testutil.ts';
 
@@ -267,4 +268,36 @@ test('code and a formula in an item, and a stray item, are not prose', () => {
   // A plain list reads as it did.
   const plain = '\\begin{itemize}\n\\item A one.\n\\item b two.\n\\end{itemize}\n';
   expect(read(plain)).toBe('• A one.\n\n• b two.\n\n ');
+});
+
+test("a paper's own words read as the words they print, and are still never changed", () => {
+  const macros = { '\\sys': 'PaperWeave', '\\eg': 'e.g. ', '\\db': 'database' };
+  const src = 'We built \\sys, \\sys{} and \\sys\\ too; \\eg tools and an \\db.\n';
+  const { annotation, segments } = prose(src, DEFAULT_TRANSPARENT, macros);
+  expect(annotation).toContainEqual({ markup: '\\sys', interpretAs: 'PaperWeave' });
+  expect(annotation).toContainEqual({ markup: '\\sys{}', interpretAs: 'PaperWeave' });
+  expect(annotation).toContainEqual({ markup: '\\db', interpretAs: 'database' });
+  // The annotation still holds every byte of the source, in order.
+  expect(annotation.map((a) => ('text' in a ? a.text : a.markup)).join('')).toBe(src);
+  // A space after the macro is the source's own: the one the body ends in is not said twice.
+  const said = annotation.map((a) => ('text' in a ? a.text : a.interpretAs)).join('');
+  expect(said).toContain('e.g. tools');
+  expect(said).not.toContain('e.g.  tools');
+  expect(said).toContain('an database.');
+  // A finding that touches the macro is dropped, one beside it is kept.
+  const at = src.indexOf('\\sys,');
+  expect(inProse(segments, at, at + 4)).toBe(false);
+  expect(inProse(segments, at - 8, at + 4)).toBe(false);
+  expect(inProse(segments, 0, 8)).toBe(true);
+  // Without the paper's words the same source reads as before.
+  const plain = prose(src);
+  expect(plain.annotation).toContainEqual({ markup: '\\sys', interpretAs: 'Dummy' });
+  expect(plain.annotation).toContainEqual({ markup: '\\db', interpretAs: 'Item' });
+  expect(prose(src, DEFAULT_TRANSPARENT, {})).toEqual(plain);
+});
+
+test("a macro that is not one of the paper's words reads as before, whatever the table holds", () => {
+  const src = 'See \\two{x}, \\sysx and \\LaTeX{} here.\n';
+  const macros = { '\\sys': 'PaperWeave', '\\LaTeX': 'Wrong' };
+  expect(prose(src, DEFAULT_TRANSPARENT, macros)).toEqual(prose(src));
 });

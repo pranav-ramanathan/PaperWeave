@@ -184,8 +184,9 @@ Read this first. Update it in every pull request.
     said when it was opened is what the server must find: a formula someone else changed
     meanwhile is not overwritten, and the person is told. The edit can be undone.
   - The preview draws the paper's own macros: `\newcommand` and relatives, plain `\def`, and
-    `\DeclareMathOperator`, read from the root file's preamble and the files it reads
-    (`macroDefs`, `paperMacros`). So does the visual view itself.
+    `\DeclareMathOperator`, read in TeX's order from the root file's preamble, the files it
+    reads and the project's own `.sty`/`.cls` it loads (`mathMacros`, `paperMacros`). So does the
+    visual view itself. An argument a macro declares but does not use is dropped, as in TeX.
   - Macros are read when the page loads. A macro defined since shows after a reload.
   - A formula the browser cannot draw can still be applied: the PDF is what decides.
 - **D1, fifth part: inserting references and equations.** In the visual view, three ways each:
@@ -5272,3 +5273,54 @@ closed: ...` (outermost first, at most 10). The log does not name the file: with
   lines, which stay boxes; paper text macros (`\eg`) and `--`/quote ligatures; a `\newtheorem`
   added since the page loaded stays boxed until a reload. A label with a trailing comment, or an
   `\end{document}` followed by text, stays a box.
+
+## A paper's own text macros read as words
+
+- **What was wrong.** `\newcommand{\sys}{PaperWeave}` showed as a grey raw chip in the visual
+  view, as `\sys` in a caption or a table cell, and as "Dummy" to the grammar checker. So `These
+\dbs is used here.` (`\dbs` for databases) had no finding, and `We use it \etc. it works.` had a
+  false one on "it".
+- **Now** a macro whose body only prints words reads as them (`textOf`, `textMacros`,
+  `textMacroOf` in `macros.ts`). A body qualifies when it holds letters, digits, punctuation,
+  `\ `, `~`, `\,`, `--`, `\%`-style escapes, `\@`, `{}`, `\xspace`, a `LIGATURES` command
+  (`\dots`) and other macros that qualify; no more than 80 characters. A macro with arguments, a
+  font wrapper (`\textsc{..}`), a formula, `\DeclareMathOperator`, a cycle, or a name in
+  `LIGATURES` does not. Definitions are read in the order TeX reads them: the root's preamble,
+  descending at each `\input` and at each `\usepackage`/`\documentclass` of the project's own
+  `.sty`/`.cls`; the last one wins. A name that the body of the paper, or a file the preamble does
+  not read, defines in any other way is left out. At most 256 names.
+- **Display.** In the editor an atom written exactly `\sys` or `\sys{}` shows the words (class
+  `pw-word`; the title is the source; a double click edits the source). A caption, a cell and
+  their labels show the words in place of the macro, except inside `$..$`. The fields still hold
+  the LaTeX, and nothing is written to the file.
+- **Grammar.** `prose(src, transparent, macros)` reads such an atom as its words; it is still
+  `hard`, so a finding that touches the macro is dropped. The answer cache is keyed by a hash of
+  the annotation (it holds the text and what every macro stands for), so a change in a package
+  that the checked file does not contain gives a new request. Nothing of the text is logged.
+- **Stale.** The editor reads the words when the page loads: a macro changed since shows after a
+  reload. The grammar check reads them on each check.
+- **Left out.** Font wrappers (`\textsc{..}`) and macros with arguments do not qualify. No space
+  is added or removed after `\sys word` as TeX would. Captions and cells are not grammar-checked.
+- **Held by** `macros.test`, `prose.test`, a guard in `bridge.test` (typing beside macros keeps
+  every byte), the grammar sandbox test (real checker, a package changed under an unchanged
+  file), and browser tests in `visual.spec` and `grammar.spec`.
+
+### Maths macros in TeX's order, from the paper's own packages
+
+- **Was.** `paperMacros` read the root's preamble first and the files it `\input`s after, so a
+  redefinition in the root lost to an earlier definition in an included file. It never read
+  `.sty` or `.cls`, so a formula written with a macro from the paper's own package was drawn as
+  raw LaTeX. `\providecommand` overrode an earlier definition. A macro that declared more
+  arguments than its body used (`\newcommand{\hide}[1]{}`) printed the argument.
+- **Now.** `mathMacros(texts, root)` takes what is in force at the end of the root's preamble
+  (the same walk as `textMacros`, now shared as `inForce`): last definition wins, `\providecommand`
+  does not override, the project's own packages are read where they are loaded. A macro whose
+  body uses fewer arguments than it declares is given to the renderer as
+  `\@secondoftwo{#n}{body}`, which takes and drops the unused ones. `paperMacros` reads
+  `.tex`, `.ltx`, `.sty` and `.cls` files.
+- **Left out.** `\def` with parameters, macros with an optional argument (and a name such an
+  optional-argument redefinition has replaced), names containing `@`, and definitions in the body
+  of the paper.
+- **Stale.** Macros are read when the page loads, as before.
+- **Held by** `macros.test`, `apps/web/lib/mathmacros.test` (the renderer drops the argument),
+  the `paperMacros` sandbox test in `labels.sandbox.test`, and `maths.spec`.
