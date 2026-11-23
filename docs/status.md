@@ -2122,8 +2122,7 @@ update` held the paper's file rows for **189.6 s** (until the proxy was cut; it 
   the file it was opened in. A mistake inside a command is placed where the command is used. A
   missing package or file is given its file but not its line. A package of TeX's own is named
   without the line that loads it. Biber's errors are read from latexmk's output, with the .bib and its line (a .bib that
-  is not there has no line); biber's own log, main.blg, is still not the build log shown. The lists are not links to the
-  lines. BibTeX's own words are not in the build log a person can open.
+  is not there has no line); biber's own log, main.blg, is still not the build log shown. BibTeX's own words are not in the build log a person can open.
 - **How it was made.** Planned by one agent, probed and written by others, checked here.
 
 ## A paper taken out and brought back
@@ -4936,3 +4935,66 @@ Found by a three-person walkthrough.
   an old revision is titled with the new name) and a browser test in `projects.spec`
   ("the owner renames a paper; a viewer cannot"), which failed before.
 - **Not done.** Editors cannot rename; no history of old names; no live update of open pages.
+
+## A brace left open in an input file was blamed on the root, and the build errors could not be followed
+
+- **What was wrong.** With `\input{sections/method}` in `main.tex` and an unclosed `\textbf{` in
+  `method.tex`, the pane said `main.tex:8 File ended while scanning use of \textbf`, the line of
+  the `\input`, not the file with the brace. The same for `\footnote{` and `\caption{`. And the
+  file and line of each build error were plain text: finding the place meant opening the file
+  and counting lines.
+- **Now** `runaway` in `apps/workers/src/compile.ts` reads which file TeX closed just before
+  "Runaway argument?" (`readingAt` also records the files it sees closed) and, when only
+  whitespace lies between, names that file, with no line, and says where it was read from ("read
+  from main.tex line 5"). A file from TeX's own installation, or the root itself, changes
+  nothing. `TEX_TEXT` in `builder.ts` is bumped, so a cached failed build is made again.
+  In the build pane, an error, a `??` warning or a "not in the PDF" entry whose file is one the
+  editor can open is a button that shows the file at the line (`showInEditor`, the same path as
+  a click in the PDF), in the open file or by going to another; the text is as before.
+- **Held by** unit tests on the real log (`diagnostics.test.ts`: file, folder root, footnote;
+  guards for text before the runaway and an installed file), a compile
+  (`compile.sandbox.test.ts`) and a browser test (`building.spec`: by pointer, in the open file,
+  by keyboard, audit), each failed before the change.
+- **Not done.** The unclosed-brace error has no line. `\begin{itemize} on input line 4 ended by
+\end{document}` still reads as if line 4 were in the main file.
+
+## A read-only visual view could not be reached by keyboard
+
+- **What was wrong.** Tiptap gives the visual text `tabindex="0"` only while it is editable. For
+  a viewer or reviewer, or a locked file, a long paper in the visual view scrolled but had
+  nothing in it to focus: in Safari the keyboard could not scroll it, and the audit's
+  `scrollable-region-focusable` rule applies. The source view had the same gap for the audit
+  while editable, since a bare contenteditable reads as `tabIndex` -1. The test called "the
+  visual view for someone who cannot edit" audited the source view, because the view last used is
+  remembered.
+- **Now** both texts always carry `tabindex="0"`: the source through `contentAttributes`
+  (`FileEditor.tsx`), the visual through `coreExtensionOptions` (`lib/visual.ts`). Tab order for
+  editable editors is unchanged. `recover.spec` audits a long file in both views, checks that
+  the read-only visual text is reached with Tab and scrolled with PageDown, and that typing
+  there changes nothing.
+- **Not done.** Someone using only the keyboard probably cannot select text in the read-only
+  visual view to start a comment: there is no caret.
+
+## TeX accents and national letters showed as raw chips in the middle of a word
+
+- **What was wrong.** `Caf\'e`, `Erd\H{o}s`, `Sch\"{o}n`, `{\'e}t{\"u}de` and `Gro\ss{}e` were read as
+  a word, a raw chip, and the rest of the word, so the visual view broke a name in three and the
+  grammar check read `Caf\'e` as "CafDummye".
+- **Now** the parser reads the common accent commands (`\'e`, `\"{o}`, `\H{o}`, `\c{c}`, `\v{S}`,
+  `\'{\i}`, …), the same wrapped in braces (`{\'e}`, `{\c{c}}`), and the national letters `\ss`,
+  `\ae`, `\oe`, `\aa`, `\o`, `\l` and their capitals as one `esc` piece showing the composed
+  character (`accentAt` in `parse.ts`). Only a pair whose composed form is a single UTF-16
+  unit qualifies, since an `esc` is one display position. A bare `\ss` ends the piece only when
+  the next character is not a letter or a space; typing after it writes `\ss{}` first. The
+  source bytes are untouched: typing next to one lands on its edge, deleting the character
+  removes the whole command, and copying gives the source.
+- **Held by** tests in `parse.test.ts`, `prose.test.ts` and `bridge.test.ts` (including a small
+  fuzz over a document dense with supported and unsupported forms), six new fragments in the
+  shared fuzz list, and a browser test in `visual.spec` ("TeX accents show as one character
+  each…"), which failed before. A test that unsupported forms stay raw passes before and after.
+- **Left out.** Forms with a space (`\' e`, `\c c`, `Gro\ss e`), which need a guard rule of their
+  own; accents with no single-unit composition, `\t`, `\d`, `\b`, standalone `\i` and `\j`,
+  `\dh`, `\th`; a paper that redefines these commands is not checked for; `\LaTeX`, `\ldots`,
+  `--` and ``…'' are still chips; accents inside raw atoms are unchanged; typing `é` still writes
+  UTF-8; the chip's double-click LaTeX window is gone for these. A paragraph made only of
+  `\AA{}` is still a raw block, as before.

@@ -141,3 +141,11 @@ test('a plain citation with a note and the text around it read as before', () =>
   expect(kindOf(src, 'says so')).toBe('text');
   expect(read(src).trim()).toBe('Known work [1] says so.');
 });
+
+test('a TeX accent reads as its character, and is prose', () => {
+  const src = "We met at the Caf\\'e.";
+  const { annotation, segments } = prose(src);
+  expect(annotation).toContainEqual({ markup: "\\'e", interpretAs: '\u00e9' });
+  const at = src.indexOf('Caf');
+  expect(inProse(segments, at, at + 6)).toBe(true);
+});

@@ -37,9 +37,12 @@ const time = (iso: string) =>
 export default function BuildPane({
   projectId,
   canBuild,
+  files,
 }: {
   projectId: string;
   canBuild: boolean;
+  /** The paper's files that can be opened in the editor. */
+  files: { id: string; path: string }[];
 }) {
   const [builds, setBuilds] = useState<Builds | null>(null);
   const [auto, setAuto] = useState(true);
@@ -237,12 +240,28 @@ export default function BuildPane({
             /^(?:Picture|Characters) not shown: |^Abbreviation not defined: /.test(d.message),
         )
       : [];
-  const place = (d: { file?: string; line?: number }) => (
-    <code>
-      {d.file}
-      {d.line ? `:${d.line}` : ''}
-    </code>
-  );
+  const place = (d: { file?: string; line?: number }) => {
+    const text = (
+      <code>
+        {d.file}
+        {d.line ? `:${d.line}` : ''}
+      </code>
+    );
+    const target = d.file ? files.find((f) => f.path === d.file) : undefined;
+    // A file the editor knows is a way to it, at the line.
+    return target ? (
+      <button
+        type="button"
+        className="place"
+        title="Show this in the editor"
+        onClick={() => showInEditor({ fileId: target.id, path: target.path, line: d.line ?? 1 })}
+      >
+        {text}
+      </button>
+    ) : (
+      text
+    );
+  };
   return (
     <section className="build" aria-label="Compiled PDF">
       <div className="editor-bar">

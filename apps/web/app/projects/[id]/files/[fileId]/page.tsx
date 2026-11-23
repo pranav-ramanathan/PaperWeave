@@ -97,7 +97,11 @@ async function FilePage({
           user={user.email}
           syncUrl={process.env.SYNC_URL ?? 'ws://localhost:4100'}
         />
-        <BuildPane projectId={id} canBuild={can(project.role, 'build.run')} />
+        <BuildPane
+          projectId={id}
+          canBuild={can(project.role, 'build.run')}
+          files={files.filter((f) => !f.readonly).map((f) => ({ id: f.id, path: f.path }))}
+        />
       </div>
     </main>
   );

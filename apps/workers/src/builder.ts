@@ -30,8 +30,10 @@ import { compile, type Compiler, IMAGE } from './compile.ts';
  * build keeps the bare message.
  * '...-bbl': a paper that reads its own .bbl and has no \bibliography builds now; a cached
  * failed build would keep it failed.
+ * '...-ended': "File ended while scanning" names the \input-ed file that ended; a cached failed
+ * build keeps naming the root file.
  */
-const TEX_TEXT = 'utf8-biber-eps-glyphs-strings-forcedate-unicode-nullfont-csname-bbl';
+const TEX_TEXT = 'utf8-biber-eps-glyphs-strings-forcedate-unicode-nullfont-csname-bbl-ended';
 
 /** The toolchain image's content ID: part of every cache key, so a new image rebuilds everything. */
 export const imageId = () =>

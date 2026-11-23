@@ -216,10 +216,11 @@ export function diagnostics(log: string, output = '', dir = ''): Diagnostic[] {
     if (stop) d.file = stop[1];
     found.push({ at: m.index, d });
   }
+  const reading = readingAt(log, dir);
   const out = found
     .filter(({ d }) => !STOP.test(d.message))
     .sort((x, y) => x.at - y.at)
-    .map(({ at, d }) => runaway(log, at, d));
+    .map(({ at, d }) => runaway(log, at, d, reading.ended));
   // The paper ends before \end{document}: TeX's own words for it are about its input.
   if (/^\*\*\* \(job aborted, no legal \\end found\)/m.test(log))
     out.push({ severity: 'error', message: 'The paper ends without \\end{document}.' });
@@ -391,7 +392,6 @@ export function diagnostics(log: string, output = '', dir = ''): Diagnostic[] {
   }
   // A warning gives a line but not the file the line is in. That is whichever of the paper's
   // files TeX was reading when it wrote the warning.
-  const reading = readingAt(log, dir);
   for (const m of log.matchAll(WARNING)) {
     const said = /^(.+?)(?: on input line (\d+))?\.?$/s.exec(m[1].replace(CONTINUED, ' '))!;
     const line = said[2] ? Number(said[2]) : undefined;
@@ -478,13 +478,36 @@ function fontName(spec: string): string {
   return spec.split(':')[0].split('/')[0].trim();
 }
 
-/** "Runaway argument?" and the next line say how an unfinished argument began. */
-function runaway(log: string, at: number, d: Diagnostic): Diagnostic {
+/**
+ * "Runaway argument?" and the next line say how an unfinished argument began. A file that ends
+ * inside one is the file with the unclosed brace, not the one that read it in: TeX closes that
+ * file's bracket on the line before "Runaway argument?", and reports the error at the file that
+ * asked for it. The error then belongs to the file that just ended, which has no line to give.
+ */
+function runaway(
+  log: string,
+  at: number,
+  d: Diagnostic,
+  ended: (offset: number) => { at: number; file: string } | undefined,
+): Diagnostic {
   if (!/^(?:File ended while scanning|Paragraph ended before)/.test(d.message)) return d;
   const before = log.slice(0, at).split('\n').slice(-6);
   const i = before.findLastIndex((t) => t.startsWith('Runaway argument?'));
   const began = i >= 0 ? before[i + 1]?.split('\\par')[0].slice(0, 40).trim() : undefined;
-  return began ? { ...d, message: `${d.message} It began: \u201c${began}\u201d.` } : d;
+  if (!began) return d;
+  const told = { ...d, message: `${d.message} It began: \u201c${began}\u201d.` };
+  if (!d.message.startsWith('File ended while scanning')) return told;
+  const runawayAt =
+    at - before.join('\n').length + before.slice(0, i).join('\n').length + (i ? 1 : 0);
+  const e = ended(runawayAt);
+  if (!e || e.file.startsWith('/') || log.slice(e.at + 1, runawayAt).trim() !== '') return told;
+  const file = e.file.replace(/^\.\//, '');
+  if (file === d.file) return told;
+  return {
+    severity: 'error',
+    file,
+    message: `${told.message} The { is never closed in this file (read from ${d.file} line ${d.line}).`,
+  };
 }
 
 /**
@@ -497,10 +520,18 @@ function runaway(log: string, at: number, d: Diagnostic): Diagnostic {
  * A file TeX brought in from its own installation is not one of the paper's: a warning written
  * while reading one gets no file.
  */
-function readingAt(log: string, dir: string): (offset: number) => string | undefined {
+function readingAt(
+  log: string,
+  dir: string,
+): {
+  (offset: number): string | undefined;
+  /** The file whose ")" was the last before a place, as the log wrote it, with where. */
+  ended: (offset: number) => { at: number; file: string } | undefined;
+} {
   // The file being read from each place where that changes.
   const changes: { at: number; file: string | undefined }[] = [];
   const stack: (string | null)[] = [];
+  const closed: { at: number; file: string }[] = [];
   const opening = /\(((?:\.\.?\/|\/)[^\s()]+)/y;
   let at = 0;
   let quoted = false;
@@ -517,8 +548,10 @@ function readingAt(log: string, dir: string): (offset: number) => string | undef
         const name = opening.exec(text)?.[1];
         stack.push(name ?? null);
         if (name) i += name.length;
-      } else if (text[i] === ')') stack.pop();
-      else continue;
+      } else if (text[i] === ')') {
+        const name = stack.pop();
+        if (name) closed.push({ at: at + i, file: name });
+      } else continue;
       const top = stack.findLast((f) => f !== null);
       changes.push({
         at: at + i,
@@ -529,7 +562,9 @@ function readingAt(log: string, dir: string): (offset: number) => string | undef
     while (stack.at(-1) === null) stack.pop();
     at += text.length + 1;
   }
-  return (offset) => changes.findLast((c) => c.at <= offset)?.file;
+  return Object.assign((offset: number) => changes.findLast((c) => c.at <= offset)?.file, {
+    ended: (offset: number) => closed.findLast((c) => c.at <= offset),
+  });
 }
 
 export type Compiler = 'pdflatex' | 'xelatex' | 'lualatex';

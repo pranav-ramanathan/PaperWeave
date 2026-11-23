@@ -12,6 +12,7 @@ import {
   person,
   run,
   showSource,
+  showVisual,
   signIn,
   slowPaper,
   sticksOut,
@@ -603,6 +604,7 @@ test('someone whose role changes while a file is open is told, and does not type
   await page.getByRole('link', { name: 'main.tex' }).first().click();
   await showSource(page);
   await expect(status(page)).toHaveText('All edits saved.');
+  await audit(page, 'the source view of a long file');
   const make = async (role: string) => {
     await owner.page.reload();
     await owner.page.getByLabel(`Role of ${editor.email}`).selectOption(role);
@@ -649,8 +651,28 @@ test('someone whose role changes while a file is open is told, and does not type
     .click();
   // Someone who can only read: in the view they arrive in, and in the source.
   await expect(status(page)).toHaveText('Read only. You can read along but not edit.');
+  // The view last used is remembered, so say which one this is.
+  await showVisual(page);
+  await expect(page.locator('.editor .visual')).toBeVisible();
+  await expect(page.locator('.editor .source')).toBeHidden();
   await audit(page, 'the visual view for someone who cannot edit');
+  // It can be reached and scrolled with the keyboard alone, though nothing in it can be typed.
+  const paper = page.locator('.editor .visual .ProseMirror');
+  await expect(paper).toHaveAttribute('tabindex', '0');
+  await expect(paper).toHaveAttribute('contenteditable', 'false');
+  await page.getByRole('group', { name: 'View' }).getByRole('button', { name: 'Visual' }).focus();
+  for (let i = 0; i < 30 && !(await paper.evaluate((el) => el === document.activeElement)); i++) {
+    await page.keyboard.press('Tab');
+  }
+  await expect(paper).toBeFocused();
+  const visual = page.locator('.editor .visual');
+  const seen = await visual.evaluate((el) => el.scrollTop);
+  await page.keyboard.press('PageDown');
+  await expect.poll(() => visual.evaluate((el) => el.scrollTop)).toBeGreaterThan(seen);
+  await page.keyboard.type('zzz');
+  await expect(paper).not.toContainText('zzz');
   await showSource(page);
+  await expect(source(page)).not.toContainText('zzz');
   await audit(page, 'the source view for someone who cannot edit');
   // The source can be reached and moved through with the keyboard alone.
   await source(page).focus();

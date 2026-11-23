@@ -943,6 +943,9 @@ export function createVisual(opts: {
     element: opts.element,
     injectNonce: pageNonce(),
     editable: opts.editable,
+    // Always a tab stop, as in the source view. Tiptap adds one only while editable, so
+    // a read-only paper that scrolls could not be reached or scrolled by keyboard.
+    coreExtensionOptions: { tabindex: { value: '0' } },
     enableInputRules: false,
     enablePasteRules: false,
     extensions: [
@@ -1067,6 +1070,9 @@ export function createVisual(opts: {
           if (
             bridge &&
             (transaction.selectionSet || transaction.docChanged) &&
+            // Someone who cannot edit does not show their caret to the others. The read-only
+            // view can now take focus (it is a tab stop), so this has to be said.
+            opts.editable &&
             editor.view.hasFocus()
           ) {
             // The state now, not the transaction's: applying it can have changed the document

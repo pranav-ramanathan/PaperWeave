@@ -448,6 +448,23 @@ test('errors are reported with file and line', async () => {
   });
 });
 
+test('an unclosed brace in an \\input-ed file is blamed on that file, not the root', async () => {
+  const project = tmp();
+  mkdirSync(join(project, 'sections'));
+  writeFileSync(
+    join(project, 'main.tex'),
+    '\\documentclass{article}\n\\begin{document}\nHello.\n\n\\input{sections/method}\n\\end{document}\n',
+  );
+  writeFileSync(
+    join(project, 'sections/method.tex'),
+    'Some words.\n\nMore words.\n\nA \\textbf{never closed\n\nText after.\n',
+  );
+  const r = await compile(project, 'main.tex', tmp());
+  expect(r.ok).toBe(false);
+  const d = r.diagnostics.find((x) => x.message.startsWith('File ended while scanning'));
+  expect(d).toMatchObject({ severity: 'error', file: 'sections/method.tex' });
+});
+
 test('a paper that uses includegraphics without graphicx is told to add the package', async () => {
   const project = tmp();
   writeFileSync(
