@@ -158,6 +158,9 @@ the keyboard (`insert.spec`).
 - Selecting with the keyboard and then tabbing away could lose the end of the selection: a
   comment was started on "Lat" when "Latency" was selected. Comments, proposed changes and
   "Show in PDF" now read the selection as it is on the screen.
+- The pages of the PDF were fixed at the width of a pane too narrow to read small type in. They
+  can now be enlarged to 300% with buttons (Smaller, Larger, Fit the width); the pane scrolls
+  sideways within itself, not the page.
 
 - A source editor that had stopped taking edits could not be reached from the keyboard at
   all, so it could only be scrolled with a mouse. That is every state in which someone is

@@ -1240,6 +1240,29 @@ Two things about tests, found on the way and not about the product:
   build fails, the pane does not try again by itself; the message and "Compile now" are
   there.
 
+## The PDF beside the text could not be made larger, and a resized window left its words off the picture
+
+- **What was wrong.** Every page was drawn at the width of the pane, one of two columns beside
+  the file list: about 500 px at a 1280 px window, so 10 pt text was about 8 px. There was no way
+  to enlarge it short of opening the PDF by itself, which loses double-click-to-source and
+  "Show in PDF". And when the pane's width changed (a window resized, a panel opened) the
+  invisible words stayed at the old size and the picture at its old resolution, so a selection
+  or a double-click landed beside the words it was made on. Measured at 1280 then 1600 px: the
+  picture stayed 502 px wide in a 662 px page, and a word's share of the page's width fell to
+  0.76 of what it was.
+- **Now** the pane has "Smaller", "Larger" and "Fit the width" (100%, 125%, 150%, 200%, 300%),
+  with the size said beside them. The choice is remembered in the browser. An enlarged page
+  scrolls sideways inside the pane, not the window, and the middle of what was being read stays
+  in the middle. Whenever the pane's width changes the words are put right at once and the
+  pictures of the pages near are drawn again at the new width (`PdfView.tsx`). A picture is
+  capped at 12 million pixels.
+- **Held by** a browser test (`synctex.spec`): larger, the words still on the picture,
+  double-click and "Show in PDF" while larger, a wider window, a reload, back to fit, and the
+  accessibility audit. It fails without the change at the first step, and a resize alone,
+  tried on the old code, showed the fault above.
+- **Not done:** no page-number box, no fit-whole-page, the reading place is not kept when the
+  window is resized, a page is softer above 12 million pixels, tried in Chromium only.
+
 ## A chart whose files have left the paper
 
 - **What was wrong.** A drawn chart is two files of the paper. If one was deleted by hand, or

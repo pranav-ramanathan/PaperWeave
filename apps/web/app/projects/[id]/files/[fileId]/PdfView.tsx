@@ -5,6 +5,12 @@ import { useEffect, useRef, useState } from 'react';
 /** A place on a page, in PDF points from the page's top-left corner. */
 export type Mark = { page: number; x: number; y: number; height: number };
 
+/** The sizes the pages can be shown at, as a share of the pane's width. */
+const ZOOMS = [1, 1.25, 1.5, 2, 3];
+const ZOOM_KEY = 'paperweave.pdfzoom';
+/** A page's picture is never more than this many pixels: a canvas beyond it fails or crawls. */
+const MAX_PIXELS = 12_000_000;
+
 /**
  * A PDF drawn page by page, so that a place on a page can be pointed at and a double-click on a
  * page says where it was. A page is drawn when it comes near the window, with its words laid
@@ -24,6 +30,32 @@ export default function PdfView(props: {
   const [drawn, setDrawn] = useState('');
   const pick = useRef(props.onPick);
   pick.current = props.onPick;
+  const [zoom, setZoom] = useState(1);
+  const zoomRef = useRef(1);
+  zoomRef.current = zoom;
+  // Set by the effect that draws the pages: puts the words and the pictures right for the
+  // width the pages now have.
+  const refit = useRef<() => void>(() => {});
+
+  // What was chosen before, read after mount so that the first draw matches the server's.
+  useEffect(() => {
+    try {
+      const saved = Number(localStorage.getItem(ZOOM_KEY));
+      if (ZOOMS.includes(saved)) setZoom(saved);
+    } catch {
+      // Without storage the size is not remembered; nothing else is lost.
+    }
+  }, []);
+  const choose = (z: number) => {
+    if (z === zoom) return;
+    setZoom(z);
+    try {
+      localStorage.setItem(ZOOM_KEY, String(z));
+    } catch {
+      // Without storage the size is not remembered; nothing else is lost.
+    }
+  };
+  const step = ZOOMS.indexOf(zoom);
 
   useEffect(() => {
     let stop = false;
@@ -42,6 +74,7 @@ export default function PdfView(props: {
       // The new pages are made beside the old and swapped in whole, so that a rebuilt PDF
       // appears where the old one was scrolled to.
       const pages = document.createElement('div');
+      pages.style.width = `${zoomRef.current * 100}%`;
       // Only the pages near the window keep their picture: a page is a large canvas, and a long
       // paper read through would otherwise hold every one of them.
       const near = new Set<HTMLElement>();
@@ -61,29 +94,39 @@ export default function PdfView(props: {
         const canvas = holder.querySelector('canvas')!;
         canvas.width = canvas.height = 0;
         delete holder.dataset.drawn;
+        delete holder.dataset.at;
       };
+      // A picture is right only if it was drawn at the width the page has now.
+      const current = (holder: HTMLElement) =>
+        holder.dataset.drawn === 'yes' && holder.dataset.at === String(holder.clientWidth);
       // One page at a time is drawn or released: PDF.js refuses a second render() on a canvas
       // that is still being drawn, as happens when a page leaves and comes back.
       const settle = async (holder: HTMLElement) => {
         if (busy.has(holder)) return;
         busy.add(holder);
         try {
-          const drawn = holder.dataset.drawn === 'yes';
-          if (near.has(holder) && !drawn) await draw(holder);
-          else if (!near.has(holder) && drawn) release(holder);
+          if (near.has(holder) && !current(holder)) await draw(holder);
+          else if (!near.has(holder) && holder.dataset.drawn === 'yes') release(holder);
         } finally {
           busy.delete(holder);
         }
-        if (!stop && near.has(holder) !== (holder.dataset.drawn === 'yes')) void settle(holder);
+        const wrong = near.has(holder) ? !current(holder) : holder.dataset.drawn === 'yes';
+        if (!stop && wrong && holder.clientWidth > 0) void settle(holder);
       };
       const draw = async (holder: HTMLElement) => {
         const page = await doc.getPage(Number(holder.dataset.page));
         if (stop) return;
         const canvas = holder.querySelector('canvas')!;
-        // Sharp on dense screens, but not more than twice the size: a page is a large picture.
+        const width = holder.clientWidth;
+        const natural = page.getViewport({ scale: 1 });
+        const fitted = width / natural.width;
+        const [cssW, cssH] = [width, natural.height * fitted];
+        if (!(cssW * cssH > 0)) return;
+        holder.dataset.at = String(width);
+        // Sharp on dense screens, but not more than twice the size, and not more pixels than
+        // a canvas can be trusted with: a page enlarged to 300% is a very large picture.
         const scale =
-          (holder.clientWidth / page.getViewport({ scale: 1 }).width) *
-          Math.min(window.devicePixelRatio || 1, 2);
+          fitted * Math.min(window.devicePixelRatio || 1, 2, Math.sqrt(MAX_PIXELS / (cssW * cssH)));
         const viewport = page.getViewport({ scale });
         canvas.width = viewport.width;
         canvas.height = viewport.height;
@@ -91,11 +134,13 @@ export default function PdfView(props: {
         page.cleanup();
         // The page's words, invisible, each where the picture shows it. They stay when the
         // picture is released, so that what was read can still be selected and read aloud.
-        if (holder.querySelector('.textLayer')) {
+        const size = holder.clientWidth / natural.width;
+        const old = holder.querySelector<HTMLElement>('.textLayer');
+        if (old) {
+          old.style.setProperty('--total-scale-factor', String(size));
           holder.dataset.drawn = 'yes';
           return;
         }
-        const size = holder.clientWidth / page.getViewport({ scale: 1 }).width;
         const words = document.createElement('div');
         words.className = 'textLayer';
         words.style.setProperty('--total-scale-factor', String(size));
@@ -133,10 +178,38 @@ export default function PdfView(props: {
       if (stop) return;
       host.current.replaceChildren(pages);
       for (const holder of pages.children) watch.observe(holder);
+      // The words follow the page's width at once, also on a page whose picture was let go;
+      // the pictures of the pages that are near are drawn again at the new width.
+      const fit = () => {
+        for (const holder of pages.children as Iterable<HTMLElement>) {
+          const words = holder.querySelector<HTMLElement>('.textLayer');
+          if (words && holder.clientWidth > 0)
+            words.style.setProperty(
+              '--total-scale-factor',
+              String(holder.clientWidth / Number(holder.dataset.width)),
+            );
+          void settle(holder);
+        }
+      };
+      refit.current = fit;
+      // The pane changes width with the window; the pages follow.
+      let width = host.current.clientWidth;
+      let timer: ReturnType<typeof setTimeout> | undefined;
+      const resized = new ResizeObserver(() => {
+        const now = host.current?.clientWidth ?? width;
+        if (now === width) return;
+        width = now;
+        clearTimeout(timer);
+        timer = setTimeout(fit, 150);
+      });
+      resized.observe(host.current);
       setDrawn(src);
       const destroy = close;
       close = () => {
         watch.disconnect();
+        resized.disconnect();
+        clearTimeout(timer);
+        refit.current = () => {};
         destroy();
       };
     })().catch(() => !stop && setProblem(true));
@@ -145,6 +218,25 @@ export default function PdfView(props: {
       close();
     };
   }, [src]);
+
+  // A new size: the pages take it, the place that was in the middle of the pane stays there,
+  // and the words and pictures are put right for the new width.
+  const shown = useRef(1);
+  useEffect(() => {
+    const el = host.current;
+    const pages = el?.firstElementChild as HTMLElement | null;
+    if (!el || !pages || drawn !== src || shown.current === zoom) {
+      if (pages && drawn === src) shown.current = zoom;
+      return;
+    }
+    shown.current = zoom;
+    const down = (el.scrollTop + el.clientHeight / 2) / (el.scrollHeight || 1);
+    const across = (el.scrollLeft + el.clientWidth / 2) / (el.scrollWidth || 1);
+    pages.style.width = `${zoom * 100}%`;
+    el.scrollTop = down * el.scrollHeight - el.clientHeight / 2;
+    el.scrollLeft = across * el.scrollWidth - el.clientWidth / 2;
+    refit.current();
+  }, [zoom, drawn, src]);
 
   // For going from the PDF to the text without a pointer: the pane is scrolled with the
   // keyboard until the passage is in the middle of it, and this picks what is there.
@@ -183,6 +275,26 @@ export default function PdfView(props: {
   return (
     <>
       {problem && <p role="alert">The PDF could not be shown here. Open it with the link above.</p>}
+      <div className="pdf-zoom" role="group" aria-label="Size of the pages">
+        <button
+          type="button"
+          aria-disabled={step <= 0}
+          onClick={() => step > 0 && choose(ZOOMS[step - 1]!)}
+        >
+          Smaller
+        </button>
+        <button
+          type="button"
+          aria-disabled={step >= ZOOMS.length - 1}
+          onClick={() => step < ZOOMS.length - 1 && choose(ZOOMS[step + 1]!)}
+        >
+          Larger
+        </button>
+        <button type="button" aria-disabled={zoom === 1} onClick={() => choose(1)}>
+          Fit the width
+        </button>
+        <span aria-live="polite">{zoom === 1 ? 'Fits the width' : `${zoom * 100}%`}</span>
+      </div>
       {/* Reachable from the keyboard, so that it can be scrolled and read without a pointer. */}
       <div className="pdf" ref={host} tabIndex={0} role="region" aria-label="Pages of the PDF" />
     </>

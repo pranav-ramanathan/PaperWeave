@@ -461,6 +461,14 @@ div.pw-frozen strong {
 }
 
 /* The PDF, drawn page by page in a pane that scrolls by itself. */
+.build .pdf-zoom {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.25rem 0.75rem;
+  align-items: baseline;
+  margin-bottom: 0.3rem;
+  font-size: 0.9rem;
+}
 .build .pdf {
   position: relative;
   height: 70vh;
