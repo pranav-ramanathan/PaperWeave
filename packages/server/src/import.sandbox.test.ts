@@ -433,6 +433,40 @@ test('files shared between several papers are left out, and the report says why'
   ]);
 });
 
+const sharedZip = () => [
+  file('paper/main.tex', doc('\\input{../shared/macros} \\who{} \\bibliography{../refs}')),
+  file('poster/poster.tex', doc()),
+  file('shared/macros.tex', '\\newcommand{\\who}{Ada}\n'),
+  file('refs.bib', '@book{k, title={T}}'),
+];
+
+test('a paper that reads shared files gets its own copy, with a note; one that does not is as before', async () => {
+  const { made, report, paths } = await reportOf(owner.id, sharedZip());
+  expect(made).toHaveLength(2);
+  expect(paths).toEqual(['paper/main.tex', 'refs.bib', 'shared/macros.tex']);
+  expect(report.root).toBe('paper/main.tex');
+  expect(report.missing).toEqual([]);
+  expect(report.skipped.filter((s) => /shared between/.test(s.reason))).toEqual([]);
+  expect(report.notes.join(' ')).toContain(
+    'This archive holds several papers that share files. This paper reads some of them, so it has its own copy of them and keeps its folder (paper/)',
+  );
+  const poster = (await importReport(t.pool, owner.id, made[1].id))!;
+  expect((await listFiles(t.pool, owner.id, made[1].id)).map((f) => f.path)).toEqual([
+    'poster.tex',
+  ]);
+  expect(poster.skipped.map((s) => s.path)).toEqual(['shared/macros.tex', 'refs.bib']);
+  expect(poster.notes.join(' ')).not.toMatch(/share files/);
+});
+
+test('a paper that reads shared files builds', async () => {
+  const { made } = await reportOf(owner.id, [
+    file('paper/main.tex', doc('\\input{../shared/macros} \\who{}')),
+    file('poster/poster.tex', doc()),
+    file('shared/macros.tex', '\\newcommand{\\who}{Ada}\n'),
+  ]);
+  expect(await buildOf(made[0].id, 'paper/main.tex')).toBe('ok');
+});
+
 test('a .bbl is kept when the archive has no .bib file, and the report says so', async () => {
   const bbl = '\\begin{thebibliography}{1}\\bibitem{k} A.\\end{thebibliography}\n';
   const alone = await reportOf(owner.id, [
@@ -567,13 +601,13 @@ test('a paper that is alone is named after its ZIP, several keep their folders',
   expect(several.made.map((p) => p.name)).toEqual(['a', 'b']);
 });
 
-async function buildOf(project: string) {
+async function buildOf(project: string, root = 'main.tex') {
   const dir = mkdtempSync(join(tmpdir(), 'paperweave-src-'));
   for (const e of (await readZip(await exportZip(t.pool, store, owner.id, project))).entries) {
     mkdirSync(dirname(join(dir, e.path)), { recursive: true });
     writeFileSync(join(dir, e.path), e.bytes);
   }
-  const r = await compile(dir, 'main.tex', join(dir, '__out'), 120);
+  const r = await compile(dir, root, join(dir, '__out'), 120);
   return r.ok ? 'ok' : r.diagnostics.filter((d) => d.severity === 'error').map((d) => d.message);
 }
 

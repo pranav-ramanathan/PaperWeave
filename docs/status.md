@@ -2618,7 +2618,7 @@ update` held the paper's file rows for **189.6 s** (until the proxy was cut; it 
 | Archive                                                                                  | Before                                                           | Now                                              |
 | ---------------------------------------------------------------------------------------- | ---------------------------------------------------------------- | ------------------------------------------------ |
 | `src/main.tex`, with `figures/` and `refs.bib` beside `src/`                             | **only `main.tex` kept; never built**                            | imported whole, root `src/main.tex`; builds      |
-| Two papers sharing `figures/` and `refs.bib`                                             | **each without them, "outside every paper"**                     | the same, said to be shared, to add to each      |
+| Two papers sharing `figures/` and `refs.bib`                                             | **each without them, "outside every paper"**                     | a reader keeps its layout and a copy, noted      |
 | An arXiv source: `main.bbl`, no `.bib`                                                   | **the `.bbl` dropped as build output; failed with no reason**    | kept, and said to be ready-made; builds          |
 | `.tikz`, `.pgf`, `.pdf_tex`, `.dat`, `.lua`, a font                                      | **dropped as "not a file type a paper uses"; never built**       | kept; builds                                     |
 | `.svg`, `.gif`                                                                           | dropped as not a type a paper uses                               | dropped: convert it to PDF or PNG                |
@@ -2651,7 +2651,11 @@ update` held the paper's file rows for **189.6 s** (until the proxy was cut; it 
   the old code.
 - **Not changed:**
   - A `.tar.gz` is refused with a sentence, not read.
-  - Files shared between papers are not copied into each.
+  - Files shared between papers are copied only into a paper that reads them (`../`,
+    `\graphicspath`, a `.sty`, `\bibliography`); a paper that reads none is as before. A copy is its
+    own: a change to it does not reach the other papers. A paper reading a file inside another
+    paper's folder is as before, a `paperweave-review.json` in a reading paper's folder has
+    folder-relative paths and does not match, and a shared file is not linked between papers.
   - A root whose name begins with `-` and that has a bibliography does not build: BibTeX takes
     the name for an option.
   - A kept `.bbl` is shown as a file that cannot be edited, and cannot be renamed by hand.
@@ -4312,6 +4316,8 @@ One more, found since:
 - Unsynced edits live in the browser tab's memory. Closing the tab while offline loses them; the
   browser warns first. Keeping them on the device (IndexedDB) would survive that, at the cost of
   leaving manuscript text on shared computers: an owner decision, not yet made.
+- A link or a PDF jump to another page asks first when the open file has edits the sync service
+  has not confirmed (`lib/leaving.ts`); `beforeunload` alone does not cover in-app navigation.
 - Names shown for other people in a file come from each client and are not verified.
 - One sync server to a database. Everything typed or done over the live connection reaches
   other editors through the one sync server that took it, which holds each open file in its
@@ -4748,3 +4754,19 @@ Found by a three-person walkthrough.
   `files.sandbox.test.ts`.
 - **Not done.** No warning on the submit check that an active `\includeonly` leaves chapters out
   of the PDF.
+
+## Opening another page no longer drops edits the sync service has not confirmed
+
+- **What was wrong.** The only guard on unsaved edits was the browser's `beforeunload`, which does
+  not fire on a client-side navigation. With the web app answering but the sync service away
+  (restarting, WebSockets blocked, reconnecting after a wake, signed out), clicking another file,
+  "Paper overview", or double-clicking PDF text from another file unmounted the editor and
+  destroyed the only copy of what was typed, with no warning.
+- **Now** such a click, or a PDF jump to another file, asks "What you typed in the file has not
+  been saved yet... Leave anyway?" when the file has unconfirmed edits and the tab is either not
+  connected or the last change was over 2 seconds ago. Plain clicks only: new-tab links,
+  ctrl/cmd/middle clicks, `#text` and links to the open file never ask. Agreeing does not also
+  bring up the browser's own prompt. "Discard my edits" never asks.
+- **Held by** unit tests in `apps/web/lib/leaving.test.ts` and two tests in
+  `tests/e2e/recover.spec.ts`.
+- **Not done.** Back/Forward cannot be cancelled and still drops unsaved edits silently.

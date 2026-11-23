@@ -38,3 +38,57 @@ test('two papers keep their folders, and what is shared between them is skipped 
     },
   ]);
 });
+
+const reading = (body: string) =>
+  Buffer.from(`\\documentclass{article}\n\\begin{document}\n${body}\n\\end{document}\n`);
+const SHARED = 'shared between the papers in this archive: add it to each paper that needs it';
+
+test('a paper that reads shared files keeps the archive layout; one that reads none stays as it was', () => {
+  const skipped: { path: string; reason: string }[] = [];
+  const list = papers(
+    [
+      f('paper/main.tex', reading('\\includegraphics{../figures/a}\\bibliography{../refs}')),
+      f('poster/poster.tex', doc),
+      f('figures/a.png'),
+      f('refs.bib'),
+    ],
+    skipped,
+  );
+  expect(shape(list)).toEqual([
+    { dir: 'paper/', name: 'paper', paths: ['paper/main.tex', 'figures/a.png', 'refs.bib'] },
+    { dir: 'poster/', name: 'poster', paths: ['poster.tex'] },
+  ]);
+  expect(list[0].note).toContain('keeps its folder (paper/)');
+  expect(list[0].skipped.filter((s) => s.reason === SHARED)).toEqual([]);
+  expect(list[1].note).toBeUndefined();
+  expect(list[1].skipped.map((s) => s.path)).toEqual(['figures/a.png', 'refs.bib']);
+});
+
+test('under a wrapping folder only the wrapper goes, and dir is still the paper folder', () => {
+  const list = papers(
+    [
+      f('repo/paper/main.tex', reading('\\includegraphics{../figures/a}')),
+      f('repo/poster/poster.tex', doc),
+      f('repo/figures/a.png'),
+    ],
+    [],
+  );
+  expect(shape(list)).toEqual([
+    { dir: 'repo/paper/', name: 'paper', paths: ['paper/main.tex', 'figures/a.png'] },
+    { dir: 'repo/poster/', name: 'poster', paths: ['poster.tex'] },
+  ]);
+  expect(list[0].note).toContain('keeps its folder (paper/)');
+});
+
+test('a file reached only through \\graphicspath counts as read', () => {
+  const list = papers(
+    [
+      f('paper/main.tex', reading('\\graphicspath{{../figures/}}\\includegraphics{a}')),
+      f('poster/poster.tex', doc),
+      f('figures/a.png'),
+    ],
+    [],
+  );
+  expect(shape(list)[0].paths).toEqual(['paper/main.tex', 'figures/a.png']);
+  expect(list[0].note).toBeDefined();
+});
