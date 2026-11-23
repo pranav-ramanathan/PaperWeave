@@ -1447,12 +1447,15 @@ export function createVisual(opts: {
     /** Mark these stretches of the source in the text. */
     setMarks(ranges: typeof marked) {
       marked = ranges;
-      // Nothing changes but what is drawn.
+      // Nothing changes but what is drawn. But any update writes the editor's record of the
+      // selection to the screen, so take the screen's first: it can be a few keys ahead.
+      catchUp();
       editor.view.dispatch(editor.state.tr.setMeta('marks', true));
     },
     /** Draw other people's carets again, as they are now. */
     redrawCarets() {
-      // Nothing changes but what is drawn.
+      // Nothing changes but what is drawn (see setMarks for why the selection is caught up first).
+      catchUp();
       editor.view.dispatch(editor.state.tr.setMeta('carets', true));
     },
     /** Where a place in the visual document is in the source text. */
