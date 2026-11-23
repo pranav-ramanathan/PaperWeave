@@ -3,6 +3,10 @@
 # Dockerfile gives the same toolchain.
 FROM debian:bookworm-slim@sha256:734a72b3d6142a71993b4bc580ca01d8ca687f77a2c422d96a961d3376b179bc
 
+# tex-gyre (tgtermes, tgpagella, tgheros ...) is only recommended by texlive-fonts-recommended, and its
+# OpenType files (TeX Gyre Termes by name, TeX Gyre Pagella Math) are in fonts-texgyre and
+# fonts-texgyre-math, which tex-gyre only recommends; they go under /usr/share/fonts, which fontconfig
+# reads already. texlive-humanities: qtree, dramatist, gb4e, linguex.
 RUN apt-get update \
  && apt-get install -y --no-install-recommends \
       latexmk biber \
@@ -11,6 +15,7 @@ RUN apt-get update \
       texlive-publishers texlive-science texlive-fonts-recommended texlive-fonts-extra \
       texlive-bibtex-extra \
       cm-super texlive-plain-generic \
+      tex-gyre fonts-texgyre fonts-texgyre-math texlive-humanities \
       texlive-lang-german texlive-lang-french texlive-lang-spanish texlive-lang-italian \
       texlive-lang-portuguese texlive-lang-european texlive-lang-polish texlive-lang-cyrillic \
       librsvg2-bin fonts-dejavu-core \
