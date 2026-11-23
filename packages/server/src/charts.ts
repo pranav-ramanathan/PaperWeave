@@ -161,13 +161,15 @@ export function vegaLite(spec: ChartSpec, table: Table) {
   if (x < 0 || y < 0 || (spec.series && s < 0))
     throw bad('The data file no longer has a column this chart uses. Choose its columns again.');
   const dated = table.columns[x].type === 'date';
+  const bar = spec.kind === 'bar';
   // A line can show a missing value as a gap. Everything else has nothing to draw for it.
   const gap = spec.kind === 'line' && spec.gaps === 'break' && !spec.combine;
   const values = table.rows
     .filter((r) => r[x] !== null && (s < 0 || r[s] !== null) && (gap || r[y] !== null))
     // Fixed names: a column's own name may hold characters that mean something to Vega.
     .map((r) => ({
-      x: dated ? utc(r[x] as string) : r[x],
+      // Bars take a date as written: they are drawn one per value, not along a time axis.
+      x: dated ? (bar ? (r[x] as string).trim() : utc(r[x] as string)) : r[x],
       y: r[y],
       ...(s < 0 ? {} : { s: r[s] }),
     }));
@@ -182,9 +184,28 @@ export function vegaLite(spec: ChartSpec, table: Table) {
         `Several rows share a value of "${spec.x}". Say how to combine them: by mean or by sum.`,
       );
   }
-  const xType = { number: 'quantitative', date: 'temporal', text: 'nominal' }[
-    table.columns[x].type
-  ];
+  const xs = values.map((v) => v.x);
+  const distinct = new Set(xs).size;
+  const xType = bar
+    ? table.columns[x].type === 'text'
+      ? 'nominal'
+      : 'ordinal'
+    : { number: 'quantitative', date: 'temporal', text: 'nominal' }[table.columns[x].type];
+  // What the bottom axis needs besides its type.
+  const axis: Record<string, unknown> = {};
+  // A few names, or short numbers and dates, fit side by side; more are turned on their side.
+  if (distinct <= 6 && (xType === 'nominal' || xs.every((v) => String(v).length <= 8)))
+    if (xType === 'nominal' || xType === 'ordinal') axis.labelAngle = 0;
+  if (!bar && xType === 'quantitative') {
+    const numbers = xs as number[];
+    // Whole numbers (years) are not ticked halfway, and four digits are not grouped.
+    if (numbers.every(Number.isInteger)) axis.tickMinStep = 1;
+    if (numbers.every((n) => Math.abs(n) < 10000))
+      axis.labelExpr = "replace(datum.label, regexp(',', 'g'), '')";
+  }
+  // Days, not hours, when every date is a whole day.
+  if (!bar && xType === 'temporal' && xs.every((d) => String(d).length === 10))
+    axis.tickMinStep = 86400000;
   const yTitle = titled(table.columns[y]);
   const group = { field: 's', type: 'nominal', title: s < 0 ? '' : titled(table.columns[s]) };
   const vl = {
@@ -210,12 +231,13 @@ export function vegaLite(spec: ChartSpec, table: Table) {
         field: 'x',
         type: xType,
         title: titled(table.columns[x]),
-        ...(dated ? { scale: { type: 'utc' } } : {}),
-        ...(spec.kind === 'bar' ? { sort: null } : {}),
+        // The data's own extent, not zero: a year is not measured from the year 0.
+        ...(xType === 'quantitative' ? { scale: { zero: false } } : {}),
+        ...(xType === 'temporal' ? { scale: { type: 'utc' } } : {}),
+        // Names keep the order of the file; numbers and dates, ordered, run upwards.
+        ...(xType === 'nominal' && bar ? { sort: null } : {}),
         // A few names fit side by side; more are turned on their side, as Vega-Lite does.
-        ...(xType === 'nominal' && new Set(values.map((v) => v.x)).size <= 6
-          ? { axis: { labelAngle: 0 } }
-          : {}),
+        ...(Object.keys(axis).length ? { axis } : {}),
       },
       y: {
         field: 'y',

@@ -19,11 +19,17 @@ import * as vega from 'vega';
 import { compile, version as vegaLiteVersion } from 'vega-lite';
 import { sandbox } from './compile.ts';
 
-/** Draw a Vega-Lite specification as a PDF and a PNG. */
-export async function render(vl: object): Promise<{ pdf: Uint8Array; png: Uint8Array }> {
+/** Draw a Vega-Lite specification as SVG. */
+export async function toSvg(vl: object): Promise<string> {
   const view = new vega.View(vega.parse(compile(vl as never).spec), { renderer: 'none' });
   const svg = await view.toSVG();
   view.finalize();
+  return svg;
+}
+
+/** Draw a Vega-Lite specification as a PDF and a PNG. */
+export async function render(vl: object): Promise<{ pdf: Uint8Array; png: Uint8Array }> {
+  const svg = await toSvg(vl);
   const work = mkdtempSync(join(tmpdir(), 'paperweave-chart-'));
   try {
     writeFileSync(join(work, 'chart.svg'), svg);

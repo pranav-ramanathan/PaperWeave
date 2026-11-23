@@ -5391,3 +5391,21 @@ closed: ...` (outermost first, at most 10). The log does not name the file: with
 - **Not done.** A word split by a hyphen or a ligature falls back to the share; the keyboard
   route ("the middle of the pages") has no word, only the share; a moved line keeps line-only
   behaviour.
+
+## Charts with numbers or dates along the bottom were drawn wrongly
+
+- **What was wrong.** A grouped bar chart over a number or date column stacked its bars (Vega-Lite
+  dropped the offset because the axis was continuous): a percentage ran to 160 and the bars were
+  slivers. A year axis read `2,019.0 | 2,019.5 | ...`. A scatter over years began at 0, with every
+  point in the last stretch of the axis. A column of whole days got hour ticks (`06 AM`, `12 PM`).
+- **Now** bars over numbers or dates are one per value, side by side, in ascending order (dates
+  as written, labels level when there are few and short). Number axes of scatter and line charts
+  start at the data's own extent, are not ticked between whole numbers when every value is whole,
+  and print numbers under 10000 without a thousands comma. A date axis of whole days is ticked by
+  the day. Text bars are as before. `toSvg` is split out of `render` in the worker.
+- **Held by** `charts.test.ts` in `packages/server` (the specification) and in `apps/workers`
+  (the drawn SVG: labels, point places, bar widths, no dropped offset), and a sandbox test that
+  draws a grouped bar over a year column twice to the same bytes.
+- **Not done.** Charts already drawn keep their old picture until "Draw it again" (they are not
+  marked out of date; `chart_draws` has no rule version). A two-day date axis still shows one
+  `12 PM` tick. The y axis still groups thousands and starts at zero.
