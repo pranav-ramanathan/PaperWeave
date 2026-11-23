@@ -574,6 +574,44 @@ test('a \\hyperref to nothing is listed on a build that worked', async ({ browse
   );
 });
 
+test('a group left open is listed on a build that worked, with a way to its line', async ({
+  browser,
+}) => {
+  test.setTimeout(180_000);
+  const owner = await person(browser, 'build-group');
+  const { page } = owner;
+  await page.goto('/sign-in');
+  await signIn(page, owner.email);
+  const zip = join(mkdtempSync(join(tmpdir(), 'paperweave-e2e-')), `Group ${run}.zip`);
+  writeFileSync(
+    zip,
+    await writeZip([
+      {
+        path: 'main.tex',
+        bytes: Buffer.from(
+          '\\documentclass{article}\n\\begin{document}\nHello {\\bfseries world.\n\nMore text.\n\\end{document}\n',
+        ),
+      },
+    ]),
+  );
+  await page.getByLabel('Or import a ZIP of a LaTeX project').setInputFiles(zip);
+  await page.getByRole('button', { name: 'Import ZIP' }).click();
+  await page.getByRole('link', { name: 'main.tex', exact: true }).click();
+  await showSource(page);
+  await expect(buildStatus(page)).toHaveText('The PDF is up to date.', { timeout: 60_000 });
+  const open = build(page).getByRole('list', { name: 'Left open' });
+  await expect(open).toContainText(/main\.tex:3 the \{ opened on line 3 has no \}/);
+
+  // From the keyboard, to the line.
+  await source(page).click();
+  await page.keyboard.press('ControlOrMeta+End');
+  await expect.poll(() => caretLine(page)).not.toBe(3);
+  await open.getByRole('button', { name: /^main\.tex:3/ }).focus();
+  await page.keyboard.press('Enter');
+  await expect.poll(() => caretLine(page)).toBe(3);
+  await audit(page, 'a group left open, in the build pane');
+});
+
 test('a paper built with the wrong engine is given another on its page, and then builds', async ({
   browser,
 }) => {

@@ -5167,3 +5167,24 @@ main.tex line 9. Add \end{itemize}.` The worker reads the files the log shows we
   needs a new kind of warning in the pane and the submit check). Knock-on errors (`You can't use
 \end in internal vertical mode`) stay. A `\begin` whose matching `\end` was itself rejected as a
   mismatch stays on the root.
+
+## A brace or group left open in the paper
+
+- **What was wrong.** A `{` left open in an argument of the root file (`\textbf{`, `\footnote{`,
+  `\caption{`) was reported as `... The { is never closed in this file (read from undefined line
+undefined).` plus a false `The paper ends without \end{document}.` A `{` or `\begingroup` left
+  open as a group, or an `\iftrue` with no `\fi`, built with exit 0 and no message, so the submit
+  check said ready while the rest of the paper was in that font.
+- **Now** the root runaway says `The { is never closed in this file.` and the second error is not
+  added. For a build with no error, the log's `### simple group ... entered at line N` and
+  `(\end occurred when \iftrue on line N was incomplete)` lines each become a warning `Never
+closed: ...` (outermost first, at most 10). The log does not name the file: with one of the
+  paper's own files read, it is placed on that file and line; with more, it has no place and says
+  `(in the main file or one it reads in)`. The pane lists them under "Left open"; the submit check
+  passes them on as compiler warnings, unchanged. The build cache key changed.
+- **Held by** `diagnostics.test.ts` (root runaway, one file, nested groups and conditionals across
+  files, LuaTeX `\if`; guards for a failed build and a missing `\end{document}`), sandbox tests in
+  `compile.sandbox.test.ts` and `submit.sandbox.test.ts`, and a browser test in `building.spec`
+  (list, keyboard to the line, audit).
+- **Not done.** The file in a multi-file paper; the line of an unclosed argument brace; groups
+  opened by a package; a submit problem rather than a warning.

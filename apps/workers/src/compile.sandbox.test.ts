@@ -486,6 +486,40 @@ test('an environment left open in an \\input-ed file is blamed on that file and 
   });
 });
 
+test('a group left open builds, with a warning on the line that opened it', async () => {
+  const project = tmp();
+  writeFileSync(
+    join(project, 'main.tex'),
+    '\\documentclass{article}\n\\begin{document}\nHello {\\bfseries world.\n\nMore text.\n\\end{document}\n',
+  );
+  const r = await compile(project, 'main.tex', tmp());
+  expect(r.ok).toBe(true);
+  const open = r.diagnostics.filter((d) => d.message.startsWith('Never closed'));
+  expect(open).toEqual([
+    {
+      severity: 'warning',
+      file: 'main.tex',
+      line: 3,
+      message: expect.stringMatching(/^Never closed: the \{ opened on line 3 has no \}\./),
+    },
+  ]);
+});
+
+test('a brace left open in the root file names no line it does not have', async () => {
+  const project = tmp();
+  writeFileSync(
+    join(project, 'main.tex'),
+    '\\documentclass{article}\n\\begin{document}\nHello\\footnote{a note\n\nMore text.\n\\end{document}\n',
+  );
+  const r = await compile(project, 'main.tex', tmp());
+  expect(r.ok).toBe(false);
+  expect(r.diagnostics.map((d) => d.message).join('\n')).not.toMatch(/undefined line/);
+  expect(r.diagnostics.some((d) => d.message.includes('The paper ends without'))).toBe(false);
+  expect(r.diagnostics).toContainEqual(
+    expect.objectContaining({ severity: 'error', file: 'main.tex' }),
+  );
+});
+
 test('a paper that uses includegraphics without graphicx is told to add the package', async () => {
   const project = tmp();
   writeFileSync(

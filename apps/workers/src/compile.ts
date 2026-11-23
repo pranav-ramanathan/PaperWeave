@@ -231,7 +231,11 @@ export function diagnostics(
     // TeX says the same thing again when it comes to the same \end a second time.
     .filter((d, i, all) => all.findIndex((e) => JSON.stringify(e) === JSON.stringify(d)) === i);
   // The paper ends before \end{document}: TeX's own words for it are about its input.
-  if (/^\*\*\* \(job aborted, no legal \\end found\)/m.test(log))
+  // (Not when a runaway argument swallowed the \end{document}: that error is already the cause.)
+  if (
+    /^\*\*\* \(job aborted, no legal \\end found\)/m.test(log) &&
+    !out.some((d) => d.severity === 'error' && d.message.startsWith('File ended while scanning'))
+  )
     out.push({ severity: 'error', message: 'The paper ends without \\end{document}.' });
   // BibTeX says where in its own way: "I was expecting a `,' or a `}'---line 9 of file refs.bib".
   // That is in latexmk's output and in main.blg, never in the TeX log.
@@ -473,6 +477,43 @@ export function diagnostics(
     };
     if (!out.some((d) => JSON.stringify(d) === JSON.stringify(warning))) out.push(warning);
   }
+  // Groups and conditionals still open at \end{document}: the build works, and the rest of the
+  // paper is in a font, or skipped. Not after an error: that leaves groups open as a knock-on.
+  if (!out.some((d) => d.severity === 'error')) {
+    // The log never names the file, so it is placed only where the build read one own file.
+    const own = [
+      ...new Set(
+        [...log.matchAll(/\((\.\/[^\s()]+)/g)]
+          .map((m) => m[1])
+          .filter((f) => !/\.(?:aux|toc|out|lof|lot|nav|snm|bbl|ind|gls|nls|brf|vrb)$/i.test(f)),
+      ),
+    ];
+    const file = own.length === 1 ? place(dir, own[0].replace(/^\.\//, '')) : undefined;
+    const where = own.length > 1 ? ' (in the main file or one it reads in)' : '';
+    const left = [
+      ...[
+        ...log.matchAll(/^### (simple|semi simple) group \(level \d+\) entered at line (\d+) \(/gm),
+      ]
+        .reverse()
+        .map((m) => ({ line: Number(m[2]), semi: m[1] !== 'simple', cmd: '' })),
+      ...[
+        ...log.matchAll(/^\(\\end occurred when (\\[A-Za-z@]+) on line (\d+) was incomplete\)/gm),
+      ].map((m) => ({ line: Number(m[2]), semi: false, cmd: m[1] })),
+    ];
+    for (const { line, semi, cmd } of left.slice(0, 10)) {
+      const what = cmd
+        ? `${cmd} on line ${line}${where} has no \\fi.`
+        : semi
+          ? `\\begingroup on line ${line}${where} has no \\endgroup.`
+          : `the { opened on line ${line}${where} has no }. What it changes (a font, a size) runs on to the end of the paper.`;
+      const warning: Diagnostic = {
+        severity: 'warning',
+        message: `Never closed: ${what}`,
+        ...(file ? { file, line } : {}),
+      };
+      if (!out.some((d) => JSON.stringify(d) === JSON.stringify(warning))) out.push(warning);
+    }
+  }
   return out;
 }
 
@@ -515,7 +556,7 @@ function runaway(
   return {
     severity: 'error',
     file,
-    message: `${told.message} The { is never closed in this file (read from ${d.file} line ${d.line}).`,
+    message: `${told.message} The { is never closed in this file${d.file === undefined ? '' : ` (read from ${d.file} line ${d.line})`}.`,
   };
 }
 
