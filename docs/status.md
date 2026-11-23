@@ -4974,3 +4974,27 @@ Found by a three-person walkthrough.
   there changes nothing.
 - **Not done.** Someone using only the keyboard probably cannot select text in the read-only
   visual view to start a comment: there is no caret.
+
+## TeX accents and national letters showed as raw chips in the middle of a word
+
+- **What was wrong.** `Caf\'e`, `Erd\H{o}s`, `Sch\"{o}n`, `{\'e}t{\"u}de` and `Gro\ss{}e` were read as
+  a word, a raw chip, and the rest of the word, so the visual view broke a name in three and the
+  grammar check read `Caf\'e` as "CafDummye".
+- **Now** the parser reads the common accent commands (`\'e`, `\"{o}`, `\H{o}`, `\c{c}`, `\v{S}`,
+  `\'{\i}`, …), the same wrapped in braces (`{\'e}`, `{\c{c}}`), and the national letters `\ss`,
+  `\ae`, `\oe`, `\aa`, `\o`, `\l` and their capitals as one `esc` piece showing the composed
+  character (`accentAt` in `parse.ts`). Only a pair whose composed form is a single UTF-16
+  unit qualifies, since an `esc` is one display position. A bare `\ss` ends the piece only when
+  the next character is not a letter or a space; typing after it writes `\ss{}` first. The
+  source bytes are untouched: typing next to one lands on its edge, deleting the character
+  removes the whole command, and copying gives the source.
+- **Held by** tests in `parse.test.ts`, `prose.test.ts` and `bridge.test.ts` (including a small
+  fuzz over a document dense with supported and unsupported forms), six new fragments in the
+  shared fuzz list, and a browser test in `visual.spec` ("TeX accents show as one character
+  each…"), which failed before. A test that unsupported forms stay raw passes before and after.
+- **Left out.** Forms with a space (`\' e`, `\c c`, `Gro\ss e`), which need a guard rule of their
+  own; accents with no single-unit composition, `\t`, `\d`, `\b`, standalone `\i` and `\j`,
+  `\dh`, `\th`; a paper that redefines these commands is not checked for; `\LaTeX`, `\ldots`,
+  `--` and ``…'' are still chips; accents inside raw atoms are unchanged; typing `é` still writes
+  UTF-8; the chip's double-click LaTeX window is gone for these. A paragraph made only of
+  `\AA{}` is still a raw block, as before.

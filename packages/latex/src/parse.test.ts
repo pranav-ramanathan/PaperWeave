@@ -438,3 +438,61 @@ test('\\symbol{34} is one shown character; other \\symbol{N} stay raw', () => {
   expect(p.filter((x) => x.k === 'esc')).toEqual([]);
   expect(p.filter((x) => x.k === 'atom').map((x) => x.type)).toEqual(['raw']);
 });
+
+const escs = (src: string) => {
+  const p = parse(src);
+  assertLossless(p);
+  return p.blocks.flatMap((b) =>
+    b.body.kind === 'para'
+      ? b.body.pieces
+          .filter((x) => x.k === 'esc')
+          .map((x) => ({ ch: x.ch, src: (b.body as { text: string }).text.slice(x.s, x.e) }))
+      : [],
+  );
+};
+
+test('TeX accents and national letters are one shown character each', () => {
+  const cases: [string, string, string][] = [
+    ["Caf\\'e\n", '\u00e9', "\\'e"],
+    ['Sch\\"{o}n\n', '\u00f6', '\\"{o}'],
+    ['Erd\\H{o}s\n', '\u0151', '\\H{o}'],
+    ['Fran\\c{c}ois\n', '\u00e7', '\\c{c}'],
+    ['\\v{S}koda\n', '\u0160', '\\v{S}'],
+    ["a\\'{\\i}b\n", '\u00ed', "\\'{\\i}"],
+    ['{\\\'e}t{\\"u}de\n', '\u00e9', "{\\'e}"],
+    ['{\\c{c}}a\n', '\u00e7', '{\\c{c}}'],
+    ['Gro\\ss{}e\n', '\u00df', '\\ss{}'],
+    ['Stra{\\ss}e\n', '\u00df', '{\\ss}'],
+    ['stra\\ss, x\n', '\u00df', '\\ss'],
+    ['{\\o}re\n', '\u00f8', '{\\o}'],
+    ['the \\AA{} unit\n', '\u00c5', '\\AA{}'],
+  ];
+  for (const [src, ch, slice] of cases) expect(escs(src)[0], src).toEqual({ ch, src: slice });
+  expect(escs('{\\\'e}t{\\"u}de\n')).toEqual([
+    { ch: '\u00e9', src: "{\\'e}" },
+    { ch: '\u00fc', src: '{\\"u}' },
+  ]);
+});
+
+test('accents that cannot be one character, or that swallow a space, stay raw', () => {
+  for (const src of [
+    "\\' e",
+    "\\'{}",
+    '\\~{}',
+    '\\^{}',
+    "\\'{ee}",
+    '\\t{oo}',
+    '\\c c',
+    '\\H o',
+    'Gro\\ss e',
+    '\\o re',
+    'na\\"\\i ve',
+    '\\c{x}',
+    "\\'{\ud83d\ude00}",
+    '\\omega',
+    '\\label{x}',
+  ])
+    expect(escs(`a ${src}\n`), src).toEqual([]);
+  // In math the whole formula is one atom, whatever is inside it.
+  for (const src of ["$\\'e$", '$\\hat{x}$']) expect(escs(`a ${src} b\n`), src).toEqual([]);
+});

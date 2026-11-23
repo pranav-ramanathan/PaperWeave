@@ -2464,3 +2464,88 @@ test('a float after a paragraph is refused if the text around its place was dele
   expect(r2.bridge.applyCommand(c2)).toBe('conflict');
   expect(r2.src).toBe('One.\n\nThree.\n');
 });
+
+describe('TeX accents in the visual view', () => {
+  const insertAt = (src: string, off: number, text: string) => {
+    const r = replica(src);
+    expect(r.dispatch(r.state.tr.insertText(text, textblocks(r)[0].start + off))).toBe(true);
+    r.check();
+    return r;
+  };
+
+  test('an accent command shows as one composed character', () => {
+    const r = replica("We met Erd\\H{o}s at the Caf\\'e.\n");
+    expect(shown(r)).toBe('We met Erd\u0151s at the Caf\u00e9.');
+  });
+
+  test('typing next to one lands on its edge, never inside the command', () => {
+    expect(insertAt("Caf\\'e au lait.\n", 4, 's').src).toBe("Caf\\'es au lait.\n");
+    expect(insertAt("Caf\\'e au lait.\n", 3, 'x').src).toBe("Cafx\\'e au lait.\n");
+  });
+
+  test('deleting the character removes the whole command', () => {
+    for (const [src, off, out] of [
+      ["Caf\\'e au lait.\n", 3, 'Caf au lait.\n'],
+      ['{\\"u}ber\n', 0, 'ber\n'],
+    ] as const) {
+      const r = replica(src);
+      const at = textblocks(r)[0].start + off;
+      expect(r.dispatch(r.state.tr.delete(at, at + 1)), src).toBe(true);
+      r.check();
+      expect(r.src).toBe(out);
+    }
+  });
+
+  test('a letter typed after a bare \\ss does not join its name', () => {
+    const r = insertAt('Gro\\ss, x\n', 4, 'e');
+    expect(r.src).toBe('Gro\\ss{}e, x\n');
+    expect(shown(r)).toBe('Gro\u00dfe, x');
+    expect(insertAt('Gro\\ss, x\n', 4, ' ').src).toBe('Gro\\ss{} , x\n');
+  });
+
+  test('selecting it copies the source, and bold wraps the source', () => {
+    const src = "Caf\\'e au lait.\n";
+    const r = replica(src);
+    const tb = textblocks(r)[0];
+    r.select(tb.start, tb.start + 4);
+    expect(r.bridge.sourceOf(r.state)).toBe("Caf\\'e");
+    expect(r.state.doc.textBetween(tb.start, tb.start + 4)).toBe('Caf\u00e9');
+    expect(marked(src, 0, 4, 'emph')!.src).toBe("\\emph{Caf\\'e} au lait.\n");
+  });
+
+  test('generated edits around accents, supported and not, stay inside their range', () => {
+    const DENSE =
+      'Caf\\\'e and {\\"u}ber, Erd\\H{o}s, Fran\\c{c}ois, Gro\\ss{}e and Stra{\\ss}e, stra\\ss, x.\n\n' +
+      "Raw ones: \\' e, \\c c, \\H o, \\'{ee}, Gro\\ss e, na\\\"\\i ve, \\o re, $\\'e$ and \\emph{\\'e\\ss{}}.\n\n" +
+      '\\begin{itemize}\n\\item Z\\"urich \\\'{\\i}a\n\\item \\section{x} {\\o}\n\\end{itemize}\n';
+    let done = 0;
+    for (let seed = 0; seed < 300; seed++) {
+      const r = rng(seed);
+      const rep = replica(DENSE);
+      for (let step = 0; step < 40; step++) {
+        const before = rep.src;
+        let op;
+        try {
+          op = visualOp(r, rep);
+          if (!op) continue;
+          rep.check();
+        } catch (err) {
+          throw new Error(`seed ${seed} step ${step}: ${(err as Error).message}`, { cause: err });
+        }
+        const where = `seed ${seed} step ${step} ${op.what}`;
+        if (!op.accepted) {
+          expect(rep.src, where).toBe(before);
+          continue;
+        }
+        done++;
+        if (rep.src === before) continue;
+        if (
+          before.slice(0, op.lo) !== rep.src.slice(0, op.lo) ||
+          !rep.src.endsWith(before.slice(op.hi))
+        )
+          throw new Error(`${where}: changed outside [${op.lo}, ${op.hi})`);
+      }
+    }
+    expect(done).toBeGreaterThan(1000);
+  });
+});

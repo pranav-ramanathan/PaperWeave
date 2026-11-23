@@ -1143,3 +1143,38 @@ test('a copy across list items is not pasted as a lonely \\item, and paragraphs 
   await showSource(page);
   expect(await sourceText(page)).toBe(src);
 });
+
+test('TeX accents show as one character each, and typing and deleting treat each as one', async ({
+  browser,
+}) => {
+  const { page, email } = await person(browser, 'vis-accent');
+  const main = [
+    '\\documentclass{article}',
+    '\\begin{document}',
+    'We met Paul Erd\\H{o}s at the Caf\\\'e Gro\\ss{}e in Z\\"urich.',
+    '\\end{document}',
+    '',
+  ].join('\n');
+  const zip = join(mkdtempSync(join(tmpdir(), 'paperweave-e2e-')), `Accent ${run}.zip`);
+  writeFileSync(zip, await writeZip([{ path: 'main.tex', bytes: Buffer.from(main) }]));
+  await page.goto('/sign-in');
+  await signIn(page, email);
+  await page.getByLabel('Or import a ZIP of a LaTeX project').setInputFiles(zip);
+  await page.getByRole('button', { name: 'Import ZIP' }).click();
+  await page.getByRole('link', { name: 'main.tex' }).first().click();
+  await expect(status(page)).toHaveText('All edits saved.');
+  await expect(page.locator(VISUAL)).toContainText('Paul Erdős at the Café Große in Zürich');
+  await expect(page.locator(`${VISUAL} .pw-raw_inline`)).toHaveCount(0);
+
+  await typeAfter(page, VISUAL, 'Café', 's');
+  await expect(status(page)).toHaveText('All edits saved.');
+  await showSource(page);
+  await expect.poll(() => sourceText(page)).toContain("Caf\\'es Gro\\ss{}e");
+  await showVisual(page);
+  await pick(page, VISUAL, 'ő');
+  await page.keyboard.press('Backspace');
+  await expect(status(page)).toHaveText('All edits saved.');
+  await showSource(page);
+  await expect.poll(() => sourceText(page)).toContain('Erds at');
+  expect(await sourceText(page)).not.toContain('\\H');
+});

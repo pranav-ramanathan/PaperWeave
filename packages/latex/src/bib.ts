@@ -89,7 +89,7 @@ export function bibEntries(text: string): BibEntry[] {
   return out;
 }
 
-const LIGATURES: Record<string, string> = {
+export const LIGATURES: Record<string, string> = {
   oe: 'œ',
   OE: 'Œ',
   ae: 'æ',
@@ -139,7 +139,7 @@ const ACCENTS: Record<string, string> = {
   b: '̱',
   t: '',
 };
-const accented = (accent: string, letter: string) =>
+export const accented = (accent: string, letter: string) =>
   (letter.replace(/^\\/, '') + ACCENTS[accent]).normalize('NFC');
 
 /** A field's text as a person reads it: TeX accents, commands and braces taken away. */

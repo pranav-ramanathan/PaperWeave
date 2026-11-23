@@ -1,6 +1,7 @@
 // Lossless LaTeX block parser. Every character of the source belongs to exactly one piece of
 // exactly one block, so a wrong parse can change what is displayed but never what is stored.
 
+import { accented, LIGATURES } from './bib.ts';
 import { CITES, MULTICITES, REFS } from './labels.ts';
 
 export type Mark = 'emph' | 'textbf' | 'textit' | 'texttt';
@@ -15,7 +16,7 @@ export type Piece = {
   s: number;
   e: number;
   marks: Mark[];
-  /** esc: the character shown. */
+  /** esc: the one UTF-16 unit shown, so an esc is always one display position. */
   ch?: string;
   /** atom: what it is. A def is a macro definition: shown, but never touched by a visual edit. */
   type?: 'math' | 'ref' | 'cite' | 'raw' | 'def';
@@ -67,6 +68,9 @@ const TEXT_ESC: Record<string, string> = {
   textgreater: '>',
   textbar: '|',
 };
+const ACCENT_SYM = /\\([`'^"~=.])(?:([a-zA-Z])|\{([a-zA-Z]|\\[ij])\})/y;
+const ACCENT_LET = /\\([cvHkur])\{([a-zA-Z]|\\[ij])\}/y;
+const NATIONAL = /\\(ss|ae|AE|oe|OE|aa|AA|o|O|l|L)(?:\{\}|(?![a-zA-Z\s]))/y;
 const ESC_SYM = new Set(['%', '&', '$', '#', '_', '{', '}', ' ']);
 const SPECIAL = new Set(['\\', '{', '}', '$', '%', '~', '&', '#', '^', '_', ' ', '\t', '\n']);
 export const MATH_ENV: ReadonlySet<string> = new Set(
@@ -221,6 +225,28 @@ function parseInto(
     if (!isL(src[j])) return j + cpLen(src, j);
     while (isL(src[j])) j++;
     return j;
+  };
+  /**
+   * A TeX accent or national letter at the backslash at i that is exactly one displayed character:
+   * \'e, \"{o}, \c{c}, \ss{}. Purely local; nothing with a space in it, and no pair without a
+   * single precomposed character.
+   */
+  const accentAt = (i: number): { end: number; ch: string } | null => {
+    for (const re of [ACCENT_SYM, ACCENT_LET]) {
+      re.lastIndex = i;
+      const m = re.exec(src);
+      if (m) {
+        const ch = accented(m[1], m[2] ?? m[3]);
+        return ch.length === 1 ? { end: re.lastIndex, ch } : null;
+      }
+    }
+    NATIONAL.lastIndex = i;
+    const m = NATIONAL.exec(src);
+    if (m && Object.hasOwn(LIGATURES, m[1])) {
+      const ch = LIGATURES[m[1]];
+      return ch.length === 1 ? { end: NATIONAL.lastIndex, ch } : null;
+    }
+    return null;
   };
   const wsEnd = (i: number) => {
     while (isW(src[i])) i++;
@@ -555,6 +581,12 @@ function parseInto(
             stopBlock();
             return i;
           } else {
+            const a = accentAt(i);
+            if (a) {
+              push('esc', i, a.end, { ch: a.ch });
+              i = a.end;
+              continue;
+            }
             const e = unit(i);
             push('atom', i, e, { type: 'raw' });
             i = e;
@@ -626,6 +658,13 @@ function parseInto(
           push('esc', i, j + 4, { ch: '"' });
           i = j + 4;
           continue;
+        } else {
+          const a = accentAt(i);
+          if (a) {
+            push('esc', i, a.end, { ch: a.ch });
+            i = a.end;
+            continue;
+          }
         }
         if (e < 0) {
           e = unit(i);
@@ -634,6 +673,12 @@ function parseInto(
         push('atom', i, e, { type });
         i = e;
       } else if (c === '{') {
+        const a = src[i + 1] === '\\' ? accentAt(i + 1) : null;
+        if (a && src[a.end] === '}') {
+          push('esc', i, a.end + 1, { ch: a.ch });
+          i = a.end + 1;
+          continue;
+        }
         const g = group(i);
         if (g < 0) throw new Unbalanced('hard', 'unclosed {');
         push('atom', i, g, { type: 'raw' });

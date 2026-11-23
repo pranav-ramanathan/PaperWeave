@@ -65,6 +65,7 @@ const FRAGMENTS = [
   ],
   ...['\\url{', '%20', '\\href{', '\\text{', '\\lstinline|', '\\crefrange{'],
   ...['$\\d', '$\\d}', '\\(lta$', '$\\delta$', '\\😀', '\\😀 x'],
+  ...["\\'e", '\\"{o}', '{\\ss}', '\\ss', "\\'", '\\c{c}'],
   ...['word', 'a', 'é', '😀', 'two words', '\\label{x}', '\\textbackslash{}', '\\begin{', '\\end{'],
 ];
 export const fragment = (r: Rng) => r.pick(FRAGMENTS);
