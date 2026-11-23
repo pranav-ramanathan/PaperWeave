@@ -111,6 +111,42 @@ async function find(db: Db, projectId: string, proposalId: string) {
 }
 const notOpen = () => new AppError('conflict', 'That proposal has already been decided.');
 
+/** What the person deciding was looking at: the two texts of the card. */
+type Seen = { expected: string; replacement: string };
+/** `seen` as sent: nothing (an older page), or the pair. Anything else is refused. */
+function seenOf(input: unknown): Seen | undefined {
+  if (input === undefined) return undefined;
+  const pair = input as { expected?: unknown; replacement?: unknown } | null;
+  if (
+    !pair ||
+    typeof pair !== 'object' ||
+    typeof pair.expected !== 'string' ||
+    typeof pair.replacement !== 'string' ||
+    pair.expected.length > MAX ||
+    pair.replacement.length > MAX
+  )
+    throw bad('Say which proposal you were looking at.');
+  return { expected: pair.expected, replacement: pair.replacement };
+}
+/** The proposal now reads differently from what the caller was shown. */
+const unseen = (p: { expected: string; replacement: string }, seen: Seen | undefined) =>
+  !!seen && (p.expected !== seen.expected || p.replacement !== seen.replacement);
+const changed = () =>
+  new AppError(
+    'conflict',
+    'This proposal was changed after you last saw it. It is shown as it now reads: look at it before deciding.',
+  );
+const overwritten = () =>
+  new AppError(
+    'conflict',
+    'Someone else changed this proposal while you were changing it. It is shown as it now reads. Save again to put your words in its place.',
+  );
+/** After an update that matched nothing: changed under the caller, or decided. */
+async function whyNot(db: Db, proposalId: string, again: () => AppError) {
+  const now = (await db.query('select status from proposals where id = $1', [proposalId])).rows[0];
+  return now?.status === 'open' ? again() : notOpen();
+}
+
 /**
  * Propose replacing a stretch of a file. `from` and `to` are encoded Yjs relative positions
  * made by the editor; an empty stretch proposes an insertion. Nothing is written to the paper.
@@ -169,13 +205,14 @@ export async function reviseProposal(
   userId: string,
   projectId: string,
   proposalId: string,
-  input: { replacement: unknown; reason?: unknown },
+  input: { replacement: unknown; reason?: unknown; seen?: unknown },
 ): Promise<void> {
   const role = await authorize(pool, userId, id(projectId), 'proposal.create');
   const p = await find(pool, projectId, proposalId);
   if (p.author !== userId && !can(role, 'proposal.decide'))
     throw new AppError('permission_denied', 'Only its author or an editor can change a proposal.');
   if (p.status !== 'open') throw notOpen();
+  if (unseen(p, seenOf(input.seen))) throw overwritten();
   const replacement = replacementOf(input.replacement);
   const { doc, text } = await textOf(pool, store, p.file_id);
   const [from, to] = [locate(doc, text, p.anchor_from), locate(doc, text, p.anchor_to)];
@@ -200,10 +237,10 @@ export async function reviseProposal(
   if (expected === replacement) throw bad('That would change nothing.');
   const done = await pool.query(
     `update proposals set replacement = $2, reason = $3, expected = $4
-     where id = $1 and status = 'open'`,
-    [p.id, replacement, reasonOf(input.reason), expected],
+     where id = $1 and status = 'open' and expected = $5 and replacement = $6`,
+    [p.id, replacement, reasonOf(input.reason), expected, p.expected, p.replacement],
   );
-  if (!done.rowCount) throw notOpen();
+  if (!done.rowCount) throw await whyNot(pool, p.id, overwritten);
 }
 
 /**
@@ -303,12 +340,15 @@ export async function acceptProposal(
   userId: string,
   projectId: string,
   proposalId: string,
+  seen?: unknown,
 ): Promise<void> {
   await authorize(pool, userId, id(projectId), 'proposal.decide');
   const p = await find(pool, projectId, proposalId);
   // Asked twice (a retry whose answer was lost): the first time did it.
   if (p.status === 'accepted') return;
   if (p.status !== 'open') throw notOpen();
+  // Only what was shown is accepted: a proposal changed since reads differently now.
+  if (unseen(p, seenOf(seen))) throw changed();
   const done = await runCommand(
     pool,
     store,
@@ -329,10 +369,17 @@ export async function acceptProposal(
         const marked = await db.query(
           `update proposals set status = 'accepted', decided_by = $2, decided_at = now(),
              anchor_from = $3, anchor_to = $4, command_key = gen_random_uuid()
-           where id = $1 and status = 'open'`,
-          [p.id, userId, Buffer.from(placed.from), Buffer.from(placed.to)],
+           where id = $1 and status = 'open' and expected = $5 and replacement = $6`,
+          [
+            p.id,
+            userId,
+            Buffer.from(placed.from),
+            Buffer.from(placed.to),
+            p.expected,
+            p.replacement,
+          ],
         );
-        if (!marked.rowCount) throw notOpen();
+        if (!marked.rowCount) throw await whyNot(db, p.id, changed);
       },
     },
   );
@@ -400,6 +447,7 @@ export async function closeProposal(
   projectId: string,
   proposalId: string,
   how: unknown,
+  seen?: unknown,
 ): Promise<void> {
   if (how !== 'rejected' && how !== 'dismissed') throw bad('Reject a proposal or withdraw it.');
   await authorize(
@@ -411,12 +459,16 @@ export async function closeProposal(
   const p = await find(db, projectId, proposalId);
   if (how === 'dismissed' && p.author !== userId)
     throw new AppError('permission_denied', 'Only its author can withdraw a proposal.');
+  // Turning one down is a decision on what it says; withdrawing one's own is not.
+  const shown = how === 'rejected' ? seenOf(seen) : undefined;
+  if (p.status === 'open' && unseen(p, shown)) throw changed();
   const done = await db.query(
     `update proposals set status = $2, decided_by = $3, decided_at = now()
-     where id = $1 and status = 'open'`,
-    [p.id, how, userId],
+     where id = $1 and status = 'open'
+       and ($4::text is null or (expected = $4 and replacement = $5))`,
+    [p.id, how, userId, shown?.expected ?? null, shown?.replacement ?? null],
   );
-  if (!done.rowCount) throw notOpen();
+  if (!done.rowCount) throw await whyNot(db, p.id, changed);
 }
 
 /** The proposals of a paper, or of one of its files, oldest first, with where each stands. */

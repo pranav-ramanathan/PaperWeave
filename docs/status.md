@@ -446,7 +446,9 @@ Read this first. Update it in every pull request.
     proposed change instead.
   - Per paper (migration 0016, "Language" on the paper's page): British or American spelling,
     the paper's own words (not reported as misspelt), and rules switched off. A finding offers
-    "It is a word of this paper" or "Do not check this in this paper".
+    "It is a word of this paper" or "Do not check this in this paper". Saving the page changes
+    only what was changed on it, and adding is done on what the paper holds then (see "A paper's
+    own words saved from a page left open").
   - `docs/grammar-benchmark.md`: on 25 sentences with a seeded mistake, 23 are pointed at; of
     20 correct sentences with LaTeX in them, 18 are left alone. Written by
     `packages/server/src/grammar-benchmark.sandbox.test.ts`, which fails if the checker stops
@@ -4563,7 +4565,7 @@ Found by a three-person walkthrough.
   stays allowed. A `%` that opens a comment is found anywhere in the file (`commentOpen`, moved from
   the bridge into `@paperweave/latex`). An unfinished group or a bare `& # _ ^` is found by parsing
   only the paragraph around the edit before and after, and reporting what the change adds. The
-  change form says "This is LaTeX: write \% for %, \& for &, \_ for _."
+  change form says "This is LaTeX: write \% for %, \& for &, \_ for \_."
 - **Held by** `hazards.test` (table of cases), `proposals.sandbox.test` and `tests/e2e/proposals.spec.ts`
   (warning shown, Accept enabled, gone after the change is written with `\%`, axe audit).
 - **Not done.** `%` inside `verbatim` or `lstlisting` is flagged. Unfinished groups and bare
@@ -5021,9 +5023,8 @@ Found by a three-person walkthrough.
 - **Left out.** Forms with a space (`\' e`, `\c c`; `Gro\ss e` is done, see the text commands section below),
   which need a guard rule of their own; accents with no single-unit composition, `\t`, `\d`, `\b`, standalone `\i` and `\j`,
   `\dh`, `\th`; a paper that redefines these commands is not checked for; `\LaTeX`, `\ldots`,
-  `--` and ``…'' are still chips; accents inside raw atoms are unchanged; typing `é` still writes
-  UTF-8; the chip's double-click LaTeX window is gone for these. A paragraph made only of
-  `\AA{}` is still a raw block, as before.
+  `--` and ``…'' are still chips; accents inside raw atoms are unchanged; typing `é`still writes
+  UTF-8; the chip's double-click LaTeX window is gone for these. A paragraph made only of`\AA{}` is still a raw block, as before.
 
 ## A reviewer can select text in the visual view with the keyboard
 
@@ -5409,3 +5410,65 @@ closed: ...` (outermost first, at most 10). The log does not name the file: with
 - **Not done.** Charts already drawn keep their old picture until "Draw it again" (they are not
   marked out of date; `chart_draws` has no rule version). A two-day date axis still shows one
   `12 PM` tick. The y axis still groups thousands and starts at zero.
+
+## A proposal changed after it was last seen
+
+- **What was wrong.** Accept applied whatever words the proposal held at that moment. If its
+  author (or another editor) changed the replacement after the card was drawn, the paper got text
+  nobody had looked at, and the "This changes more than the wording" flags on the card were for
+  the old words. Reject could turn down a revision unseen, and two people changing the same
+  proposal silently overwrote each other.
+- **Now** Accept, Reject and Save send the two texts the card showed (`seen`). If the proposal
+  reads differently, the server refuses with a conflict, writes nothing, and the card is read
+  again so it shows the proposal as it now reads. The update itself also names the texts it
+  expects, so a change between the check and the write is refused as well. A person changing a
+  proposal who is overtaken by someone else's change is told so beside the form, and keeps what
+  they wrote. A `seen` that is not a pair of texts is refused as invalid. No `TEX_TEXT` bump.
+- **Held by** a sandbox test in `proposals.sandbox.test.ts` (accept, reject and revise refused on
+  stale `seen`, malformed `seen`, success with fresh `seen`, retry, no `seen`, withdraw) and a
+  browser test in `proposals.spec` (Accept refused on a card that could not refresh, and the note
+  for a change overtaken while writing).
+- **Not done.** Withdraw is not checked (it is the author's own, and decides nothing about what
+  it says). A tab opened before this deploy sends no `seen` and behaves as before. The race
+  between the check and the write is closed by the update's `where` clause, which has no test.
+
+## Resolve hides a reply that was never seen
+
+- **What was wrong.** Ana replies "Don't close this, Table 2 is wrong". Ben's card still shows the
+  old thread, so he presses Resolve, and the thread drops into "Resolved (n)" with the objection
+  unread and no notice. Smaller: a reply sent just after the last comment of a thread was deleted
+  brought the thread back holding only an answer to nothing.
+- **Now.** Each thread carries a `mark`, a digest of its live comments and when each was last
+  changed. Resolve sends the mark the card was drawn from; if anyone has written, changed or
+  deleted a comment since, the server refuses (`conflict`) in the same statement that would have
+  resolved it, the page reads the thread again, and says "Someone wrote in this thread after you
+  last saw it". The reply stays in the open list, the Resolve button keeps the keyboard, and the
+  next press sends the new mark. Opening again is never guarded; an older page that sends no mark
+  behaves as before. A reply to a thread with no live comment is refused. No schema change; the
+  mark is never logged.
+- **Held by** two sandbox tests in `threads.sandbox.test.ts` and `threads.spec` ("Resolve refuses
+  a thread someone wrote in after it was drawn"). Each failed on the old code.
+- **Not done.** A reply sent to a thread resolved a moment earlier is still taken and lands in
+  Resolved; the owner's Delete of a comment its author changed a moment earlier is not guarded;
+  the mark does not cover the text under the thread; a draft is still lost when its thread
+  disappears.
+
+## A paper's own words saved from a page left open
+
+- **What was wrong.** The Language form sent the whole word list and the whole list of switched-off
+  rules as the page had drawn them, and saving replaced what the paper held. With the paper's page
+  open in one tab, words made the paper's own (and rules switched off) in the editor were deleted
+  or switched back on by pressing Save there for any reason, and "Language settings saved." was
+  shown. The editor's two buttons read the lists and wrote them back, so two clicks at once could
+  lose a word (twenty at once kept one).
+- **Now.** `changeLanguageSettings` adds and removes words and rules on what the paper holds,
+  under a row lock; the editor's buttons add one word or one rule. The form carries what it showed
+  (`shownLanguage`, `shownGlossary`, `shownOff`) and `languageChange` turns the difference into
+  words to add, words to drop, rules to switch on and a language only if it was changed. A form
+  drawn before this change is saved whole as before. `setLanguageSettings` takes the same lock.
+  Nothing is refused and no message is new. Words are never logged.
+- **Held by** `grammar.test.ts`, three sandbox tests in `grammar.sandbox.test.ts` and a browser
+  test in `grammar.spec`. Each failed on the old code.
+- **Not done.** The page still does not show others' changes until it is saved or reloaded; a word
+  removed on the page while someone re-adds it in the editor follows whichever came last; the
+  editor's panel does not hear of a word removed on the page until its next check.

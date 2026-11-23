@@ -22,6 +22,8 @@ import {
   restoreRevision,
   saveChart,
   saveRevision,
+  changeLanguageSettings,
+  languageChange,
   setLanguageSettings,
   setModelProcessing,
   setRole,
@@ -317,13 +319,27 @@ export async function languageAction(projectId: string, form: FormData) {
   const back = `/projects/${projectId}`;
   const user = await requireUser(back);
   await act(back, async () => {
-    await setLanguageSettings(db(), user.id, projectId, {
+    // One word to a line, or several with spaces between.
+    const words = (v: string) => v.split(/\s+/).filter(Boolean);
+    const sent = {
       language: text(form, 'language'),
-      // One word to a line, or several with spaces between.
-      glossary: text(form, 'glossary').split(/\s+/).filter(Boolean),
+      glossary: words(text(form, 'glossary')),
       // The rules still ticked stay off.
       off: form.getAll('off').map(String),
-    });
+    };
+    const shownGlossary = form.get('shownGlossary');
+    if (shownGlossary === null) {
+      // A form drawn before the page said what it showed: save it whole, as it always was.
+      await setLanguageSettings(db(), user.id, projectId, sent);
+    } else {
+      // Only what the person changed on the page is applied to what the paper holds now.
+      const shown = {
+        language: text(form, 'shownLanguage'),
+        glossary: words(String(shownGlossary)),
+        off: form.getAll('shownOff').map(String),
+      };
+      await changeLanguageSettings(db(), user.id, projectId, languageChange(shown, sent));
+    }
     return `${back}?language=1#language`;
   });
 }

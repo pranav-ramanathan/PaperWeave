@@ -531,3 +531,62 @@ test('a comment is changed by its author and deleted by its author or the owner,
   await expect(reviewer.page.locator(`${VISUAL} .thread-mark`)).toHaveCount(0);
   await expect(theirs.getByText('No open threads on this file.')).toBeVisible();
 });
+
+test('Resolve refuses a thread someone wrote in after it was drawn', async ({ browser }) => {
+  test.setTimeout(150_000);
+  const owner = await person(browser, 'seen-owner');
+  const reviewer = await person(browser, 'seen-reviewer');
+  const zip = join(mkdtempSync(join(tmpdir(), 'paperweave-e2e-')), `Seen ${run}.zip`);
+  writeFileSync(zip, await writeZip([{ path: 'main.tex', bytes: Buffer.from(MAIN) }]));
+  await owner.page.goto('/sign-in');
+  await signIn(owner.page, owner.email);
+  await owner.page.getByLabel('Or import a ZIP of a LaTeX project').setInputFiles(zip);
+  await owner.page.getByRole('button', { name: 'Import ZIP' }).click();
+  await owner.page.getByLabel('Their email address').fill(reviewer.email);
+  await owner.page.getByLabel('Their role').selectOption('reviewer');
+  await owner.page.getByRole('button', { name: 'Send invitation' }).click();
+  await expect(owner.page.getByRole('status')).toContainText(reviewer.email);
+  await reviewer.page.goto(await emailedLink(reviewer.email, '/invitations/'));
+  await signIn(reviewer.page, reviewer.email);
+  await reviewer.page.getByRole('button', { name: 'Join this paper' }).click();
+  await expect(reviewer.page.getByText('You are a reviewer')).toBeVisible();
+
+  await reviewer.page.getByRole('link', { name: 'main.tex' }).first().click();
+  await owner.page.getByRole('link', { name: 'main.tex' }).first().click();
+  const theirs = reviewer.page.getByRole('region', { name: 'Comments' });
+  const mine = owner.page.getByRole('region', { name: 'Comments' });
+  const thread = (page: typeof owner.page) =>
+    page.getByRole('article', { name: 'Thread on “forty”' });
+  await selectWord(reviewer.page, VISUAL, 'forty');
+  await theirs.getByRole('button', { name: 'Comment on the selected text' }).click();
+  await theirs.getByLabel('Comment', { exact: true }).fill('Is this measured?');
+  await theirs.getByRole('button', { name: 'Start thread' }).click();
+  await expect(thread(owner.page)).toContainText('Is this measured?', { timeout: 15_000 });
+
+  // The owner's page can no longer read the threads, so what it shows stays as it was drawn.
+  await owner.page.route(/\/projects\/[^/]+\/threads\?file=/, (r) => r.abort());
+  await thread(reviewer.page).getByLabel('Reply about “forty”').fill('Wait: the number is wrong.');
+  await thread(reviewer.page).getByRole('button', { name: 'Reply' }).click();
+  await expect(thread(reviewer.page)).toContainText('Wait: the number is wrong.');
+  await expect(thread(owner.page)).not.toContainText('Wait: the number is wrong.');
+
+  const resolve = thread(owner.page).getByRole('button', { name: 'Resolve' });
+  await resolve.click();
+  await expect(mine).toContainText('after you last saw it');
+  await expect(resolve).toBeFocused();
+  await expect(owner.page.getByText('Resolved (')).toHaveCount(0);
+  await reviewer.page.waitForTimeout(6000);
+  await expect(thread(reviewer.page).getByRole('button', { name: 'Resolve' })).toBeVisible();
+  await expect(reviewer.page.getByText('Resolved (1)')).toHaveCount(0);
+  await audit(owner.page, 'a resolve refused because the thread changed');
+
+  // Read again, the owner sees the reply, and resolving then goes through.
+  await owner.page.unroute(/\/projects\/[^/]+\/threads\?file=/);
+  await expect(thread(owner.page)).toContainText('Wait: the number is wrong.', {
+    timeout: 30_000,
+  });
+  await thread(owner.page).getByRole('button', { name: 'Resolve' }).click();
+  await expect(mine).toContainText('Thread resolved.');
+  await expect(mine.getByText('Resolved (1)')).toBeVisible();
+  await expect(theirs.getByText('Resolved (1)')).toBeVisible({ timeout: 15_000 });
+});

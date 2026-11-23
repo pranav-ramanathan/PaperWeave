@@ -117,6 +117,9 @@ export default function Proposals(props: {
   const [proposals, setProposals] = useState<Proposal[] | null>(null);
   const [starting, setStarting] = useState<Stretch | null>(null);
   const [revising, setRevising] = useState<string | null>(null);
+  // What the proposal said when "Change the proposal" was pressed, to tell whether someone else
+  // has changed it since.
+  const [opened, setOpened] = useState<{ expected: string; replacement: string } | null>(null);
   const [note, setNote] = useState('');
   const url = `/projects/${projectId}/proposals`;
   const told = useRef(props.onProposals);
@@ -205,8 +208,13 @@ export default function Proposals(props: {
     if (wasStarting.current && !starting) opener.current?.focus();
     wasStarting.current = !!starting;
   }, [starting]);
+  // What this person is looking at, sent with a decision so the server can tell if it has moved on.
+  const seen = (p: Proposal) => ({ expected: p.expected, replacement: p.replacement });
   const act = async (p: Proposal, action: string) => {
-    const wrong = await post(`${url}/${p.id}`, { action });
+    const wrong = await post(
+      `${url}/${p.id}`,
+      action === 'accept' || action === 'reject' ? { action, seen: seen(p) } : { action },
+    );
     if (wrong) return setNote(wrong);
     setNote(
       {
@@ -291,16 +299,34 @@ export default function Proposals(props: {
             It can no longer be changed. What you wrote is still below, to copy if you want it.
           </p>
         )}
+        {revising === p.id &&
+          p.status === 'open' &&
+          opened &&
+          (opened.expected !== p.expected || opened.replacement !== p.replacement) && (
+            <p className="note" role="status">
+              <strong>This proposal was changed by someone else while you were changing it.</strong>{' '}
+              It now proposes what is shown above. Saving yours puts it in its place.
+            </p>
+          )}
         {revising === p.id ? (
           <Change
             was={p.now}
             start={{ replacement: p.replacement, reason: p.reason }}
             button="Save the proposal"
-            onCancel={() => setRevising(null)}
+            onCancel={() => {
+              setRevising(null);
+              setOpened(null);
+            }}
             send={async (replacement, reason) => {
-              const wrong = await post(`${url}/${p.id}`, { action: 'revise', replacement, reason });
+              const wrong = await post(`${url}/${p.id}`, {
+                action: 'revise',
+                replacement,
+                reason,
+                seen: seen(p),
+              });
               if (!wrong) {
                 setRevising(null);
+                setOpened(null);
                 setNote('Proposal changed.');
               }
               return wrong;
@@ -347,7 +373,14 @@ export default function Proposals(props: {
                 </button>
               )}
             {p.status === 'open' && !gone(p) && !p.placeLost && (p.mine || canDecide) && (
-              <button type="button" data-revise={p.id} onClick={() => setRevising(p.id)}>
+              <button
+                type="button"
+                data-revise={p.id}
+                onClick={() => {
+                  setOpened(seen(p));
+                  setRevising(p.id);
+                }}
+              >
                 Change the proposal
               </button>
             )}

@@ -379,10 +379,15 @@ export default function Threads(props: {
               type="button"
               onClick={async () => {
                 const resolving = t.status === 'open';
-                const wrong = await post(`${url}/${t.id}`, {
-                  status: resolving ? 'resolved' : 'open',
-                });
-                if (wrong) return setNote(wrong);
+                const wrong = await post(
+                  `${url}/${t.id}`,
+                  resolving ? { status: 'resolved', seen: t.mark } : { status: 'open' },
+                );
+                if (wrong) {
+                  // Shown again as it now reads, and the person told why it was not resolved.
+                  await read();
+                  return setNote(wrong);
+                }
                 setNote(resolving ? 'Thread resolved.' : 'Thread opened again.');
                 setMoved((n) => n + 1);
               }}

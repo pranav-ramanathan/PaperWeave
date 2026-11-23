@@ -6,7 +6,7 @@ import type pg from 'pg';
 import * as Y from 'yjs';
 import { authorize } from './authz.ts';
 import { type BlobStore, sha256 } from './blobs.ts';
-import type { Db } from './db.ts';
+import { type Db, transaction } from './db.ts';
 import { AppError } from './errors.ts';
 import { envCount } from './limits.ts';
 import { boundedJson } from './outbound.ts';
@@ -68,32 +68,110 @@ export async function languageSettings(
   return rows[0];
 }
 
+const sorted = (items: Iterable<string>) => [...new Set(items)].sort((a, b) => a.localeCompare(b));
+/** A list of strings, trimmed and unique, of which every one must be `ok`. */
+function list(v: unknown, what: string, ok: (s: string) => boolean) {
+  if (!Array.isArray(v) || v.length > 2000) throw bad(`Give ${what} as a list.`);
+  const items = [...new Set(v.map((s) => (typeof s === 'string' ? s.trim() : '')))].filter(Boolean);
+  if (!items.every(ok)) throw bad(`One of ${what} cannot be used.`);
+  return items.sort((a, b) => a.localeCompare(b));
+}
+
 /** Change how a paper's prose is checked. Only what is given is changed. */
 export async function setLanguageSettings(
-  db: Db,
+  pool: pg.Pool,
   userId: string,
   projectId: string,
   input: { language?: unknown; glossary?: unknown; off?: unknown },
 ): Promise<void> {
-  await authorize(db, userId, id(projectId), 'file.write');
-  const now = await languageSettings(db, userId, projectId);
-  const list = (v: unknown, what: string, ok: (s: string) => boolean) => {
-    if (!Array.isArray(v) || v.length > 2000) throw bad(`Give ${what} as a list.`);
-    const items = [...new Set(v.map((s) => (typeof s === 'string' ? s.trim() : '')))].filter(
-      Boolean,
-    );
-    if (!items.every(ok)) throw bad(`One of ${what} cannot be used.`);
-    return items.sort((a, b) => a.localeCompare(b));
-  };
+  await authorize(pool, userId, id(projectId), 'file.write');
   if (input.language !== undefined && !LANGUAGES.includes(input.language as Language))
     throw bad('Choose British or American English.');
   const glossary =
-    input.glossary === undefined ? now.glossary : list(input.glossary, 'the words', fits);
-  const off = input.off === undefined ? now.off : list(input.off, 'the rules', (s) => RULE.test(s));
-  await db.query(
-    'update projects set language = $2, glossary = $3, grammar_off = $4 where id = $1',
-    [projectId, input.language ?? now.language, JSON.stringify(glossary), JSON.stringify(off)],
-  );
+    input.glossary === undefined ? undefined : list(input.glossary, 'the words', fits);
+  const off =
+    input.off === undefined ? undefined : list(input.off, 'the rules', (s) => RULE.test(s));
+  await transaction(pool, async (tx) => {
+    const now = (
+      await tx.query(
+        'select language, glossary, grammar_off as off from projects where id = $1 for update',
+        [projectId],
+      )
+    ).rows[0] as LanguageSettings;
+    await tx.query(
+      'update projects set language = $2, glossary = $3, grammar_off = $4 where id = $1',
+      [
+        projectId,
+        input.language ?? now.language,
+        JSON.stringify(glossary ?? now.glossary),
+        JSON.stringify(off ?? now.off),
+      ],
+    );
+  });
+}
+
+/**
+ * What a saved language form changes: the difference between what the page showed when it was
+ * drawn and what was sent back. Only that is applied, so what others changed meanwhile stays.
+ */
+export function languageChange(
+  shown: { language: string; glossary: string[]; off: string[] },
+  sent: { language: string; glossary: string[]; off: string[] },
+) {
+  const minus = (a: string[], b: string[]) => {
+    const gone = new Set(b);
+    return a.filter((x) => !gone.has(x));
+  };
+  return {
+    ...(sent.language !== shown.language ? { language: sent.language } : {}),
+    addWords: minus(sent.glossary, shown.glossary),
+    dropWords: minus(shown.glossary, sent.glossary),
+    rulesOn: minus(shown.off, sent.off),
+  };
+}
+
+/**
+ * Add and remove words and rules one by one, on what the paper holds now, so that changes made
+ * at the same moment or since a page was drawn are kept. Never logs a word.
+ */
+export async function changeLanguageSettings(
+  pool: pg.Pool,
+  userId: string,
+  projectId: string,
+  change: {
+    language?: unknown;
+    addWords?: unknown;
+    dropWords?: unknown;
+    rulesOff?: unknown;
+    rulesOn?: unknown;
+  },
+): Promise<void> {
+  await authorize(pool, userId, id(projectId), 'file.write');
+  if (change.language !== undefined && !LANGUAGES.includes(change.language as Language))
+    throw bad('Choose British or American English.');
+  const given = (v: unknown, what: string, ok: (s: string) => boolean) =>
+    v === undefined ? [] : list(v, what, ok);
+  const addWords = given(change.addWords, 'the words', fits);
+  const dropWords = given(change.dropWords, 'the words', (s) => s.length <= 2000);
+  const rulesOff = given(change.rulesOff, 'the rules', (s) => RULE.test(s));
+  const rulesOn = given(change.rulesOn, 'the rules', (s) => s.length <= 2000);
+  await transaction(pool, async (tx) => {
+    const now = (
+      await tx.query(
+        'select language, glossary, grammar_off as off from projects where id = $1 for update',
+        [projectId],
+      )
+    ).rows[0] as LanguageSettings;
+    const drop = new Set(dropWords);
+    const on = new Set(rulesOn);
+    const glossary = sorted([...now.glossary.filter((w) => !drop.has(w)), ...addWords]);
+    const off = sorted([...now.off.filter((r) => !on.has(r)), ...rulesOff]);
+    if (glossary.length > 2000) throw bad('A paper keeps at most 2,000 words of its own.');
+    await tx.query(
+      'update projects set language = $2, glossary = $3, grammar_off = $4 where id = $1',
+      [projectId, change.language ?? now.language, JSON.stringify(glossary), JSON.stringify(off)],
+    );
+  });
 }
 
 type Match = {

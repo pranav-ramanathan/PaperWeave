@@ -236,6 +236,90 @@ test('a reviewer proposes a change; the owner accepts it, undoes that, and rejec
   await expect(panel(owner.page)).toContainText('Reviews by a model are not set up.');
 });
 
+test('Accept refuses a proposal that changed after the card was drawn', async ({ browser }) => {
+  test.setTimeout(150_000);
+  const owner = await person(browser, 'seen-owner');
+  const reviewer = await person(browser, 'seen-reviewer');
+  const zip = join(mkdtempSync(join(tmpdir(), 'paperweave-e2e-')), `Seen ${run}.zip`);
+  writeFileSync(zip, await writeZip([{ path: 'main.tex', bytes: Buffer.from(MAIN) }]));
+  await owner.page.goto('/sign-in');
+  await signIn(owner.page, owner.email);
+  await owner.page.getByLabel('Or import a ZIP of a LaTeX project').setInputFiles(zip);
+  await owner.page.getByRole('button', { name: 'Import ZIP' }).click();
+  await owner.page.getByLabel('Their email address').fill(reviewer.email);
+  await owner.page.getByLabel('Their role').selectOption('reviewer');
+  await owner.page.getByRole('button', { name: 'Send invitation' }).click();
+  await expect(owner.page.getByRole('status')).toContainText(reviewer.email);
+  await reviewer.page.goto(await emailedLink(reviewer.email, '/invitations/'));
+  await signIn(reviewer.page, reviewer.email);
+  await reviewer.page.getByRole('button', { name: 'Join this paper' }).click();
+  await expect(reviewer.page.getByText('You are a reviewer')).toBeVisible();
+  await owner.page.getByRole('link', { name: 'main.tex' }).first().click();
+  await showSource(owner.page);
+  await reviewer.page.getByRole('link', { name: 'main.tex' }).first().click();
+  const proposal = (page: Page, word: string) =>
+    page.getByRole('article', { name: `Proposal to change “${word}”` });
+  const propose = async (word: string, replacement: string) => {
+    await selectWord(reviewer.page, VISUAL, word);
+    await panel(reviewer.page).getByRole('button', { name: 'Propose a change here' }).click();
+    await panel(reviewer.page).getByLabel('Replace it with').fill(replacement);
+    await panel(reviewer.page).getByRole('button', { name: 'Propose', exact: true }).click();
+    await expect(proposal(reviewer.page, word)).toContainText(`Proposed: ${replacement}`);
+  };
+  const revise = async (page: Page, word: string, replacement: string) => {
+    await proposal(page, word).getByRole('button', { name: 'Change the proposal' }).click();
+    await proposal(page, word).getByLabel('Replace it with').fill(replacement);
+    await proposal(page, word).getByRole('button', { name: 'Save the proposal' }).click();
+  };
+
+  await propose('forty', 'thirty');
+  await expect(proposal(owner.page, 'forty')).toContainText('Proposed: thirty', {
+    timeout: 15_000,
+  });
+  // The owner's card can no longer refresh. The reviewer changes the proposal under it.
+  await owner.page.route(/\/projects\/[^/]+\/proposals\?file=/, (r) => r.abort());
+  await revise(reviewer.page, 'forty', 'three hundred');
+  await expect(proposal(reviewer.page, 'forty')).toContainText('Proposed: three hundred');
+
+  // Accept on the card as it was drawn: refused, and nothing is written.
+  const accept = proposal(owner.page, 'forty').getByRole('button', { name: 'Accept' });
+  await expect(proposal(owner.page, 'forty')).toContainText('Proposed: thirty');
+  await accept.click();
+  await expect(panel(owner.page)).toContainText('changed after you last saw it');
+  await expect(owner.page.locator(SOURCE)).toContainText('below forty milliseconds');
+  await expect(owner.page.locator(SOURCE)).not.toContainText('three hundred');
+  await expect(accept).toBeFocused();
+  await audit(owner.page, 'a proposal refused because it changed');
+
+  // Shown as it now reads, it can be decided on.
+  await owner.page.unroute(/\/projects\/[^/]+\/proposals\?file=/);
+  await expect(proposal(owner.page, 'forty')).toContainText('Proposed: three hundred', {
+    timeout: 30_000,
+  });
+  await accept.click();
+  await expect(owner.page.locator(SOURCE)).toContainText('below three hundred milliseconds');
+
+  // Two people changing the same proposal: the one who saves second is told, and loses nothing
+  // they wrote.
+  await propose('claimed', 'shown');
+  await expect(proposal(owner.page, 'claimed')).toContainText('Proposed: shown', {
+    timeout: 15_000,
+  });
+  const mine = proposal(owner.page, 'claimed');
+  await mine.getByRole('button', { name: 'Change the proposal' }).click();
+  await mine.getByLabel('Replace it with').fill('twenty');
+  await revise(reviewer.page, 'claimed', 'fifty');
+  await expect(mine).toContainText('Proposed: fifty', { timeout: 30_000 });
+  await expect(mine.getByRole('status')).toContainText(
+    'changed by someone else while you were changing it',
+  );
+  await expect(mine.getByLabel('Replace it with')).toHaveValue('twenty');
+  await audit(owner.page, 'a proposal changed under a change being written');
+  await mine.getByRole('button', { name: 'Save the proposal' }).click();
+  await expect(mine).toContainText('Proposed: twenty');
+  await expect(mine).not.toContainText('changed by someone else');
+});
+
 test('a proposal marks only the words it changes', async ({ browser }) => {
   test.setTimeout(90_000);
   const owner = await person(browser, 'worddiff-owner');

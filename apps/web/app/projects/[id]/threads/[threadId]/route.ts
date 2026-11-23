@@ -45,7 +45,15 @@ export async function POST(
       // Where the words stand now, from the tab that undid their deletion. Both or neither.
       const places = placesOf(input);
       await reattachThread(db(), blobs(), user.id, id, threadId, places);
-    } else if ('status' in input) await setThreadStatus(db(), user.id, id, threadId, input.status);
+    } else if ('status' in input)
+      await setThreadStatus(
+        db(),
+        user.id,
+        id,
+        threadId,
+        input.status,
+        (input as { seen?: unknown }).seen,
+      );
     else if ('comment' in input)
       await (input.delete === true
         ? deleteComment(db(), user.id, id, threadId, String(input.comment))
