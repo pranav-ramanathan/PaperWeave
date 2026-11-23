@@ -7,7 +7,7 @@ import { checkGrammar, languageSettings, setLanguageSettings } from './grammar.t
 import { importZip, listFiles } from './import.ts';
 import { recordGrammarOutcome } from './metrics.ts';
 import { acceptInvitation, invite } from './projects.ts';
-import { loadUpdates, TEXT } from './sync.ts';
+import { editFile, loadUpdates, TEXT } from './sync.ts';
 import { TEST_ENV, testDb } from './testing.ts';
 
 const store = blobStore(TEST_ENV);
@@ -45,10 +45,11 @@ const MAIN = [
 ].join('\n');
 // `withGuests: false` leaves out the reviewer and the viewer: one person may send 30 invitations an
 // hour, and every paper made here sends two.
-async function paper(main = MAIN, withGuests = true) {
+async function paper(main = MAIN, withGuests = true, extra: Record<string, string> = {}) {
   const zip = await writeZip([
     { path: 'main.tex', bytes: Buffer.from(main) },
     { path: 'notes.txt', bytes: Buffer.from('teh recieve\n') },
+    ...Object.entries(extra).map(([path, text]) => ({ path, bytes: Buffer.from(text) })),
   ]);
   const [project] = await importZip(t.pool, store, users.owner.id, zip, 'Grammar');
   for (const who of withGuests ? (['reviewer', 'viewer'] as const) : []) {
@@ -58,7 +59,7 @@ async function paper(main = MAIN, withGuests = true) {
   const ids = Object.fromEntries(
     (await listFiles(t.pool, users.owner.id, project.id)).map((f) => [f.path, f.id]),
   );
-  return { id: project.id, file: ids['main.tex'], notes: ids['notes.txt'] };
+  return { id: project.id, file: ids['main.tex'], notes: ids['notes.txt'], ids };
 }
 const check = (p: { id: string; file: string }, who: keyof typeof users = 'viewer') =>
   checkGrammar(t.pool, store, users[who].id, p.id, p.file, { url });
@@ -418,4 +419,47 @@ test('mistakes in a description list and in a nested list are found', async () =
   const fix = teh!.replacements.find((r) => r === 'the');
   expect(fix).toBe('the');
   expect(text.slice(0, from) + fix + text.slice(to)).toContain('\\item[Parser] reads the source.');
+});
+
+test("a paper's own text macros are read as the words they print, from the package that defines them", async () => {
+  const p = await paper(
+    [
+      '\\documentclass{article}',
+      '\\usepackage{own}',
+      '\\begin{document}',
+      '\\input{sec}',
+      '\\end{document}',
+      '',
+    ].join('\n'),
+    false,
+    {
+      'own.sty': '\\newcommand{\\dbs}{databases}\n\\newcommand{\\etc}{etc}\n',
+      'sec.tex': 'These \\dbs is used here.\n\nWe use it \\etc. it works.\n',
+    },
+  );
+  const sec = { id: p.id, file: p.ids['sec.tex'] };
+  let calls = 0;
+  const fetcher: typeof fetch = (...args) => (calls++, fetch(...args));
+  const ask = () => checkGrammar(t.pool, store, users.owner.id, sec.id, sec.file, { url, fetcher });
+  const found = await ask();
+  // Read as "These databases is used", it is wrong, and the finding is on a word of the prose.
+  expect(found.some((f) => f.words === 'is')).toBe(true);
+  // Read as a stand-in noun, "\etc." made "it" start a sentence. It does not.
+  expect(found.some((f) => f.words === 'it')).toBe(false);
+  // What the checker is told is never what a finding is made of.
+  for (const f of found) expect(f.words).not.toContain('\\');
+  const first = calls;
+  expect(first).toBe(1);
+  await ask();
+  expect(calls).toBe(first);
+
+  // The package changes; this file does not. What the checker reads has changed, so it is asked.
+  await editFile(t.pool, store, p.ids['own.sty'], users.owner.id, (text) => {
+    const at = text.toString().indexOf('databases');
+    text.delete(at, 'databases'.length);
+    text.insert(at, 'database');
+  });
+  const after = await ask();
+  expect(calls).toBe(first + 1);
+  expect(after.some((f) => f.words === 'is')).toBe(false);
 });

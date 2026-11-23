@@ -275,3 +275,34 @@ test("a name with a TeX accent is made one of the paper's own words", async ({ b
   await owner.page.goto(paper);
   await expect(owner.page.getByLabel(/The paper.s own words/)).toHaveValue('H\u00f6lder');
 });
+
+test("a paper's own word macro is read as the word it prints, so the panel finds the agreement", async ({
+  browser,
+}) => {
+  test.setTimeout(120_000);
+  const owner = await person(browser, 'grammar-words');
+  const main = [
+    '\\documentclass{article}',
+    '\\newcommand{\\dbs}{databases}',
+    '\\newcommand{\\etc}{etc}',
+    '\\begin{document}',
+    'These \\dbs is used here.',
+    '',
+    'We use it \\etc. it works.',
+    '\\end{document}',
+    '',
+  ].join('\n');
+  const zip = join(mkdtempSync(join(tmpdir(), 'paperweave-e2e-')), `Words ${run}.zip`);
+  writeFileSync(zip, await writeZip([{ path: 'main.tex', bytes: Buffer.from(main) }]));
+  await owner.page.goto('/sign-in');
+  await signIn(owner.page, owner.email);
+  await owner.page.getByLabel('Or import a ZIP of a LaTeX project').setInputFiles(zip);
+  await owner.page.getByRole('button', { name: 'Import ZIP' }).click();
+  await expect(owner.page.getByRole('heading', { name: 'Language' })).toBeVisible();
+  await owner.page.getByRole('link', { name: 'main.tex' }).first().click();
+  await expect(finding(owner.page, /“is”/)).toBeVisible({ timeout: 30_000 });
+  await expect(owner.page.locator(`${VISUAL} .finding-mark`)).toHaveText(['is']);
+  // The macro itself is never marked, and nothing is made of the sentence after "\etc.".
+  await expect(panel(owner.page)).not.toContainText('\\');
+  await expect(finding(owner.page, /“it”/)).toHaveCount(0);
+});

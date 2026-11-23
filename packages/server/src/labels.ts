@@ -8,6 +8,7 @@ import {
   projectGraphicsPaths,
   proseEnvs,
   readyMadeBbls,
+  textMacros,
 } from '@paperweave/latex';
 import type pg from 'pg';
 import * as Y from 'yjs';
@@ -213,6 +214,33 @@ export async function paperMacros(
   for (const path of includeGraph(texts, root.path).preamble)
     macros = { ...macros, ...macroDefs(texts[path] ?? '') };
   return macros;
+}
+
+/**
+ * The macros of the paper that only print words (`\\newcommand{\\sys}{PaperWeave}`): the editor
+ * shows them as those words. Read in the order TeX reads them, from the root's preamble, the files
+ * it reads and the project's own packages it loads (`textMacros`).
+ */
+export async function paperTextMacros(
+  pool: pg.Pool,
+  store: BlobStore,
+  userId: string,
+  projectId: string,
+): Promise<Record<string, string>> {
+  await authorize(pool, userId, id(projectId), 'project.read');
+  return textMacrosOf(pool, store, projectId);
+}
+
+/** `paperTextMacros` for a caller that has already checked the person's access. */
+export async function textMacrosOf(
+  pool: Db,
+  store: BlobStore,
+  projectId: string,
+): Promise<Record<string, string>> {
+  const files = await texFiles(pool, store, projectId, false, '\\.(tex|ltx|sty|cls)$');
+  const root = files.find((f) => f.root);
+  if (!root) return {};
+  return textMacros(Object.fromEntries(files.map((f) => [f.path, f.text])), root.path);
 }
 
 /**

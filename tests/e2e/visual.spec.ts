@@ -1318,3 +1318,74 @@ test('labels and theorem lines are one line, and the source is untouched', async
   await showSource(page);
   await expect.poll(() => lines()).toBe(typed.replace('\\label{sec:setup}\n', ''));
 });
+
+test("a paper's own text macros read as words, and the source keeps what was written", async ({
+  browser,
+}) => {
+  test.setTimeout(120_000);
+  const { page, email } = await person(browser, 'vis-words');
+  const main = [
+    '\\documentclass{article}',
+    '\\newcommand{\\sys}{PaperWeave}',
+    '\\newcommand{\\two}[1]{a #1}',
+    '\\begin{document}',
+    'We built \\sys{} and then \\two{x} ran.',
+    '',
+    '\\begin{table}[t]',
+    '  \\caption{The \\sys results}',
+    '  \\begin{tabular}{ll}',
+    '    Tool & Speed \\\\',
+    '    \\sys & fast \\\\',
+    '  \\end{tabular}',
+    '\\end{table}',
+    '\\end{document}',
+    '',
+  ].join('\n');
+  const zip = join(mkdtempSync(join(tmpdir(), 'paperweave-e2e-')), `Words ${run}.zip`);
+  writeFileSync(zip, await writeZip([{ path: 'main.tex', bytes: Buffer.from(main) }]));
+  await page.goto('/sign-in');
+  await signIn(page, email);
+  await page.getByLabel('Or import a ZIP of a LaTeX project').setInputFiles(zip);
+  await page.getByRole('button', { name: 'Import ZIP' }).click();
+  await page.getByRole('link', { name: 'main.tex' }).first().click();
+  await expect(status(page)).toHaveText('All edits saved.');
+
+  // The macro prints a word: it reads as that word. One that takes an argument is still a chip.
+  const word = page.locator(`${VISUAL} .pw-raw_inline.pw-word`);
+  await expect(word).toHaveCount(1);
+  await expect(word).toHaveText('PaperWeave');
+  await expect(word).toHaveAttribute('title', '\\sys{}');
+  const chip = page.locator(`${VISUAL} .pw-raw_inline:not(.pw-word)`);
+  await expect(chip).toHaveCount(1);
+  await expect(chip).toHaveAttribute('title', '\\two{x}');
+
+  // So do a caption and a cell, whose fields still hold the LaTeX.
+  const table = page.locator(VISUAL).getByRole('group', { name: 'Table' });
+  const caption = table.getByRole('button', { name: /^Caption:/ });
+  await expect(caption).toHaveText('The PaperWeave results');
+  const cell = table.getByRole('button', { name: /^Row 2, column 1:/ });
+  await expect(cell).toHaveText('PaperWeave');
+  await caption.click();
+  await expect(table.getByLabel('Caption', { exact: true })).toHaveValue('The \\sys results');
+  await page.keyboard.press('Escape');
+  await cell.click();
+  await expect(table.getByLabel('Row 2, column 1', { exact: true })).toHaveValue('\\sys');
+  await page.keyboard.press('Escape');
+  await audit(page, 'own text macros read as words');
+
+  // A double click opens the word's LaTeX, not its reading.
+  await word.dblclick();
+  const box = page.getByRole('dialog', { name: 'Edit LaTeX' });
+  await expect(box.getByLabel('LaTeX')).toHaveValue('\\sys{}');
+  await page.keyboard.press('Escape');
+  await expect(box).toBeHidden();
+
+  // Typing beside it leaves its bytes as they were.
+  await typeAfter(page, VISUAL, 'built', ' fast');
+  await expect(status(page)).toHaveText('All edits saved.');
+  await showSource(page);
+  // The text of the editor has its lines run together.
+  await expect
+    .poll(() => sourceText(page))
+    .toBe(main.replace('We built \\sys{}', 'We built fast \\sys{}').replace(/\n/g, ''));
+});

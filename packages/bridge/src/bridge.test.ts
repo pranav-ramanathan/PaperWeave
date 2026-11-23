@@ -187,6 +187,35 @@ test('typing a character and deleting it restores every byte', () => {
   expect(guarded).toBeLessThan(positions / 100);
 });
 
+test("typing beside a paper's own word macro and deleting it again restores every byte", () => {
+  const src =
+    '\\newcommand{\\sys}{PaperWeave}\n\\begin{document}\nWe built \\sys, \\sys{} and \\eg tools with \\sys\\ too.\n\\end{document}\n';
+  const r = replica(src);
+  let tried = 0;
+  for (let i = 0; i < textblocks(r).length; i++) {
+    for (let off = 0; off <= textblocks(r)[i].size; off++) {
+      const pos = textblocks(r)[i].start + off;
+      const before = r.src;
+      if (!r.dispatch(r.state.tr.insertText('Q', pos))) continue;
+      const q = r.state.doc.textBetween(pos, pos + 1) === 'Q' ? pos : pos + 1;
+      expect(r.dispatch(r.state.tr.delete(q, q + 1)), `@${pos}`).toBe(true);
+      tried++;
+      if (r.src !== before) {
+        const x = [...before].findIndex((c, k) => c !== r.src[k]);
+        const sep = r.src.startsWith('{}', x) ? '{}' : '\n';
+        expect(r.src, `@${pos}`).toBe(before.slice(0, x) + sep + before.slice(x));
+        r.ytext.delete(x, sep.length);
+      }
+      // The macros are in the source exactly as written, once any separator is taken out again, whatever was typed and removed.
+      for (const word of ['\\sys,', '\\sys{} and', '\\eg tools', '\\sys\\ too'])
+        expect(r.src, `@${pos}`).toContain(word);
+    }
+  }
+  r.check();
+  expect(tried).toBeGreaterThan(20);
+  expect(r.src).toBe(src);
+});
+
 test(`${N} generated visual edits stay inside their intended range`, () => {
   const paths = Object.keys(fixtures);
   const counts: Record<string, number> = {};

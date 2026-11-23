@@ -5,6 +5,7 @@
 // read from inside: its items read as bullets, and the term of a description item is not prose.
 // A checker that is told "this is markup, read it as that" answers in source positions.
 import { logoOf } from './bib.ts';
+import { textMacroOf } from './macros.ts';
 import { DEFAULT_TRANSPARENT, parse, textblocks } from './parse.ts';
 
 /** One stretch of the source, as LanguageTool's annotated text has it. */
@@ -35,7 +36,15 @@ const bullet = (item: string) => {
   return term ? `\n\n• ${term[1]}:` : '\n\n•';
 };
 
-export function prose(src: string, transparent: ReadonlySet<string> = DEFAULT_TRANSPARENT) {
+/**
+ * `macros` are the paper's own words (`textMacros`): a command written as one reads as what it
+ * prints. It is still a command, and no finding may touch it.
+ */
+export function prose(
+  src: string,
+  transparent: ReadonlySet<string> = DEFAULT_TRANSPARENT,
+  macros: Record<string, string> = {},
+) {
   const annotation: Annotated[] = [];
   const segments: Segment[] = [];
   /** What has been said so far, as the checker will read it: to choose a stand-in that fits. */
@@ -46,6 +55,11 @@ export function prose(src: string, transparent: ReadonlySet<string> = DEFAULT_TR
     annotation.push(kind === 'text' ? { text: part } : { markup: part, interpretAs: as ?? '' });
     segments.push(kind === 'soft' ? { from, to, kind, as: as ?? '' } : { from, to, kind });
     read = (read + (kind === 'text' ? part : (as ?? ''))).slice(-8);
+  };
+  /** What a command of the paper's words prints. TeX has eaten the space after it, so a body's own is not said twice. */
+  const reading = (from: number, to: number) => {
+    const said = textMacroOf(src.slice(from, to), macros);
+    return said !== null && /\s/.test(src[to] ?? '') ? said.trimEnd() : said;
   };
   const noun = () => (/\ban\s*$/i.test(read) ? VOWEL_NOUN : NOUN);
   let at = 0;
@@ -114,7 +128,7 @@ export function prose(src: string, transparent: ReadonlySet<string> = DEFAULT_TR
                 : p.type === 'ref'
                   ? '1'
                   : p.type === 'raw'
-                    ? (logoOf(src.slice(from, to)) ?? noun())
+                    ? (logoOf(src.slice(from, to)) ?? reading(from, to) ?? noun())
                     : noun(),
             );
           // The command that opens a list item reads as the bullet it prints. Any other command
