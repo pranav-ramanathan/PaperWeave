@@ -9,6 +9,8 @@ export type Graphic = {
   target: Span;
   /** The description for people who cannot see the picture: `alt={...}` in the options. */
   alt: Span | null;
+  /** The description is written without braces: `alt=text`. */
+  altBare: boolean;
   /** Where a new option would go: just inside the closing bracket, or -1 if there are no options. */
   optionsEnd: number;
   /** Where options would start if there are none: just after `\includegraphics`. */
@@ -198,6 +200,7 @@ export function floatParts(src: string): Float | null {
     let at = commandEnd;
     let optionsEnd = -1;
     let alt: Span | null = null;
+    let altBare = false;
     if (text[at] === '[') {
       const close = closeOf(text, at, '[', ']');
       if (close < 0) continue;
@@ -212,6 +215,7 @@ export function floatParts(src: string): Float | null {
         } else {
           const comma = text.indexOf(',', value);
           alt = trimmed(src, value, comma < 0 || comma > optionsEnd ? optionsEnd : comma);
+          altBare = true;
         }
       }
       at = close;
@@ -219,7 +223,13 @@ export function floatParts(src: string): Float | null {
     if (text[at] !== '{') continue;
     const close = closeOf(text, at);
     if (close < 0) continue;
-    graphics.push({ target: trimmed(src, at + 1, close - 1), alt, optionsEnd, commandEnd });
+    graphics.push({
+      target: trimmed(src, at + 1, close - 1),
+      alt,
+      altBare,
+      optionsEnd,
+      commandEnd,
+    });
   }
   return { kind, caption, graphics, table: tableOf(src, text) };
 }
@@ -249,21 +259,29 @@ type Edit = { at: number; length: number; insert: string };
 export function altEdit(graphic: Graphic, text: string): Edit | null {
   const alt = text.replace(/\s+/g, ' ').trim();
   if (/[{}%#\\\]]/.test(alt)) return null;
-  if (graphic.alt)
-    return { at: graphic.alt.at, length: graphic.alt.end - graphic.alt.at, insert: alt };
+  if (graphic.alt) {
+    // Without braces a comma ends the value and an equals sign starts a new key.
+    const insert = graphic.altBare && /[,=]/.test(alt) ? `{${alt}}` : alt;
+    return { at: graphic.alt.at, length: graphic.alt.end - graphic.alt.at, insert };
+  }
   return graphic.optionsEnd >= 0
     ? { at: graphic.optionsEnd, length: 0, insert: `,alt={${alt}}` }
     : { at: graphic.commandEnd, length: 0, insert: `[alt={${alt}}]` };
 }
 
-/** Whether text can stand as one cell: no cell or row separator of its own, braces balanced. */
-export function cellText(text: string): boolean {
+/**
+ * Whether text can stand inside braces without breaking what is around it. In a cell a `\\` ends
+ * the row, so it is refused there; elsewhere it is a line break.
+ */
+function fits(text: string, cell: boolean): boolean {
   let depth = 0;
   for (let i = 0; i < text.length; i++) {
     const c = text[i];
     if (c === '\\') {
+      // A backslash at the end would take the closing brace with it.
+      if (i === text.length - 1) return false;
       // \\\\ ends a row; any other backslash takes the next character with it (\\&, \\%).
-      if (text[i + 1] === '\\') return false;
+      if (text[i + 1] === '\\' && cell) return false;
       i++;
     } else if (c === '{') depth++;
     else if (c === '}') {
@@ -273,6 +291,15 @@ export function cellText(text: string): boolean {
   }
   return depth === 0;
 }
+
+/** Whether text can stand as one cell: no cell or row separator of its own, braces balanced. */
+export const cellText = (text: string): boolean => fits(text, true);
+
+/**
+ * Whether text can stand as a caption's argument: braces balanced, no bare % or &, no line
+ * break, not ending in a lone backslash. A `\\\\` is allowed.
+ */
+export const captionText = (text: string): boolean => fits(text, false);
 
 export type TableOp =
   | { kind: 'row-after' | 'row-delete'; row: number }

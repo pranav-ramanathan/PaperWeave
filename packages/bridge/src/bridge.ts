@@ -13,7 +13,7 @@ import type { Node as PMNode, Schema } from '@tiptap/pm/model';
 import { ReplaceStep } from '@tiptap/pm/transform';
 import { type EditorState, Selection, TextSelection, type Transaction } from '@tiptap/pm/state';
 import * as Y from 'yjs';
-import { needs, pasteable } from './clipboard.ts';
+import { formulaText, needs, pasteable } from './clipboard.ts';
 import { locate, model, type Model, projector, toSrc } from './project.ts';
 import { diff, type Edit, emphEdit, guard, translate, type Translation } from './translate.ts';
 
@@ -505,6 +505,43 @@ export class Bridge {
       contained(old, parse(text, old.transparent), from, to - from, replacement.length)
       ? { ...c, key: crypto.randomUUID(), replacement, contained: true, ...this.proseOf() }
       : 'spills';
+  }
+
+  /**
+   * `c` (from insertCommand) filled with a formula typed into the Insert window, `latex`: 'spills'
+   * if it would not stand alone (an unclosed brace, a blank line, a % that runs off its end) or
+   * would change how the text around it, or a formula's own block, is read; 'conflict' if the
+   * place is gone or the model is behind the text.
+   */
+  formulaCommand(c: Command, latex: string): Command | 'conflict' | 'spills' {
+    const at = Y.createAbsolutePositionFromRelativePosition(c.to, this.ytext.doc!)?.index;
+    const src = this.ytext.toString();
+    if (at == null || src !== this.model.parsed.src) return 'conflict';
+    const body = latex.trim();
+    if (!formulaText(body) || HALF.test(body)) return 'spills';
+    // A stand-in of the same shape, to find out where the formula would sit.
+    const plain = body.startsWith('\\begin{equation}')
+      ? '\\begin{equation}\n  x\n\\end{equation}'
+      : '$x$';
+    const put = (inner: string) => {
+      const whole = latex.replace(body, () => inner);
+      const filled = this.fillCommand(c, whole).replacement;
+      const from = at + filled.indexOf(whole) + whole.indexOf(inner);
+      return { filled, text: src.slice(0, at) + filled + src.slice(at), from };
+    };
+    const a = put(plain);
+    const b = put(body);
+    const t = this.model.parsed.transparent;
+    const base = parse(a.text, t);
+    // Where even a trivial formula is not a block of its own (a list item, a heading), only the
+    // text check above applies.
+    const one = contained(base, base, a.from, plain.length, plain.length);
+    const ok =
+      !one ||
+      (a.from === b.from &&
+        contained(base, parse(b.text, t), a.from, plain.length, body.length) &&
+        contained(base, reparse(base, b.text), a.from, plain.length, body.length));
+    return ok ? { ...c, key: crypto.randomUUID(), replacement: b.filled } : 'spills';
   }
 
   /** The model's own transparent names beyond the default, for a command to carry. */

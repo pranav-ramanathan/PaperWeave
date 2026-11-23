@@ -7,7 +7,7 @@ import { fixtures, replica, shown, textblocks, visualOp } from './harness.ts';
 import { contained, DEFAULT_TRANSPARENT, parse } from '@paperweave/latex';
 import type { Command } from './bridge.ts';
 import { fromSrc, toSrc } from './project.ts';
-import { needs, pasteable } from './clipboard.ts';
+import { formulaText, needs, pasteable } from './clipboard.ts';
 import { schema } from './schema.ts';
 import { getTextBetween, getTextSerializersFromSchema } from '@tiptap/core';
 
@@ -2361,6 +2361,32 @@ describe('cut and paste of a stretch of source', () => {
   });
 });
 
+test('formulaText: a formula that stands alone', () => {
+  for (const bad of [
+    '$p = 50%$',
+    '$\\frac{a}{b$',
+    '$a } b$',
+    '$a $ b$',
+    '$a\n\nb$',
+    '$a \\$',
+    '\\begin{equation}\n  a\n\n  b\n\\end{equation}',
+    '\\begin{equation}\n  a \\end{equation} b\n\\end{equation}',
+    '$a$\\end{document}',
+    '',
+  ])
+    expect(formulaText(bad), bad).toBe(false);
+  for (const ok of [
+    '$a_1 + b$',
+    '$\\frac{a}{b}$',
+    '$50\\%$',
+    '$x$ and $y$',
+    '\\begin{equation}\n  a = b\n\\end{equation}',
+    '\\begin{equation}\n  a = b % note\n  + c\n\\end{equation}',
+    '\n$a$\n',
+  ])
+    expect(formulaText(ok), ok).toBe(true);
+});
+
 describe('text put in by a command is guarded as typed text is', () => {
   /** Put `latex` where the caret is, through the command path, and return the source. */
   const put = (src: string, at: (r: ReturnType<typeof replica>) => number, latex: string) => {
@@ -2759,5 +2785,103 @@ describe('text commands in the visual view', () => {
       }
     }
     expect(done).toBeGreaterThan(1000);
+  });
+});
+
+describe('an equation typed into the Insert window', () => {
+  const PRE = '\\documentclass{article}\n\\begin{document}\n';
+  const POST = '\\end{document}\n';
+  const D = (b: string) => `\n\\begin{equation}\n  ${b}\n\\end{equation}\n`;
+  /** Where the caret goes, in a document, for each place a formula can be put. */
+  const places: Record<string, [string, number]> = {
+    'mid-paragraph': ['Alpha beta gamma delta.\n\nNext paragraph stays.\n', 10],
+    'paragraph start': ['Alpha beta gamma delta.\n\nNext paragraph stays.\n', 0],
+    'paragraph end': ['Alpha beta gamma delta.\n\nNext paragraph stays.\n', 23],
+    'inside \\emph': ['Alpha \\emph{beta gamma} delta.\n\nNext.\n', 9],
+    'after \\LaTeX': ['Alpha \\LaTeX gamma delta.\n\nNext.\n', 12],
+    'on a line with a comment': ['Alpha beta % note\ngamma delta.\n\nNext.\n', 11],
+    'in a heading': ['\\section{Alpha beta}\n\nText.\n', 5],
+    'in a list item': ['\\begin{itemize}\n\\item Alpha beta\n\\item Two\n\\end{itemize}\n', 5],
+  };
+  const open = (place: string) => {
+    const [body, off] = places[place];
+    const r = replica(PRE + body + POST);
+    const tb = textblocks(r).find((b) => b.para) ?? textblocks(r)[0];
+    r.select(tb.start + off);
+    return r;
+  };
+  const refused: Record<string, string> = {
+    percent: '$p = 50%$',
+    'open brace': '$\\frac{a}{b$',
+    'extra brace': '$a } b$',
+    'stray dollar': '$a $ b$',
+    'blank line': '$a\n\nb$',
+    'last backslash': '$a \\$',
+    'display, blank line': D('a = b\n\n  c'),
+    'display, inner end': D('a \\end{equation} b'),
+    'display, open brace': D('\\frac{a}{b'),
+    section: '$a \\section{x}$',
+    'end of document': '$a$\\end{document}',
+  };
+  const accepted: Record<string, string> = {
+    subscript: '$a_1 + b$',
+    fraction: '$\\frac{a}{b}$',
+    'escaped percent': '$50\\%$',
+    'two formulas': '$x$ and $y$',
+    'numbered display': D('a = b'),
+    'comment, then a line': D('a = b % note\n  + c'),
+    aligned: D('\\begin{aligned} a &= b \\\\ c &= d \\end{aligned}'),
+  };
+
+  test('an equation that would break the paper is not inserted', () => {
+    for (const place of Object.keys(places))
+      for (const [name, latex] of Object.entries(refused)) {
+        const r = open(place);
+        const before = r.src;
+        const c = r.bridge.insertCommand(r.state, '');
+        if (!c) continue;
+        expect(r.bridge.formulaCommand(c, latex), `${place}: ${name}`).toBe('spills');
+        expect(r.src).toBe(before);
+      }
+  });
+
+  test('a sound equation goes in exactly as the fill command would put it', () => {
+    for (const place of Object.keys(places))
+      for (const [name, latex] of Object.entries(accepted)) {
+        const r = open(place);
+        const before = r.src;
+        const c = r.bridge.insertCommand(r.state, '')!;
+        expect(c, place).not.toBeNull();
+        const f = r.bridge.formulaCommand(c, latex);
+        expect(typeof f, `${place}: ${name}`).toBe('object');
+        if (typeof f === 'string') continue;
+        const at = Y.createAbsolutePositionFromRelativePosition(c.to, r.bridge.ytext.doc!)!.index;
+        const want = r.bridge.fillCommand(c, latex).replacement;
+        expect(f.replacement, `${place}: ${name}`).toBe(want);
+        expect(r.bridge.applyCommand(f)).toBe('applied');
+        r.check();
+        expect(r.src, `${place}: ${name}`).toBe(before.slice(0, at) + want + before.slice(at));
+      }
+  });
+
+  test('a display equation in a list item is accepted', () => {
+    const r = open('in a list item');
+    const c = r.bridge.insertCommand(r.state, '')!;
+    const f = r.bridge.formulaCommand(c, D('a = b'));
+    expect(typeof f).toBe('object');
+  });
+
+  test('a model behind the text, or a place that is not in it, is a conflict', () => {
+    const r = open('mid-paragraph');
+    const c = r.bridge.insertCommand(r.state, '')!;
+    // The model falls behind the text.
+    r.ytext.unobserve((r.bridge as unknown as { observer: () => void }).observer);
+    r.ytext.insert(0, 'X');
+    expect(r.bridge.formulaCommand(c, '$a$')).toBe('conflict');
+    // A place named in some other text.
+    const a = open('mid-paragraph');
+    const b = replica(PRE + 'Something else entirely.\n\nAnd more.\n' + POST);
+    const elsewhere = a.bridge.insertCommand(a.state, '')!;
+    expect(b.bridge.formulaCommand(elsewhere, '$a$')).toBe('conflict');
   });
 });

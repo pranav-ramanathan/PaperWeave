@@ -49,6 +49,12 @@ export function pasteable(latex: string): boolean {
   return braces === 0 && dollars % 2 === 0 && display === 0 && envs.length === 0;
 }
 
+/** Whether a formula's source stands alone: pasteable, and no blank line (TeX ends the paragraph inside it). */
+export const formulaText = (latex: string) => {
+  const t = latex.trim();
+  return pasteable(t) && !/\n[ \t]*\n/.test(t);
+};
+
 const SECTIONING =
   /\\(?:part|chapter|section|subsection|subsubsection|paragraph|subparagraph)\*?(?![a-zA-Z])/;
 

@@ -3,7 +3,7 @@
 // The small windows the visual editor opens: a formula's LaTeX with its preview, the list of
 // labels to refer to, and the menu of things to do at a place in the text.
 import type { CommandResult } from '@paperweave/bridge';
-import { cellText } from '@paperweave/latex';
+import { captionText, cellText } from '@paperweave/latex';
 import { type RefObject, useEffect, useLayoutEffect, useRef, useState } from 'react';
 import { numbers } from '../../../../../lib/numbers';
 import { renderMath } from '../../../../../lib/visual';
@@ -273,8 +273,10 @@ export function FloatBox(props: {
       return setProblem(
         'A description cannot hold { } % # ] or a backslash. Say it in plain words.',
       );
-    if (!cellText(cap))
-      return setProblem('A caption cannot hold an unescaped & or %, and its braces must match.');
+    if (!captionText(cap))
+      return setProblem(
+        'A caption cannot hold an unescaped & or %, its braces must match, and it cannot end in a backslash.',
+      );
     if (figure && target && /[%#"{}]/.test(target))
       return setProblem("LaTeX cannot use this picture's name. Rename it first.");
     const label = `  \\label{${labelFor(figure ? 'fig' : 'tab', cap, labels)}}`;
@@ -456,8 +458,7 @@ export function HeadingBox(props: {
     // One line: a line break in a title would end the paragraph the heading is in.
     const text = title.replace(/\s+/g, ' ').trim();
     if (!text) return setProblem('A heading needs a title.');
-    // A backslash at the end would take the closing brace with it.
-    if (!cellText(text) || /(^|[^\\])(\\\\)*\\$/.test(text))
+    if (!cellText(text))
       return setProblem('A title cannot hold an unescaped & or %, and its braces must match.');
     setProblem('');
     setBusy(true);

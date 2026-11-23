@@ -5,6 +5,7 @@ import {
   type Command,
   type CommandResult,
   extensions,
+  formulaText,
   fromSrc,
   LATEX_TYPE,
   pasteable,
@@ -12,6 +13,7 @@ import {
 } from '@paperweave/bridge';
 import {
   altEdit,
+  captionText,
   DEFAULT_TRANSPARENT,
   cellText,
   escape,
@@ -35,6 +37,8 @@ import { pageNonce } from './nonce';
 import { labelKey, markerOf } from './marker';
 import { numbers, onNumbers } from './numbers';
 
+const CAPTION_PROBLEM =
+  'A caption cannot hold an unescaped & or %, its braces must match, and it cannot end in a backslash. Write \\% for a percent sign. Edit it in the source for anything else.';
 const ENV = /^\\begin\{(\w+)\*?\}([\s\S]*)\\end\{\1\*?\}$/;
 const MULTILINE = new Set(['align', 'gather', 'multline', 'eqnarray', 'flalign', 'alignat']);
 
@@ -259,6 +263,8 @@ export function createVisual(opts: {
     if (!c) return say('That formula cannot be edited here. Edit it in the source.');
     resume = { from: editor.state.selection.from, to: editor.state.selection.to, acted };
     opts.editMath!(src, async (replacement) => {
+      // A brace that does not close, or a blank line, passes for a change in the formula alone.
+      if (!formulaText(replacement)) return 'spills';
       const next = bridge.rewriteCommand(c, replacement);
       return typeof next === 'string' ? next : run(next);
     });
@@ -608,7 +614,13 @@ export function createVisual(opts: {
       const caption = float.caption
         ? [
             el('span', 'pw-label', float.kind === 'table' ? 'Table: ' : 'Figure: '),
-            part(getPos, float.caption, 'Caption', undefined, opened),
+            part(
+              getPos,
+              float.caption,
+              'Caption',
+              (text) => (captionText(text) ? null : CAPTION_PROBLEM),
+              opened,
+            ),
           ]
         : [];
       /**
@@ -667,7 +679,7 @@ export function createVisual(opts: {
                 (text) =>
                   cellText(text)
                     ? null
-                    : 'A cell cannot hold an unescaped &, a row break or a %. Edit the table in the source for that.',
+                    : 'A cell cannot hold an unescaped &, a row break, a % or a final backslash. Edit the table in the source for that.',
                 opened,
               ),
             );
@@ -843,8 +855,11 @@ export function createVisual(opts: {
     skipSpace = false,
     caretIn,
     block = false,
+    formula = false,
   }: {
     skipSpace?: boolean;
+    /** The text is a formula typed by a person: refused ('spills') if it would not stand alone. */
+    formula?: boolean;
     /** Where in the inserted text the caret goes, if not at its end. */
     caretIn?: (latex: string) => number;
     /**
@@ -852,7 +867,7 @@ export function createVisual(opts: {
      * not at the caret, and the caret stands after it.
      */
     block?: boolean;
-  } = {}): ((latex: string) => Promise<CommandResult>) | null => {
+  } = {}): ((latex: string) => Promise<CommandResult | 'spills'>) | null => {
     catchUp();
     const floated = block && bridge.floatsAfter(editor.state);
     const c = floated
@@ -866,8 +881,14 @@ export function createVisual(opts: {
       const before = moves;
       // Guarded as typed text is, against the text as the earlier commands left it.
       let sent = latex;
-      const result = await inOrder(() => {
+      const result = await inOrder(async () => {
         const key = crypto.randomUUID();
+        if (formula) {
+          const f = bridge.formulaCommand({ ...c, key }, latex);
+          if (typeof f === 'string') return f;
+          sent = f.replacement;
+          return opts.run(f);
+        }
         // Padded against the text as it is now, not as it was when the caret was fixed.
         const filled = bridge.fillCommand(
           { ...c, key },
@@ -895,7 +916,7 @@ export function createVisual(opts: {
       if (after != null && !floated) after -= caretIn ? sent.length - lead - caretIn(latex) : trail;
       if (moves !== before)
         resume = null; // the person has gone elsewhere meanwhile
-      else if (result !== 'conflict' && after != null) {
+      else if (result !== 'conflict' && result !== 'spills' && after != null) {
         const caret = fromSrc(bridge.model, editor.state.doc, after);
         selectAt(caret);
         const { from, to } = editor.state.selection;
@@ -909,7 +930,10 @@ export function createVisual(opts: {
    * the function that inserts it, by way of the server, or null if the caret is not in a paragraph.
    */
   const heading = ():
-    | ((level: 'section' | 'subsection' | 'subsubsection', title: string) => Promise<CommandResult>)
+    | ((
+        level: 'section' | 'subsection' | 'subsubsection',
+        title: string,
+      ) => Promise<CommandResult | 'spills'>)
     | null => {
     catchUp();
     // The line breaks it needs around it depend on the text where the caret is, which is settled
@@ -925,7 +949,7 @@ export function createVisual(opts: {
    * Returns the function that inserts it, or null if the caret is not in a paragraph. The caret
    * ends up in the item, just after `\item `.
    */
-  const list = (ordered: boolean): (() => Promise<CommandResult>) | null => {
+  const list = (ordered: boolean): (() => Promise<CommandResult | 'spills'>) | null => {
     catchUp();
     const probe = bridge.listCommand(editor.state, ordered);
     const put =
