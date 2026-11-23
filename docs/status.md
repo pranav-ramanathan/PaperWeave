@@ -5911,3 +5911,31 @@ two`, cut at 40 characters, the source in the title, announced as "comment: ..."
   file is still listed. The `naaclhlt2019` `\ifx` false alarm remains: a package-opened group is
   reported as "\ifx on line 3 ... has no \fi" (repro: `\usepackage[hyperref]{naaclhlt2019}` in a
   six-line paper whose line 3 is blank). The build pane still shows none of these warnings.
+
+## A group or conditional a package leaves open is not held against the paper
+
+- **What was wrong** The build pane said "Built, but something is left open: `\ifx` on line 3 ...
+  has no `\fi`" on every build of a paper using the official NAACL 2019 style, and again under
+  "Worth a look" on submit. It was false: the style ends a line with `\ifaclfinal\else...` and no
+  `\fi`, the kernel's own `\fi` closes that one instead, and TeX reports the kernel's `\ifx` with
+  the line counter of the main file. The log gives a line number, never the file. A group an
+  installed package opens (`\begingroup` on its line 5) was shown the same way, with a button to
+  the author's innocent line 5. Of the 15 corpus logs only `1810.04805` has such a line.
+- **Now** When the build can read every own file the log names, an entry is kept only if one of
+  them has an opener on that line: `\if...` or `\unless` for a conditional (so an author's
+  `\ifdraft`, which TeX names `\iftrue`, still counts), `\begingroup`, or `{` / `\bgroup`
+  (comments and `\{` ignored). None: a package, class or macro opened it, and nothing is said.
+  Exactly one: the warning is placed at that file and line, with no "in the main file or one it
+  reads in", even when several files were read. More than one: the unplaced wording as before. A
+  file that cannot be read leaves the old behaviour. Wording of kept warnings is unchanged. The
+  toolchain text gets `-opened`, so cached builds are made again. Nothing is logged.
+- **Held by** seven tests in `diagnostics.test.ts` (the two false alarms, a place in a read-in
+  file, a root folder, `\ifdraft`, two fits, an unreadable file, comment and `\{` guards), two in
+  `compile.sandbox.test.ts` (a `.sty` that leaves `\ifx` open; a brace left open in a section),
+  and two in `building.spec.ts`, which run the accessibility check. The existing "group left open"
+  tests are unchanged.
+- **Not done.** A conditional or group opened by the paper's own macro (`\newcommand{\hide}{\iftrue}`)
+  and never closed is no longer reported, since no line of the paper has the opener. `\ifdraft` is
+  still named as TeX names it (`\iftrue`). The faulty line inside the `.sty` is not found. Still
+  carried over: overfull boxes are not reported; "You have requested package" from an installed
+  file is still listed; the build pane shows no compiler warnings.

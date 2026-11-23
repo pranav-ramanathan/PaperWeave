@@ -683,8 +683,11 @@ export function diagnostics(
   }
   // Groups and conditionals still open at \end{document}: the build works, and the rest of the
   // paper is in a font, or skipped. Not after an error: that leaves groups open as a knock-on.
+  // The log gives a line number but never the file. A package, class or macro that leaves one
+  // open (the NAACL style does) is reported with the line of whichever file was current, so
+  // when the paper's own files can be read, the entry is kept only if one of them has an opener
+  // on that line: none, and it is not the paper's; exactly one, and it is placed there.
   if (!out.some((d) => d.severity === 'error')) {
-    // The log never names the file, so it is placed only where the build read one own file.
     const own = [
       ...new Set(
         [...log.matchAll(/\((\.\/[^\s()]+)/g)]
@@ -692,8 +695,23 @@ export function diagnostics(
           .filter((f) => !/\.(?:aux|toc|out|lof|lot|nav|snm|bbl|ind|gls|nls|brf|vrb)$/i.test(f)),
       ),
     ];
-    const file = own.length === 1 ? place(dir, own[0].replace(/^\.\//, '')) : undefined;
-    const where = own.length > 1 ? ' (in the main file or one it reads in)' : '';
+    const names = own.map((f) => f.replace(/^\.\//, ''));
+    // Every own file's text, or none: one that cannot be read leaves today's behaviour.
+    let texts: string[] | undefined;
+    if (read && names.length <= 500) {
+      const got = names.map((n) => read(n));
+      if (got.every((t) => t !== undefined)) texts = got as string[];
+    }
+    const opens = (text: string, line: number, kind: 'if' | 'semi' | 'simple') => {
+      const here = text.split(/\r\n|\r|\n/)[line - 1];
+      if (here === undefined) return false;
+      const code = uncommented(here);
+      return kind === 'if'
+        ? /\\(?:if[A-Za-z@]*|unless)(?![A-Za-z@])/.test(code)
+        : kind === 'semi'
+          ? /\\begingroup(?![A-Za-z@])/.test(code)
+          : /(?<!\\)\{|\\bgroup(?![A-Za-z@])/.test(code);
+    };
     const left = [
       ...[
         ...log.matchAll(/^### (simple|semi simple) group \(level \d+\) entered at line (\d+) \(/gm),
@@ -703,8 +721,17 @@ export function diagnostics(
       ...[
         ...log.matchAll(/^\(\\end occurred when (\\[A-Za-z@]+) on line (\d+) was incomplete\)/gm),
       ].map((m) => ({ line: Number(m[2]), semi: false, cmd: m[1] })),
-    ];
-    for (const { line, semi, cmd } of left.slice(0, 10)) {
+    ].flatMap((entry) => {
+      const alone = own.length === 1 ? place(dir, names[0]) : undefined;
+      if (!texts) return [{ ...entry, file: alone, where: own.length > 1 }];
+      const kind = entry.cmd ? 'if' : entry.semi ? 'semi' : 'simple';
+      const fits = names.filter((_, i) => opens(texts[i], entry.line, kind));
+      if (fits.length === 0) return [];
+      if (fits.length > 1) return [{ ...entry, file: undefined, where: true }];
+      return [{ ...entry, file: place(dir, fits[0]), where: false }];
+    });
+    for (const { line, semi, cmd, file, where: unplaced } of left.slice(0, 10)) {
+      const where = unplaced ? ' (in the main file or one it reads in)' : '';
       const what = cmd
         ? `${cmd} on line ${line}${where} has no \\fi.`
         : semi
