@@ -38,9 +38,11 @@ import { compile, type Compiler, IMAGE } from './compile.ts';
  * line; a cached silent build is rebuilt.
  * '...-bibentry': a bare _, & or # in a .bib entry names the reference and its .bib line; a cached
  * failed build keeps the sentence about "an entry of a .bib file".
+ * '...-minted': a paper that loads minted gets one error that says what to do; a cached failed
+ * build keeps the five minted errors.
  */
 const TEX_TEXT =
-  'utf8-biber-eps-glyphs-strings-forcedate-unicode-nullfont-csname-bbl-ended-unclosed-group-bibentry';
+  'utf8-biber-eps-glyphs-strings-forcedate-unicode-nullfont-csname-bbl-ended-unclosed-group-bibentry-minted';
 
 /** The toolchain image's content ID: part of every cache key, so a new image rebuilds everything. */
 export const imageId = () =>

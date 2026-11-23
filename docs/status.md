@@ -3816,7 +3816,8 @@ Not changed:
 
 - Files without an extension (`Makefile`) and `.ipynb` are still skipped.
 - Papers imported before this change lack these files; they can now be added by hand.
-- `\inputminted` still does not build, because shell escape is off, but its file is now kept.
+- `\inputminted` still does not build, because shell escape is off, but its file is now kept. (A paper
+  that loads minted fails as a whole, not in part: see "A paper that loads minted is told what to do".)
 
 ## `texlive-fonts-extra` added to the image
 
@@ -5623,3 +5624,32 @@ inserted`), `Item #3` (`macro parameter character #`, or `Illegal parameter numb
   own tree. An error printed by `\fullcite` or the like, away from `\printbibliography`. The
   shell-escape message of minted. A `#` that joins strings in a `.bib` (`month = jan # "~1"`) is
   read as a bare one if TeX complains of `#` in that entry.
+
+## A paper that loads minted is told what to do
+
+- **What was wrong.** minted runs Pygments during the build, and shell escape is off, so a paper
+  that loads it does not build at all (no PDF), not just without its listings. The build pane
+  listed five errors for one listing (`You must invoke LaTeX with the -shell-escape flag`,
+  `You must have pygmentize installed`, `catchfile ... _minted-main/default.pygstyle not found`,
+  `Cannot find Pygments style`, `Missing Pygments output`), three or four more for each further
+  listing, the first on `\begin{document}` and none saying what to do. The import note said
+  "those parts will not build", which was wrong for minted.
+- **Now** the build shows one error, on the `\usepackage` (or `\RequirePackage`) line that loads
+  minted: "This paper loads the minted package, which runs a program (Pygments) during the build.
+  PaperWeave never runs programs from a paper, so it cannot be built with minted. Set the code
+  with the listings package instead (\begin{lstlisting})." It is only given when minted's own
+  shell-escape error is in the log; the other minted and catchfile errors are dropped and the
+  rest keep their log order. With no way to read the paper, or minted loaded from a `.sty` or
+  `.cls`, it keeps TeX's line. The import note for minted now says the paper will not build until
+  the code is set another way; `pythontex` and `shellesc` keep the old sentence. Builds from
+  before are rebuilt (`-minted`).
+- **Held by** six excerpt tests in `diagnostics.test.ts` (one error on line 2, no `read`, a root
+  in a folder, a second listing with an unrelated error between, a commented-out `\usepackage`,
+  a catchfile error with no trigger left alone), a real compile under pdfLaTeX and LuaLaTeX in
+  `compile.sandbox.test.ts`, three note tests in `import.test.ts` and a browser test in
+  `building.spec.ts`.
+- **Not done.** Keeping a frozen minted cache (`.pygtex`/`.pygstyle` files are dropped at import;
+  minted 3 and 2 differ in format; listings would go stale after edits; the image would need to
+  change): an owner decision. `frozencache` without its cache still shows minted's own errors.
+  `pythontex`, `svg` and other shell-escape packages. Import reports stored earlier keep the old
+  sentence. Nothing converts minted to listings.

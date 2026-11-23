@@ -701,3 +701,58 @@ test('a paper built with the wrong engine is given another on its page, and then
     build(owner.page).getByRole('link', { name: 'Open the PDF by itself' }),
   ).toBeVisible();
 });
+
+test('a paper that loads minted fails with one error that says what to do, on its line', async ({
+  browser,
+}) => {
+  test.setTimeout(180_000);
+  const owner = await person(browser, 'build-minted');
+  const { page } = owner;
+  await page.goto('/sign-in');
+  await signIn(page, owner.email);
+  await page
+    .getByLabel('Or import a ZIP of a LaTeX project')
+    .setInputFiles(await fixtureZip('Minted'));
+  await page.getByRole('button', { name: 'Import ZIP' }).click();
+  await page.getByRole('link', { name: 'sections/intro.tex' }).click();
+  await showSource(page);
+  await expect(buildStatus(page)).toHaveText('The PDF is up to date.', { timeout: 60_000 });
+
+  // A new preamble line in main.tex, before a \usepackage that was there.
+  const added = '\\usepackage{minted}';
+  await page.getByRole('link', { name: 'main.tex', exact: true }).click();
+  await expect(page.getByRole('region', { name: 'Editor for main.tex' })).toBeVisible();
+  await expect(source(page)).toContainText('\\usepackage{cite}');
+  await source(page).click();
+  await page.keyboard.press('ControlOrMeta+Home');
+  for (let i = 0; i < 3; i++) await page.keyboard.press('ArrowDown');
+  await page.keyboard.press('Home');
+  await page.keyboard.type(added);
+  await page.keyboard.press('Enter');
+  await expect(buildStatus(page)).toHaveText('The latest build failed.', { timeout: 60_000 });
+  const errors = build(page).getByRole('list', { name: 'Build errors' });
+  await expect(errors.getByRole('listitem')).toHaveCount(1);
+  await expect(errors).toContainText(/main\.tex:\d+ This paper loads the minted package/);
+  await expect(errors).not.toContainText('shell-escape');
+
+  // The error is a way to the line that loads minted.
+  await page.getByRole('link', { name: 'sections/intro.tex' }).click();
+  await expect(page.getByRole('region', { name: 'Editor for sections/intro.tex' })).toBeVisible();
+  const place = errors.getByRole('button', { name: /^main\.tex:\d+/ });
+  const line = Number(/:(\d+)/.exec((await place.textContent())!)![1]);
+  await place.click();
+  await expect(page.getByRole('region', { name: 'Editor for main.tex' })).toBeVisible();
+  await expect.poll(() => caretLine(page)).toBe(line);
+  await expect(
+    source(page)
+      .locator('.cm-line')
+      .nth(line - 1),
+  ).toContainText(added);
+
+  // Taking the line out builds again.
+  await page.keyboard.press('End');
+  for (let i = 0; i <= added.length; i++) await page.keyboard.press('Backspace');
+  await expect(source(page)).not.toContainText(added);
+  await expect(buildStatus(page)).toHaveText('The PDF is up to date.', { timeout: 60_000 });
+  await expect(errors).toHaveCount(0);
+});
