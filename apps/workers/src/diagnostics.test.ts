@@ -88,15 +88,10 @@ test('a warning that runs over several lines is one warning, with the line it en
   expect(diagnostics(log)).toEqual([
     {
       severity: 'warning',
-      message: "Token not allowed in a PDF string (Unicode): removing `math shift'",
+      message:
+        "PDF bookmark: a heading or title here has maths or a command that the PDF's outline cannot show, so the bookmark leaves it out. The page itself is not affected. To say what the bookmark should read, write \\texorpdfstring{$x$}{x}.",
       file: 'sections/one.tex',
       line: 1,
-    },
-    {
-      severity: 'warning',
-      message: "Font shape `OT1/cmr/m/n' in size <100> not available size <24.88> substituted",
-      file: 'sections/one.tex',
-      line: 4,
     },
     {
       severity: 'warning',
@@ -106,8 +101,168 @@ test('a warning that runs over several lines is one warning, with the line it en
     },
     {
       severity: 'warning',
-      message: 'Size substitutions with differences up to 75.12pt have occurred',
+      message:
+        'Font sizes not available: the font has no 100pt, so the nearest size it has was used (up to 75.12pt different). \\usepackage{lmodern} or \\usepackage{fix-cm} usually gives every size.',
+      file: 'sections/one.tex',
+      line: 4,
+    },
+  ]);
+});
+
+const hyperref = (n: number, token: string) => [
+  'Package hyperref Warning: Token not allowed in a PDF string (Unicode):',
+  `(hyperref)                removing \`${token}' on input line ${n}.`,
+  '',
+  '',
+];
+
+test('one heading with maths is one bookmark warning', () => {
+  // From the build of a paper with one \section that has maths in it: a warning per token.
+  const log = [
+    "LaTeX Warning: `h' float specifier changed to `ht'.",
+    '',
+    '(./iclr14_sva_appendix.tex',
+    '',
+    ...[
+      'math shift',
+      'subscript',
+      'subscript',
+      '\\begingroup',
+      '\\<let>-command',
+      'math shift',
+    ].flatMap((t) => hyperref(6, t)),
+    ')',
+  ].join('\n');
+  const bookmarks = diagnostics(log).filter((d) => /^PDF bookmark: /.test(d.message));
+  expect(bookmarks).toHaveLength(1);
+  expect(bookmarks[0]).toMatchObject({ file: 'iclr14_sva_appendix.tex', line: 6 });
+  expect(diagnostics(log).filter((d) => /Token not allowed/.test(d.message))).toEqual([]);
+  expect(diagnostics(log)).toHaveLength(2);
+});
+
+test('two headings on different lines are two bookmark warnings', () => {
+  const log = ['(./main.tex', ...hyperref(6, 'math shift'), ...hyperref(9, 'subscript'), ')'].join(
+    '\n',
+  );
+  expect(diagnostics(log).map((d) => [d.file, d.line])).toEqual([
+    ['main.tex', 6],
+    ['main.tex', 9],
+  ]);
+});
+
+test('font sizes that are not there are one warning, at the first', () => {
+  const asked = (shape: string, size: string, line: number) => [
+    `LaTeX Font Warning: Font shape \`${shape}' in size <${size}> not available`,
+    `(Font)              size <5> substituted on input line ${line}.`,
+    '',
+    '',
+  ];
+  const log = [
+    '(./main.tex',
+    ...asked('OT1/cmr/m/n', '3.8', 63),
+    ...asked('OML/cmm/m/it', '3.8', 63),
+    ...asked('OMS/cmsy/m/n', '3.8', 63),
+    ...asked('OT1/cmr/m/n', '4.55', 70),
+    ')',
+    'LaTeX Font Warning: Size substitutions with differences',
+    '(Font)              up to 1.75pt have occurred.',
+    '',
+  ].join('\n');
+  const out = diagnostics(log);
+  expect(out).toHaveLength(1);
+  expect(out[0].message).toBe(
+    'Font sizes not available: the font has no 3.8pt, 4.55pt, so the nearest size it has was used (up to 1.75pt different). \\usepackage{lmodern} or \\usepackage{fix-cm} usually gives every size.',
+  );
+  expect(out[0]).toMatchObject({ file: 'main.tex', line: 63 });
+});
+
+test('font sizes are listed up to six, then counted', () => {
+  const log = [
+    '(./main.tex',
+    ...[3, 4, 5.5, 6.5, 7, 8, 9, 10.25].flatMap((s) => [
+      `LaTeX Font Warning: Font shape \`OT1/cmr/m/n' in size <${s}> not available`,
+      '(Font)              size <12> substituted on input line 3.',
+      '',
+    ]),
+    ')',
+  ].join('\n');
+  const [only, ...rest] = diagnostics(log);
+  expect(rest).toEqual([]);
+  expect(only.message).toMatch(
+    /^Font sizes not available: the font has no 3pt, 4pt, 5\.5pt, 6\.5pt, 7pt, 8pt and 2 more, so the nearest size it has was used\. /,
+  );
+});
+
+test('a size summary with no size before it is kept as it was', () => {
+  const log = [
+    'LaTeX Font Warning: Size substitutions with differences',
+    '(Font)              up to 1.75pt have occurred.',
+  ].join('\n');
+  expect(diagnostics(log)).toEqual([
+    {
+      severity: 'warning',
+      message: 'Size substitutions with differences up to 1.75pt have occurred',
       line: undefined,
+    },
+  ]);
+});
+
+test('a font shape that is undefined is left as it was', () => {
+  const log = [
+    '(./main.tex',
+    "LaTeX Font Warning: Font shape `OT1/ptm/bx/sc' undefined",
+    "(Font)              using `OT1/ptm/bx/n' instead on input line 5.",
+    ')',
+  ].join('\n');
+  expect(diagnostics(log)).toEqual([
+    {
+      severity: 'warning',
+      message: "Font shape `OT1/ptm/bx/sc' undefined using `OT1/ptm/bx/n' instead",
+      file: 'main.tex',
+      line: 5,
+    },
+  ]);
+});
+
+test("a LaTeX warning's second line is part of it", () => {
+  const log = [
+    "LaTeX Warning: You have requested package `eso-pic',",
+    "               but the package provides `everyshi'.",
+    '',
+    '(./main.tex',
+    'LaTeX Warning: No positions in optional float specifier.',
+    "               Default added (so using `tbp') on input line 110.",
+    ')',
+  ].join('\n');
+  expect(diagnostics(log)).toEqual([
+    {
+      severity: 'warning',
+      message: "You have requested package `eso-pic', but the package provides `everyshi'",
+      line: undefined,
+    },
+    {
+      severity: 'warning',
+      message: "No positions in optional float specifier. Default added (so using `tbp')",
+      file: 'main.tex',
+      line: 110,
+    },
+  ]);
+});
+
+test('a warning followed by a blank line does not take an indented line after it', () => {
+  const log = [
+    '(./main.tex',
+    "LaTeX Warning: Reference `a' on page 1 undefined on input line 3.",
+    '',
+    '               indented text that is not part of it',
+    ')',
+  ].join('\n');
+  expect(diagnostics(log)).toEqual([
+    {
+      severity: 'warning',
+      message: "Reference `a' on page 1 undefined",
+      file: 'main.tex',
+      line: 3,
     },
   ]);
 });
