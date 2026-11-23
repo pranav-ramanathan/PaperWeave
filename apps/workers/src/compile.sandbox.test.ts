@@ -845,3 +845,18 @@ test('an error in the file that holds the \\documentclass is reported against th
   expect(r.ok).toBe(false);
   expect(r.diagnostics.some((d) => d.severity === 'error' && d.file === 'setup.tex')).toBe(true);
 });
+
+test('a paper whose root is .ltx builds, with SyncTeX that maps back to it', async () => {
+  const dir = tmp();
+  writeFileSync(
+    join(dir, 'main.ltx'),
+    '\\documentclass{article}\n\\begin{document}\nHello.\n\\end{document}\n',
+  );
+  const out = tmp();
+  const r = await compile(dir, 'main.ltx', out);
+  expect(r.diagnostics.filter((d) => d.severity === 'error')).toEqual([]);
+  expect(r.ok).toBe(true);
+  expect(readFileSync(join(out, r.pdf!)).subarray(0, 5).toString()).toBe('%PDF-');
+  expect(existsSync(join(out, r.synctex!))).toBe(true);
+  expect(texText(gunzipSync(readFileSync(join(out, r.synctex!))))).toContain('main.ltx');
+});

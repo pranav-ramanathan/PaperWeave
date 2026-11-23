@@ -552,13 +552,13 @@ export async function compile(
   // No shell is involved anywhere (sandbox() runs docker with execFile and an argument array),
   // so a name needs to be a plain path and nothing more.
   if (
-    !/\.tex$/i.test(root) ||
+    !/\.(tex|ltx)$/i.test(root) ||
     // eslint-disable-next-line no-control-regex -- control characters are exactly what is refused
     /[\u0000-\u001f\u007f\\]/.test(root) ||
     root.startsWith('/') ||
     root.split('/').includes('..')
   )
-    throw new Error(`not a .tex path inside the project: ${root}`);
+    throw new Error(`not a .tex or .ltx path inside the project: ${root}`);
   // A clean copy: the build never writes into the project, and starts from nothing else.
   const work = mkdtempSync(join(tmpdir(), 'paperweave-build-'));
   try {
@@ -588,7 +588,7 @@ export async function compile(
       Number.isInteger(epoch) ? { SOURCE_DATE_EPOCH: String(epoch), FORCE_SOURCE_DATE: '1' } : {},
       dashed && dir ? `/${dir}` : '',
     );
-    const base = root.replace(/\.tex$/i, '');
+    const base = root.replace(/\.(tex|ltx)$/i, '');
     const logPath = join(work, base + '.log');
     const log = existsSync(logPath) ? texText(readFileSync(logPath)) : run.output;
     mkdirSync(out, { recursive: true });

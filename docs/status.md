@@ -4841,3 +4841,13 @@ Found by a three-person walkthrough.
   `citations.sandbox.test.ts` and `builds.sandbox.test.ts`.
 - **Not done.** Editing a `.bbl` in the source editor; the import rule that drops a `.bbl` when
   the archive has any `.bib`; the "left out" reason does not say a `.bbl` can be uploaded.
+
+## A paper whose root is a `.ltx` file never built
+
+- **What was wrong.** The import and "make this the root" accept a `.ltx` file as the root, but
+  the build service refused any root not ending in `.tex`, so the author saw "could not run this
+  build. Try again" for ever.
+- **Now** the builder accepts a `.ltx` root as it does a `.tex` one, and the PDF, log and SyncTeX
+  names drop `.ltx` the same way.
+- **Held by** a build test in `compile.sandbox.test.ts` (with SyncTeX mapping back to `main.ltx`).
+- **Not done.** Nothing known.
