@@ -11,6 +11,7 @@ import {
 import type pg from 'pg';
 import {
   checkPath,
+  nfc,
   clashMessage,
   type Limits,
   LIMITS,
@@ -63,6 +64,7 @@ export async function createFile(
   limits: Limits = LIMITS,
 ): Promise<string> {
   await authorize(db, userId, id(projectId), 'file.write');
+  path = nfc(path);
   const problem = checkPath(path);
   if (problem) throw new AppError('invalid_input', `That name cannot be used: ${problem}.`);
   const tex = texName(path as string);
@@ -136,14 +138,18 @@ export async function replaceFile(
   limits: Limits = LIMITS,
 ): Promise<string> {
   await authorize(pool, userId, id(projectId), 'file.write');
+  path = nfc(path);
   const problem = checkPath(path);
   if (problem) throw new AppError('invalid_input', `That name cannot be used: ${problem}.`);
-  const name = path as string;
+  const wanted = path as string;
   if (bytes.length > limits.fileBytes)
     throw new AppError('invalid_input', 'That file is too large.');
   const paths: string[] = (
     await pool.query('select path from files where project_id = $1', [projectId])
   ).rows.map((r) => r.path);
+  // A paper imported before names were kept composed may hold this file under its decomposed
+  // name: that file is replaced, not a look-alike added.
+  const name = paths.find((p) => p.normalize('NFC') === wanted) ?? wanted;
   if (!paths.includes(name)) {
     if (paths.some((p) => p.startsWith(`${name}/`)))
       throw new AppError('invalid_input', `${name} is a folder, and cannot be replaced by a file.`);
@@ -449,6 +455,7 @@ export async function proposeFileRename(
   to: unknown,
 ): Promise<RenameProposal> {
   await authorize(pool, userId, id(projectId), 'file.write');
+  to = nfc(to);
   const problem = checkPath(to);
   if (problem) throw new AppError('invalid_input', `That name cannot be used: ${problem}.`);
   const tex = texName(to as string);
@@ -486,6 +493,7 @@ export async function renameFileAndReferences(
   digest?: unknown,
 ): Promise<{ places: number }> {
   await authorize(pool, userId, id(projectId), 'file.write');
+  to = nfc(to);
   if (digest === undefined) {
     await renameFile(pool, userId, projectId, fileId, to);
     return { places: 0 };

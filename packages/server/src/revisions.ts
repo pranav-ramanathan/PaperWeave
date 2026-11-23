@@ -4,6 +4,7 @@ import { LATEXMK_RULES, decodeFile } from '@paperweave/latex';
 import type pg from 'pg';
 import {
   checkPath,
+  nfc,
   clashMessage,
   type Entry,
   pathClash,
@@ -625,6 +626,7 @@ export async function renameFile(
   path: unknown,
 ) {
   await authorize(db, userId, id(projectId), 'file.write');
+  path = nfc(path);
   const problem = checkPath(path);
   if (problem) throw new AppError('invalid_input', `That name cannot be used: ${problem}.`);
   const tex = texName(path as string);

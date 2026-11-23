@@ -813,6 +813,19 @@ test('a paper with a long but valid file name still builds', async () => {
   expect(done).toMatchObject({ status: 'succeeded', hasPdf: true });
 });
 
+test('a paper from a Mac, with decomposed file names, builds against the composed names it cites', async () => {
+  const { built, errors, project } = await importAndBuild({
+    'main.tex': tex('\\input{sections/m\u00e9thode} \\includegraphics{figs/\u00dcbersicht}'),
+    'sections/me\u0301thode.tex': 'Words.',
+    'figs/U\u0308bersicht.png': PNG,
+  });
+  expect(errors).toEqual([]);
+  expect(built).toMatchObject({ status: 'succeeded', hasPdf: true });
+  expect((await listFiles(t.pool, owner.id, project.id)).map((f) => f.path)).toContain(
+    'sections/m\u00e9thode.tex',
+  );
+});
+
 test('the next build taken is the one whose requester has had the fewest done, not the oldest', async () => {
   const a = await t.signIn('fair-a@example.org');
   const b = await t.signIn('fair-b@example.org');

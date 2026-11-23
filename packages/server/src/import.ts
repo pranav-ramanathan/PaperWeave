@@ -447,7 +447,7 @@ export async function importZip(
     const report: ImportReport = { ...p.report, review: brought };
     // The paper's root where it came from, if the archive says: a plain ZIP leaves that to the
     // importer's guess, which can be another file.
-    const carried = carriedRoot(parsed);
+    const carried = carriedRoot(parsed)?.normalize('NFC') ?? null;
     if (carried && carried !== report.root) {
       const target = (
         await pool.query(
