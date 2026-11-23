@@ -476,7 +476,7 @@ test('a .bbl is kept when the archive has no .bib file, and the report says so',
   expect(alone.paths).toEqual(['main.bbl', 'main.tex']);
   expect(alone.report.skipped).toEqual([]);
   expect(alone.report.notes).toContain(
-    'The bibliography came ready-made (main.bbl), with no .bib file: its entries can be cited, but not changed or added to here.',
+    'The bibliography came ready-made (main.bbl), with no .bib file: its entries can be cited. To change it, upload a new copy with "Replace the file of this name" ticked.',
   );
   // With a .bib file it is build output as before.
   const both = await reportOf(owner.id, [

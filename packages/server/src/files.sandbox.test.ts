@@ -132,6 +132,27 @@ test('bad names, duplicates and people without write access are refused', async 
   expect(await paths(p.id)).toEqual(['intro.tex', 'main.tex']);
 });
 
+test('a ready-made .bbl can be added, replaced and renamed, and stays a stored file', async () => {
+  const p = await paper();
+  const one = Buffer.from('\\begin{thebibliography}{1}\n\\bibitem{a} A.\n\\end{thebibliography}\n');
+  const two = Buffer.from(one.toString().replace('{a}', '{b}'));
+  const bbl = await createFile(t.pool, store, owner.id, p.id, 'main.bbl', one);
+  expect(await paths(p.id)).toContain('main.bbl');
+  expect(await replaceFile(t.pool, store, owner.id, p.id, 'main.bbl', two)).toBe(bbl);
+  const out = (await readZip(await exportZip(t.pool, store, owner.id, p.id))).entries.find(
+    (e) => e.path === 'main.bbl',
+  )!;
+  expect(Buffer.from(out.bytes)).toEqual(two);
+  const proposal = await proposeFileRename(t.pool, store, owner.id, p.id, bbl, 'paper.bbl');
+  expect(
+    await renameFileAndReferences(t.pool, store, owner.id, p.id, bbl, 'paper.bbl', proposal.digest),
+  ).toMatchObject({ places: 0 });
+  expect(await paths(p.id)).toContain('paper.bbl');
+  // Build output other than a .bbl is still refused, and a viewer may not add one.
+  expect(await code(createFile(t.pool, store, owner.id, p.id, 'main.blg'))).toBe('invalid_input');
+  expect(await code(createFile(t.pool, store, viewer.id, p.id, 'x.bbl'))).toBe('permission_denied');
+});
+
 test('a paper takes only so many files, and only so much in all', async () => {
   const p = await paper();
   // The paper has two files already. The limits here are small ones: room for 27 bytes more.
@@ -1100,4 +1121,43 @@ test('a name LaTeX cannot spell is refused for a new or renamed file, but existi
   expect(await code(renameFile(t.pool, owner.id, project.id, ids['50%.png'], 'fifty.png'))).toBe(
     'ok',
   );
+});
+
+const NFC_PNG = 'figs/Übersicht.png';
+const NFD_PNG = 'figs/Übersicht.png';
+
+test('a file added under a decomposed name is stored composed, and a reference to it resolves', async () => {
+  const p = await paper();
+  await createFile(t.pool, store, owner.id, p.id, NFD_PNG, PNG);
+  expect(await paths(p.id)).toContain(NFC_PNG);
+  expect(await paths(p.id)).not.toContain(NFD_PNG);
+  expect(await pictureDigest(t.pool, store, owner.id, p.id, 'figs/Übersicht')).toMatchObject({
+    type: 'image/png',
+  });
+});
+
+test('replacing under either spelling keeps one file, and a rename is stored composed', async () => {
+  const p = await paper();
+  const fig = await createFile(t.pool, store, owner.id, p.id, NFC_PNG, PNG);
+  expect(await replaceFile(t.pool, store, owner.id, p.id, NFD_PNG, PNG)).toBe(fig);
+  expect((await paths(p.id)).filter((x) => x.startsWith('figs/'))).toEqual([NFC_PNG]);
+  await renameFile(t.pool, owner.id, p.id, p.intro, 'méthode.tex');
+  expect(await paths(p.id)).toContain('méthode.tex');
+  expect(await paths(p.id)).not.toContain('intro.tex');
+});
+
+test('a paper stored with a decomposed name has that file replaced, not a look-alike added', async () => {
+  const p = await paper();
+  const one = Buffer.from([0x89, 0x50, 0x4e, 0x47, 1, 1, 1]);
+  const two = Buffer.from([0x89, 0x50, 0x4e, 0x47, 2, 2, 2, 2]);
+  const row = (
+    await t.pool.query(
+      'insert into files (project_id, path, digest, size, readonly_reason) values ($1, $2, $3, $4, $5) returning id',
+      [p.id, NFD_PNG, await store.put(one), one.length, 'picture'],
+    )
+  ).rows[0].id;
+  const before = (await paths(p.id)).length;
+  expect(await replaceFile(t.pool, store, owner.id, p.id, NFC_PNG, two)).toBe(row);
+  expect(await paths(p.id)).toHaveLength(before);
+  expect(Buffer.from(await bytesOf(row))).toEqual(two);
 });

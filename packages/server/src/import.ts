@@ -297,7 +297,7 @@ export function describeImport(
   const bbls = entries.map((e) => e.path).filter((p) => /\.bbl$/i.test(p));
   if (bbls.length && !entries.some((e) => /\.bib$/i.test(e.path)))
     notes.push(
-      `The bibliography came ready-made (${bbls.map((p) => p.split('/').pop()).join(', ')}), with no .bib file: its entries can be cited, but not changed or added to here.`,
+      `The bibliography came ready-made (${bbls.map((p) => p.split('/').pop()).join(', ')}), with no .bib file: its entries can be cited. To change it, upload a new copy with "Replace the file of this name" ticked.`,
     );
   if (skipped.some((s) => s.reason.startsWith('build script')))
     notes.push(
@@ -447,7 +447,7 @@ export async function importZip(
     const report: ImportReport = { ...p.report, review: brought };
     // The paper's root where it came from, if the archive says: a plain ZIP leaves that to the
     // importer's guess, which can be another file.
-    const carried = carriedRoot(parsed);
+    const carried = carriedRoot(parsed)?.normalize('NFC') ?? null;
     if (carried && carried !== report.root) {
       const target = (
         await pool.query(

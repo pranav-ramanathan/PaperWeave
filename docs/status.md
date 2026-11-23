@@ -4732,8 +4732,9 @@ Found by a three-person walkthrough.
   (`main.tex` has `main.bbl`, in the same folder; with no root, every `.bbl`). Both a BibTeX
   `thebibliography` and a biblatex `\entry` are read, each key once. A key a `.tex` `\bibitem`
   already has is not added again. They show as entries with a place and a one-line description,
-  and evidence can be recorded for them. The import note now says "its entries can be cited, but
-  not changed or added to here". The `.bbl` is still not editable.
+  and evidence can be recorded for them. (The import note said "its entries can be cited, but
+  not changed or added to here"; it now says how to change it, see the section on a ready-made
+  `.bbl` below.) The `.bbl` is not editable in the source editor.
 - **Held by** unit tests in `bib.test.ts` and sandbox tests in `citations.sandbox.test.ts`,
   `evidence.sandbox.test.ts`, `import.sandbox.test.ts` and `submit.sandbox.test.ts`.
 - **Not done.** A `]` inside a braced `\bibitem` label; a key BibTeX broke across lines with `%`;
@@ -4803,3 +4804,50 @@ Found by a three-person walkthrough.
   and `\subincludefrom`, and an `\include` under `\iffalse` or after `\end{document}` (read as
   live) are not handled. A left-out `\include` of a file the paper lacks also gets the existing
   "not among the paper's files" warning.
+
+## A paper from a Mac with accented file names failed to build, or imported with garbled names
+
+- **What was wrong.** macOS writes file names decomposed (`U` and a combining diaeresis) where
+  authors type them composed, and names were stored as given. The paper's `\includegraphics` and
+  `\input` then missed the file, and the builder wrote the stored bytes as the file name, so TeX
+  said "File not found" for a paper that built on the author's Mac. Separately, a ZIP name
+  without the UTF-8 flag was read as CP437, so a UTF-8 name came out as mojibake.
+- **Now** names are kept in Unicode NFC whether they come from a ZIP, an upload, a new file, a
+  replace or a rename (`nfc` in `archive.ts`). A ZIP name without the flag that is valid UTF-8 is
+  read as UTF-8; one that is not (real CP437) keeps its old reading. Two ZIP names that are the
+  same once composed are refused as the same file twice. Replacing a file by its composed name
+  replaces a file stored decomposed before this change, instead of adding a look-alike. Review
+  data and a carried root file find files by their composed names.
+- **Held by** unit tests in `archive.test.ts`, sandbox tests in `files.sandbox.test.ts` and a
+  build test in `builds.sandbox.test.ts`.
+- **Not done.** A reference written decomposed in the source is not matched (typed references are
+  composed). Paths already stored decomposed are not rewritten; renaming one to its own name
+  fixes it.
+
+## A ready-made `.bbl` could not be added, replaced or renamed
+
+- **What was wrong.** The name check refused every `.bbl` ("not a file type a paper uses"), so a
+  paper that came with only a `.bbl` could not have its bibliography updated, a deleted `.bbl`
+  could be put back only by restoring a revision, and after the root was renamed the `.bbl`
+  could not be renamed to match (TeX reads `\jobname.bbl`, so the bibliography was orphaned). The
+  import note told the author it could not be changed.
+- **Now** a name ending in `.bbl` (any case, any folder) is accepted when a file is added,
+  replaced or renamed (`checkPath` in `archive.ts`); `.aux`, `.blg`, `.log` and `.synctex.gz`
+  are still refused. It stays a stored, read-only binary file: replacing it keeps its id, cuts a
+  revision, and makes the last build stale. The citation report reads the `.bbl` as it stands now,
+  including edits to a text file that was renamed to it. The import note now ends "To change it,
+  upload a new copy with "Replace the file of this name" ticked".
+- **Held by** a unit test in `archive.test.ts`, sandbox tests in `files.sandbox.test.ts`,
+  `citations.sandbox.test.ts` and `builds.sandbox.test.ts`.
+- **Not done.** Editing a `.bbl` in the source editor; the import rule that drops a `.bbl` when
+  the archive has any `.bib`; the "left out" reason does not say a `.bbl` can be uploaded.
+
+## A paper whose root is a `.ltx` file never built
+
+- **What was wrong.** The import and "make this the root" accept a `.ltx` file as the root, but
+  the build service refused any root not ending in `.tex`, so the author saw "could not run this
+  build. Try again" for ever.
+- **Now** the builder accepts a `.ltx` root as it does a `.tex` one, and the PDF, log and SyncTeX
+  names drop `.ltx` the same way.
+- **Held by** a build test in `compile.sandbox.test.ts` (with SyncTeX mapping back to `main.ltx`).
+- **Not done.** Nothing known.

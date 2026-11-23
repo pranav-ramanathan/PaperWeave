@@ -700,6 +700,32 @@ test('an arXiv-shaped paper, a .bbl and no .bib, builds with its citations resol
   expect(built.diagnostics.filter((d) => /undefined/.test(d.message))).toEqual([]);
 });
 
+test('a .bbl that lacks a cited key can be replaced, and the paper builds with it', async () => {
+  const { project, built } = await importAndBuild(
+    {
+      'main.tex': tex(
+        'Hi \\cite{k} and \\cite{new}\n\\bibliographystyle{plain}\n\\bibliography{refs}',
+      ),
+      'main.bbl': BBL,
+    },
+    'Replace bbl',
+  );
+  expect(built.diagnostics.some((d) => /undefined/i.test(d.message))).toBe(true);
+  const fixed = BBL.replace(
+    '\\end{thebibliography}',
+    '\\bibitem{new} B.~Writer. \\newblock {\\em Fresh Entry}. \\newblock Q, 2021.\n\\end{thebibliography}',
+  );
+  await replaceFile(t.pool, store, owner.id, project.id, 'main.bbl', Buffer.from(fixed));
+  expect((await latestBuilds(t.pool, owner.id, project.id)).latest!.stale).toBe(true);
+  const again = await build(project.id);
+  expect(again).toMatchObject({ status: 'succeeded', hasPdf: true });
+  expect(again.diagnostics.filter((d) => /undefined/i.test(d.message))).toEqual([]);
+  const text = String(
+    pdfText(Buffer.from(await buildOutput(t.pool, store, owner.id, project.id, again.id, 'pdf'))),
+  );
+  expect(text).toContain('Fresh Entry');
+});
+
 test('a paper with a .tikz picture builds', async () => {
   const { built, errors } = await importAndBuild({
     'main.tex': tex('\\input{fig.tikz}', '\\usepackage{tikz}'),
@@ -811,6 +837,19 @@ test('a paper with a long but valid file name still builds', async () => {
   );
   const done = await build(project);
   expect(done).toMatchObject({ status: 'succeeded', hasPdf: true });
+});
+
+test('a paper from a Mac, with decomposed file names, builds against the composed names it cites', async () => {
+  const { built, errors, project } = await importAndBuild({
+    'main.tex': tex('\\input{sections/m\u00e9thode} \\includegraphics{figs/\u00dcbersicht}'),
+    'sections/me\u0301thode.tex': 'Words.',
+    'figs/U\u0308bersicht.png': PNG,
+  });
+  expect(errors).toEqual([]);
+  expect(built).toMatchObject({ status: 'succeeded', hasPdf: true });
+  expect((await listFiles(t.pool, owner.id, project.id)).map((f) => f.path)).toContain(
+    'sections/m\u00e9thode.tex',
+  );
 });
 
 test('the next build taken is the one whose requester has had the fewest done, not the oldest', async () => {

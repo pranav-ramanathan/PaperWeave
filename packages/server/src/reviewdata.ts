@@ -116,7 +116,8 @@ async function texts(pool: Db, store: BlobStore, projectId: string) {
   );
   const open = new Map<string, { id: string; doc: Y.Doc; text: Y.Text }>();
   return async (path: string) => {
-    const file = rows.find((r) => r.path === path);
+    const want = path.normalize('NFC');
+    const file = rows.find((r) => r.path.normalize('NFC') === want);
     if (!file) return null;
     if (!open.has(path)) {
       const doc = new Y.Doc();

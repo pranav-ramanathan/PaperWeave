@@ -97,6 +97,37 @@ export function pathClash(path: string, existing: Iterable<string>): string {
 export const clashMessage = (name: string) =>
   `A file and a folder cannot share the name "${name}".`;
 
+/**
+ * A name in Unicode NFC. macOS writes file names decomposed (NFD), authors type references
+ * composed, and a file system takes the bytes as they are: so names are kept composed. Anything
+ * that is not a string is returned as it is, for `checkPath` to refuse.
+ */
+export function nfc(path: unknown): unknown {
+  return typeof path === 'string' ? path.normalize('NFC') : path;
+}
+
+/**
+ * The name of a ZIP entry. A name without the UTF-8 flag is read by yauzl as CP437; one that is
+ * in fact valid UTF-8 (as macOS writes them) is read as UTF-8 here, and one that is not keeps
+ * the CP437 reading. Always in NFC.
+ */
+function entryName(entry: yauzl.Entry): string {
+  const raw = entry.fileNameRaw;
+  const plain =
+    (entry.generalPurposeBitFlag & 0x800) !== 0 ||
+    !raw.some((b) => b >= 0x80) ||
+    entry.extraFields.some((f) => f.id === 0x7075);
+  if (plain) return entry.fileName.normalize('NFC');
+  try {
+    return new TextDecoder('utf-8', { fatal: true })
+      .decode(raw)
+      .replace(/\\/g, '/')
+      .normalize('NFC');
+  } catch {
+    return entry.fileName.normalize('NFC');
+  }
+}
+
 /** Why a path cannot be a file in a paper, or '' if it can. */
 export function checkPath(path: unknown, limits: Limits = LIMITS): string {
   if (typeof path !== 'string' || !path || path.length > limits.pathLength)
@@ -113,7 +144,8 @@ export function checkPath(path: unknown, limits: Limits = LIMITS): string {
   if (PICTURE.test(path)) return PICTURE_REASON;
   if (TOOLCHAIN.test(path))
     return 'paperweave-toolchain.json is written by PaperWeave on download, so it cannot be a file of the paper';
-  if (SYSTEM.test(path) || BUILD.test(path) || !WANTED.test(path))
+  // A .bbl is let in by name: it is how a paper with no .bib file keeps its bibliography.
+  if (SYSTEM.test(path) || (!BBL.test(path) && (BUILD.test(path) || !WANTED.test(path))))
     return 'it is not a file type a paper uses';
   return '';
 }
@@ -174,7 +206,7 @@ export function readZip(
         });
       });
       file.on('entry', (entry: yauzl.Entry) => {
-        const path = entry.fileName;
+        const path = entryName(entry);
         if (path.endsWith('/')) return file.readEntry();
         // Never read, so neither counted nor checked: .git and __MACOSX can be huge or odd.
         if (SYSTEM.test(path)) return file.readEntry();

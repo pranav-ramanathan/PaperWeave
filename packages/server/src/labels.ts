@@ -16,7 +16,7 @@ import { type Db, transaction } from './db.ts';
 import { AppError } from './errors.ts';
 import { id } from './projects.ts';
 import { remembered } from './scope.ts';
-import { appendUpdate, bytesOfLog, loadUpdates, readLogs, TEXT } from './sync.ts';
+import { appendUpdate, bytesOfLog, currentBytes, loadUpdates, readLogs, TEXT } from './sync.ts';
 
 export type LabelPlace = { key: string; fileId: string; path: string; line: number };
 export type LabelReport = {
@@ -111,13 +111,13 @@ async function readTexFiles(
 
 /**
  * The text of the .bbl a paper with no .bib file came with: the root's own (`main.tex` has
- * `main.bbl`, as \\jobname.bbl), or with no root, every one. A .bbl is generated, so it is
- * not in the editable files and is read as it was stored.
+ * `main.bbl`, as \\jobname.bbl), or with no root, every one. A .bbl is not an editable text
+ * file, but one renamed from a text file has edits in its log, so it is read as it stands now.
  */
 export function bblFiles(pool: Db, store: BlobStore, projectId: string) {
   return remembered(pool, ['bbl', projectId], async () => {
     const { rows } = await pool.query(
-      `select f.id, f.path, f.digest, (select r.path from files r where r.id = p.root_file_id) as root_path
+      `select f.id, f.path, f.digest, f.eol, f.bom, f.head_seq, (select r.path from files r where r.id = p.root_file_id) as root_path
        from files f join projects p on p.id = f.project_id
        where f.project_id = $1 and f.path ~* '\\.bbl$'
          and not exists (select 1 from files b where b.project_id = f.project_id and b.path ~* '\\.bib$')
@@ -130,8 +130,7 @@ export function bblFiles(pool: Db, store: BlobStore, projectId: string) {
     const files: { id: string; path: string; text: string }[] = [];
     for (const f of rows) {
       if (wanted && f.path !== wanted) continue;
-      const bytes = await store.get(f.digest);
-      if (!bytes) throw new Error(`blob ${f.digest} is missing`);
+      const bytes = await currentBytes(pool, store, f);
       const decoded = decodeFile(bytes);
       files.push({
         id: f.id,

@@ -3,7 +3,10 @@ import { afterAll, beforeAll, expect, test } from 'vitest';
 import { readZip, writeZip } from './archive.ts';
 import { blobStore } from './blobs.ts';
 import { citationReport } from './citations.ts';
-import { exportZip, importZip } from './import.ts';
+import { createFile, replaceFile, deleteFile } from './files.ts';
+import { exportZip, importZip, listFiles } from './import.ts';
+import { renameFile } from './revisions.ts';
+import { editFile } from './sync.ts';
 import { TEST_ENV, testDb } from './testing.ts';
 
 const store = blobStore(TEST_ENV);
@@ -199,7 +202,7 @@ test('a .bbl is ignored when the paper has a .bib', async () => {
     { 'main.tex': MAIN('\\cite{k} and \\cite{extra}.'), 'refs.bib': '@misc{k, title={T}}\n' },
     'Bib then bbl',
   );
-  // The import would drop the .bbl, and a new file cannot be named .bbl: put the row in directly.
+  // The import would drop the .bbl, so put the row in directly.
   const bytes = Buffer.from(BBL_BIBTEX.replace('{two}', '{extra}'));
   await t.pool.query(
     "insert into files (project_id, path, digest, size, readonly_reason) values ($1, 'main.bbl', $2, $3, 'build output')",
@@ -208,4 +211,57 @@ test('a .bbl is ignored when the paper has a .bib', async () => {
   const report = await citationReport(t.pool, store, owner.id, project.id);
   expect(report.missing.map((m) => m.key)).toEqual(['extra']);
   expect(report.duplicates).toEqual([]);
+});
+
+const fileId = async (project: string, path: string) =>
+  (await listFiles(t.pool, owner.id, project)).find((f) => f.path === path)!.id;
+
+test('a ready-made .bbl can be replaced, and follows a renamed root', async () => {
+  const project = await importFiles(
+    {
+      'main.tex': MAIN('\\cite{k} and \\cite{new}.'),
+      'main.bbl': BBL_BIBTEX.replace('\\bibitem[Two(2002)]{two}', '\\bibitem[Zed(2003)]{zed}'),
+    },
+    'Replace bbl',
+  );
+  const keys = async () =>
+    (await citationReport(t.pool, store, owner.id, project.id)).missing.map((m) => m.key);
+  expect(await keys()).toEqual(['new']);
+  await replaceFile(
+    t.pool,
+    store,
+    owner.id,
+    project.id,
+    'main.bbl',
+    Buffer.from(BBL_BIBTEX.replace('{two}', '{new}')),
+  );
+  expect(await keys()).toEqual([]);
+  // TeX reads \\jobname.bbl: with the root renamed, the .bbl is no longer the paper's own.
+  await renameFile(t.pool, owner.id, project.id, await fileId(project.id, 'main.tex'), 'paper.tex');
+  expect(await keys()).toEqual(['k', 'new']);
+  await renameFile(t.pool, owner.id, project.id, await fileId(project.id, 'main.bbl'), 'paper.bbl');
+  expect(await keys()).toEqual([]);
+});
+
+test('a text file renamed to main.bbl is read with its edits', async () => {
+  const project = await importFiles(
+    { 'main.tex': MAIN('\\cite{k} and \\cite{late}.'), 'main.bbl': BBL_BIBTEX },
+    'Edited bbl',
+  );
+  await deleteFile(t.pool, store, owner.id, project.id, await fileId(project.id, 'main.bbl'));
+  const txt = await createFile(
+    t.pool,
+    store,
+    owner.id,
+    project.id,
+    'refs.txt',
+    Buffer.from(BBL_BIBTEX),
+  );
+  await renameFile(t.pool, owner.id, project.id, txt, 'main.bbl');
+  await editFile(t.pool, store, txt, owner.id, (text) =>
+    text.insert(text.toString().indexOf('\\end{thebibliography}'), '\\bibitem{late}\nL.\n'),
+  );
+  const report = await citationReport(t.pool, store, owner.id, project.id);
+  expect(report.missing).toEqual([]);
+  expect(report.entries.map((e) => e.key)).toContain('late');
 });
