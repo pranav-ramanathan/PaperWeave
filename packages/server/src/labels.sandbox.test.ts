@@ -6,7 +6,7 @@ import { importZip, listFiles } from './import.ts';
 import { labelIndex } from '@paperweave/latex';
 import { readZip } from './archive.ts';
 import { exportZip } from './import.ts';
-import { labelReport, paperProse, proposeLabelRename, renameLabel } from './labels.ts';
+import { labelReport, paperMacros, paperProse, proposeLabelRename, renameLabel } from './labels.ts';
 import { acceptInvitation, invite } from './projects.ts';
 import { editFile } from './sync.ts';
 import { TEST_ENV, testDb } from './testing.ts';
@@ -241,6 +241,42 @@ test("paperProse reads the root's preamble and the project's own packages, and o
   );
   expect(await paperProse(t.pool, store, owner.id, project.id)).toContain('notice');
   await expect(paperProse(t.pool, store, outsider.id, project.id)).rejects.toMatchObject({
+    code: 'not_found',
+  });
+});
+
+test("paperMacros reads in TeX's order and the project's own packages, and only for members", async () => {
+  const zip = await writeZip(
+    Object.entries({
+      'main.tex': [
+        '\\documentclass{article}',
+        '\\input{defs}',
+        '\\usepackage{local}',
+        '\\renewcommand{\\R}{\\mathbb{Q}}',
+        '\\newcommand{\\hide}[1]{}',
+        '\\begin{document}',
+        '$\\R \\norm{x}$',
+        '\\end{document}',
+        '',
+      ].join('\n'),
+      'defs.tex': '\\newcommand{\\R}{\\mathbb{R}}\n',
+      'local.sty': '\\newcommand{\\norm}[1]{\\lVert #1\\rVert}\n',
+      'unused.sty': '\\newcommand{\\unused}{u}\n',
+    }).map(([path, text]) => ({ path, bytes: Buffer.from(text) })),
+  );
+  const [project] = await importZip(t.pool, store, owner.id, zip, 'Macros');
+  expect(await paperMacros(t.pool, store, owner.id, project.id)).toEqual({
+    '\\R': '\\mathbb{Q}',
+    '\\norm': '\\lVert #1\\rVert',
+    '\\hide': '\\@secondoftwo{#1}{}',
+  });
+  const files = await listFiles(t.pool, owner.id, project.id);
+  const sty = files.find((f) => f.path === 'local.sty')!;
+  await editFile(t.pool, store, sty.id, owner.id, (text) =>
+    text.insert(0, '\\newcommand{\\fresh}{f}\n'),
+  );
+  expect(await paperMacros(t.pool, store, owner.id, project.id)).toHaveProperty(['\\fresh'], 'f');
+  await expect(paperMacros(t.pool, store, outsider.id, project.id)).rejects.toMatchObject({
     code: 'not_found',
   });
 });

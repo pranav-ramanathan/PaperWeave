@@ -1,5 +1,5 @@
 import { expect, test } from 'vitest';
-import { macroDefs, textMacroOf, textMacros, textOf } from './macros.ts';
+import { macroDefs, mathMacros, textMacroOf, textMacros, textOf } from './macros.ts';
 import { fixtureFiles } from './testutil.ts';
 
 test('simple macros are read with their bodies; what the renderer cannot take is left out', () => {
@@ -186,4 +186,90 @@ test('words are found only in a paper with a root, and no more than 256 are kept
   expect(Object.keys(textMacros({ 'main.tex': MAIN(many.join('\n')) }, 'main.tex')).length).toBe(
     256,
   );
+});
+
+const DOC = (preamble: string) =>
+  `\\documentclass{article}\n${preamble}\n\\begin{document}\nx\n\\end{document}\n`;
+
+test('mathMacros reads in the order TeX does, from the files and the own packages that are loaded', () => {
+  const texts = {
+    'main.tex': DOC(
+      [
+        '\\input{defs}',
+        '\\usepackage{own}',
+        '\\renewcommand{\\R}{\\mathbb{Q}}',
+        '\\usepackage{amsmath}',
+      ].join('\n'),
+    ),
+    'defs.tex': '\\newcommand{\\R}{\\mathbb{R}}\n\\newcommand{\\fromdefs}{d}\n',
+    'own.sty': '\\newcommand{\\R}{\\mathbb{Z}}\n\\newcommand{\\fromown}{o}\n',
+    'unread.sty': '\\newcommand{\\nope}{n}\n',
+  };
+  expect(mathMacros(texts, 'main.tex')).toEqual({
+    '\\R': '\\mathbb{Q}',
+    '\\fromdefs': 'd',
+    '\\fromown': 'o',
+  });
+});
+
+test('a package loaded after the root defines a name wins over the root', () => {
+  const texts = {
+    'main.tex': DOC('\\renewcommand{\\R}{\\mathbb{Q}}\n\\usepackage{own}'),
+    'own.sty': '\\renewcommand{\\R}{\\mathbb{C}}\n',
+  };
+  expect(mathMacros(texts, 'main.tex')).toEqual({ '\\R': '\\mathbb{C}' });
+});
+
+test('providecommand does not override a definition, and is overridden by a later one', () => {
+  const after = DOC('\\newcommand{\\R}{A}\n\\providecommand{\\R}{B}');
+  expect(mathMacros({ 'main.tex': after }, 'main.tex')).toEqual({ '\\R': 'A' });
+  const before = DOC('\\providecommand{\\R}{B}\n\\newcommand{\\R}{A}');
+  expect(mathMacros({ 'main.tex': before }, 'main.tex')).toEqual({ '\\R': 'A' });
+});
+
+test('an argument the body does not use is dropped, as TeX does', () => {
+  const src = DOC(
+    [
+      '\\newcommand{\\norm}[1]{\\lVert #1\\rVert}',
+      '\\newcommand{\\zero}[1]{0}',
+      '\\newcommand{\\first}[2]{#1}',
+      '\\newcommand{\\both}[2]{#1#2}',
+    ].join('\n'),
+  );
+  expect(mathMacros({ 'main.tex': src }, 'main.tex')).toEqual({
+    '\\norm': '\\lVert #1\\rVert',
+    '\\zero': '\\@secondoftwo{#1}{0}',
+    '\\first': '\\@secondoftwo{#2}{#1}',
+    '\\both': '#1#2',
+  });
+});
+
+test('what the renderer cannot take is left out, and an optional-argument redefinition removes the name', () => {
+  const src = DOC(
+    [
+      '\\newcommand{\\opt}{old}',
+      '\\renewcommand{\\opt}[2][x]{#1 + #2}',
+      '\\def\\p#1{(#1)}',
+      '\\newcommand{\\my@internal}{i}',
+      '\\DeclareMathOperator*{\\esssup}{ess\\,sup}',
+      '\\newcommand{\\ok}{k}',
+    ].join('\n'),
+  );
+  expect(mathMacros({ 'main.tex': src }, 'main.tex')).toEqual({
+    '\\esssup': '\\operatorname*{ess\\,sup}',
+    '\\ok': 'k',
+  });
+});
+
+test('mathMacros has nothing without a root, and a commented begin does not end the preamble', () => {
+  expect(mathMacros({ 'a.tex': '\\newcommand{\\x}{1}' }, 'main.tex')).toEqual({});
+  const src = [
+    '\\documentclass{article}',
+    '% \\begin{document}',
+    '\\newcommand{\\late}{l}',
+    '\\begin{document}',
+    '\\newcommand{\\body}{b}',
+    '\\end{document}',
+  ].join('\n');
+  expect(mathMacros({ 'main.tex': src }, 'main.tex')).toEqual({ '\\late': 'l' });
 });

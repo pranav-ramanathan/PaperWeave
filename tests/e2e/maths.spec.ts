@@ -5,7 +5,7 @@ import { mkdtempSync, readdirSync, readFileSync, statSync, writeFileSync } from 
 import { tmpdir } from 'node:os';
 import { join, relative } from 'node:path';
 import { readZip, writeZip } from '../../packages/server/src/archive';
-import { person, run, showSource, showVisual, signIn, sourceText } from './helpers';
+import { audit, person, run, showSource, showVisual, signIn, sourceText } from './helpers';
 
 const FIXTURE = join(import.meta.dirname, '../../fixtures/ieee-multifile');
 const VISUAL = '.editor .visual .ProseMirror';
@@ -143,4 +143,56 @@ test('a formula is edited in place, with a preview, and without overwriting anyo
       .replace('$T$', '$T_0 \\in \\RR$')
       .replace('\\label{eq:minimal}', '\\label{eq:minimal} % theirs'),
   );
+});
+
+test("a formula is drawn with the paper's own package, in TeX's order", async ({ browser }) => {
+  test.setTimeout(120_000);
+  const { page, email } = await person(browser, 'math-package');
+  const text = (path: string, body: string) => ({ path, bytes: Buffer.from(body) });
+  const zip = join(mkdtempSync(join(tmpdir(), 'paperweave-e2e-')), `Package ${run}.zip`);
+  writeFileSync(
+    zip,
+    await writeZip([
+      text(
+        'main.tex',
+        [
+          '\\documentclass{article}',
+          '\\input{defs}',
+          '\\usepackage{own}',
+          '\\renewcommand{\\R}{\\mathbb{Q}}',
+          '\\newcommand{\\hide}[1]{}',
+          '\\begin{document}',
+          'First $\\R$ then $\\norm{x}$ then $a\\hide{zzz}b$.',
+          '\\end{document}',
+          '',
+        ].join('\n'),
+      ),
+      text('defs.tex', '\\newcommand{\\R}{\\mathbb{R}}\n'),
+      text('own.sty', '\\newcommand{\\norm}[1]{\\lVert #1\\rVert}\n'),
+    ]),
+  );
+  await page.goto('/sign-in');
+  await signIn(page, email);
+  await page.getByLabel('Or import a ZIP of a LaTeX project').setInputFiles(zip);
+  await page.getByRole('button', { name: 'Import ZIP' }).click();
+  await page.getByRole('link', { name: 'main.tex' }).click();
+  await saved(page);
+  await showVisual(page);
+  const formulas = page.locator(`${VISUAL} span.pw-math`);
+  await expect(formulas).toHaveCount(3);
+  // The root's later definition is the one in force.
+  await expect(formulas.nth(0).locator('.katex-html')).toContainText('Q');
+  await expect(formulas.nth(0).locator('.katex-html')).not.toContainText('R');
+  // The project's own package is read.
+  await expect(formulas.nth(1)).not.toHaveClass(/pw-raw/);
+  await expect(formulas.nth(1).locator('.katex-html')).toContainText('∥');
+  // An argument the macro does not use is not printed.
+  // (`.katex-html` is what is drawn; KaTeX keeps the source beside it for assistive software.)
+  await expect(formulas.nth(2).locator('.katex-html')).toHaveText('ab');
+  // Its LaTeX is still what was written.
+  const box = page.getByRole('dialog', { name: 'Edit formula' });
+  await formulas.nth(1).dblclick();
+  await expect(box.locator('.preview .katex')).toBeVisible();
+  await expect(box.getByLabel('LaTeX')).toHaveValue('$\\norm{x}$');
+  await audit(page, 'formula drawn with a package');
 });

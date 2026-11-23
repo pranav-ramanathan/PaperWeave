@@ -177,16 +177,18 @@ const OWN = (name: string) => Object.hasOwn(LIGATURES, name.slice(1));
 const MAX_NAMES = 256;
 
 /**
- * The macros of the paper that only print words, by name with the backslash: what each prints.
- * `texts` maps every path of the project's `.tex`, `.ltx`, `.sty` and `.cls` files to its text.
- * They are read in the order TeX reads them: the root's preamble, descending at each `\input`
- * and at each `\usepackage` of the project's own package, so that the last definition wins. A
- * name that the body of the paper (or a file it does not read in the preamble) defines in any
- * other way is left out, as are macros that take arguments.
+ * What is in force at the end of the root's preamble, in the order TeX reads it: the root's head
+ * up to `\begin{document}`, descending at each `\input` and at each `\usepackage` or
+ * `\documentclass` of the project's own `.sty`/`.cls`; the last definition of a name wins and
+ * `\providecommand` does not override. `later` is the text read after that: the body of the root
+ * and every file the preamble did not read. Null when there is no such root.
  */
-export function textMacros(texts: Record<string, string>, root: string): Record<string, string> {
+function inForce(
+  texts: Record<string, string>,
+  root: string,
+): { now: Map<string, Definition>; later: string[] } | null {
   const rootText = texts[root];
-  if (rootText === undefined) return {};
+  if (rootText === undefined) return null;
   const dir = rootDir(root);
   const all = new Set(Object.keys(texts));
   const begins = uncomment(rootText).indexOf('\\begin{document}');
@@ -226,6 +228,21 @@ export function textMacros(texts: Record<string, string>, root: string): Record<
   // read. It may define a name again, and then what the text says is not what the preamble says.
   const later = [begins < 0 ? '' : rootText.slice(begins)];
   for (const path of all) if (!seen.has(path)) later.push(texts[path] ?? '');
+  return { now, later };
+}
+
+/**
+ * The macros of the paper that only print words, by name with the backslash: what each prints.
+ * `texts` maps every path of the project's `.tex`, `.ltx`, `.sty` and `.cls` files to its text.
+ * They are read in the order TeX reads them: the root's preamble, descending at each `\input`
+ * and at each `\usepackage` of the project's own package, so that the last definition wins. A
+ * name that the body of the paper (or a file it does not read in the preamble) defines in any
+ * other way is left out, as are macros that take arguments.
+ */
+export function textMacros(texts: Record<string, string>, root: string): Record<string, string> {
+  const walked = inForce(texts, root);
+  if (!walked) return {};
+  const { now, later } = walked;
   const changed = new Set<string>();
   for (const text of later)
     for (const d of definitions(text)) {
@@ -251,4 +268,27 @@ export function textMacros(texts: Record<string, string>, root: string): Record<
 export function textMacroOf(src: string, macros: Record<string, string>): string | null {
   const m = /^(\\[a-zA-Z@]+)(?:\{\})?$/.exec(src);
   return (m && macros[m[1]!]) || null;
+}
+
+/** The highest `#n` a macro body uses, 0 when it uses none. */
+const usedArguments = (body: string) =>
+  Math.max(0, ...[...body.matchAll(/#([1-9])/g)].map((m) => Number(m[1])));
+
+/**
+ * The macros of the paper in the form the in-browser maths renderer takes: name (with its
+ * backslash) to replacement text. Read in TeX's order, from the root's preamble, the files it
+ * reads and the project's own packages it loads (`inForce`), so that the last definition of a name
+ * wins. The renderer counts a macro's arguments from the highest `#n` its body uses, so a macro
+ * that declares more than it uses is wrapped to take (and drop) them. Left out: a macro with an
+ * optional or delimited argument (so is a name an optional-argument redefinition has replaced),
+ * and a name with `@`, which can not be typed in a document.
+ */
+export function mathMacros(texts: Record<string, string>, root: string): Record<string, string> {
+  const out: Record<string, string> = {};
+  for (const [name, d] of inForce(texts, root)?.now ?? []) {
+    if (d.params < 0 || name.includes('@') || d.params > 9) continue;
+    out[name] =
+      d.params <= usedArguments(d.body) ? d.body : `\\@secondoftwo{#${d.params}}{${d.body}}`;
+  }
+  return out;
 }
