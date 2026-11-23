@@ -42,6 +42,8 @@ const PICTURE = /^Picture not shown: /;
 /** The worker's warning for characters the font lacks: the PDF leaves them out. */
 const MISSING = /^Characters not shown: /;
 const ABBREVIATION = /^Abbreviation not defined: /;
+/** The worker's warning for a .bib the paper names and does not have, with no .bbl: the PDF has [?]. */
+const NOT_MADE = /^Bibliography not made: /;
 /** The worker's error for a .bib biber could not find; on a build that succeeded the .bbl stood in. */
 const NO_BIB = /^Biber could not find the bibliography file (.+)\.$/;
 const NOT_FOUND = /[`'](.+?)' not found/;
@@ -349,7 +351,10 @@ async function checksOf(
       // said nothing is wrong.
       if (
         fresh &&
-        (PICTURE.test(d.message) || MISSING.test(d.message) || ABBREVIATION.test(d.message))
+        (PICTURE.test(d.message) ||
+          MISSING.test(d.message) ||
+          ABBREVIATION.test(d.message) ||
+          NOT_MADE.test(d.message))
       ) {
         problem('file', d.message, where);
         continue;

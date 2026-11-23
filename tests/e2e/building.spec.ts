@@ -757,3 +757,45 @@ test('a paper that loads minted fails with one error that says what to do, on it
   await expect(buildStatus(page)).toHaveText('The PDF is up to date.', { timeout: 60_000 });
   await expect(errors).toHaveCount(0);
 });
+
+test('a paper that names a .bib it does not have still builds, and says what is missing', async ({
+  browser,
+}) => {
+  test.setTimeout(180_000);
+  const owner = await person(browser, 'build-nobib');
+  const { page } = owner;
+  await page.goto('/sign-in');
+  await signIn(page, owner.email);
+  const zip = join(mkdtempSync(join(tmpdir(), 'paperweave-e2e-')), `Nobib ${run}.zip`);
+  writeFileSync(
+    zip,
+    await writeZip([
+      {
+        path: 'main.tex',
+        bytes: Buffer.from(
+          '\\documentclass{article}\n\\begin{document}\nSee \\cite{a}.\n\\bibliographystyle{plain}\n\\bibliography{refs}\n\\end{document}\n',
+        ),
+      },
+    ]),
+  );
+  await page.getByLabel('Or import a ZIP of a LaTeX project').setInputFiles(zip);
+  await page.getByRole('button', { name: 'Import ZIP' }).click();
+  await page.getByRole('link', { name: 'main.tex', exact: true }).click();
+  await showSource(page);
+  // A PDF, not a failure, and the pane says what is not in it.
+  await expect(buildStatus(page)).toHaveText('The PDF is up to date.', { timeout: 60_000 });
+  const missing = build(page).getByRole('list', { name: 'Not in the PDF' });
+  await expect(missing).toContainText("refs.bib is not among the paper's files");
+  await expect(build(page).getByRole('list', { name: 'Build warnings' })).toContainText('Citation');
+  await audit(page, 'a bibliography that was not made');
+
+  // The same file under other capitals is the likely cause, and the pane says so.
+  await page.getByRole('link', { name: 'Paper overview' }).click();
+  await page.getByLabel('Name, with folders if you like').fill('Refs.bib');
+  await page.getByRole('button', { name: 'Add file' }).click();
+  await expect(page.getByRole('status')).toHaveText('Added Refs.bib.');
+  await page.getByRole('link', { name: 'main.tex', exact: true }).click();
+  await showSource(page);
+  await expect(missing).toContainText('only the capital letters differ', { timeout: 60_000 });
+  await expect(buildStatus(page)).toHaveText('The PDF is up to date.');
+});

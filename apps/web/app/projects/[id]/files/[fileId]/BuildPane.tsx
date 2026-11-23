@@ -33,7 +33,11 @@ const refusal = (res: Response) =>
     .catch(() => '');
 
 /** The name a build error says it could not find, if it says one. */
-const NOT_FOUND = [/[`'](.+?)' not found/, /could not find the bibliography file (.+?)\.$/];
+const NOT_FOUND = [
+  /[`'](.+?)' not found/,
+  /could not find the bibliography file (.+?)\.$/,
+  /^Bibliography not made: (.+?) is not among/,
+];
 
 const time = (iso: string) =>
   new Date(iso).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
@@ -261,7 +265,9 @@ export default function BuildPane({
       ? latest.diagnostics.filter(
           (d) =>
             d.severity === 'warning' &&
-            /^(?:Picture|Characters) not shown: |^Abbreviation not defined: /.test(d.message),
+            /^(?:Picture|Characters) not shown: |^Abbreviation not defined: |^Bibliography not made: /.test(
+              d.message,
+            ),
         )
       : [];
   // A build that worked but left a brace, a group or a conditional open: the rest of the paper is
@@ -356,6 +362,7 @@ export default function BuildPane({
               <li key={i}>
                 {/^(?:Characters|Abbreviation)/.test(d.message) && d.file && <>{place(d)} </>}
                 {d.message.replace(/^Picture not shown: /, '')}
+                {d.message.startsWith('Bibliography not made: ') && hint(d.message)}
               </li>
             ))}
           </ul>

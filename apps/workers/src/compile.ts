@@ -479,10 +479,34 @@ export function diagnostics(
       });
     else biber({ severity: 'error', message: `Biber: ${m[2].replace(/[.!]$/, '')}.` });
   }
+  // The build put an empty .bbl in place of one that was not there (see LATEXMK_RULES): latexmk
+  // would not run BibTeX or biber for a .bib that is not among the files, and says which.
+  const stub = /^PaperWeave: no .+\.bbl, an empty one stands in\.$/m.test(output);
+  const notMade: Diagnostic[] = [];
+  if (stub) {
+    const said = new Set<string>();
+    for (const m of output.matchAll(
+      /^Latexmk: I WON'T RUN '(?:bibtex|biber) [^']*' because I don't find the following files:\r?\n((?:[ \t]+.*(?:\n|$))+)/gm,
+    ))
+      for (const f of m[1]
+        .split('\n')
+        .map((t) => t.trim())
+        .filter(Boolean)) {
+        const name = place(dir, f.replace(/^\.\//, '')) ?? f.replace(/^\.\//, '');
+        if (said.has(name)) continue;
+        said.add(name);
+        notMade.push({
+          severity: 'warning',
+          message: `Bibliography not made: ${name} is not among the paper's files, so the PDF has [?] for citations to its entries. Add the file, or correct its name in \\bibliography or \\addbibresource.`,
+        });
+      }
+  }
   // latexmk does not start biber at all on a .bib file that is not there, and says so.
-  for (const m of output.matchAll(
-    /^Latexmk: Bibliography file\(s\) form \.bcf file:\n(?:[ \t]+.*\n)*?Bib file\(s\) not found in search path:\n((?:[ \t]+.*(?:\n|$))+)/gm,
-  ))
+  for (const m of stub
+    ? []
+    : output.matchAll(
+        /^Latexmk: Bibliography file\(s\) form \.bcf file:\n(?:[ \t]+.*\n)*?Bib file\(s\) not found in search path:\n((?:[ \t]+.*(?:\n|$))+)/gm,
+      ))
     for (const f of m[1]
       .split('\n')
       .map((t) => t.trim())
@@ -502,7 +526,7 @@ export function diagnostics(
       severity: 'error',
       message: 'The bibliography could not be made. The build log has the details.',
     });
-  out.push(...abbreviations);
+  out.push(...abbreviations, ...notMade);
   // A custom-dependency rule (makeglossaries, or makeindex for nomencl) failed: latexmk says so
   // in its summary, and whatever the tool said went to its own .glg or .nlg file, not the TeX log.
   if (/^Collected error summary[^\n]*\n(?:[ \t]+.*\n)*?[ \t]+cusdep\b/m.test(output))

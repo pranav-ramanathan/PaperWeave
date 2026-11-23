@@ -4897,7 +4897,8 @@ Found by a three-person walkthrough.
   that is not in the archive from the root's folder, or names one through a macro. The rest are
   dropped as before. The import report says why a `.bbl` was kept. The citation report reads the
   same set when the paper has a `.bib` (`bblFiles` in `labels.ts`). The build needs no change:
-  `latexmk -bibtex-cond` does not run BibTeX when a named `.bib` is missing, so the `.bbl` is used.
+  `latexmk -bibtex-cond` does not run BibTeX when a named `.bib` is missing, so the `.bbl` is used
+  (that holds only where a `.bbl` exists; with none, see the section on a missing `.bib` below).
 - **Held by** unit tests in `graph.test.ts`, `archive.test.ts` and `import.test.ts`, sandbox tests
   in `import.sandbox.test.ts`, `citations.sandbox.test.ts` and `builds.sandbox.test.ts`.
 - **Not done.** A `.bib` named only inside the paper's own `.cls` or `.sty` is not seen; a
@@ -5834,3 +5835,44 @@ two`, cut at 40 characters, the source in the title, announced as "comment: ..."
   `\noindent ` (TeX drops it); `\vskip`, `\vspace`, `\smallskip`, `\;` and `\quad` stay chips
   (7 in the corpus); `\\` in captions and table cells; the import coverage figure still counts
   these atoms as raw.
+
+## A paper that names a `.bib` it does not have, and has no `.bbl`, got no PDF
+
+- **What was wrong.** With `-bibtex-cond`, latexmk says "I WON'T RUN 'bibtex main'" for a `.bib`
+  that is not among the files and does a dummy run. The `.bbl` never appears, the rule stays out of
+  date, and after five passes latexmk exits 12 with "needed too many passes". A PDF is in the work
+  folder, but the build keeps it only on exit 0, so the author saw "The bibliography could not be
+  made. The build log has the details." and no PDF. It hit every new paper before its `.bib` is
+  uploaded and any paper whose `.bib` is deleted: `\bibliography{refs}` with no `refs.bib`;
+  `\bibliography{refs,more}` with only `refs.bib`; biblatex `\addbibresource{refs.bib}` with none.
+  The 17-paper corpus (through ZIP read, `keepBbls`, import and the worker's `compile()` in the
+  image):
+
+  | Result                        | Papers                                                                                                  |
+  | ----------------------------- | ------------------------------------------------------------------------------------------------------- |
+  | Imported and built, no errors | 12                                                                                                      |
+  | Refused at import, correctly  | 2 (`1602.03837`, `hep-th_9711200`)                                                                      |
+  | Fail on EPS (owner decision)  | 2 (`1207.7214`, `1502.03167`)                                                                           |
+  | Failed for this cause         | 1 (`1301.3781`: `\bibliography{strings,refs}` beside an inline `thebibliography`, no `.bib`, no `.bbl`) |
+
+- **Now** `LATEXMK_RULES` has an `after_xlatex` hook, `pw_bbl`: when the TeX log says there is no
+  `<root>.bbl` and none exists, it makes an empty one and prints "PaperWeave: no main.bbl, an empty
+  one stands in." The build then ends after a normal pass and keeps the PDF, with `[?]` for the
+  citations. `diagnostics()` reads that line together with latexmk's "I WON'T RUN" block (the marker
+  also prints on ordinary first passes, which BibTeX then overwrites) and says, once per file, as a
+  warning: "Bibliography not made: refs.bib is not among the paper's files, so the PDF has [?] ...".
+  The biber "could not find" error is not also said on such a build. The build pane lists it under
+  "Not in the PDF" with the capital-letters hint (`Refs.bib` for `refs.bib`), and the submission
+  check makes it a problem of kind `file`, so the paper is not ready. The rules string has no single
+  quote and runs no command, and the download command carries it, so ZIP and PDF stay in step.
+  `1301.3781` now exits 0 with the same 12 pages. Across 15 corpus papers and 10 fixtures, the old
+  and new rules give the same exit code and `pdftotext` text, except that paper. A `.bbl` that is
+  there is kept byte for byte, with a `.bib` missing (BibTeX and biber); a `.bib` syntax error and
+  `\input{main.bbl}` with no file still fail. `$bibtex_use=2` was rejected: it makes biber truncate a
+  ready-made `.bbl`.
+- **Held by** `diagnostics.test.ts`, `latexmk.test.ts`, three tests in `builds.sandbox.test.ts`, the
+  biblatex check in `submit.sandbox.test.ts` (which used to expect the build to fail), and a browser
+  test in `building.spec.ts` that also runs the accessibility check.
+- **Not done.** The warning carries no line of `\bibliography`. With one of two `.bib` files missing,
+  entries of the present one also show `[?]`. A per-chapter `.bbl` (chapterbib, multibib) is not
+  stubbed.
