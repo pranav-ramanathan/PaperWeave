@@ -486,14 +486,10 @@ export default function FileEditor(props: {
     // One undo history per person, for both views: undo never takes back someone else's edit.
     const undo = new Y.UndoManager(text);
     const writable = new Compartment();
-    // Locked, the text still takes the keyboard: someone who cannot edit can scroll it, move
-    // through it and select from it with keys alone. Without the tab stop a locked editor
-    // could only be scrolled with a mouse.
-    const lock = (on: boolean) => [
-      EditorState.readOnly.of(on),
-      EditorView.editable.of(!on),
-      EditorView.contentAttributes.of(on ? { tabindex: '0' } : {}),
-    ];
+    // The text is always a tab stop (see its contentAttributes below), so locked it still
+    // takes the keyboard: someone who cannot edit can scroll it, move through it and select
+    // from it with keys alone.
+    const lock = (on: boolean) => [EditorState.readOnly.of(on), EditorView.editable.of(!on)];
     const view = new EditorView({
       parent: host.current!,
       state: EditorState.create({
@@ -537,7 +533,12 @@ export default function FileEditor(props: {
             },
           }),
           EditorView.lineWrapping,
-          EditorView.contentAttributes.of({ 'aria-label': `LaTeX source of ${props.path}` }),
+          // An explicit tab stop, editable or not: a bare contenteditable reads as tabIndex -1
+          // to tools that check whether a scrolling region can be reached by keyboard.
+          EditorView.contentAttributes.of({
+            'aria-label': `LaTeX source of ${props.path}`,
+            tabindex: '0',
+          }),
           // Shut until the file has arrived. Typed into an editor still empty, words would
           // land at the top of the file, wherever the caret was meant to be.
           writable.of(lock(true)),

@@ -4957,3 +4957,20 @@ Found by a three-person walkthrough.
   by keyboard, audit), each failed before the change.
 - **Not done.** The unclosed-brace error has no line. `\begin{itemize} on input line 4 ended by
 \end{document}` still reads as if line 4 were in the main file.
+
+## A read-only visual view could not be reached by keyboard
+
+- **What was wrong.** Tiptap gives the visual text `tabindex="0"` only while it is editable. For
+  a viewer or reviewer, or a locked file, a long paper in the visual view scrolled but had
+  nothing in it to focus: in Safari the keyboard could not scroll it, and the audit's
+  `scrollable-region-focusable` rule applies. The source view had the same gap for the audit
+  while editable, since a bare contenteditable reads as `tabIndex` -1. The test called "the
+  visual view for someone who cannot edit" audited the source view, because the view last used is
+  remembered.
+- **Now** both texts always carry `tabindex="0"`: the source through `contentAttributes`
+  (`FileEditor.tsx`), the visual through `coreExtensionOptions` (`lib/visual.ts`). Tab order for
+  editable editors is unchanged. `recover.spec` audits a long file in both views, checks that
+  the read-only visual text is reached with Tab and scrolled with PageDown, and that typing
+  there changes nothing.
+- **Not done.** Someone using only the keyboard probably cannot select text in the read-only
+  visual view to start a comment: there is no caret.

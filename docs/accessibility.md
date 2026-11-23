@@ -40,6 +40,11 @@ Where this stands, what holds it there, and what nobody has checked yet.
     (serious): the `<pre class="diff">` scrolled but could not be focused. It is now
     `role="region"` named "Changes to <file>" with `tabIndex={0}` and a visible focus outline,
     like `Wide`; `tests/e2e/a11y.spec.ts` holds it.
+- **Both texts are always a tab stop.** The source and the visual view carry `tabindex="0"`
+  whether or not the person can edit, so a long paper opened read-only can be reached and
+  scrolled with the keyboard, and the audit passes on long files. The old "visual view for
+  someone who cannot edit" audit had run on the source view (the view last used is remembered);
+  `recover.spec` now shows the view it audits.
 - **The keys that insert in the visual view**: Alt+R (reference), Alt+C (citation), Alt+= (equation),
   Alt+G (figure), Alt+T (table), Alt+H (heading), Alt+L (bulleted list) and Alt+N (numbered
   list), Ctrl+I (emphasis), Ctrl+B (bold) and Shift+F10 (the menu at
