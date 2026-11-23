@@ -221,7 +221,8 @@ test('visual edits reach the source through the server, byte for byte', async ({
   await reviewer.page.goto(editor.page.url());
   await expect(status(reviewer.page)).toHaveText('Read only. You can read along but not edit.');
   await expect(reviewer.page.locator(VISUAL)).toContainText(both);
-  await expect(reviewer.page.locator(VISUAL)).toHaveAttribute('contenteditable', 'false');
+  await expect(reviewer.page.locator(VISUAL)).toHaveAttribute('aria-readonly', 'true');
+  await expect(reviewer.page.locator(VISUAL)).toHaveAttribute('contenteditable', 'true');
   await expect(reviewer.page.getByRole('button', { name: 'Emphasise' })).toHaveCount(0);
   await expect(reviewer.page.getByRole('button', { name: 'Bold' })).toHaveCount(0);
 

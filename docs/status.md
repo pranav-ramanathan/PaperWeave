@@ -4998,3 +4998,23 @@ Found by a three-person walkthrough.
   `--` and ``…'' are still chips; accents inside raw atoms are unchanged; typing `é` still writes
   UTF-8; the chip's double-click LaTeX window is gone for these. A paragraph made only of
   `\AA{}` is still a raw block, as before.
+
+## A reviewer can select text in the visual view with the keyboard
+
+- **What was wrong.** The visual view was `contenteditable="false"` for anyone who cannot write,
+  so a reviewer using only the keyboard had no caret and could not select the text that "Comment
+  on the selected text" and "Propose a change here" act on. Only the source view selected.
+- **Now** the visual view stays editable for reviewers and viewers (`setLocked` in
+  `FileEditor.tsx` no longer shuts it for a non-writer) and refuses every change in
+  `lib/visual.ts`: `filterTransaction` turns away any document change that is not a remote
+  update (`projection`), a keydown guard refuses typing, Enter, Backspace, Delete and undo, redo,
+  bold and emphasis, and paste, drop, cut and the mark commands refuse with the note "You can
+  read this paper but not edit it. Nothing was changed." The text carries `aria-readonly="true"`,
+  `inputmode="none"` and no spell-checking. A writer who is locked (file not arrived, refused,
+  too large, role lowered) is still `contenteditable="false"`. The server's role check is
+  unchanged and remains the guarantee.
+- **Presence.** A reviewer's caret in the visual view is not shared with the others (as before):
+  `moved` is only called for editors that can edit.
+- **Tests.** `keys.spec` "a reviewer selects words in the visual view with keys alone..." (fails
+  before: no selection). The reviewer assertions in `visual.spec`, `insert.spec` and
+  `recover.spec` now expect `aria-readonly="true"` and `contenteditable="true"`.

@@ -15,6 +15,7 @@ import {
   selectWord,
   showSource,
   showVisual,
+  dropOn,
   signIn,
   sourceText,
   typingSaved,
@@ -190,6 +191,88 @@ test('a comment and a proposed change are started, sent and decided without losi
   const proposals = page.getByRole('region', { name: 'Proposed changes' });
   await expect(proposals.getByText('Proposal accepted.')).toBeVisible();
   expect((await focused(page)).region).toBe('Proposed changes');
+});
+
+test('a reviewer selects words in the visual view with keys alone, comments on them and proposes a change; nothing they type changes the paper', async ({
+  browser,
+}) => {
+  test.setTimeout(240_000);
+  const owner = await paper(browser, 'keys-rev-owner');
+  const reviewer = await person(browser, 'keys-rev');
+  await owner.getByLabel('Their email address').fill(reviewer.email);
+  await owner.getByLabel('Their role').selectOption('reviewer');
+  await owner.getByRole('button', { name: 'Send invitation' }).click();
+  await expect(owner.getByRole('status')).toContainText(reviewer.email);
+  await reviewer.page.goto(await emailedLink(reviewer.email, '/invitations/'));
+  await signIn(reviewer.page, reviewer.email);
+  await reviewer.page.getByRole('button', { name: 'Join this paper' }).click();
+  await reviewer.page.getByRole('link', { name: 'main.tex' }).first().click();
+  const page = reviewer.page;
+
+  const editor = page.locator('.editor .visual .ProseMirror');
+  await expect(page.getByText('Read only. You can read along but not edit.')).toBeVisible();
+  await expect(editor).toHaveAttribute('aria-readonly', 'true');
+  await expect(editor).toHaveAttribute('contenteditable', 'true');
+  await expect(editor).toContainText('Latency stays below forty milliseconds.');
+  await expect(page.getByRole('button', { name: 'Emphasise' })).toHaveCount(0);
+  await audit(page, 'the visual view for a reviewer');
+
+  // Words selected with keys alone.
+  await selectLine(page, 1, 'Latency');
+
+  // Nothing typed, deleted, pasted, dropped or composed changes the paper.
+  await page.keyboard.type('zzz');
+  await page.keyboard.press('Backspace');
+  await page.keyboard.press('Delete');
+  await page.keyboard.press('Enter');
+  await editor.evaluate((el) => {
+    const data = new DataTransfer();
+    data.setData('text/plain', 'PASTED');
+    el.dispatchEvent(
+      new ClipboardEvent('paste', { clipboardData: data, bubbles: true, cancelable: true }),
+    );
+  });
+  await dropOn(editor, { text: 'DROPPED' });
+  const cdp = await page.context().newCDPSession(page);
+  await cdp.send('Input.imeSetComposition', { text: 'に', selectionStart: 1, selectionEnd: 1 });
+  await cdp.send('Input.insertText', { text: '日本' });
+  await expect(page.locator('.editor .toolbar .note')).toHaveText(
+    'You can read this paper but not edit it. Nothing was changed.',
+  );
+  for (const gone of ['zzz', 'PASTED', 'DROPPED', '日本', 'に'])
+    await expect(editor).not.toContainText(gone);
+  await expect(editor).toContainText('Latency stays below forty milliseconds.');
+
+  // A comment on the words, started from the keyboard.
+  await selectLine(page, 1, 'Latency');
+  await tabTo(page, 'Comment on the selected text');
+  await page.keyboard.press('Enter');
+  await page.keyboard.type('From the keyboard.');
+  await tabTo(page, 'Start thread');
+  await page.keyboard.press('Enter');
+  await expect(page.getByRole('article', { name: /^Thread on/ })).toContainText(
+    'From the keyboard.',
+  );
+  await expect(editor.locator('.thread-mark').first()).toHaveText('Latency');
+
+  // A proposed change to them.
+  await selectLine(page, 1, 'Latency');
+  await tabTo(page, 'Propose a change here');
+  await page.keyboard.press('Enter');
+  await expect(page.getByLabel('Replace it with')).toHaveValue('Latency');
+  await page.keyboard.type('Delay');
+  await tabTo(page, 'Propose');
+  await page.keyboard.press('Enter');
+  await expect(page.getByRole('article', { name: /Proposal to change/ })).toBeVisible();
+  await audit(page, 'the visual view for a reviewer with a comment and a proposal');
+
+  // The owner's copy is exactly what it was.
+  await owner.getByRole('link', { name: 'main.tex' }).first().click();
+  await showSource(owner);
+  // The source's text has no line breaks (they are drawn, not text): compare without whitespace.
+  await expect
+    .poll(async () => (await sourceText(owner)).replace(/\s/g, ''))
+    .toBe(MAIN.replace(/\s/g, ''));
 });
 
 test('the window for an equation takes what is typed straight after it opens', async ({

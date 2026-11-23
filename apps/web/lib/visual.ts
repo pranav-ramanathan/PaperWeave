@@ -172,6 +172,14 @@ export function createVisual(opts: {
    * the nearest one after it that can take text, or failing that the nearest before it. (A
    * caret left between blocks is not drawn, and what is typed next lands before the equation.)
    */
+  const READ_ONLY = 'You can read this paper but not edit it. Nothing was changed.';
+  /** Someone who cannot edit has a caret to select with; any change they try is turned away here. */
+  let refused = false;
+  const refuse = () => {
+    refused = true;
+    say(READ_ONLY);
+    return true;
+  };
   const selectAt = (from: number, to = from) => {
     const { doc, tr } = editor.state;
     const at = (pos: number) => doc.resolve(Math.max(0, Math.min(pos, doc.content.size)));
@@ -261,6 +269,7 @@ export function createVisual(opts: {
   /** Marks asked for and not yet made: a person typing shortcuts faster than the server answers. */
   let marking = 0;
   const mark = (kind: 'emph' | 'textbf') => {
+    if (!opts.editable) return refuse();
     if (marking >= 4) {
       say('Still making the last changes. Try again in a moment.');
       return true;
@@ -852,7 +861,7 @@ export function createVisual(opts: {
    * clipboard's formatting is not LaTeX. False if there was nothing to take.
    */
   const take = (text: string, files: number, verb = 'pasted'): boolean => {
-    if (!opts.editable) return true;
+    if (!opts.editable) return refuse();
     const { view } = editor;
     const act = verb === 'pasted' ? 'paste' : 'drop';
     if (!text.trim()) {
@@ -971,6 +980,12 @@ export function createVisual(opts: {
         addProseMirrorPlugins: () => [
           new Plugin({
             filterTransaction: (tr, state) => {
+              // The guarantee for anyone who cannot edit: no change to the document, whatever the
+              // browser or a shortcut tried. Remote updates come in as 'projection' and pass.
+              if (!opts.editable && tr.docChanged && !tr.getMeta('projection')) {
+                refuse();
+                return false;
+              }
               if (!bridge) return true;
               // A key that only moves the selection must not leave the caret where nothing can
               // be typed (the root, between blocks). A selected block is still allowed.
@@ -1064,6 +1079,17 @@ export function createVisual(opts: {
             (transaction.selectionSet || transaction.docChanged)
           )
             moves++;
+          // Moving the caret after a refused change clears the note about it.
+          if (
+            refused &&
+            transaction.selectionSet &&
+            !transaction.docChanged &&
+            !transaction.getMeta('projection') &&
+            !transaction.getMeta('own')
+          ) {
+            refused = false;
+            say('');
+          }
           // An edit going through is the answer to any note about the last refused one.
           if (transaction.docChanged && !transaction.getMeta('projection')) say('');
           bridge?.applied(transaction);
@@ -1139,9 +1165,25 @@ export function createVisual(opts: {
       }),
     ],
     editorProps: {
-      attributes: { 'aria-label': opts.label, role: 'textbox', 'aria-multiline': 'true' },
+      attributes: {
+        'aria-label': opts.label,
+        role: 'textbox',
+        'aria-multiline': 'true',
+        ...(opts.editable
+          ? {}
+          : { 'aria-readonly': 'true', inputmode: 'none', spellcheck: 'false' }),
+      },
       // These keys act where the caret is on the screen, even straight after a caret key.
       handleKeyDown: (view, e) => {
+        if (!opts.editable && !view.composing) {
+          const mod = e.ctrlKey || e.metaKey;
+          if (
+            (e.key.length === 1 && !mod && !e.altKey) ||
+            ['Enter', 'Backspace', 'Delete'].includes(e.key) ||
+            (mod && ['z', 'y', 'b', 'i'].includes(e.key.toLowerCase()))
+          )
+            return refuse();
+        }
         if (
           !view.composing &&
           ['Enter', 'Backspace', 'Delete', 'ArrowLeft', 'ArrowRight'].includes(e.key)
