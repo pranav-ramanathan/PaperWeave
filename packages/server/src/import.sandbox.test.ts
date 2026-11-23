@@ -315,6 +315,22 @@ test('a working folder full of files the import leaves out imports as the paper 
   expect(report.skippedMore).toBe(102);
 });
 
+test('a ZIP made by tar, with ./ and // in names, imports with its \\input found', async () => {
+  const zip = rawZip([
+    {
+      name: './main.tex',
+      data: Buffer.from(
+        '\\documentclass{article}\n\\begin{document}\n\\input{sec/a}\n\\end{document}\n',
+      ),
+    },
+    { name: 'sec//a.tex', data: Buffer.from('Some text.\n') },
+  ]);
+  const [made] = await importZip(t.pool, store, owner.id, zip, 'x');
+  const report = (await importReport(t.pool, owner.id, made.id))!;
+  expect(report.root).toBe('main.tex');
+  expect(report.missing).toEqual([]);
+});
+
 test('a symbolic link inside .git does not refuse the archive', async () => {
   const zip = rawZip([
     main,

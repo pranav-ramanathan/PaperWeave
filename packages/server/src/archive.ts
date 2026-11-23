@@ -111,9 +111,28 @@ export function nfc(path: unknown): unknown {
 /**
  * The name of a ZIP entry. A name without the UTF-8 flag is read by yauzl as CP437; one that is
  * in fact valid UTF-8 (as macOS writes them) is read as UTF-8 here, and one that is not keeps
- * the CP437 reading. Always in NFC.
+ * the CP437 reading. Always in NFC, and without "./" or empty parts (see `tidy`).
  */
 function entryName(entry: yauzl.Entry): string {
+  return tidy(rawName(entry));
+}
+
+/**
+ * Drop "./" segments and empty ones ("./main.tex", "sec//a.tex", "a/./b.tex"), as `tar -a -cf`
+ * writes them. Only whole segments are removed, so nothing is added: ".." and a leading "/"
+ * (which yauzl refuses before this runs) cannot appear. A name that ends in "/" or "/." is a
+ * folder, and one with nothing left is the folder "./".
+ */
+function tidy(name: string): string {
+  const out = name
+    .split('/')
+    .filter((p) => p !== '' && p !== '.')
+    .join('/');
+  const folder = name.endsWith('/') || name === '.' || name.endsWith('/.');
+  return folder ? (out ? out + '/' : './') : out || './';
+}
+
+function rawName(entry: yauzl.Entry): string {
   const raw = entry.fileNameRaw;
   const plain =
     (entry.generalPurposeBitFlag & 0x800) !== 0 ||

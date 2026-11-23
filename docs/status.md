@@ -5070,3 +5070,19 @@ Found by a three-person walkthrough.
   existing hostile-archive sandbox test's "password-protected entry" row has a stored size that
   yauzl rejects as damaged, so it passes without reaching the encryption check; the new
   `archive.test` guard builds the entry properly.
+
+## ZIP entry names with `./` or `//` are cleaned
+
+- **What was wrong.** `bsdtar -a -cf paper.zip .` and some other tools write entry names as
+  `./main.tex`, and some write `sec//a.tex`. `readZip` kept them as they were, so the paper's root
+  was `./main.tex` and `\input{sec/a}` was reported missing.
+- **Now** `entryName` (`archive.ts`) removes `.` and empty parts of a name (`./main.tex` becomes
+  `main.tex`, `sec//a.tex` becomes `sec/a.tex`, `a/./b.tex` becomes `a/b.tex`). Only whole parts
+  are removed, so a name never gains a `..` or a leading `/` (yauzl still refuses those before
+  this runs). `./` alone is a folder. Two names that become one file (`./a.tex` and `a.tex`) are
+  refused as "the same file twice".
+- **Held by** `archive.test` (the names, the folder, the clash, and a loop of hostile names that
+  must be refused or come out safe) and a sandbox test (a tar-style ZIP imports with root
+  `main.tex` and nothing missing).
+- **Not done.** A ZIP whose every name starts with `./` was already imported correctly (the common
+  folder is stripped); this only matters for mixed or doubled-slash names.

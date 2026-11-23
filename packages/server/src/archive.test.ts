@@ -225,3 +225,37 @@ test('left-out entries still count toward the entry bound', async () => {
     read([f('main.tex'), ...Array.from({ length: 40 }, (_, i) => f(`x/${i}.pyc`))]),
   ).rejects.toThrow(/too many files/); // guard
 });
+
+test("a './' prefix and doubled slashes in an entry name are removed", async () => {
+  const r = await rawRead([
+    { name: utf8('./main.tex') },
+    { name: utf8('sec//a.tex') },
+    { name: utf8('./figs/./b.tex') },
+    { name: utf8('./') },
+  ]);
+  expect(r.entries.map((e) => e.path)).toEqual(['main.tex', 'sec/a.tex', 'figs/b.tex']);
+});
+
+test('two names that become the same file are refused', async () => {
+  await expect(rawRead([{ name: utf8('./a.tex') }, { name: utf8('a.tex') }])).rejects.toThrow(
+    /same file twice/,
+  );
+});
+
+test('a cleaned name never climbs out or becomes absolute', async () => {
+  for (const name of [
+    '../a.tex',
+    './../a.tex',
+    'x/../../a.tex',
+    '/a.tex',
+    './/a.tex',
+    '.\\..\\a.tex',
+  ])
+    await rawRead([{ name: utf8(name) }]).then(
+      (r) =>
+        expect(
+          r.entries.every((e) => !e.path.startsWith('/') && !e.path.split('/').includes('..')),
+        ).toBe(true),
+      () => undefined,
+    ); // guard: refused, or safe
+});
