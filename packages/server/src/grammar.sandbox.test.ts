@@ -43,13 +43,15 @@ const MAIN = [
   '\\end{document}',
   '',
 ].join('\n');
-async function paper(main = MAIN) {
+// `withGuests: false` leaves out the reviewer and the viewer: one person may send 30 invitations an
+// hour, and every paper made here sends two.
+async function paper(main = MAIN, withGuests = true) {
   const zip = await writeZip([
     { path: 'main.tex', bytes: Buffer.from(main) },
     { path: 'notes.txt', bytes: Buffer.from('teh recieve\n') },
   ]);
   const [project] = await importZip(t.pool, store, users.owner.id, zip, 'Grammar');
-  for (const who of ['reviewer', 'viewer'] as const) {
+  for (const who of withGuests ? (['reviewer', 'viewer'] as const) : []) {
     const { token } = await invite(t.pool, users.owner.id, project.id, users[who].email, who);
     await acceptInvitation(t.pool, users[who].id, token);
   }
@@ -334,4 +336,86 @@ test('text commands are read as what they print, so they cause no false findings
     addable: true,
   });
   expect(words).not.toContain('ler');
+});
+
+test('a list item may start in lower case; a sentence may not', async () => {
+  const p = await paper(
+    wrap(
+      [
+        'This is fine. this is not.',
+        '\\begin{itemize}',
+        '\\item A fast parser.',
+        '\\item open-source code.',
+        '\\item first, we parse it. it is fast.',
+        '\\item a small one, and',
+        '\\item the the last.',
+        '\\end{itemize}',
+        '\\begin{enumerate}',
+        '\\item Parsing is quick.',
+        '\\item lazy loading.',
+        '\\end{enumerate}',
+      ].join('\n'),
+    ),
+    false,
+  );
+  const found = await check(p, 'owner');
+  const upper = found.filter((f) => f.rule === 'UPPERCASE_SENTENCE_START').map((f) => f.words);
+  // A list item is not a sentence; the sentences in the paragraph and in an item are.
+  expect(upper).toEqual(expect.arrayContaining(['this', 'it']));
+  expect(upper.sort()).toEqual(['it', 'this']);
+  for (const w of ['open', 'first', 'a', 'the', 'lazy'])
+    expect(
+      upper.some((u) => u.startsWith(w)),
+      w,
+    ).toBe(false);
+  // Other mistakes in an item are still found.
+  expect(found.some((f) => f.words.includes('the the'))).toBe(true);
+});
+
+test('mistakes in a description list and in a nested list are found', async () => {
+  const src = wrap(
+    [
+      '\\begin{description}',
+      '\\item[Parser] reads teh source.',
+      '\\item[Teh recieve] A fine thing.',
+      '\\item[Nested] A list follows.',
+      '  \\begin{itemize}',
+      '  \\item we saw the the result.',
+      '  \\end{itemize}',
+      '\\item[Code] Listing follows.',
+      '\\begin{verbatim}',
+      'teh',
+      '\\end{verbatim}',
+      '\\end{description}',
+    ].join('\n'),
+  );
+  const p = await paper(src, false);
+  const found = await check(p, 'owner');
+  const doc = new Y.Doc();
+  for (const u of await loadUpdates(t.pool, store, p.file)) Y.applyUpdate(doc, u);
+  const text = doc.getText(TEXT).toString();
+  const at = (b64: string) =>
+    Y.createAbsolutePositionFromRelativePosition(
+      Y.decodeRelativePosition(Buffer.from(b64, 'base64')),
+      doc,
+    )!.index;
+  const teh = found.find((f) => f.words === 'teh');
+  expect(teh).toBeDefined();
+  const [from, to] = [at(teh!.from), at(teh!.to)];
+  expect(text.slice(from, to)).toBe('teh');
+  expect(text.slice(from - 20, to + 8)).toBe('\\item[Parser] reads teh source.');
+  expect(found.some((f) => f.words.includes('the the'))).toBe(true);
+  // Nothing in a term, in the listing, or on the word after the term.
+  for (const f of found) {
+    expect(f.words).not.toMatch(/recieve/i);
+    expect(at(f.from)).not.toBe(text.indexOf('teh\n\\end{verbatim}'));
+    expect(at(f.from)).not.toBe(text.indexOf('Teh recieve'));
+  }
+  expect(found.some((f) => f.rule === 'UPPERCASE_SENTENCE_START' && f.words === 'reads')).toBe(
+    false,
+  );
+  // Taking the suggestion changes only the word.
+  const fix = teh!.replacements.find((r) => r === 'the');
+  expect(fix).toBe('the');
+  expect(text.slice(0, from) + fix + text.slice(to)).toContain('\\item[Parser] reads the source.');
 });
