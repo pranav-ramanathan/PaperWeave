@@ -31,6 +31,7 @@ import * as Y from 'yjs';
 import { bibliography, onBibliography } from './bibliography';
 import { footnoteText } from './footnote';
 import { pageNonce } from './nonce';
+import { labelKey, markerOf } from './marker';
 import { numbers, onNumbers } from './numbers';
 
 const ENV = /^\\begin\{(\w+)\*?\}([\s\S]*)\\end\{\1\*?\}$/;
@@ -297,6 +298,11 @@ export function createVisual(opts: {
   const emph = () => mark('emph');
   const bold = () => mark('textbf');
 
+  /** The environments whose body is prose: the parser and the one-line markers agree on them. */
+  const transparent: ReadonlySet<string> = opts.prose?.length
+    ? new Set([...DEFAULT_TRANSPARENT, ...opts.prose])
+    : DEFAULT_TRANSPARENT;
+
   /** Mark an element whose number comes from a PDF that is behind the text. */
   const age = (dom: HTMLElement, src: string) => {
     const n = numbers();
@@ -400,6 +406,12 @@ export function createVisual(opts: {
       if (note !== null) {
         dom.textContent = `Footnote: ${note.length > 40 ? note.slice(0, 39).trimEnd() + '…' : note}`;
         dom.setAttribute('aria-label', `footnote: ${note}`);
+      }
+      const key = labelKey(node.attrs.src);
+      if (key !== null) {
+        dom.textContent = key;
+        dom.classList.add('pw-tag');
+        dom.setAttribute('aria-label', `label ${key}`);
       }
       const logo = logoOf(node.attrs.src);
       if (logo) {
@@ -724,6 +736,29 @@ export function createVisual(opts: {
             );
         },
       };
+    }
+    const mk = frozen ? null : markerOf(node.attrs.src, node.attrs.label, transparent);
+    if (mk) {
+      // One quiet line: the source is in the title and behind the button, as before.
+      const dom = el('div', `pw-atom pw-block pw-raw pw-slim pw-slim-${mk.kind}`);
+      dom.setAttribute('role', 'group');
+      dom.title = node.attrs.src;
+      const said = el('span', 'pw-label');
+      const text = mk.kind === 'label' ? `label ${mk.text}` : mk.text;
+      said.textContent = text;
+      const go = el('button', '', 'source');
+      go.type = 'button';
+      go.onclick = () => opts.showInSource(getPos() ?? 0, getPos() ?? 0);
+      const draw = () => {
+        const n = numbers();
+        const num = mk.kind === 'label' && n.known ? n.labels[mk.text]?.number : undefined;
+        said.textContent = num ? `${text} \u00b7 ${num}` : text;
+        go.setAttribute('aria-label', `Edit in source: ${said.textContent}`);
+        if (mk.kind === 'label') age(dom, node.attrs.src);
+      };
+      draw();
+      dom.append(said, go);
+      return { dom, destroy: mk.kind === 'label' ? onNumbers(draw) : undefined };
     }
     const dom = el('div', `pw-atom pw-block ${frozen ? 'pw-frozen' : 'pw-raw'}`);
     dom.setAttribute('role', 'group');
@@ -1233,9 +1268,7 @@ export function createVisual(opts: {
   });
   bridge = new Bridge(opts.ytext, editor.schema, {
     sourceOnly: opts.sourceOnly,
-    transparent: opts.prose?.length
-      ? new Set([...DEFAULT_TRANSPARENT, ...opts.prose])
-      : DEFAULT_TRANSPARENT,
+    transparent,
   });
   undo.addTrackedOrigin(bridge);
   bridge.onReject = () => say('That edit spans LaTeX structure. Make it in the source editor.');

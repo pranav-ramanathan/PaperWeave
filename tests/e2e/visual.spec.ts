@@ -1226,3 +1226,95 @@ test('text commands read as what they print, and typing around them keeps the so
   await expect.poll(() => sourceText(page)).toContain('1, 2, , 9');
   expect(await sourceText(page)).toContain('\\ldots \\ then');
 });
+
+test('labels and theorem lines are one line, and the source is untouched', async ({ browser }) => {
+  const { page, email } = await person(browser, 'vis-marker');
+  const main = [
+    '\\documentclass{article}',
+    '\\begin{document}',
+    '\\section{Introduction}',
+    '\\label{sec:intro}',
+    'We study things.',
+    '',
+    '\\section{Setup}',
+    '\\label{sec:setup}',
+    '',
+    '\\begin{theorem}[Convergence]',
+    '\\label{thm:main}',
+    'Every sequence converges.',
+    '\\end{theorem}',
+    '',
+    '\\begin{proof}',
+    'Obvious.',
+    '\\end{proof}',
+    '',
+    '\\label{thm:two} Text after the label.',
+    '',
+    '\\end{document}',
+    '',
+  ].join('\n');
+  const zip = join(mkdtempSync(join(tmpdir(), 'paperweave-e2e-')), `Marker ${run}.zip`);
+  writeFileSync(zip, await writeZip([{ path: 'main.tex', bytes: Buffer.from(main) }]));
+  await page.goto('/sign-in');
+  await signIn(page, email);
+  await page.getByLabel('Or import a ZIP of a LaTeX project').setInputFiles(zip);
+  await page.getByRole('button', { name: 'Import ZIP' }).click();
+  await page.getByRole('link', { name: 'main.tex' }).first().click();
+  await expect(status(page)).toHaveText('All edits saved.');
+  await expect(page.locator(VISUAL)).toContainText('Every sequence converges.');
+  // The source line by line, so that line breaks count.
+  const lines = () =>
+    page
+      .locator(`${SOURCE} .cm-line`)
+      .evaluateAll((els) => els.map((e) => e.textContent).join('\n'));
+
+  // Three labels, two begin lines, two end lines and the end of the document: eight one-line
+  // markers. The preamble is the one box left.
+  await expect(page.locator(`${VISUAL} .pw-slim`)).toHaveCount(8);
+  await expect(page.locator(`${VISUAL} div.pw-raw:not(.pw-slim)`)).toHaveCount(1);
+  await expect(page.locator(`${VISUAL} .pw-slim pre`)).toHaveCount(0);
+  await expect(page.locator(VISUAL)).not.toContainText('LaTeX: label');
+  await expect(page.locator(VISUAL)).not.toContainText('LaTeX: end');
+  const markers = page.locator(`${VISUAL} .pw-slim .pw-label`);
+  await expect(markers).toHaveText([
+    'label sec:intro',
+    'label sec:setup',
+    'Theorem (Convergence)',
+    'label thm:main',
+    'End of theorem',
+    'Proof',
+    'End of proof',
+    'End of document',
+  ]);
+
+  // A label inside a paragraph is a small tag with its key.
+  const tag = page.locator(`${VISUAL} .pw-raw_inline`);
+  await expect(tag).toHaveCount(1);
+  await expect(tag).toHaveClass(/pw-tag/);
+  await expect(tag).toHaveText('thm:two');
+  await expect(tag).toHaveAttribute('title', '\\label{thm:two}');
+
+  await audit(page, 'editor, visual view with markers');
+
+  // The way to the source is a button on the line.
+  await page.getByRole('button', { name: 'Edit in source: label sec:intro' }).click();
+  await expect(view(page, 'Source')).toHaveAttribute('aria-pressed', 'true');
+  await expect(page.locator(SOURCE)).toBeFocused();
+  await showVisual(page);
+  await expect(page.locator(VISUAL)).toContainText('Every sequence converges.');
+
+  // Typing in the theorem changes only what was typed.
+  await typeAfter(page, VISUAL, 'Every', ' really');
+  await expect(status(page)).toHaveText('All edits saved.');
+  const typed = main.replace('Every sequence', 'Every really sequence');
+  await showSource(page);
+  await expect.poll(() => lines()).toBe(typed);
+  await showVisual(page);
+
+  // Selecting a lone label and pressing Backspace removes that line and no other.
+  await page.locator(`${VISUAL} .pw-slim`, { hasText: 'sec:setup' }).locator('.pw-label').click();
+  await page.keyboard.press('Backspace');
+  await expect(status(page)).toHaveText('All edits saved.');
+  await showSource(page);
+  await expect.poll(() => lines()).toBe(typed.replace('\\label{sec:setup}\n', ''));
+});
