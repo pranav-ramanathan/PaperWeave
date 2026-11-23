@@ -510,7 +510,7 @@ test('the toolbar is one Tab stop, and the arrow keys move along it', async ({ b
   await page.keyboard.press('Escape');
   await expect.poll(name).toBe('main.tex, visual editor');
 
-  // The source view has three buttons, and the stop survives the Edit group going.
+  // The source view has four buttons (Find and replace is the new one), and the stop survives the Edit group going.
   await page.keyboard.press('Shift+Tab');
   await page.keyboard.press('Home');
   await page.keyboard.press('ArrowRight');
@@ -519,7 +519,7 @@ test('the toolbar is one Tab stop, and the arrow keys move along it', async ({ b
   expect(await press('Shift+Tab')).toBe('Source');
   expect(await press('End')).toBe('Show in PDF');
   expect(await press('ArrowRight')).toBe('Visual');
-  await expect(bar.getByRole('button')).toHaveCount(3);
+  await expect(bar.getByRole('button')).toHaveCount(4);
   await audit(page, 'the file page with its toolbar');
 
   await showVisual(page);

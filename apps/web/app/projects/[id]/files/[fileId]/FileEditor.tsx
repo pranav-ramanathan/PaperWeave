@@ -1,6 +1,13 @@
 'use client';
 
 import { defaultKeymap } from '@codemirror/commands';
+import {
+  closeSearchPanel,
+  findNext,
+  findPrevious,
+  openSearchPanel,
+  search,
+} from '@codemirror/search';
 import { Compartment, EditorState, StateEffect, StateField } from '@codemirror/state';
 import {
   Decoration,
@@ -542,6 +549,45 @@ export default function FileEditor(props: {
           // Shut until the file has arrived. Typed into an editor still empty, words would
           // land at the top of the file, wherever the caret was meant to be.
           writable.of(lock(true)),
+          // Find and replace, drawn at the foot of the editor. Only these four keys, not the whole
+          // searchKeymap, which also takes Ctrl+D, Ctrl+Alt+G and Ctrl+Shift+L.
+          search(),
+          EditorState.phrases.of({
+            Find: 'Find',
+            Replace: 'Replace',
+            next: 'Next',
+            previous: 'Previous',
+            all: 'All',
+            'match case': 'Match case',
+            regexp: 'Regular expression',
+            'by word': 'Whole word',
+            replace: 'Replace',
+            'replace all': 'Replace all',
+            close: 'Close',
+          }),
+          keymap.of([
+            {
+              key: 'Mod-f',
+              run: openSearchPanel,
+              scope: 'editor search-panel',
+              preventDefault: true,
+            },
+            {
+              key: 'F3',
+              run: findNext,
+              shift: findPrevious,
+              scope: 'editor search-panel',
+              preventDefault: true,
+            },
+            {
+              key: 'Mod-g',
+              run: findNext,
+              shift: findPrevious,
+              scope: 'editor search-panel',
+              preventDefault: true,
+            },
+            { key: 'Escape', run: closeSearchPanel, scope: 'editor search-panel' },
+          ]),
           keymap.of([...yUndoManagerKeymap, ...defaultKeymap]),
           yCollab(text, awareness, { undoManager: undo }),
           marks,
@@ -1019,6 +1065,16 @@ export default function FileEditor(props: {
             </span>
           )}
           <span role="group" aria-label="Go to">
+            {mode === 'source' && (
+              <button
+                type="button"
+                onClick={() => live.current && openSearchPanel(live.current.view)}
+                aria-keyshortcuts="Control+F Meta+F"
+                title="Ctrl+F"
+              >
+                Find and replace
+              </button>
+            )}
             <button
               type="button"
               onClick={() =>
