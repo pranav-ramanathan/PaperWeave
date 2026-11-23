@@ -105,9 +105,10 @@ export function sandbox(
 
 const ERROR = /^(?:\.\/)?([^:\n]+?\.\w+):(\d+): (.+)$/gm;
 // A warning can run over several lines. Each further line starts with a name in brackets
-// and spaces, "(hyperref)        removing ...", and the line number is often on the last.
+// and spaces, "(hyperref)        removing ...", or (for LaTeX itself) with exactly 15 spaces;
+// the line number is often on the last.
 const WARNING =
-  /^(?:LaTeX(?: Font)?|Package \S+|Class \S+) Warning: (.+(?:\n\([A-Za-z0-9@-]+\)[ \t]+.*)*)$/gm;
+  /^(?:LaTeX(?: Font)?|Package \S+|Class \S+) Warning: (.+(?:\n(?:\([A-Za-z0-9@-]+\)[ \t]+| {15}(?=\S)).*)*)$/gm;
 // A character the font has no glyph for: TeX goes on and leaves it out of the PDF. LuaTeX
 // writes "There is no 王 (U+738B) in font [lmroman12-regular]:mapping=tex-text;!", XeTeX
 // "There is no 王 ("738B) in font ...!"; pdfTeX has no code: "There is no ^^e9 in font cmr10!"
@@ -115,7 +116,10 @@ const WARNING =
 // it is a stray character in a picture, not a missing glyph.
 const MISSING =
   /^Missing character: There is no (.+?)(?: \((?:U\+([0-9A-Fa-f]{4,6})|"([0-9A-Fa-f]{1,6}))\))? in font (.+)!$/gm;
-const CONTINUED = /\n\([A-Za-z0-9@-]+\)[ \t]+/g;
+// What a heading with maths in it says once, in place of the warning hyperref writes per token.
+const BOOKMARK =
+  "PDF bookmark: a heading or title here has maths or a command that the PDF's outline cannot show, so the bookmark leaves it out. The page itself is not affected. To say what the bookmark should read, write \\texorpdfstring{$x$}{x}.";
+const CONTINUED = /\n(?:\([A-Za-z0-9@-]+\)[ \t]+| {15}(?=\S))/g;
 
 /** TeX announcing that it gave up; the cause is the entry before it. */
 const STOP = /^\s*(?:Emergency stop\.?|==> Fatal error occurred)/;
@@ -570,18 +574,53 @@ export function diagnostics(
   }
   // A warning gives a line but not the file the line is in. That is whichever of the paper's
   // files TeX was reading when it wrote the warning.
+  // A font that lacks a size is one warning for the paper, not one for each shape it is asked
+  // for; a heading with maths in it is one bookmark warning, not one for each token.
+  const sizes: string[] = [];
+  let sizesAt: { file?: string; line?: number } | undefined;
+  let differs: string | undefined;
   for (const m of log.matchAll(WARNING)) {
     const said = /^(.+?)(?: on input line (\d+))?\.?$/s.exec(m[1].replace(CONTINUED, ' '))!;
     const line = said[2] ? Number(said[2]) : undefined;
     const file = line === undefined ? undefined : reading(m.index);
+    const size =
+      /^Font shape `.+?' in size <([\d.]+)> not available size <[\d.]+> substituted$/.exec(said[1]);
+    if (size) {
+      if (!sizes.includes(size[1])) sizes.push(size[1]);
+      sizesAt ??= { ...(file ? { file } : {}), line };
+      continue;
+    }
+    const summary = /^Size substitutions with differences up to ([\d.]+)pt have occurred$/.exec(
+      said[1],
+    );
+    if (summary) {
+      // With no size seen before it, it is kept as it was.
+      if (sizes.length > 0) {
+        differs = summary[1];
+        continue;
+      }
+    }
+    const bookmark = /^Token not allowed in a PDF string \([A-Za-z]+\): removing /.test(said[1]);
     const warning = {
       severity: 'warning' as const,
-      message: said[1],
+      message: bookmark ? BOOKMARK : said[1],
       ...(file ? { file } : {}),
       line,
     };
     // The same warning is written once for each pass over the paper.
     if (!out.some((d) => JSON.stringify(d) === JSON.stringify(warning))) out.push(warning);
+  }
+  if (sizes.length > 0) {
+    const shown = sizes
+      .slice(0, 6)
+      .map((x) => `${Number(Number(x).toFixed(2))}pt`)
+      .join(', ');
+    const more = sizes.length > 6 ? ` and ${sizes.length - 6} more` : '';
+    out.push({
+      severity: 'warning',
+      message: `Font sizes not available: the font has no ${shown}${more}, so the nearest size it has was used${differs ? ` (up to ${Number(differs)}pt different)` : ''}. \\usepackage{lmodern} or \\usepackage{fix-cm} usually gives every size.`,
+      ...sizesAt,
+    } as Diagnostic);
   }
   // A character the font lacks is left out of the PDF without a word in the paper's warnings.
   // Whichever file TeX was reading when it came to the character gets the one warning.

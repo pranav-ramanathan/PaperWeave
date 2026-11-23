@@ -43,9 +43,11 @@ import { compile, type Compiler, IMAGE } from './compile.ts';
  * '...-nobib': a paper that names a .bib it does not have, with no .bbl, builds with [?] for its
  * citations and says what is missing; a cached failed build keeps "The bibliography could not
  * be made."
+ * '...-merged': one warning per heading for PDF bookmarks, one for font sizes; a LaTeX
+ * warning's second line is read.
  */
 const TEX_TEXT =
-  'utf8-biber-eps-glyphs-strings-forcedate-unicode-nullfont-csname-bbl-ended-unclosed-group-bibentry-minted-nobib';
+  'utf8-biber-eps-glyphs-strings-forcedate-unicode-nullfont-csname-bbl-ended-unclosed-group-bibentry-minted-nobib-merged';
 
 /** The toolchain image's content ID: part of every cache key, so a new image rebuilds everything. */
 export const imageId = () =>

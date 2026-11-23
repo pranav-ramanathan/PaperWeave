@@ -982,3 +982,27 @@ test('a paper whose root is .ltx builds, with SyncTeX that maps back to it', asy
   expect(existsSync(join(out, r.synctex!))).toBe(true);
   expect(texText(gunzipSync(readFileSync(join(out, r.synctex!))))).toContain('main.ltx');
 });
+
+test('headings with maths and tiny fonts are one warning each', async () => {
+  const dir = tmp();
+  writeFileSync(
+    join(dir, 'main.tex'),
+    [
+      '\\documentclass{article}',
+      '\\usepackage{hyperref}',
+      '\\begin{document}',
+      '\\section{Bound $-D_{KL}(q_\\phi \\| p_\\theta)$}',
+      '{\\fontsize{3.8}{4}\\selectfont x}',
+      '\\end{document}',
+      '',
+    ].join('\n'),
+  );
+  const r = await compile(dir, 'main.tex', tmp());
+  expect(r.ok).toBe(true);
+  const said = r.diagnostics.filter((d) => d.severity === 'warning');
+  const marks = said.filter((d) => /^PDF bookmark: /.test(d.message));
+  expect(marks).toHaveLength(1);
+  expect(marks[0]).toMatchObject({ file: 'main.tex', line: 4 });
+  expect(said.filter((d) => /^Font sizes not available: /.test(d.message))).toHaveLength(1);
+  expect(said.filter((d) => /Token not allowed|Font shape/.test(d.message))).toEqual([]);
+});

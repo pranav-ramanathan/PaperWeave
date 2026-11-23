@@ -5876,3 +5876,38 @@ two`, cut at 40 characters, the source in the title, announced as "comment: ..."
 - **Not done.** The warning carries no line of `\bibliography`. With one of two `.bib` files missing,
   entries of the present one also show `[?]`. A per-chapter `.bbl` (chapterbib, multibib) is not
   stubbed.
+
+## One "Worth a look" line per cause for compiler warnings
+
+- **What was wrong.** "Check before submitting" passed every compiler warning through as its own
+  "Worth a look" item, uncapped: 88 items for about 18 causes across 12 clean corpus papers. One
+  `\section` with maths made hyperref write a warning per token; a font without a size made one per
+  shape; `\small` in maths made one per line. Two warnings also lost their second line: LaTeX's own
+  warnings continue with 15 spaces, not `(name)`, so "You have requested package `eso-pic'," ended
+  at the comma and "No positions in optional float specifier" lost its line number.
+
+  | Paper      | Items before | What                                                             | After |
+  | ---------- | -----------: | ---------------------------------------------------------------- | ----: |
+  | 1312.6114  |           27 | 26 hyperref "Token not allowed in a PDF string", one per token   |     3 |
+  | 1512.03385 |           20 | 15 "Font shape ... size not available", plus the size summary    |     5 |
+  | 1810.04805 |           29 | 28 "Command \small invalid in math mode", one per line, 11 files |     2 |
+  | 1404.7828  |            6 | 4 "Command \o invalid in math mode", 2 bookmark                  |     2 |
+
+- **Now** `diagnostics()` reads a LaTeX warning's 15-space second line as part of it (all 15 corpus
+  logs: same warning count, 5 messages change; `2010.11929` gains lines 105, 110 and 138). Every
+  "Token not allowed in a PDF string" becomes one "PDF bookmark: ..." warning per file and line,
+  which says the page is not affected and offers `\texorpdfstring`. "Font shape ... size ... not
+  available" and "Size substitutions ..." become one "Font sizes not available: ..." warning at the
+  first place, listing up to six sizes. `byCause()` in `packages/server/src/findings.ts` merges
+  findings with the same level, kind and message (never a chart's) into one item with its places,
+  and the submit page shows the first five places and "and N more places." The toolchain text gets
+  `-merged`, so cached builds are made again. No message contains manuscript text, and nothing is
+  logged.
+- **Held by** `diagnostics.test.ts` (the multi-line test's expectation changed: it asserted the old
+  per-token and per-shape texts), `findings.test.ts`, a test in `compile.sandbox.test.ts`, and
+  "warnings with one cause are one line, with every place" in `submit.spec.ts`, which runs the
+  accessibility check.
+- **Not done.** Overfull boxes are not reported. "You have requested package" from an installed
+  file is still listed. The `naaclhlt2019` `\ifx` false alarm remains: a package-opened group is
+  reported as "\ifx on line 3 ... has no \fi" (repro: `\usepackage[hyperref]{naaclhlt2019}` in a
+  six-line paper whose line 3 is blank). The build pane still shows none of these warnings.

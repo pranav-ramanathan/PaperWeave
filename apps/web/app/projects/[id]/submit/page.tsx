@@ -3,6 +3,8 @@ import {
   withScope,
   can,
   type Finding,
+  byCause,
+  type Placed,
   heldInRevisions,
   heldLine,
   submissionChecks,
@@ -36,25 +38,40 @@ async function Submit({
     throw err;
   });
   const of = (level: Finding['level']) => checks.findings.filter((f) => f.level === level);
+  // One place, as the editor opens it.
+  const where = (p: Placed['places'][number]) =>
+    p.fileId ? (
+      // The editor goes to a line it is given.
+      <Link
+        prefetch={false}
+        href={`/projects/${id}/files/${p.fileId}${p.line ? `?line=${p.line}` : ''}`}
+      >
+        {p.path}
+        {p.line ? `, line ${p.line}` : ''}
+      </Link>
+    ) : (
+      <>
+        <code>{p.path}</code>
+        {p.line ? `, line ${p.line}` : ''}
+      </>
+    );
   const list = (found: Finding[]) => (
     <ul className="report">
-      {found.map((f, i) => (
+      {byCause(found).map((f, i) => (
         <li key={i}>
           {f.message}{' '}
-          {f.fileId ? (
-            // The editor goes to a line it is given.
-            <Link
-              prefetch={false}
-              href={`/projects/${id}/files/${f.fileId}${f.line ? `?line=${f.line}` : ''}`}
-            >
-              {f.path}
-              {f.line ? `, line ${f.line}` : ''}
-            </Link>
-          ) : f.path ? (
+          {f.places.length > 1 ? (
             <>
-              <code>{f.path}</code>
-              {f.line ? `, line ${f.line}` : ''}
+              {f.places.slice(0, 5).map((p, j) => (
+                <span key={j}>
+                  {j > 0 && ', '}
+                  {where(p)}
+                </span>
+              ))}
+              {f.places.length > 5 && ` and ${f.places.length - 5} more places.`}
             </>
+          ) : f.fileId || f.path ? (
+            where({ fileId: f.fileId, path: f.path, line: f.line })
           ) : (
             f.chartId && (
               <Link prefetch={false} href={`/projects/${id}/charts/${f.chartId}`}>

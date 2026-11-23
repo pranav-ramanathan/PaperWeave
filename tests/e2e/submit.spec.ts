@@ -136,6 +136,46 @@ test('a paper with a hand-written bibliography is ready once built, and offers i
   await expect(page.getByRole('link', { name: 'Download the PDF', exact: true })).toBeVisible();
 });
 
+test('warnings with one cause are one line, with every place', async ({ browser }) => {
+  test.setTimeout(180_000);
+  const { page, email } = await person(browser, 'submit-cause');
+  const main = [
+    '\\documentclass{article}',
+    '\\usepackage{hyperref}',
+    '\\begin{document}',
+    '\\section{Bound $x_1 + \\alpha$}',
+    ...Array.from({ length: 7 }, (_, i) => `Item ${i + 1} is $\\o$.\n`),
+    '\\end{document}',
+    '',
+  ].join('\n');
+  const zip = join(mkdtempSync(join(tmpdir(), 'paperweave-e2e-')), `Cause ${run}.zip`);
+  writeFileSync(zip, await writeZip([{ path: 'main.tex', bytes: Buffer.from(main) }]));
+  await page.goto('/sign-in');
+  await signIn(page, email);
+  await page.getByLabel('Or import a ZIP of a LaTeX project').setInputFiles(zip);
+  await page.getByRole('button', { name: 'Import ZIP' }).click();
+  await page.getByRole('link', { name: 'Check before submitting' }).click();
+  const ready = page.getByText('Nothing stands in the way.');
+  const again = page.getByRole('button', { name: 'Build the paper and check again' });
+  await expect(again.or(ready).first()).toBeVisible({ timeout: 60_000 });
+  if (!(await ready.isVisible())) await again.click();
+  await expect(ready).toBeVisible({ timeout: 90_000 });
+  const worth = page.getByRole('heading', { name: 'Worth a look' });
+  await expect(worth).toBeVisible();
+  const items = page.getByRole('listitem');
+  await expect(items.filter({ hasText: 'PDF bookmark' })).toHaveCount(1);
+  const small = items.filter({ hasText: 'Command \\o invalid in math mode' });
+  await expect(small).toHaveCount(1);
+  await expect(small.getByRole('link', { name: /^main\.tex, line \d+$/ })).toHaveCount(5);
+  await expect(small).toContainText('and 2 more places');
+  await audit(page, 'the checks with grouped warnings');
+  await small
+    .getByRole('link', { name: /^main\.tex, line \d+$/ })
+    .first()
+    .click();
+  await expect(page).toHaveURL(/line=\d+$/);
+});
+
 test('downloads are named after the paper, with its letters, and the PDF too', async ({
   browser,
 }) => {
