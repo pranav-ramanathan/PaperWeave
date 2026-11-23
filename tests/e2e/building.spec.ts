@@ -409,6 +409,7 @@ test('the PDF is behind only when the paper has changed, and is built once for e
   // PDF is no longer of this paper, and the pane finds that out and builds by itself.
   await other.goto(paper);
   await other.getByRole('button', { name: 'Delete tables/ablation.tex' }).click();
+  await other.getByRole('button', { name: 'Delete tables/ablation.tex anyway' }).click();
   await expect(other.getByRole('status')).toContainText('Deleted tables/ablation.tex.');
   await expect(buildStatus(page)).toHaveText('The latest build failed.', { timeout: 30_000 });
   await expect(build(page)).toContainText('before the latest edits');

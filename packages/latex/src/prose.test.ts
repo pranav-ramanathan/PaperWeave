@@ -301,3 +301,11 @@ test("a macro that is not one of the paper's words reads as before, whatever the
   const macros = { '\\sys': 'PaperWeave', '\\LaTeX': 'Wrong' };
   expect(prose(src, DEFAULT_TRANSPARENT, macros)).toEqual(prose(src));
 });
+
+test('a comment between \\begin{itemize} and the first item is not prose', () => {
+  const src =
+    '\\begin{document}\n\\begin{itemize}\n%\\item Oldd\n\\item Newword here.\n\\end{itemize}\n\\end{document}\n';
+  expect(kindOf(src, 'Oldd')).not.toBe('text');
+  expect(kindOf(src, 'Newword')).toBe('text');
+  expect(read(src)).not.toContain('Oldd');
+});

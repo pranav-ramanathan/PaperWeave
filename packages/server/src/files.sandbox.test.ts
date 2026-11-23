@@ -11,6 +11,7 @@ import { AppError } from './errors.ts';
 import {
   createFile,
   deleteFile,
+  fileUses,
   picture,
   pictureDigest,
   pictures,
@@ -1160,4 +1161,46 @@ test('a paper stored with a decomposed name has that file replaced, not a look-a
   expect(await replaceFile(t.pool, store, owner.id, p.id, NFC_PNG, two)).toBe(row);
   expect(await paths(p.id)).toHaveLength(before);
   expect(Buffer.from(await bytesOf(row))).toEqual(two);
+});
+
+test('the lines that name a file are found before it is deleted', async () => {
+  const main =
+    '\\documentclass{article}\n\\graphicspath{{figures/}}\n\\begin{document}\n' +
+    '\\input{sections/intro}\n% \\input{sections/intro}\n\\includegraphics{plot}\n' +
+    '\\bibliography{refs}\n\\end{document}\n';
+  const zip = await writeZip([
+    { path: 'main.tex', bytes: Buffer.from(main) },
+    { path: 'sections/intro.tex', bytes: Buffer.from('Intro.\n') },
+    { path: 'figures/plot.png', bytes: Buffer.from([0x89, 0x50, 0x4e, 0x47, 0, 1, 2, 3]) },
+    { path: 'refs.bib', bytes: Buffer.from('@book{a, title={A}}\n') },
+    { path: 'notes.tex', bytes: Buffer.from('Notes.\n') },
+  ]);
+  const [project] = await importZip(t.pool, store, owner.id, zip, 'Uses');
+  const { token } = await invite(t.pool, owner.id, project.id, viewer.email, 'viewer');
+  await acceptInvitation(t.pool, viewer.id, token);
+  const ids = Object.fromEntries(
+    (await listFiles(t.pool, owner.id, project.id)).map((f) => [f.path, f.id]),
+  );
+  const uses = (path: string) => fileUses(t.pool, store, owner.id, project.id, ids[path]);
+  expect(await uses('sections/intro.tex')).toEqual({
+    path: 'sections/intro.tex',
+    root: false,
+    lines: [{ path: 'main.tex', line: 4, text: '\\input{sections/intro}' }],
+  });
+  expect((await uses('figures/plot.png')).lines).toEqual([
+    { path: 'main.tex', line: 6, text: '\\includegraphics{plot}' },
+  ]);
+  expect((await uses('refs.bib')).lines).toEqual([
+    { path: 'main.tex', line: 7, text: '\\bibliography{refs}' },
+  ]);
+  expect((await uses('notes.tex')).lines).toEqual([]);
+  expect(await uses('main.tex')).toMatchObject({ root: true });
+  expect(await code(fileUses(t.pool, store, viewer.id, project.id, ids['notes.tex']))).toBe(
+    'permission_denied',
+  );
+  expect(await code(fileUses(t.pool, store, owner.id, project.id, crypto.randomUUID()))).toBe(
+    'not_found',
+  );
+  // Looking changes nothing.
+  expect(await paths(project.id)).toContain('sections/intro.tex');
 });

@@ -8,6 +8,7 @@ import {
   createFromTemplate,
   createProject,
   deleteFile,
+  fileUses,
   invite,
   lookUpDoi,
   proposeFileRename,
@@ -180,12 +181,20 @@ export async function renameFileAction(projectId: string, fileId: string, form: 
   });
 }
 
-export async function deleteFileAction(projectId: string, fileId: string) {
-  const back = `/projects/${projectId}`;
+export async function deleteFileAction(projectId: string, fileId: string, form: FormData) {
+  const paper = `/projects/${projectId}`;
+  const sure = form.get('sure') === '1';
+  // A refusal on the confirming page comes back to it, not to the paper.
+  const back = sure ? `${paper}/files/${fileId}/delete` : paper;
   const user = await requireUser(back);
   await act(back, async () => {
+    // Look first: a file the paper reads is deleted only from the page that shows the lines.
+    if (!sure) {
+      const { lines } = await fileUses(db(), blobs(), user.id, projectId, fileId);
+      if (lines.length > 0) return `${paper}/files/${fileId}/delete`;
+    }
     const gone = await deleteFile(db(), blobs(), user.id, projectId, fileId);
-    return `${back}?deleted=${encodeURIComponent(gone.path)}&in=${gone.revision}`;
+    return `${paper}?deleted=${encodeURIComponent(gone.path)}&in=${gone.revision}`;
   });
 }
 

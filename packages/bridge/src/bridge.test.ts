@@ -2904,3 +2904,41 @@ test('the bridge itself still accepts a footnote with an underscore', () => {
   const { out } = rewrite(r, '\\footnote{Old note}', '\\footnote{a_b}');
   expect(typeof out).toBe('object');
 });
+
+test('Enter and typing in a list with an option change only their own bytes', () => {
+  const OPT =
+    '\\begin{enumerate}[label=(\\alph*), noitemsep]\n  \\item one\n  \\item two\n\\end{enumerate}\n';
+  let r = replica(OPT);
+  expect(items(r).length).toBe(2);
+  const li = items(r);
+  expect(enterAt(r, li[1].start + li[1].size)).toBe(true);
+  expect(r.src).toBe(
+    '\\begin{enumerate}[label=(\\alph*), noitemsep]\n  \\item one\n  \\item two\n  \\item \n\\end{enumerate}\n',
+  );
+  r.check();
+  r = replica(OPT);
+  expect(r.dispatch(r.state.tr.insertText('X', items(r)[0].start))).toBe(true);
+  expect(r.src).toBe(OPT.replace('\\item one', '\\item Xone'));
+  r.check();
+  // A comment head stays untouched.
+  const com = '\\begin{itemize}\n%\\item old\n  \\item one\n  \\item two\n\\end{itemize}\n';
+  r = replica(com);
+  expect(items(r).length).toBe(2);
+  expect(enterAt(r, items(r)[0].start + items(r)[0].size)).toBe(true);
+  expect(r.src).toBe(
+    '\\begin{itemize}\n%\\item old\n  \\item one\n  \\item \n  \\item two\n\\end{itemize}\n',
+  );
+  r.check();
+  // A tab-indented length head: the new \item has the tab.
+  const len =
+    '\\begin{itemize}\n\t\\setlength\\itemsep{0em}\n\t\\item one\n\t\\item two\n\\end{itemize}\n';
+  r = replica(len);
+  expect(enterAt(r, items(r)[1].start + items(r)[1].size)).toBe(true);
+  expect(r.src).toBe(
+    '\\begin{itemize}\n\t\\setlength\\itemsep{0em}\n\t\\item one\n\t\\item two\n\t\\item \n\\end{itemize}\n',
+  );
+  r.check();
+  expect(
+    dropped('A\n\n\\begin{itemize}[noitemsep]\n  \\item \n\\end{itemize}\n\nB\n', 'list'),
+  ).toBe('A\n\nB\n');
+});

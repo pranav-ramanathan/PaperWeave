@@ -532,3 +532,70 @@ test('accents that cannot be one character, or that swallow a space, stay raw', 
   // In math the whole formula is one atom, whatever is inside it.
   for (const src of ["$\\'e$", '$\\hat{x}$']) expect(escs(`a ${src} b\n`), src).toEqual([]);
 });
+
+test('a list with an option, a comment or a length before its first item is a list', () => {
+  const cases: [string, string, number][] = [
+    [
+      '\\begin{enumerate}[label=(\\alph*), noitemsep]\n  \\item one\n  \\item two\n\\end{enumerate}\n',
+      '[label=(\\alph*), noitemsep]',
+      2,
+    ],
+    [
+      '\\begin{enumerate}[label={[\\arabic*]}]\n  \\item one\n  \\item two\n\\end{enumerate}\n',
+      '[label={[\\arabic*]}]',
+      2,
+    ],
+    ['\\begin{enumerate}[(a)]\n  \\item one\n  \\item two\n\\end{enumerate}\n', '[(a)]', 2],
+    ['\\begin{itemize}[noitemsep] \\item a\n\\item b\n\\end{itemize}\n', '[noitemsep]', 2],
+    [
+      '\\begin{itemize}\n%\\item old\n  \\item one\n  \\item two\n\\end{itemize}\n',
+      '%\\item old',
+      2,
+    ],
+    [
+      '\\begin{itemize}\n\\setlength\\itemsep{0em}\n  \\item one\n  \\item two\n\\end{itemize}\n',
+      '\\setlength\\itemsep{0em}',
+      2,
+    ],
+    [
+      '\\begin{itemize}\n\\setlength{\\itemsep}{0pt}\\setlength{\\parskip}{0pt}\n  \\item one\n\\end{itemize}\n',
+      '\\setlength{\\parskip}{0pt}',
+      1,
+    ],
+    [
+      '\\begin{itemize}\n\\itemsep0em\n  \\item one\n  \\item two\n\\end{itemize}\n',
+      '\\itemsep0em',
+      2,
+    ],
+  ];
+  for (const [src, head, count] of cases) {
+    const body = parse(src).blocks[0].body;
+    expect(body.kind, src).toBe('list');
+    if (body.kind !== 'list') continue;
+    expect(body.items.length, src).toBe(count);
+    const first = body.items[0].pieces[0];
+    expect(first.k).toBe('pre');
+    const text = body.text.slice(first.s, first.e);
+    expect(text.endsWith('\\item '), src).toBe(true);
+    expect(text, src).toContain(head);
+    // The pieces tile the text with no gap.
+    let at = 0;
+    for (const it of body.items)
+      for (const p of it.pieces) {
+        expect(p.s, src).toBe(at);
+        at = p.e;
+      }
+    assertLossless(parse(src));
+  }
+});
+
+test('a list head that is not an option, a comment or a length stays a raw block', () => {
+  for (const src of [
+    '\\begin{itemize}[\n  \\item a\n\\end{itemize}\n',
+    '\\begin{itemize}[a]b\n  \\item a\n\\end{itemize}\n',
+    '\\begin{itemize}[noitemsep]\n  \\item[x] a\n\\end{itemize}\n',
+    '\\begin{itemize}\n\\small\n  \\item a\n\\end{itemize}\n',
+    '\\begin{description}\n  \\item a\n\\end{description}\n',
+  ])
+    expect(parse(src).blocks[0].body.kind, src).toBe('raw');
+});

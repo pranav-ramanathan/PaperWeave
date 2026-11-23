@@ -685,6 +685,48 @@ test('Enter in a list item opens a new item; undo takes it back; another person 
   await expect(other.page.locator(`${VISUAL} li`)).toHaveCount(2);
 });
 
+test('a list with an option is an editable list in the visual view', async ({ browser }) => {
+  test.setTimeout(180_000);
+  const { page, email } = await person(browser, 'vis-listopt');
+  const main = [
+    '\\documentclass{article}',
+    '\\usepackage{enumitem}',
+    '\\begin{document}',
+    'Alpha one two alphaend.',
+    '',
+    '\\begin{enumerate}[label=(\\alph*), noitemsep]',
+    '  \\item item uno',
+    '  \\item item dos',
+    '\\end{enumerate}',
+    '\\end{document}',
+    '',
+  ].join('\n');
+  const zip = join(mkdtempSync(join(tmpdir(), 'paperweave-e2e-')), `ListOpt ${run}.zip`);
+  writeFileSync(zip, await writeZip([{ path: 'main.tex', bytes: Buffer.from(main) }]));
+  await page.goto('/sign-in');
+  await signIn(page, email);
+  await page.getByLabel('Or import a ZIP of a LaTeX project').setInputFiles(zip);
+  await page.getByRole('button', { name: 'Import ZIP' }).click();
+  await page.getByRole('link', { name: 'main.tex' }).first().click();
+  await expect(status(page)).toHaveText('All edits saved.');
+  await expect(page.locator(`${VISUAL} li`)).toHaveCount(2);
+  await expect(page.locator(VISUAL)).not.toContainText('noitemsep');
+  await clickAfter(page, VISUAL, 'item dos');
+  await page.keyboard.press('End');
+  await page.keyboard.press('Enter');
+  await page.keyboard.type('tres');
+  await expect(page.locator(`${VISUAL} li`)).toHaveCount(3);
+  await expect(status(page)).toHaveText('All edits saved.');
+  await showSource(page);
+  await page.waitForTimeout(800);
+  expect((await sourceText(page)).replace(/⁠/g, '')).toMatch(
+    /\\begin\{enumerate\}\[label=\(\\alph\*\), noitemsep\]\s*\\item item uno\s*\\item item dos\s*\\item tres\s*\\end\{enumerate\}/,
+  );
+  await showVisual(page);
+  await expect(page.locator(VISUAL)).toBeVisible();
+  await audit(page, 'visual view, list with an option');
+});
+
 test('a selection across list items is deleted or typed over; undo restores it; another person sees it', async ({
   browser,
 }) => {
