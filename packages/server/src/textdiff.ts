@@ -101,14 +101,102 @@ export type DiffHunk = {
   rows: DiffRow[];
 };
 
-/** At most this many pairs of lines are compared word by word in one call. */
-const MAX_PAIRS = 200;
+/** At most this many pairs of lines are compared word by word in one call (the cheap check is free). */
+const MAX_COMPARISONS = 400;
+
+/** A run of changed rows with more cells than this (removed x added) pairs by position only. */
+const MAX_RUN_CELLS = 100;
+
+type Counterpart = { was: WordPiece[]; now: WordPiece[]; kept: number };
+
+/** The words of `a` and `b` marked, and how many characters they share, if the lines are plain counterparts. */
+function counterpart(a: string, b: string, budget: { left: number }): Counterpart | null {
+  const ta = a.trim();
+  const tb = b.trim();
+  if (!ta || !tb) return null;
+  // Cheap check before the table: the words the two lines share, counted as a multiset.
+  const count = new Map<string, number>();
+  let na = 0;
+  for (const t of ta.match(WORDS) ?? []) {
+    if (!t.trim()) continue;
+    na++;
+    count.set(t, (count.get(t) ?? 0) + 1);
+  }
+  let nb = 0;
+  let shared = 0;
+  for (const t of tb.match(WORDS) ?? []) {
+    if (!t.trim()) continue;
+    nb++;
+    const c = count.get(t) ?? 0;
+    if (c > 0) {
+      shared++;
+      count.set(t, c - 1);
+    }
+  }
+  if (shared * 3 < Math.max(na, nb)) return null;
+  return compare(a, b, budget);
+}
+
+/** The word diff of two lines, if mostly the same words (kept non-space characters x3 cover both). */
+function compare(a: string, b: string, budget: { left: number }): Counterpart | null {
+  if (budget.left <= 0) return null;
+  budget.left--;
+  const d = diffWords(a, b, 250_000);
+  if (!d) return null;
+  const kept = d.was.reduce((n, p) => (p.changed || !p.text.trim() ? n : n + p.text.length), 0);
+  if (kept * 3 < a.trim().length || kept * 3 < b.trim().length) return null;
+  return { was: d.was, now: d.now, kept };
+}
+
+/**
+ * Matches removed lines to added ones, in order and without crossing, so as to keep the most
+ * shared characters. Small runs are matched by likeness; a run over MAX_RUN_CELLS cells is paired
+ * by position, only when it has as many removed lines as added ones.
+ */
+function pairRun(gone: DiffRow[], added: DiffRow[], budget: { left: number }) {
+  const n = gone.length;
+  const m = added.length;
+  const set = (g: DiffRow, a: DiffRow, c: Counterpart) => {
+    g.words = c.was;
+    a.words = c.now;
+  };
+  if (n * m > MAX_RUN_CELLS) {
+    if (n !== m) return;
+    for (let k = 0; k < n; k++) {
+      const c = compare(gone[k].text, added[k].text, budget);
+      if (c) set(gone[k], added[k], c);
+    }
+    return;
+  }
+  const found: (Counterpart | null)[][] = [];
+  for (let i = 0; i < n; i++) {
+    found.push([]);
+    for (let j = 0; j < m; j++) {
+      found[i].push(counterpart(gone[i].text, added[j].text, budget));
+    }
+  }
+  const best = Array.from({ length: n + 1 }, () => new Array<number>(m + 1).fill(0));
+  for (let i = n - 1; i >= 0; i--)
+    for (let j = m - 1; j >= 0; j--) {
+      const c = found[i][j];
+      best[i][j] = Math.max(best[i + 1][j], best[i][j + 1], c ? c.kept + best[i + 1][j + 1] : 0);
+    }
+  let i = 0;
+  let j = 0;
+  while (i < n && j < m) {
+    const c = found[i][j];
+    if (c && best[i][j] === c.kept + best[i + 1][j + 1]) {
+      set(gone[i++], added[j++], c);
+    } else if (best[i][j] === best[i + 1][j]) i++;
+    else j++;
+  }
+}
 
 /**
  * Only the changed lines of `lines` (from `diffLines`) and `context` kept lines around each, in
  * hunks, with how many unchanged lines were left out before each hunk and after the last. A
- * removed line and an added line that are plain counterparts (equal numbers of each in a run, and
- * mostly the same words) carry their words, marked changed or not. sum(skipped) + all rows + rest
+ * removed line and an added line that are plain counterparts (mostly the same words, matched in
+ * order within a run of changed rows) carry their words, marked changed or not. sum(skipped) + all rows + rest
  * is `lines.length`.
  */
 export function diffHunks(lines: DiffLine[], context = 3): { hunks: DiffHunk[]; rest: number } {
@@ -121,7 +209,7 @@ export function diffHunks(lines: DiffLine[], context = 3): { hunks: DiffHunk[]; 
   const hunks: DiffHunk[] = [];
   let newer = 0; // lines of the newer text before index i
   let last = 0; // index after the previous hunk
-  let pairs = 0;
+  const budget = { left: MAX_COMPARISONS };
   let i = 0;
   while (i < lines.length) {
     if (!keep[i]) {
@@ -148,19 +236,7 @@ export function diffHunks(lines: DiffLine[], context = 3): { hunks: DiffHunk[]; 
       while (r < rows.length && rows[r].op !== ' ') run.push(rows[r++]);
       const gone = run.filter((x) => x.op === '-');
       const added = run.filter((x) => x.op === '+');
-      if (gone.length !== added.length) continue;
-      for (let k = 0; k < gone.length && pairs < MAX_PAIRS; k++, pairs++) {
-        const d = diffWords(gone[k].text, added[k].text, 250_000);
-        if (!d) continue;
-        const kept = d.was.reduce(
-          (n, p) => (p.changed || !p.text.trim() ? n : n + p.text.length),
-          0,
-        );
-        if (kept * 3 < gone[k].text.trim().length || kept * 3 < added[k].text.trim().length)
-          continue;
-        gone[k].words = d.was;
-        added[k].words = d.now;
-      }
+      pairRun(gone, added, budget);
     }
     hunks.push(hunk);
   }

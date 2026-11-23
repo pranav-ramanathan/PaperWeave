@@ -186,10 +186,108 @@ test('lines that are not counterparts stay whole-line changes', () => {
       .hunks[0].rows.filter((r) => r.op !== ' ')
       .map((r) => r.words);
   expect(words('alpha beta gamma', 'one two three')).toEqual([undefined, undefined]);
-  // One removed against two added: no pairing by position.
+  // A line with nothing like it among the added ones stays whole.
   expect(words('keep this text', 'keep this text\nand this')).toEqual([undefined]);
   expect(words('', 'x')).toEqual([undefined, undefined]);
-  expect(words('a\nb', 'a\nb x\nb y').every((w) => w === undefined)).toBe(true);
+  // `b` is matched to its best counterpart `b x` (marked); `b y` has none left and stays whole.
+  const pair = words('a\nb', 'a\nb x\nb y');
+  expect(pair).toHaveLength(3);
+  expect(pair.filter((w) => w !== undefined)).toHaveLength(2);
+  expect(pair.filter((w) => w === undefined)).toHaveLength(1);
+});
+
+const P = (n: string) =>
+  `${'The latency of the system stays low in every run. '.repeat(3)}After ${n} runs it was the same. ${'Nothing else moved at all. '.repeat(3)}`;
+const changedRows = (a: string, b: string) =>
+  hunks(a, b).hunks.flatMap((h) => h.rows.filter((r) => r.op !== ' '));
+const marked = (ps: { changed: boolean; text: string }[] | undefined) =>
+  ps?.filter((p) => p.changed).map((p) => p.text);
+
+test('a changed line keeps its word marks when a paragraph is added after it', () => {
+  const rows = changedRows(
+    `a\n${P('forty')}\nb`,
+    `a\n${P('thirty')}\n\nA new paragraph follows.\nb`,
+  );
+  const [gone, added, blank, fresh] = rows;
+  expect(gone.op).toBe('-');
+  expect(marked(gone.words)).toEqual(['forty']);
+  expect(marked(added.words)).toEqual(['thirty']);
+  expect(blank.words).toBeUndefined();
+  expect(fresh.words).toBeUndefined();
+});
+
+test('a changed line keeps its word marks when a sentence is added on the next line', () => {
+  const rows = changedRows(`a\n${P('forty')}\nb`, `a\n${P('thirty')}\nA second sentence here.\nb`);
+  const gone = rows.find((r) => r.op === '-')!;
+  const adds = rows.filter((r) => r.op === '+');
+  expect(marked(gone.words)).toEqual(['forty']);
+  expect(marked(adds[0].words)).toEqual(['thirty']);
+  expect(adds[1].words).toBeUndefined();
+});
+
+test('a changed line keeps its word marks when a line above it is deleted', () => {
+  const rows = changedRows(
+    `a\nDelete this unrelated heading\n${P('forty')}\nb`,
+    `a\n${P('thirty')}\nb`,
+  );
+  const gone = rows.filter((r) => r.op === '-');
+  expect(gone[0].text).toBe('Delete this unrelated heading');
+  expect(gone[0].words).toBeUndefined();
+  expect(marked(gone[1].words)).toEqual(['forty']);
+  expect(marked(rows.find((r) => r.op === '+')!.words)).toEqual(['thirty']);
+});
+
+test('a paragraph split by Enter is matched to its larger half', () => {
+  const first = 'The latency of the system stays low in every run we made today.';
+  const second = 'Nothing else moved at all.';
+  const rows = changedRows(
+    `a\n${first} ${second}\nb`,
+    `a\n${first.replace('low', 'high')}\n\n${second}\nb`,
+  );
+  const adds = rows.filter((r) => r.op === '+');
+  expect(rows.find((r) => r.op === '-')!.words).toBeDefined();
+  expect(marked(adds[0].words)).toEqual(['high']);
+  expect(adds[1].words).toBeUndefined();
+  expect(adds[2].words).toBeUndefined();
+});
+
+test('equal counts are matched by likeness, not position', () => {
+  const X = 'Completely unrelated heading text';
+  const Y = 'Another thing entirely different';
+  const rows = changedRows(`${X}\n${P('forty')}`, `${P('thirty')}\n${Y}`);
+  const byText = (t: string) => rows.find((r) => r.text === t)!;
+  expect(byText(X).words).toBeUndefined();
+  expect(byText(Y).words).toBeUndefined();
+  expect(marked(byText(P('forty')).words)).toEqual(['forty']);
+  expect(marked(byText(P('thirty')).words)).toEqual(['thirty']);
+});
+
+test('pairs never cross', () => {
+  const A = P('forty');
+  const B = `${'Different material about caching and storage. '.repeat(3)}Hits were ten percent.`;
+  const rows = changedRows(
+    `${A}\n${B}`,
+    `${B.replace('ten', 'twenty')}\n${A.replace('forty', 'thirty')}`,
+  );
+  expect(rows.filter((r) => r.op === '-' && r.words).length).toBeLessThanOrEqual(1);
+  for (const r of rows) if (r.words) expect(r.words.map((p) => p.text).join('')).toBe(r.text);
+});
+
+test('a blank line is never a counterpart', () => {
+  const rows = changedRows('', 'x');
+  expect(rows.map((r) => r.words)).toEqual([undefined, undefined]);
+  const r2 = changedRows('text line here', '');
+  expect(r2.map((r) => r.words)).toEqual([undefined, undefined]);
+});
+
+test('guard: a big run pairs by index when counts are equal, and marks nothing when unrelated', () => {
+  const line = (i: number, n: string) => `Row ${i} of the table says ${n} for the entry.`;
+  const old = Array.from({ length: 11 }, (_, i) => line(i, 'one')).join('\n');
+  const now = Array.from({ length: 11 }, (_, i) => line(i, 'two')).join('\n');
+  const rows = changedRows(old, now);
+  expect(rows.every((r) => marked(r.words)!.length === 1)).toBe(true);
+  const other = Array.from({ length: 12 }, (_, i) => `Zq${i} wxyv${i} unrelated${i}`).join('\n');
+  expect(changedRows(old, other).every((r) => r.words === undefined)).toBe(true);
 });
 
 test('with no changed line there are no hunks, and every line is the rest', () => {
@@ -210,6 +308,10 @@ test('random texts: nothing is lost between hunks, and rows are in order', () =>
     const count = h.reduce((n, x) => n + x.skipped + x.rows.length, 0) + rest;
     if (count !== all.length) throw new Error(`seed ${seed}: ${count} of ${all.length}`);
     let at = 0;
+    for (const x of h)
+      for (const r of x.rows)
+        if (r.words && r.words.map((p) => p.text).join('') !== r.text)
+          throw new Error(`seed ${seed}: words do not join to text`);
     for (const x of h) {
       at += x.skipped;
       for (const r of x.rows) {

@@ -4942,8 +4942,9 @@ Found by a three-person walkthrough.
   sideways, now it wraps, so that test expects no sideways scroll (the region keeps its name and
   tab stop, and the audit and focus check are unchanged).
 - **Not done.** The line-endings-only sentence was not looked at in a browser. At most 200 pairs of
-  lines per file are compared word by word. Lines are paired by position, only when a run has as
-  many removed lines as added ones; otherwise they stay whole-line changes.
+  lines per file are compared word by word. Lines were paired by position, only when a run had as
+  many removed lines as added ones; see "The comparison lost its word marks when a line was added
+  beside a changed one".
 
 ## A paper could not be renamed
 
@@ -5229,3 +5230,23 @@ closed: ...` (outermost first, at most 10). The log does not name the file: with
   is in the Language panel (and its replacement applies to the source) but has no underline
   there, and "show" puts the caret before the block. The term itself is never checked.
   `enumerate*` and custom list environments are unchanged.
+
+## The comparison lost its word marks when a line was added beside a changed one
+
+- **What was wrong.** Word marks in a comparison were given only when a run of changed lines had as
+  many removed lines as added ones, paired by position. Changing a number and pressing Enter after
+  it, adding a sentence on the next line, or deleting a line above a changed one made the changed
+  line a plain whole-line removal and addition.
+- **Now** each run of changed lines is matched in order, without crossing pairs, so that the most
+  shared characters are kept (`counterpart` and `pairRun` in `textdiff.ts`). A pair must still
+  be mostly the same words, a blank line is never a counterpart, and lines left over stay
+  whole-line changes. At most 400 word comparisons are made per call (cheap pre-checks do not
+  count); after that, rows stay whole-line. Nothing is logged.
+- **Held by** unit tests in `textdiff.test.ts` (paragraph added after, sentence added on the next
+  line, line deleted above, a paragraph split by Enter, equal counts matched by likeness, pairs not
+  crossing, a blank line, guards for big runs) and a browser test in `revisions.spec` ("a
+  comparison still marks the changed word when a paragraph was added after it", with an audit).
+  The unit test "lines that are not counterparts stay whole-line changes" changed in one case:
+  `a` / `b` against `a` / `b x` / `b y` now pairs `b` with one of the added lines.
+- **Not done.** A run of more than 100 cells (removed x added) is paired by position only, and only
+  with equal counts. Moved lines are not detected.
