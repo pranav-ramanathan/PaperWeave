@@ -115,8 +115,8 @@ function tableOf(src: string, text: string): Table | null {
     row.push(found);
   };
   const closeRow = (to: number, terminated: boolean) => {
-    // A last line with only rules on it, or nothing, is not a row.
-    if (row.length > 1 || row[0]?.text) {
+    // A last line with only rules on it, or nothing, is not a row; a line with only \\ is.
+    if (row.length > 1 || row[0]?.text || terminated) {
       rows.push(row);
       const lead = src.slice(rowAt, row[0].at);
       const indent = lead.includes('\n') ? lead.slice(lead.lastIndexOf('\n') + 1) : '';
@@ -319,7 +319,10 @@ export function tableEdit(src: string, table: Table, op: TableOp): Edit | null {
     const indent = line.indent || table.lines.find((l) => l.indent)?.indent || '    ';
     const cells = Array.from({ length: width }, () => '').join(' & ');
     // A last row with no \\ of its own is given one before the new row follows it.
-    const insert = line.terminated ? `\n${indent}${cells} \\\\` : ` \\\\\n${indent}${cells}`;
+    // With one column an empty last row is nothing to read, so the new row ends with its own too.
+    const insert = line.terminated
+      ? `\n${indent}${cells} \\\\`
+      : ` \\\\\n${indent}${cells}${width < 2 ? ' \\\\' : ''}`;
     return { at: line.end, length: 0, insert };
   }
   const columns = columnsOf(table.spec);

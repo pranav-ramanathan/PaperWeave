@@ -5495,6 +5495,20 @@ closed: ...` (outermost first, at most 10). The log does not name the file: with
 - **Not done.** No one-press fix. The visual view still says "cannot be shown here. It is in
   the PDF." Names that differ in Unicode normalisation are not matched. A reference made
   through a macro is not checked. Import reports stored earlier keep the old sentence.
-- **Known, not fixed.** "Add a row" on a one-column table inserts `\n     \\`, which
-  `tableOf` does not read back as a row (`closeRow` drops a lone empty cell), so the button
-  seems to do nothing and each press adds a blank line to the PDF.
+- **Found here, fixed in the next section.** "Add a row" on a one-column table inserted `\n     \\`, which
+  `tableOf` did not read back as a row (`closeRow` dropped a lone empty cell), so the button
+  seemed to do nothing and each press added a blank line to the PDF.
+
+## "Add a row" on a one-column table did nothing
+
+- **What was wrong.** The new row of a one-column table was written as an empty cell and `\\`,
+  and the table reader dropped a line with one empty cell, so the grid did not change while each
+  press added a blank line to the PDF. (When the last row had no `\\` of its own the new row had
+  none either, and it could not be read for the same reason.)
+- **Now** a line that is only `\\` is a row, as in LaTeX. A final line with nothing after the last
+  `\\` (or only rules or a comment) is still not a row, so existing tables keep their row counts.
+  Adding a row after an unterminated last row of a one-column table also gives the new row its
+  own `\\`. Nothing else in the source changes.
+- **Held by** the one-column tests in `packages/latex/src/floats.test.ts` (end, middle, repeated,
+  delete, edit of the new cell, trailing `\\ \hline` guards) and the one-column case in
+  `tests/e2e/tables.spec.ts`.
