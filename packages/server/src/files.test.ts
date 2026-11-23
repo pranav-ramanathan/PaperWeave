@@ -26,3 +26,7 @@ test('a path in two groups is replaced group by group, keeping the style of the 
   expect(to('\\import{}{a}', 'parts/a')).toBe('\\import{parts/}{a}');
   expect(nameSplices(includes('\\import{s/}{a}')[0], 's/a')).toEqual([]);
 });
+
+test('a file renamed in an \\includeonly entry is replaced whole', () => {
+  expect(renamed('\\includeonly{ sections/a }', 'parts/b')).toBe('\\includeonly{ parts/b }');
+});

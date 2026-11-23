@@ -367,7 +367,7 @@ export function nameSplices(inc: Include, path: string): Splice[] {
   return out;
 }
 
-/** The lines that name a file (`\input`, `\bibliography`, `\includegraphics`...) and what they would say after it is renamed. */
+/** The lines that name a file (`\input`, `\includeonly`, `\bibliography`, `\includegraphics`...) and what they would say after it is renamed. */
 async function renamePlan(
   db: Db,
   store: BlobStore,
@@ -395,8 +395,11 @@ async function renamePlan(
     const inBase = base[file.path] ?? '';
     for (const inc of includes(file.text)) {
       // As includeGraph looks: the import folder first, then the root's folder.
+      // \includeonly names are matched as written against \include, from the root's folder.
       const underBase =
-        inc.kind !== 'bib' && inBase ? resolveVia(inc, dir + inBase, paths) : undefined;
+        inc.kind !== 'bib' && inc.kind !== 'only' && inBase
+          ? resolveVia(inc, dir + inBase, paths)
+          : undefined;
       const found = underBase ?? resolveVia(inc, dir, paths, via);
       if (found?.path !== from) continue;
       // Written without its extension before, and the extension has not changed: leave it off.

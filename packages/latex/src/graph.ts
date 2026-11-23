@@ -4,8 +4,10 @@ export type Include = {
   /**
    * `support` is a file the build reads that is not text of the paper: a style, a listing, a
    * data file. It is followed by renames only, never walked into, and never reported missing.
+   * `only` is an `\includeonly` entry: also followed by renames only, never walked, never an
+   * edge, never reported missing.
    */
-  kind: 'input' | 'bib' | 'graphics' | 'support';
+  kind: 'input' | 'bib' | 'graphics' | 'support' | 'only';
   target: string;
   dynamic: boolean;
   /** Where the command starts in the source. */
@@ -23,7 +25,7 @@ export type Include = {
 };
 
 const CMD =
-  /\\(input|include|subfile|bibliography|addbibresource|includegraphics)\*?(?:\[[^\]]*\])?\s*\{([^{}]*)\}/g;
+  /\\(input|includeonly|include|subfile|bibliography|addbibresource|includegraphics)\*?(?:\[[^\]]*\])?\s*\{([^{}]*)\}/g;
 // The `import` package: `\import{dir}{file}`, `\subimport{dir}{file}`, `\includefrom{dir}{file}`.
 const IMPORT =
   /\\(import|subimport|inputfrom|subinputfrom|includefrom|subincludefrom)\*?\s*\{([^{}]*)\}\s*\{([^{}]*)\}/g;
@@ -38,6 +40,7 @@ const MINTED = /\\inputminted\*?(?:\[[^\]]*\])?\s*\{[^{}]*\}\s*\{([^{}]*)\}/g;
 const PLOT = /\\addplot3?[+*]?\s*(?:\[[^\]]*\])?\s*table\s*(?:\[[^\]]*\])?\s*\{([^{}]*)\}/g;
 const KIND: Record<string, Include['kind']> = {
   bibliography: 'bib',
+  includeonly: 'only',
   addbibresource: 'bib',
   includegraphics: 'graphics',
   usepackage: 'support',
@@ -53,7 +56,7 @@ const KIND: Record<string, Include['kind']> = {
   csvautotabular: 'support',
   includesvg: 'support',
 };
-const LISTS = new Set(['bibliography', 'usepackage', 'RequirePackage']);
+const LISTS = new Set(['bibliography', 'includeonly', 'usepackage', 'RequirePackage']);
 const ADDED: Record<string, string> = {
   usepackage: '.sty',
   RequirePackage: '.sty',
@@ -355,6 +358,8 @@ export function includeGraph(
     if (preamble) g.preamble.push(from);
     stack.push(from);
     for (const inc of includes(files[from] ?? '')) {
+      // \includeonly only filters the \include lines; it reads nothing itself.
+      if (inc.kind === 'only') continue;
       if (inc.dynamic) {
         if (inc.kind === 'support') continue;
         g.dynamic.push({ from, target: inc.target });
