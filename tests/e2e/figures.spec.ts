@@ -108,6 +108,10 @@ test('a figure shows its picture, and is given a description in place', async ({
   await box.getByLabel('Caption').fill('A second dot & more');
   await box.getByRole('button', { name: 'Insert' }).click();
   await expect(box.getByRole('alert')).toContainText('A caption cannot hold an unescaped &');
+  await box.getByLabel('Caption').fill('Cost in $');
+  await box.getByRole('button', { name: 'Insert' }).click();
+  await expect(box.getByRole('alert')).toContainText('Write \\$');
+  await expect(box).toBeVisible();
   await box.getByLabel('Caption').fill('A second dot');
   await box.getByRole('button', { name: 'Insert' }).click();
   // The editor gives the server eight seconds to answer. If the edit is refused, the window

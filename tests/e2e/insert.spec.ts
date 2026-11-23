@@ -484,6 +484,9 @@ test('a heading is inserted from the toolbar, the keyboard and the menu, and tak
   await box.getByLabel('Title').fill('50% done');
   await box.getByRole('button', { name: 'Insert' }).click();
   await expect(box.getByRole('alert')).toContainText('unescaped & or %');
+  await box.getByLabel('Title').fill('Results for n_max');
+  await box.getByRole('button', { name: 'Insert' }).click();
+  await expect(box.getByRole('alert')).toContainText('underscore');
   await expect(box).toBeVisible();
   await audit(page, 'heading window, with a refusal');
   await box.getByLabel('Title').fill('  Related \n  work  ');

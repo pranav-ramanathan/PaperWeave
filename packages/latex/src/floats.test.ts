@@ -5,6 +5,8 @@ import {
   cellText,
   fieldText,
   floatParts,
+  stray,
+  strayAdvice,
   tableEdit,
   type TableOp,
 } from './floats.ts';
@@ -407,4 +409,57 @@ test('rows added to a multi-column table are read as before', () => {
     ['b', '2'],
     ['', ''],
   ]);
+});
+
+test('stray names the first mark TeX would stop at', () => {
+  const flagged: [string, string][] = [
+    ['file_name', '_'],
+    ['x^2', '^'],
+    ['Item #3', '#'],
+    ['Costs $5', '$'],
+    ['\\(a', '$'],
+    ['a \\) b', '$'],
+    ['{$a} b$', '$'],
+    ['\\textbf{a_b}', '_'],
+    ['{\\bf a_b}', '_'],
+    ['$\\text{a_b}$', '_'],
+    ['\\multicolumn{2}{c}{n_s}', '_'],
+    ['$x$ #', '#'],
+    ['$a#b$', '#'],
+  ];
+  for (const [text, kind] of flagged) expect([text, stray(text)]).toEqual([text, kind]);
+});
+
+test('stray lets through what builds', () => {
+  const fine = [
+    '',
+    'plain',
+    '\\_ \\# \\$ \\^{}',
+    '$x_1^2$',
+    '$$x^2$$',
+    '\\(x_1\\)',
+    '\\ensuremath{y^2}',
+    '\\label{tab_a} \\ref{a_b} \\cite{smith_2020}',
+    '\\url{http://x.org/a_b#c}',
+    '\\href{http://x#y}{t}',
+    '\\includegraphics[width=1cm]{a_b}',
+    '\\ce{CO_2}',
+    '\\verb|a_b|',
+    'a~b <c>',
+    'Cost \\$5 and \\$6',
+    '$a$ and $b_1$',
+  ];
+  for (const text of fine) expect([text, stray(text)]).toEqual([text, null]);
+});
+
+test('strayAdvice says what to write and never quotes the text', () => {
+  for (const kind of ['_', '^', '#', '$'] as const) expect(strayAdvice(kind)).not.toBe('');
+  expect(strayAdvice('_')).toContain('\\_');
+  expect(strayAdvice('#')).toContain('\\#');
+  expect(strayAdvice('$')).toContain('\\$');
+});
+
+test('stray is separate from what cellText and captionText allow', () => {
+  expect(cellText('file_name')).toBe(true);
+  expect(captionText('Costs $5')).toBe(true);
 });

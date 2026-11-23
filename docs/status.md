@@ -5536,7 +5536,8 @@ closed: ...` (outermost first, at most 10). The log does not name the file: with
   `tests/e2e/tables.spec.ts` (refusal, field kept open with the typed text, then a good caption;
   the closing ZIP comparison shows nothing else changed).
 - **Not done.** A bare `#`, `_`, `^` or unbalanced `$` in a caption still gives a TeX error (a PDF
-  is still made; `#` is legitimate inside `\href`). Captions are edited as LaTeX, not escaped
+  is still made; `#` is legitimate inside `\href`) — corrected below: the worker keeps no PDF when
+  latexmk exits non-zero, and the section "A bare `_`, `^`, `#` or unclosed `$`" now refuses those. Captions are edited as LaTeX, not escaped
   for the person. `\verb|%|` in a caption is refused. No server-side check.
 
 ## An equation typed into the Insert window can no longer stop the build
@@ -5566,3 +5567,31 @@ closed: ...` (outermost first, at most 10). The log does not name the file: with
   at the end of a line of a display equation is accepted and prints without the percent sign.
   Footnote and other atom edits get no brace check beyond `contained`. No server-side check for
   insertions. No TEX_TEXT bump.
+
+## A bare `_`, `^`, `#` or unclosed `$` in a table cell, caption or heading title failed the build with no PDF
+
+- **What was wrong.** The earlier notes said a PDF is still made after such a TeX error. It is not:
+  `apps/workers/src/compile.ts` keeps the PDF only when latexmk exits 0, so the build fails with
+  nothing to show. With the worker's own latexmk command, `file_name` and `x^2` (`Missing $
+inserted`), `Item #3` (`macro parameter character #`, or `Illegal parameter number` in a caption
+  or title) and `Costs $5` (`Extra }, or forgotten $` or `Missing $ inserted`) all exit 12. In-place
+  cells, captions and heading titles accepted them, because `cellText` and `captionText` only
+  check braces, `&`, `%` and line breaks.
+- **Now.** `stray` and `strayAdvice` (`packages/latex/src/floats.ts`) find the first such mark and
+  say what to write (`\_`, `\#`, `\$`, or put the formula between `$` signs) without quoting what
+  was typed. Formulas (`$x_1^2$`, `\(...\)`, `$$...$$`), escaped marks, `\verb`, and the arguments
+  of commands such as `\label`, `\ref`, `\cite`, `\url`, `\href`, `\includegraphics` and
+  `\ensuremath` pass. Text commands (`\textbf`, `\multicolumn`, `\text`, ...) are read as text.
+  The in-place cell and caption fields, the Insert figure/table dialog and the heading dialog
+  refuse such text and stay open with what was typed. An in-place cell or caption that already
+  held such a mark may be edited (the `underscore` package, or source that was already broken).
+  `cellText` and `captionText` are unchanged. No TEX_TEXT bump.
+- **Held by** the `stray` tests in `packages/latex/src/floats.test.ts` and the refusal steps in
+  `tests/e2e/tables.spec.ts` (cell, caption), `tests/e2e/insert.spec.ts` (heading) and
+  `tests/e2e/figures.spec.ts` (figure dialog). The exemption for a cell or caption that already
+  holds a mark is held by review only.
+- **Not done.** Marks inside text-like commands outside the known set, or inside any unknown
+  command's argument; `#` inside `\href` in a caption or title (exit 12, stays allowed); a paper
+  using the `underscore` package is told to write `\_` the first time (that still builds); the
+  server chart-caption check, the atom/footnote window, inline-formula `&` and `#`; no
+  server-side check.

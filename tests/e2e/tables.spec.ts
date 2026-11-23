@@ -84,6 +84,11 @@ test('a table cell and a caption are edited in place, byte for byte', async ({ b
   await field(4, 1).fill('ams & art');
   await page.keyboard.press('Enter');
   await expect(note(page)).toContainText('A cell cannot hold an unescaped &');
+  // A # would stop the build: refused with the way to write it, and the field keeps the text.
+  await field(4, 1).fill('#runs');
+  await page.keyboard.press('Enter');
+  await expect(note(page)).toContainText('Write \\#');
+  await expect(field(4, 1)).toHaveValue('#runs');
   await page.keyboard.press('Escape');
   await expect(cell(4, 1)).toHaveText('amsart');
   await expect(cell(4, 1)).toBeFocused();
@@ -148,6 +153,11 @@ test('a table cell and a caption are edited in place, byte for byte', async ({ b
     await expect(note(page)).toContainText('A caption cannot hold');
     await expect(figure.getByLabel('Caption', { exact: true })).toHaveValue(bad);
   }
+  // An underscore outside a formula stops the build too.
+  await figure.getByLabel('Caption', { exact: true }).fill('Latency in ms_p95');
+  await page.keyboard.press('Enter');
+  await expect(note(page)).toContainText('Write \\_');
+  await expect(figure.getByLabel('Caption', { exact: true })).toHaveValue('Latency in ms_p95');
   await figure.getByLabel('Caption', { exact: true }).fill('Latency, to be measured.');
   await page.keyboard.press('Enter');
   await expect(figure.getByRole('button', { name: /^Caption:/ })).toHaveText(
