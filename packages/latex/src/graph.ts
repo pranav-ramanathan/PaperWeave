@@ -386,3 +386,36 @@ export function includeGraph(
   visit(root);
   return g;
 }
+
+/**
+ * The chapters an \includeonly in the root's preamble leaves out of the PDF: the names \include'd
+ * in `order` (the files the paper reads) that the last \includeonly before \begin{document} does
+ * not name. Null when there is no such \includeonly, when it names a macro, or when it leaves
+ * nothing out. `at` is where that \includeonly starts in the root.
+ */
+export function leftOut(
+  files: Record<string, string>,
+  root: string,
+  order: string[] = [root],
+): { at: number; names: string[] } | null {
+  const live = uncomment(files[root] ?? '');
+  const body = live.indexOf('\\begin{document}');
+  if (body < 0) return null;
+  // TeX compares the names as plain strings: no folder or case normalising.
+  const name = (t: string) => {
+    let n = t.trim();
+    if (n.length > 2 && n.startsWith('"') && n.endsWith('"')) n = n.slice(1, -1).trim();
+    return n.replace(/\.tex$/, '');
+  };
+  const only = [...live.slice(0, body).matchAll(/\\includeonly\s*\{([^{}]*)\}/g)].pop();
+  if (!only) return null;
+  const named = only[1].split(',').map(name).filter(Boolean);
+  if (named.some((n) => /[\\#]/.test(n))) return null;
+  const out = new Set<string>();
+  for (const path of order)
+    for (const m of uncomment(files[path] ?? '').matchAll(/\\include\s*\{([^{}]*)\}/g)) {
+      const target = name(m[1]);
+      if (target && !/[\\#]/.test(target) && !named.includes(target)) out.add(target);
+    }
+  return out.size ? { at: only.index, names: [...out] } : null;
+}

@@ -772,3 +772,23 @@ test('a paper with an abbreviation no @string defines is not ready, until one do
   expect(fixed.text).toEqual([]);
   expect(fixed.ready).toBe(true);
 }, 300_000);
+
+test('a paper whose \\includeonly leaves chapters out is not ready, and says which', async () => {
+  const files = (pre: string) => ({
+    'main.tex': doc(pre, '\\include{ch/a}\n\\include{ch/b}\n\\include{ch/c}'),
+    'ch/a.tex': '\\section{A}One.\n',
+    'ch/b.tex': '\\section{B}Two.\n',
+    'ch/c.tex': '\\section{C}Three.\n',
+  });
+  const v = await verdict('Include only', files('\\includeonly{ch/a}'));
+  expect(v.ready).toBe(false);
+  expect(v.revisionId).toBeNull();
+  expect(v.text).toEqual([
+    'file: \\includeonly leaves "ch/b" and "ch/c" out of the PDF. Take the \\includeonly line out to build the whole paper, or take out the \\include lines of what is not meant to be in it.',
+  ]);
+  expect(v.problems[0]).toMatchObject({ path: 'main.tex', line: 2 });
+  // A guard: a commented-out \includeonly leaves nothing out. It passes without the check, too.
+  const off = await verdict('Include only off', files('% \\includeonly{ch/a}'));
+  expect(off.text).toEqual([]);
+  expect(off.ready).toBe(true);
+}, 300_000);

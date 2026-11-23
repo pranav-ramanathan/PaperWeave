@@ -1,6 +1,6 @@
 // What stands between the paper as it is and a paper that can be sent: everything the service
 // already knows is wrong with it, gathered in one place.
-import { includeGraph } from '@paperweave/latex';
+import { includeGraph, leftOut } from '@paperweave/latex';
 import type pg from 'pg';
 import { authorize } from './authz.ts';
 import type { BlobStore } from './blobs.ts';
@@ -52,6 +52,15 @@ const namesTarget = (found: string, target: string) => {
 /** Why a data file held back from downloads, which the paper reads, is a problem. */
 export const heldReadMessage = (path: string) =>
   `The paper reads ${path}, which is not included in downloads: the ZIP would not build without it. Include it in downloads, or draw the chart here and include the drawing instead.`;
+
+/** Why chapters an active \includeonly leaves out of the PDF are a problem, and the way out. */
+export const leftOutMessage = (names: string[]) => {
+  const q = names.slice(0, 5).map((n) => `"${n}"`);
+  const rest = names.length - q.length;
+  if (rest > 0) q.push(`${rest} more`);
+  const list = q.length > 1 ? `${q.slice(0, -1).join(', ')} and ${q[q.length - 1]}` : q[0];
+  return `\\includeonly leaves ${list} out of the PDF. Take the \\includeonly line out to build the whole paper, or take out the \\include lines of what is not meant to be in it.`;
+};
 
 /**
  * The data files the paper reads (a table, a CSV, a plot's data) that are held back from
@@ -196,6 +205,8 @@ async function checksOf(
         `"${d.target}" is put together by a macro, so it could not be checked.`,
         place(d.from),
       );
+    const out = leftOut(texts, root.path, graph.order);
+    if (out) problem('file', leftOutMessage(out.names), place(root.path, out.at));
   }
 
   const at = (p: { fileId: string; path: string; line: number }) => ({
