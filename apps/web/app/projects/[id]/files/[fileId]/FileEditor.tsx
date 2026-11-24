@@ -104,6 +104,10 @@ const TEXT = 'source';
 const NO_ACCESS = 'no-access';
 /** The sync server's word for an edit it will not take for its size. */
 const TOO_LARGE = 'too-large';
+/** Its word for closing a connection whose person has sent too many edits lately. */
+const OVER_BUDGET = 'over-budget';
+/** How long to wait before connecting again after that: the budget is given back as time goes. */
+const PAUSE_MS = 10_000;
 /** Its word, when a connection is turned away, for "not now" as against "no". */
 const TRY_AGAIN = 'try-again';
 /** Its word for closing a connection whose sign-in has ended. */
@@ -123,6 +127,8 @@ type Sync = {
   held: boolean;
   /** The server would not take an edit for its size. Their unsaved edits cannot be kept. */
   tooLarge: boolean;
+  /** The server is not taking edits from them for a moment, for how many they have sent. Kept. */
+  paused: boolean;
   /** Their sign-in has ended. The page waits for them to sign in again. */
   signedOut: boolean;
   /** Their role on the paper, if it is no longer the one this page was made for, and whether
@@ -362,6 +368,7 @@ export default function FileEditor(props: {
     refused: false,
     held: false,
     tooLarge: false,
+    paused: false,
     signedOut: false,
     role: null,
   });
@@ -468,7 +475,9 @@ export default function FileEditor(props: {
         // unsent: the text in front of them has changed all the same, and they are told.
         if (offeredNote && isNews(offeredNote.number, restoreSeen)) setRestore(offeredNote);
         restoreSeen = Math.max(restoreSeen ?? 0, restoreOffered ?? 0);
-        update({ loaded: true });
+        // Synced with nothing unsent: a pause that was for the reconnect's own payload (what an
+        // idle tab sends when it connects) is over. With edits unsent, the saved-check ends it.
+        setSync((s) => ({ ...s, loaded: true, paused: s.unsaved ? s.paused : false }));
         // Arrived from a place in the PDF: go to the line it named, once, now that there is text.
         const line = Number(new URLSearchParams(location.search).get('line'));
         if (line && !arrived) {
@@ -531,6 +540,22 @@ export default function FileEditor(props: {
           if (wantOpen) provider.configuration.websocketProvider.disconnect();
           return;
         }
+        // Too many edits lately: not final. What was typed is kept and sent again, but not at
+        // once, which would be refused again. The library leaves the socket open after a close
+        // message and does not connect again by itself: this closes it and connects later.
+        if (event.reason === OVER_BUDGET) {
+          update({ paused: true });
+          provider.configuration.websocketProvider.disconnect();
+          if (pausing) clearTimeout(pausing);
+          const wait = setTimeout(() => {
+            pausing = null;
+            pending.delete(wait);
+            if (wantOpen) void provider.configuration.websocketProvider.connect();
+          }, PAUSE_MS);
+          pausing = wait;
+          pending.add(wait);
+          return;
+        }
         if (event.reason !== TOO_LARGE && event.code !== 1009) return;
         oversized = true;
         update({ tooLarge: true });
@@ -558,7 +583,8 @@ export default function FileEditor(props: {
       // and then stays down. So whenever the connection has closed and this tab should be
       // connected, and the library is not going to try by itself, ask again.
       const socket = provider.configuration.websocketProvider;
-      if (status === 'disconnected' && wantOpen && !socket.shouldConnect) void socket.connect();
+      if (status === 'disconnected' && wantOpen && !pausing && !socket.shouldConnect)
+        void socket.connect();
     });
     let arrived = false;
     // Whether this person's changes are saved is asked of the server, not inferred: "do you hold
@@ -570,7 +596,8 @@ export default function FileEditor(props: {
       ready: () => provider.synced,
       say: (unsaved) => {
         if (unsaved) lastChange = Date.now();
-        update({ unsaved });
+        // Everything is held by the server again: the pause, if there was one, is over.
+        update(unsaved ? { unsaved } : { unsaved, paused: false });
         // The build pane builds soon after this editor's edits are saved and it has gone quiet.
         setTyping(unsaved);
       },
@@ -587,6 +614,8 @@ export default function FileEditor(props: {
     let stumbled = false;
     /** The server refused an edit for its size. */
     let oversized = false;
+    /** The wait, if any, before connecting again after "too many edits". */
+    let pausing: ReturnType<typeof setTimeout> | null = null;
     const awareness = provider.awareness!;
     awareness.setLocalStateField('user', {
       name: user,
@@ -1131,15 +1160,17 @@ export default function FileEditor(props: {
           ? `You are signed out. Sign in again in another tab and this page will carry on. ${sync.unsaved ? 'Your edits are kept here until then.' : ''}`.trim()
           : sync.role
             ? `You are now ${/^[aeiou]/.test(sync.role.now) ? 'an' : 'a'} ${sync.role.now} on this paper${sync.role.lost ? ` and can no longer edit. ${sync.unsaved ? 'What you typed last was not saved. ' : ''}` : '. '}Reload the page to carry on.`
-            : !sync.loaded
-              ? 'Opening…'
-              : !sync.connected
-                ? `Offline. ${sync.unsaved ? 'Your edits are waiting to be saved.' : 'Nothing is waiting to be saved.'}`
-                : !canWrite
-                  ? 'Read only. You can read along but not edit.'
-                  : sync.unsaved
-                    ? 'Saving your edits…'
-                    : 'All edits saved.';
+            : sync.paused
+              ? 'Saving is paused for a moment: too many edits at once. Your edits are kept and will be saved.'
+              : !sync.loaded
+                ? 'Opening…'
+                : !sync.connected
+                  ? `Offline. ${sync.unsaved ? 'Your edits are waiting to be saved.' : 'Nothing is waiting to be saved.'}`
+                  : !canWrite
+                    ? 'Read only. You can read along but not edit.'
+                    : sync.unsaved
+                      ? 'Saving your edits…'
+                      : 'All edits saved.';
   // The restore a note is about: the one that took this file out, or the one made under it.
   const about = left ? (left.why === 'restore' ? left.restore : null) : restore;
   const changes = about && restoreChanges(projectId, about);

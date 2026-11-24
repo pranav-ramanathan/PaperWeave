@@ -122,7 +122,12 @@ export async function runCommand(
      * together or not at all. `placed` is where the replacement now stands, as two encoded
      * positions that follow the text.
      */
-    within?: (db: Db, placed: { from: Uint8Array; to: Uint8Array }) => Promise<void>;
+    within?: (
+      db: Db,
+      placed: { from: Uint8Array; to: Uint8Array },
+      /** The bytes of edit appended to the file's log: what a budget is charged. */
+      appended: number,
+    ) => Promise<void>;
     /** The longest the file's text may become. The default is what could be imported. */
     maxFileText?: number;
     /**
@@ -213,10 +218,11 @@ export async function runCommand(
     ]);
     const place = (index: number, side: number) =>
       Y.encodeRelativePosition(Y.createRelativePositionFromTypeIndex(text, index, side));
-    await opts.within?.(db, {
-      from: place(from, 0),
-      to: place(from + c.replacement.length, -1),
-    });
+    await opts.within?.(
+      db,
+      { from: place(from, 0), to: place(from + c.replacement.length, -1) },
+      update.length,
+    );
     return { result: 'applied', update };
   });
 }

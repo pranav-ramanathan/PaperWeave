@@ -2,7 +2,6 @@
 // Positions in the text do not travel (they belong to this copy's edit history), so each item
 // goes out with the words it is about and what stands around them, and is placed by those when
 // it comes back in.
-import type pg from 'pg';
 import type { Db } from './db.ts';
 import * as Y from 'yjs';
 import { z } from 'zod';
@@ -30,6 +29,8 @@ const when = z.iso.datetime();
 const MAX_THREADS = 20_000;
 const MAX_PROPOSALS = 20_000;
 const MAX_COMMENTS = 5000;
+/** Comments written by one statement. */
+const COMMENT_CHUNK = 500;
 const Thread = z.object({
   file: text(500),
   quote: text(500),
@@ -114,7 +115,7 @@ async function texts(pool: Db, store: BlobStore, projectId: string) {
     'select id, path from files where project_id = $1 and eol is not null',
     [projectId],
   );
-  const open = new Map<string, { id: string; doc: Y.Doc; text: Y.Text }>();
+  const open = new Map<string, { id: string; doc: Y.Doc; text: Y.Text; all: string }>();
   return async (path: string) => {
     const want = path.normalize('NFC');
     const file = rows.find((r) => r.path.normalize('NFC') === want);
@@ -122,7 +123,10 @@ async function texts(pool: Db, store: BlobStore, projectId: string) {
     if (!open.has(path)) {
       const doc = new Y.Doc();
       for (const update of await loadUpdates(pool, store, file.id)) Y.applyUpdate(doc, update);
-      open.set(path, { id: file.id, doc, text: doc.getText(TEXT) });
+      const text = doc.getText(TEXT);
+      // The text is read once: nothing here changes it, and a large file read for each thread
+      // costs more than placing the thread.
+      open.set(path, { id: file.id, doc, text, all: text.toString() });
     }
     return open.get(path)!;
   };
@@ -181,7 +185,7 @@ export async function exportReview(
       threads.push({ ...base, quote: t.excerpt, before: t.before, after: t.after, detached: true });
       continue;
     }
-    const all = f.text.toString();
+    const all = f.all;
     const end = at + t.now.length;
     // A stretch longer than the quote says how long it is and what it hashes to.
     const toIdx = Y.createAbsolutePositionFromRelativePosition(
@@ -209,7 +213,7 @@ export async function exportReview(
       Y.decodeRelativePosition(Buffer.from(p.from, 'base64')),
       f.doc,
     )?.index;
-    const all = f.text.toString();
+    const all = f.all;
     const end = at === undefined ? 0 : at + p.now.length;
     proposals.push({
       file: p.path,
@@ -270,7 +274,7 @@ export function locateQuote(all: string, quote: string, before: string, after: s
  * was lost is reported and left out. The people named in the data are kept as names.
  */
 export async function importReview(
-  pool: pg.Pool,
+  pool: Db,
   store: BlobStore,
   projectId: string,
   input: unknown,
@@ -315,7 +319,7 @@ export async function importReview(
     }
     // A thread detached where it came from is not placed again by its old words, which may
     // have been typed elsewhere since.
-    const all = f.text.toString();
+    const all = f.all;
     const at = t.detached ? -1 : locateQuote(all, t.quote, t.before, t.after);
     // A longer stretch is kept whole if what stands there still hashes as it did; otherwise the
     // quote is all there is to go by.
@@ -354,16 +358,40 @@ export async function importReview(
       );
     // The file's order is the thread's order, though listThreads sorts by time: a comment is
     // never stored earlier than a microsecond after the one before it, so ties do not reshuffle.
+    // Comment n of a chunk is stored at the latest of its own time and that of every comment
+    // before it, each pushed on by a microsecond per step: n microseconds plus the greatest of
+    // (time - k microseconds) over k up to n, and of the last time stored by the chunk before.
+    const kept = t.comments.slice(0, MAX_COMMENTS);
     let prev: string | null = null;
-    for (const c of t.comments.slice(0, MAX_COMMENTS))
+    for (let i = 0; i < kept.length; i += COMMENT_CHUNK) {
+      const chunk = kept.slice(i, i + COMMENT_CHUNK);
       prev = (
         await pool.query(
-          `insert into thread_comments (thread_id, body, created_at, imported_author)
-           values ($1, $2, greatest($3::timestamptz, $5::timestamptz + interval '1 microsecond'), $4)
-           returning created_at::text as at`,
-          [made.id, c.body, c.createdAt, c.author, prev],
+          `with given as (
+             select body, at, author, n
+               from unnest($2::text[], $3::timestamptz[], $4::text[])
+                    with ordinality as u(body, at, author, n)
+           ), ins as (
+             insert into thread_comments (thread_id, body, created_at, imported_author)
+             select $1, body,
+                    n * interval '1 microsecond' + greatest(
+                      max(at - n * interval '1 microsecond') over (order by n),
+                      $5::timestamptz),
+                    author
+               from given
+             returning created_at
+           )
+           select max(created_at)::text as at from ins`,
+          [
+            made.id,
+            chunk.map((c) => c.body),
+            chunk.map((c) => c.createdAt),
+            chunk.map((c) => c.author),
+            prev,
+          ],
         )
       ).rows[0].at;
+    }
     done.threads++;
   }
   for (const raw of read.data.proposals.slice(0, MAX_PROPOSALS)) {
@@ -389,7 +417,7 @@ export async function importReview(
     const stale = openStale || (p.status === 'accepted' && p.stale === true);
     // One that had gone stale is anchored where it does not read as its words, so that it is
     // stale here too.
-    const at = !f ? -1 : stale ? 0 : locateQuote(f.text.toString(), stands, p.before, p.after);
+    const at = !f ? -1 : stale ? 0 : locateQuote(f.all, stands, p.before, p.after);
     if (!f || at < 0) {
       done.missing.push(
         `A proposal to change “${short(p.expected)}” in ${p.file}: ${f ? 'that text is not in the file, or is there more than once' : 'the paper has no such file'}.`,

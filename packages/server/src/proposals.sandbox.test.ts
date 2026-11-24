@@ -4,6 +4,7 @@ import * as Y from 'yjs';
 import { readZip, writeZip } from './archive.ts';
 import { blobStore } from './blobs.ts';
 import { exportZip, importZip, listFiles } from './import.ts';
+import { WEB_EDIT_SMALL_FLOOR } from './limits.ts';
 import { acceptInvitation, invite } from './projects.ts';
 import {
   acceptProposal,
@@ -803,4 +804,142 @@ test('a reviewer cannot accept a proposal, and the text is unchanged', async () 
   ).toBe('permission_denied');
   expect(await saved(p)).toBe(MAIN);
   expect((await proposals(p))[0].status).toBe('open');
+});
+
+/** What this person was charged on this paper, one number for each charge. */
+const charges = async (who: keyof typeof users, p: { id: string }) =>
+  (
+    await t.pool.query(
+      'select bytes from web_edits where user_id = $1 and project_id = $2 order by id',
+      [users[who].id, p.id],
+    )
+  ).rows.map((r) => Number(r.bytes));
+
+/** An editor of their own, so that what other tests charged to the shared editor does not count. */
+async function freshEditor(p: { id: string }, email: string) {
+  const me = await t.signIn(email);
+  const { token } = await invite(t.pool, users.owner.id, p.id, me.email, 'editor', 1000);
+  await acceptInvitation(t.pool, me.id, token);
+  return me;
+}
+
+test('accepts and undos are charged to the person deciding, until the hour is spent', async () => {
+  const p = await paper();
+  const id = await propose(t.pool, store, users.reviewer.id, p.id, p.file, {
+    ...(await ends(p.file, 'below 40 ms')),
+    replacement: 'under 40 ms',
+  });
+  const deciding = await freshEditor(p, 'deciding@example.org');
+  const spent = async () =>
+    (
+      await t.pool.query('select bytes from web_edits where user_id = $1 order by id', [
+        deciding.id,
+      ])
+    ).rows.map((r) => Number(r.bytes));
+  // Room for two small edits and not a third.
+  const budget = { bytesPerHour: 2 * WEB_EDIT_SMALL_FLOOR + 100 };
+  await acceptProposal(t.pool, store, deciding.id, p.id, id, undefined, budget);
+  await undoAccept(t.pool, store, deciding.id, p.id, id, budget);
+  expect(await spent()).toEqual([WEB_EDIT_SMALL_FLOOR, WEB_EDIT_SMALL_FLOOR]);
+  // The author of the proposal was charged nothing.
+  expect(await charges('reviewer', p)).toEqual([]);
+  const before = await saved(p);
+  expect(await code(acceptProposal(t.pool, store, deciding.id, p.id, id, undefined, budget))).toBe(
+    'conflict',
+  );
+  await expect(
+    acceptProposal(t.pool, store, deciding.id, p.id, id, undefined, budget),
+  ).rejects.toThrow('You have changed too much in the last hour. Try again in a little while.');
+  expect(await saved(p)).toBe(before);
+  expect((await proposals(p))[0].status).toBe('open');
+  expect(await spent()).toHaveLength(2);
+  // Someone else has an hour of their own.
+  const other = await freshEditor(p, 'deciding-too@example.org');
+  await acceptProposal(t.pool, store, other.id, p.id, id, undefined, budget);
+  expect(await saved(p)).toBe(MAIN.replace('below 40 ms', 'under 40 ms'));
+});
+
+test('an accept whose edit is larger than what is left rolls back the edit and the status', async () => {
+  const p = await paper();
+  const big = 'x'.repeat(9000);
+  const id = await propose(t.pool, store, users.reviewer.id, p.id, p.file, {
+    ...(await ends(p.file, 'below 40 ms')),
+    replacement: big,
+  });
+  // The floor fits, so the early check passes; the edit itself, of over 9000 bytes, does not.
+  const budget = { bytesPerHour: WEB_EDIT_SMALL_FLOOR + 1000 };
+  const me = await freshEditor(p, 'rollback@example.org');
+  expect(await code(acceptProposal(t.pool, store, me.id, p.id, id, undefined, budget))).toBe(
+    'conflict',
+  );
+  expect(await saved(p)).toBe(MAIN);
+  expect((await proposals(p))[0].status).toBe('open');
+  const rows = async () =>
+    (await t.pool.query('select bytes from web_edits where user_id = $1', [me.id])).rows.map((r) =>
+      Number(r.bytes),
+    );
+  expect(await rows()).toEqual([]);
+  // Within a budget that holds it, the charge is the bytes appended, over the floor.
+  await acceptProposal(t.pool, store, me.id, p.id, id, undefined, { bytesPerHour: 1_000_000 });
+  const [cost] = await rows();
+  expect(cost).toBeGreaterThan(9000);
+});
+
+test('a duplicate accept, a conflicting accept, an undo of an open proposal and a reviewer add no charge', async () => {
+  const p = await paper();
+  const first = await propose(t.pool, store, users.reviewer.id, p.id, p.file, {
+    ...(await ends(p.file, 'below 40 ms')),
+    replacement: 'under 40 ms',
+  });
+  const second = await propose(t.pool, store, users.reviewer.id, p.id, p.file, {
+    ...(await ends(p.file, 'Nothing else')),
+    replacement: 'Little else',
+  });
+  // A reviewer's accept is refused, and refused first: no charge.
+  expect(await code(acceptProposal(t.pool, store, users.reviewer.id, p.id, first))).toBe(
+    'permission_denied',
+  );
+  expect(await charges('reviewer', p)).toEqual([]);
+  // An undo of a proposal that is open does nothing and costs nothing.
+  await undoAccept(t.pool, store, users.editor.id, p.id, first);
+  expect(await charges('editor', p)).toEqual([]);
+  await acceptProposal(t.pool, store, users.editor.id, p.id, first);
+  expect(await charges('editor', p)).toHaveLength(1);
+  // Asked again, as after a lost answer: still one charge.
+  await acceptProposal(t.pool, store, users.editor.id, p.id, first);
+  expect(await charges('editor', p)).toHaveLength(1);
+  // The words of the second have changed under it: the accept is a conflict, and free.
+  await change(p.file, 'Nothing else', 'Something else');
+  expect(await code(acceptProposal(t.pool, store, users.editor.id, p.id, second))).toBe('conflict');
+  expect(await charges('editor', p)).toHaveLength(1);
+});
+
+test('fifty accepts in a row by one person fit in the default hour, each at the small floor', async () => {
+  const me = await t.signIn('bulk@example.org');
+  const words = Array.from({ length: 50 }, (_, i) => `word${String(i).padStart(2, '0')}`);
+  const body = `\\documentclass{article}\n\\begin{document}\n${words.join('\n')}\n\\end{document}\n`;
+  const zip = await writeZip([{ path: 'main.tex', bytes: Buffer.from(body) }]);
+  const [project] = await importZip(t.pool, store, me.id, zip, 'Bulk');
+  const [{ id: file }] = await listFiles(t.pool, me.id, project.id);
+  const ids: string[] = [];
+  for (const w of words)
+    ids.push(
+      await propose(t.pool, store, me.id, project.id, file, {
+        ...(await ends(file, w)),
+        replacement: `${w}x`,
+      }),
+    );
+  const began = performance.now();
+  for (const id of ids) await acceptProposal(t.pool, store, me.id, project.id, id);
+  const took = performance.now() - began;
+  // Printed for the record: how long fifty accepts took, one after another.
+  console.info(`50 accepts in a row: ${Math.round(took)} ms (${Math.round(took / 50)} ms each)`);
+  const rows = (
+    await t.pool.query('select bytes from web_edits where user_id = $1 and project_id = $2', [
+      me.id,
+      project.id,
+    ])
+  ).rows.map((r) => Number(r.bytes));
+  expect(rows).toHaveLength(50);
+  expect(rows.every((b) => b >= WEB_EDIT_SMALL_FLOOR)).toBe(true);
 });

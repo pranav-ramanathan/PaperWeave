@@ -237,27 +237,33 @@ export function editFile(
   userId: string,
   change: (text: Y.Text) => void,
 ): Promise<void> {
-  return transaction(pool, (db) => editLocked(db, store, fileId, userId, change));
+  return transaction(pool, async (db) => {
+    await editLocked(db, store, fileId, userId, change);
+  });
 }
 
-/** The same as one step of a larger transaction. People see the edit when it commits. */
+/**
+ * The same as one step of a larger transaction. People see the edit when it commits. Returns the
+ * bytes of edit appended: 0 if nothing changed.
+ */
 export async function editLocked(
   db: Db,
   store: BlobStore,
   fileId: string,
   userId: string,
   change: (text: Y.Text) => void,
-): Promise<void> {
+): Promise<number> {
   const doc = new Y.Doc();
   for (const update of await lockedUpdates(db, store, fileId)) Y.applyUpdate(doc, update);
   const before = Y.encodeStateVector(doc);
   change(doc.getText(TEXT));
   const update = Y.encodeStateAsUpdate(doc, before);
   // Two zero bytes: nothing was inserted or deleted.
-  if (update.length <= 2) return;
+  if (update.length <= 2) return 0;
   const seq = await appendUpdate(db, fileId, userId, update);
   if (seq === null) throw new AppError('permission_denied', 'You cannot edit this file.');
   await db.query("select pg_notify('file_edits', $1)", [`${fileId}:${seq}`]);
+  return update.length;
 }
 
 /**
@@ -312,15 +318,26 @@ export function holds(doc: Y.Doc, snapshot: Uint8Array): boolean {
   const want = Y.decodeSnapshot(snapshot);
   for (const [client, clock] of want.sv) if (Y.getState(doc.store, client) < clock) return false;
   // Ranges of deleted text per author, adjoining ones merged, so one wanted range lies in one.
+  // createDeleteSetFromStructStore walks each author's structs in clock order and joins runs of
+  // deleted ones, so its ranges come out sorted by clock, disjoint and never touching (a live
+  // struct lies between any two). The snapshot's own ranges can be in any order and repeated, so
+  // each is looked up by binary search instead of scanned for: the work stays near W log H.
   const have = Y.createDeleteSetFromStructStore(doc.store);
-  for (const [client, ranges] of want.ds.clients)
-    for (const w of ranges)
-      if (
-        !(have.clients.get(client) ?? []).some(
-          (h) => h.clock <= w.clock && w.clock + w.len <= h.clock + h.len,
-        )
-      )
-        return false;
+  for (const [client, ranges] of want.ds.clients) {
+    const mine = have.clients.get(client) ?? [];
+    for (const w of ranges) {
+      // The last held range starting at or before w; no other one can contain it.
+      let lo = 0;
+      let hi = mine.length;
+      while (lo < hi) {
+        const mid = (lo + hi) >>> 1;
+        if (mine[mid].clock <= w.clock) lo = mid + 1;
+        else hi = mid;
+      }
+      const h = mine[lo - 1];
+      if (!h || w.clock + w.len > h.clock + h.len) return false;
+    }
+  }
   return true;
 }
 

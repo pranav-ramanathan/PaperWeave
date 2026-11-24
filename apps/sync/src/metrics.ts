@@ -14,6 +14,7 @@ export const newCounts = () => ({
   editsSaved: 0,
   editsRejected: 0,
   editsTooLarge: 0,
+  editsOverBudget: 0,
   editsOffTheOpenCopy: 0,
   commandsApplied: 0,
   commandsNotApplied: 0,
@@ -28,6 +29,8 @@ const HELP: Record<keyof Counts, string> = {
   editsSaved: 'Edits appended to a file log.',
   editsRejected: 'Edits refused because their author may not write to the file.',
   editsTooLarge: 'Edits refused for their size, or for the size they would make the file.',
+  editsOverBudget:
+    'Edits and structural edits refused because their author had made too many lately.',
   editsOffTheOpenCopy:
     'Edits saved from a connection no longer on the open copy of its file, and passed on to it.',
   commandsApplied: 'Structural edits applied.',

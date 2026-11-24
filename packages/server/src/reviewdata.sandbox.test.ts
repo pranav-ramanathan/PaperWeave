@@ -876,3 +876,100 @@ test('a review file says how long a long passage is, and only then', async () =>
   expect(long.hash).toMatch(/^[0-9a-f]{64}$/);
   expect('length' in short || 'hash' in short).toBe(false);
 });
+
+// ---- Review data that cannot be written costs the review, not the paper. ----
+
+const hand = (quote: string, comments: { author: null; body: string; createdAt: string }[]) => ({
+  file: 'main.tex',
+  quote,
+  before: '',
+  after: '',
+  status: 'open',
+  startedBy: null,
+  createdAt: NOW,
+  comments,
+});
+const handFile = (threads: unknown[]) =>
+  JSON.stringify({
+    format: 'paperweave-review-1',
+    paper: 'Hand-written',
+    exported: NOW,
+    threads,
+    proposals: [],
+  });
+
+test('a comment Postgres refuses leaves the paper with none of its review, and says so', async () => {
+  const one = hand('below 40 ms', [{ author: null, body: 'Fine.', createdAt: NOW }]);
+  const two = hand('Nothing else', [{ author: null, body: 'a\u0000b', createdAt: NOW }]);
+  const before = (await t.pool.query('select count(*)::int as n from projects')).rows[0].n;
+  const [made] = await importZip(
+    t.pool,
+    store,
+    users.importer.id,
+    await zipWith(handFile([one, two])),
+    'Refused',
+  );
+  expect((await t.pool.query('select count(*)::int as n from projects')).rows[0].n).toBe(
+    before + 1,
+  );
+  expect(await listThreads(t.pool, store, users.importer.id, made.id)).toEqual([]);
+  expect((await importReport(t.pool, users.importer.id, made.id))!.review).toEqual({
+    threads: 0,
+    proposals: 0,
+    detached: 0,
+    missing: ['The review data could not be brought in, so none was.'],
+  });
+});
+
+test('a thread of 5,001 comments arrives with 5,000, in the file order', async () => {
+  const comments = Array.from({ length: 5001 }, (_, i) => ({
+    author: null,
+    body: `c${i + 1}`,
+    createdAt: NOW,
+  }));
+  const [made] = await importZip(
+    t.pool,
+    store,
+    users.importer.id,
+    await zipWith(handFile([hand('below 40 ms', comments)])),
+    'Many',
+  );
+  expect((await importReport(t.pool, users.importer.id, made.id))!.review).toEqual({
+    threads: 1,
+    proposals: 0,
+    detached: 0,
+    missing: ['A thread on “below 40 ms” had 5001 comments; the last 1 were left out.'],
+  });
+  const [th] = await listThreads(t.pool, store, users.importer.id, made.id);
+  expect(th.comments.map((c) => c.body)).toEqual(comments.slice(0, 5000).map((c) => c.body));
+});
+
+test('equal and falling times across a chunk of comments keep the file order', async () => {
+  const base = Date.parse(NOW);
+  // Equal for a while, then falling by a second a comment, then one far ahead, then falling again.
+  const at = (i: number) =>
+    i < 600 ? base : i < 1000 ? base - (i - 599) * 1000 : i < 1100 ? base + 3_600_000 : base;
+  const comments = Array.from({ length: 1200 }, (_, i) => ({
+    author: null,
+    body: `c${i}`,
+    createdAt: new Date(at(i)).toISOString(),
+  }));
+  const [made] = await importZip(
+    t.pool,
+    store,
+    users.importer.id,
+    await zipWith(handFile([hand('below 40 ms', comments)])),
+    'Chunks',
+  );
+  const [th] = await listThreads(t.pool, store, users.importer.id, made.id);
+  expect(th.comments.map((c) => c.body)).toEqual(comments.map((c) => c.body));
+  // Each is stored at the greater of its own time and a microsecond after the one before.
+  let prev = -Infinity;
+  const want = comments.map((c) => (prev = Math.max(Date.parse(c.createdAt) * 1000, prev + 1)));
+  const { rows } = await t.pool.query(
+    `select round(extract(epoch from created_at) * 1000000)::bigint::text as us
+       from thread_comments where thread_id = $1 order by created_at, body`,
+    [th.id],
+  );
+  expect(rows.map((r) => Number(r.us)).sort((a, b) => a - b)).toEqual(want);
+});

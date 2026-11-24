@@ -33,6 +33,7 @@ import {
   type Splice,
   texFiles,
 } from './labels.ts';
+import { chargeRewrite, mayRewrite, type RewriteOpts, WEB_EDIT_SMALL_FLOOR } from './limits.ts';
 import { cutRevision, renameFile, restoreEdits } from './revisions.ts';
 import { editLocked, loadUpdates } from './sync.ts';
 
@@ -127,7 +128,9 @@ export async function createFile(
  * tied to it (a dataset's description, the charts drawn from it) stays tied. The paper is saved
  * as a revision first, in the same transaction, so the old content is always kept. Text that
  * people may have open is changed by edits, as a restore does, so they see it at once. A path
- * with no file is added as a new file. Returns the file's ID.
+ * with no file is added as a new file, which costs nothing here. A replacement costs the person
+ * the bytes of edits it appends, at least the floor, from their hour's budget. Returns the
+ * file's ID.
  */
 export async function replaceFile(
   pool: pg.Pool,
@@ -137,6 +140,7 @@ export async function replaceFile(
   path: unknown,
   bytes: Uint8Array,
   limits: Limits = LIMITS,
+  budget: RewriteOpts = {},
 ): Promise<string> {
   await authorize(pool, userId, id(projectId), 'file.write');
   path = nfc(path);
@@ -156,6 +160,8 @@ export async function replaceFile(
       throw new AppError('invalid_input', `${name} is a folder, and cannot be replaced by a file.`);
     return createFile(pool, store, userId, projectId, name, bytes, limits);
   }
+  // Before the bytes are stored: someone with no room left puts nothing in the store.
+  await mayRewrite(pool, userId, budget);
   const meta = fileMeta(name, bytes);
   const digest = await store.put(bytes);
   let fileId = '';
@@ -195,18 +201,21 @@ export async function replaceFile(
          where id = $1`,
         [file.id, digest, bytes.length, meta.eol, meta.bom, meta.readonly],
       );
+      let appended = 0;
       if (meta.eol && Number(file.head_seq) > 0) {
         const decoded = decodeFile(bytes);
         if (!decoded.editable)
           throw new AppError('invalid_input', 'The new file cannot be read as text.');
         const want = decoded.text;
-        await editLocked(db, store, file.id, userId, (text) => {
+        appended = await editLocked(db, store, file.id, userId, (text) => {
           for (const e of restoreEdits(text.toString(), want)) {
             if (e.del) text.delete(e.at, e.del);
             if (e.ins) text.insert(e.at, e.ins);
           }
         });
       }
+      // Over budget, the transaction ends: no edit, no revision, no notice.
+      await chargeRewrite(db, userId, projectId, appended, budget);
       await db.query('update projects set manifest_version = manifest_version + 1 where id = $1', [
         projectId,
       ]);
@@ -513,7 +522,8 @@ export async function fileUses(
 /**
  * Rename a file and, in the same transaction, the lines that name it. `digest` is the
  * proposal's: if the lines would now differ, nothing is done. With no digest only the file is
- * renamed, and the lines that name it are left as they are.
+ * renamed, and the lines that name it are left as they are. Only the second kind, which edits
+ * text, is charged to the person's hour of web edits (`budget` is for tests).
  */
 export async function renameFileAndReferences(
   pool: pg.Pool,
@@ -523,6 +533,7 @@ export async function renameFileAndReferences(
   fileId: string,
   to: unknown,
   digest?: unknown,
+  budget: RewriteOpts = {},
 ): Promise<{ places: number }> {
   await authorize(pool, userId, id(projectId), 'file.write');
   to = nfc(to);
@@ -530,6 +541,8 @@ export async function renameFileAndReferences(
     await renameFile(pool, userId, projectId, fileId, to);
     return { places: 0 };
   }
+  const small = { ...budget, floor: WEB_EDIT_SMALL_FLOOR };
+  await mayRewrite(pool, userId, small);
   // Makes sure each file's uploaded bytes are in its log as the first entry.
   for (const f of await texFiles(pool, store, projectId)) await loadUpdates(pool, store, f.id);
   return transaction(pool, async (db) => {
@@ -538,7 +551,11 @@ export async function renameFileAndReferences(
     await renameFile(db, userId, projectId, fileId, to);
     if (plan.proposal.digest !== digest)
       throw new AppError('conflict', 'The paper has changed since. Look at the changes again.');
-    return { places: await applySplices(db, userId, plan.splices) };
+    const { places, appended } = await applySplices(db, userId, plan.splices);
+    // Nothing named the file: no text was edited and nothing is charged. Over budget, the
+    // transaction ends and the name and the lines stay as they were.
+    if (places > 0) await chargeRewrite(db, userId, projectId, appended, small);
+    return { places };
   });
 }
 

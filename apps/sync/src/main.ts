@@ -1,4 +1,4 @@
-import { blobStore, connect, onlyOne } from '@paperweave/server';
+import { blobStore, connect, editBudgetFromEnv, onlyOne } from '@paperweave/server';
 import { startSync } from './server.ts';
 
 const need = (name: string) => {
@@ -29,5 +29,6 @@ const sync = await startSync({
   databaseUrl: need('DATABASE_URL'),
   compactEvery: Number(process.env.SYNC_COMPACT_EVERY ?? 500),
   metricsToken: process.env.METRICS_TOKEN,
+  editBudget: editBudgetFromEnv(),
 });
 console.log(`sync server listening on ${sync.port}`);

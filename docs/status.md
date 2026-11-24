@@ -136,6 +136,11 @@ Read this first. Update it in every pull request.
     sync library's own count reaches zero too early after a reconnect, because edits queued
     while offline are confirmed after the count was reset. The status line, the warning on
     closing the tab, and the hold after a restore all use the exact answer.
+  - "Is it saved?" no longer scales with the size of the question. `holds` scanned every held
+    delete range for each range in the client's snapshot, and a snapshot can repeat one range as
+    often as a frame allows (a 533 KB message held the server for about 9 s). It now looks each
+    range up by binary search; the answers are unchanged. `packages/server/src/saved.test.ts`
+    covers it, including a comparison with the old scan on seeded random documents.
   - Restores replace whole lines. An edit made offline before a restore is merged in at an edge
     of the replaced part, and used to be able to land in the middle of a line. (Since changed:
     each changed stretch is replaced on its own, and a line changed in place word by word; an
@@ -582,8 +587,16 @@ Read this first. Update it in every pull request.
     if they are there more than once, where the surroundings match (`locateQuote`).
   - A thread whose words are not in the paper arrives detached, with its words. A proposal that
     cannot be placed is left out. The import report says how many of each came in and lists
-    what did not, with the reason. Review data that cannot be read is reported and never stops
-    the paper itself coming in.
+    what did not, with the reason. Review data that cannot be read, or cannot be written (a
+    comment with a NUL character, which the schema allows and Postgres refuses), is reported and
+    does not stop the paper itself coming in. A paper's review is brought in as one transaction:
+    if it fails, none of that paper's review is kept, and the report says "The review data could
+    not be brought in, so none was." (the error itself is not logged, as it can hold manuscript
+    text). A thread's comments are written by one statement per 500, not one per comment.
+  - **Not done:** placing quotes on a large file with many threads still costs CPU time: about
+    450 s worst case for 20,000 threads on a 5 MB file with a common quote (measured). A cap or a
+    time budget is an owner decision. The caps (20,000 threads, 5,000 comments a thread) are
+    unchanged.
   - The people named in the data may have no account here: they are kept as names
     (`imported_author`, migration 0019), and shown where an author is shown.
   - A service test exports a paper with two threads and four proposals (resolved, detached,
@@ -922,8 +935,9 @@ Built after the security review, which had it as its second open item.
   connecting would send the same edit again. The text can still be selected and copied.
 - **Why everything unsaved goes, not just the large edit:** the editor cannot take one edit
   back out of what it has not yet sent; later edits may rest on it.
-- **Not limited:** how many files a paper holds, and how often someone edits. A member can
-  still grow the log by adding and deleting. Those are the review's "limits in general".
+- **Not limited:** how many files a paper holds. A member can still grow the log by adding
+  and deleting. That is the review's "limits in general". How often someone edits is limited
+  by size: see "A person's edits have a budget".
 
 ## A compiler warning says which file it is in
 
@@ -7172,3 +7186,102 @@ of the paper's .bib files.`
 - **Not done.**
   - A file deleted and made again as text on one side only is "Changed" with no lines.
   - A changed file's own "too much changed" sentence still links both ZIPs even for held data.
+
+## A person's edits have a budget
+
+Built from the security review's first open item: how often someone edits was not limited, and
+one writer could send 2 MB edits without pause, each stored as a `file_updates` row while
+compaction runs only every 500 edits.
+
+- **The budget.** A token bucket for each signed-in person, in the sync server's memory
+  (`editBudget` in `packages/server/src/limits.ts`): 20 MB at once, 2 MB a minute given back
+  (`SYNC_EDIT_BURST_BYTES`, `SYNC_EDIT_BYTES_PER_MINUTE`). It is kept by the user ID in the
+  ticket, so two files, or two tabs, share it, and nothing the client sends changes whose it is. A
+  person who is back to a full budget is forgotten, so the map holds only people who edited
+  lately. The sync server will not start with a burst below the largest edit.
+- **What costs.** Each saved edit costs its size, or 512 bytes if that is more. Each structural
+  edit asked for over the connection costs its size or 512 bytes, whichever is more: the
+  replacement's length is charged before anything is done, and what the edit comes to beyond that
+  is charged inside the transaction that appends it, which is undone if it is not there. Edits
+  refused as too large are refused first and cost nothing. Only people who may write (by their
+  role, not by whether the connection was since made read-only) are charged; the question "do
+  you have all my changes?" and an empty edit are free. A connection closed for an edit it sent
+  takes nothing more: edits and commands already queued on it are refused.
+- **What the server does.** An edit over budget is not saved, not applied and not passed on. The
+  connection is made read-only, so the library answers "not saved" and applies nothing, and is
+  closed with the code 1013 and the reason `over-budget`. A structural edit over budget is
+  answered with "Too many edits at once. Try again in a moment." and changes nothing. Both are
+  counted as `paperweave_sync_edits_over_budget_total`.
+- **What the editor does.** The status line says "Saving is paused for a moment: too many edits
+  at once. Your edits are kept and will be saved." Nothing is discarded: the editor keeps what
+  it has not sent and sends it when it connects again. The library does not connect again by
+  itself after the server's close message (it leaves the socket open and the file unsynced),
+  so the editor closes the socket and connects again after 10 seconds. The wait is there
+  because an immediate connect sends the same edit and is refused again, and a loop of that
+  would cost a ticket and a database look-up each time. The line goes when the server holds
+  everything again.
+- **Held by** `limits.test.ts` and the budget tests in `sync.sandbox.test.ts` (an edit over
+  budget is refused and later saved with nothing lost, one person on two files has one budget, a
+  structural edit over budget is answered with the error, and the metrics count it).
+- **Not done.** The budget is not shared between sync servers (there is one) and starts afresh
+  when the server restarts. Edits made by the web app's own requests are not counted.
+
+## Restores and replaced files have a budget too
+
+The sync budget did not count what the web app writes as edits itself, so alternating two
+restores of a large paper got round it (`docs/security-review.md`, Open 1).
+
+- **The budget.** `WEB_EDIT_BYTES_PER_USER_HOUR`, default 100 MB, summed for each person over all
+  their papers for the last hour. Kept in the database (`web_edits`, migration 0036), because
+  two web apps may run. A row keeps the person, the paper (left empty if the paper is deleted)
+  and the bytes; nothing of the text.
+- **What costs.** A restore or a replacement costs the bytes of edit it appends, at least 256 KB.
+  The floor also applies to a restore that changes nothing and to a replaced picture or other
+  file that is not text. `editLocked` now returns the bytes it appended. A replace that finds no
+  file at the path adds a file and is not charged. A file uploaded to replace one
+  (`addUploaded` with `replace`) goes through `replaceFile` and is charged.
+- **How.** `mayRewrite` runs after the permission check and before any blob is read or stored,
+  and refuses if even the floor no longer fits. `chargeRewrite` runs in the transaction, after
+  the edits are appended (in `within` for a replace), under `pg_advisory_xact_lock` on the
+  person, and deletes rows a day old. Over budget it throws `conflict`, "You have changed too
+  much in the last hour. Try again in a little while.", and the transaction ends: no edits, no
+  revision, no notice. A viewer or someone not on the paper is refused first and not charged.
+  The budget is an optional last argument (`restoreRevision`, `replaceFile`, `addUploaded`) so
+  tests can use a small one.
+- **Held by** `limits.sandbox.test.ts` (sums per person, a charge 61 minutes old, two at once),
+  `revisions.sandbox.test.ts` and `files.sandbox.test.ts`.
+- **Not done.** Accepting and undoing proposals, renaming labels and renaming files also edit
+  text from the web app and were not counted (done below). Imports are not counted. A refused
+  request has already done its reading and, for a restore, its storing of edited text, before
+  the charge; only the early check is free.
+
+### Accepts, undos and renames are counted, and a rename is capped
+
+- **A fault found.** `applySplices` appended its edit with no size check. A label can be renamed
+  to 200 characters, so a file dense with `\ref{a}` could be taken past `MAX_FILE_TEXT` (50 MB)
+  in one request. A sandbox test with a lowered limit (`renameLabel` and `applySplices` take
+  an optional `maxText`) took a file from about 900 characters to about 20 000 under a limit of
+  about 6 000, and failed on the old code. Now a file that would pass the limit refuses the whole
+  rename with `invalid_input`, "That rename cannot be made: it would make a file too large.",
+  and the transaction ends: no file is changed. A file renamed to a longer path is capped the
+  same way.
+- **What is counted now.** Accepting a proposal, undoing an accept, renaming a label, and
+  renaming a file _with_ the lines that name it (the digest branch). The cost is the bytes
+  appended, at least `WEB_EDIT_SMALL_FLOOR` (4 KB; 256 KB would have refused a bulk accept of
+  about 380 in an hour of the 100 MB). It is charged to the person acting, not the proposal's
+  author, in the transaction that made the edit, by `chargeRewrite` with the new `floor` option
+  of `RewriteOpts`. `runCommand` now passes `appended` (the update's length) to `within`; the sync
+  server passes no `within` and keeps its own budget.
+- **Over budget.** `conflict` with the same sentence, and everything rolls back: the edit, the
+  proposal's status, the file's name. `mayRewrite` runs first (after the permission check, and
+  for a proposal after the free cases below), so a person with no room left for the smallest
+  edit is refused before the file is read.
+- **Free.** Accepting a proposal that is already accepted, undoing one that is open, an accept or
+  undo that answers `conflict` (the edit was not made), a request refused for permission, a
+  rename that only changes the name (no digest), and a rename with a digest that names no
+  lines (no text is edited).
+- **Held by** new cases in `proposals`, `labels`, `files` and `limits` sandbox tests. Fifty
+  accepts in a row by one person took 630 ms (13 ms each), each charged the floor.
+- **Still not counted.** Imports (ZIP and the like), creating or uploading a file that does not
+  replace one, deleting, saving a revision, comments and proposals (limited separately by
+  `mayWrite`). The budget is kept per person over all their papers.

@@ -16,9 +16,18 @@ import { authorize } from './authz.ts';
 import type { BlobStore } from './blobs.ts';
 import { type Db, transaction } from './db.ts';
 import { AppError } from './errors.ts';
+import { chargeRewrite, mayRewrite, type RewriteOpts, WEB_EDIT_SMALL_FLOOR } from './limits.ts';
 import { id } from './projects.ts';
 import { remembered } from './scope.ts';
-import { appendUpdate, bytesOfLog, currentBytes, loadUpdates, readLogs, TEXT } from './sync.ts';
+import {
+  appendUpdate,
+  bytesOfLog,
+  currentBytes,
+  loadUpdates,
+  MAX_FILE_TEXT,
+  readLogs,
+  TEXT,
+} from './sync.ts';
 
 export type LabelPlace = { key: string; fileId: string; path: string; line: number };
 export type LabelReport = {
@@ -324,9 +333,18 @@ export function listChanges(files: TexFile[], splices: Map<string, Splice[]>): R
 /**
  * Make the splices, as the user, in a transaction that already holds the files. Each file's edit
  * goes through its log like any other, and reaches open editors when the transaction commits.
+ * A file whose text would pass `maxText` refuses the whole set (the caller's transaction ends, so
+ * no file is changed). Returns the places changed and the bytes of edit appended, which is what a
+ * budget is charged.
  */
-export async function applySplices(db: Db, userId: string, splices: Map<string, Splice[]>) {
+export async function applySplices(
+  db: Db,
+  userId: string,
+  splices: Map<string, Splice[]>,
+  maxText = MAX_FILE_TEXT,
+) {
   let places = 0;
+  let appended = 0;
   for (const [fileId, hits] of splices) {
     const doc = new Y.Doc();
     const { rows } = await db.query(
@@ -342,12 +360,20 @@ export async function applySplices(db: Db, userId: string, splices: Map<string, 
         text.insert(h.at, h.insert);
       }
     });
-    const seq = await appendUpdate(db, fileId, userId, Y.encodeStateAsUpdate(doc, before));
+    // A long new name at many places can grow a file a great deal in one request.
+    if (text.length > maxText)
+      throw new AppError(
+        'invalid_input',
+        'That rename cannot be made: it would make a file too large.',
+      );
+    const update = Y.encodeStateAsUpdate(doc, before);
+    const seq = await appendUpdate(db, fileId, userId, update);
     if (seq === null) throw new AppError('permission_denied', 'You cannot edit this paper.');
     await db.query("select pg_notify('file_edits', $1)", [`${fileId}:${seq}`]);
     places += hits.length;
+    appended += update.length;
   }
-  return places;
+  return { places, appended };
 }
 
 /** What stands for exactly one set of changes: sent with a proposal, and back to carry it out. */
@@ -409,6 +435,7 @@ export async function proposeLabelRename(
 /**
  * Carry out a proposed rename, in every file at once or not at all. `digest` is the proposal's:
  * if the text has changed since it was made so that the changes would differ, nothing is done.
+ * It is charged to the person's hour of web edits (`budget` and `maxText` are for tests).
  */
 export async function renameLabel(
   pool: pg.Pool,
@@ -418,8 +445,12 @@ export async function renameLabel(
   from: unknown,
   to: unknown,
   digest: unknown,
+  budget: RewriteOpts = {},
+  maxText = MAX_FILE_TEXT,
 ): Promise<{ places: number }> {
   await authorize(pool, userId, id(projectId), 'file.write');
+  const small = { ...budget, floor: WEB_EDIT_SMALL_FLOOR };
+  await mayRewrite(pool, userId, small);
   const [a, b] = names(from, to);
   // Makes sure each file's uploaded bytes are in its log as the first entry.
   for (const f of await texFiles(pool, store, projectId)) await loadUpdates(pool, store, f.id);
@@ -429,6 +460,9 @@ export async function renameLabel(
     if (proposal.digest !== digest)
       throw new AppError('conflict', 'The paper has changed since. Look at the changes again.');
     // Delivered when the transaction commits: open editors see every file change together.
-    return { places: await applySplices(db, userId, splices) };
+    const { places, appended } = await applySplices(db, userId, splices, maxText);
+    // Over budget, the transaction ends: no file is changed.
+    await chargeRewrite(db, userId, projectId, appended, small);
+    return { places };
   });
 }
