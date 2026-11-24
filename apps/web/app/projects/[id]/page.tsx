@@ -94,6 +94,7 @@ async function Project({
     assistance?: string;
     checked?: string;
     places?: string;
+    owner?: string;
   }>;
 }) {
   const { id } = await params;
@@ -1167,6 +1168,9 @@ async function Project({
       {saved && <Result>Role changed.</Result>}
       {query.cancelled && <Result>Invitation to {query.cancelled} cancelled.</Result>}
       {query.removed && <Result>Removed {query.removed} from this paper.</Result>}
+      {query.owner && (
+        <Result>{query.owner} is now the owner of this paper. You are an editor.</Result>
+      )}
       <Wide label="Table of people">
         <table>
           <thead>
@@ -1215,6 +1219,11 @@ async function Project({
 
       {owner && (
         <>
+          <p>
+            <Link prefetch={false} href={`/projects/${id}/owner`}>
+              Hand this paper to someone else…
+            </Link>
+          </p>
           {pending.length > 0 && (
             <section aria-labelledby="pending-heading">
               <h2 id="pending-heading">Invited, not yet joined</h2>

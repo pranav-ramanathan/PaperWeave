@@ -2327,9 +2327,36 @@ update` held the paper's file rows for **189.6 s** (until the proxy was cut; it 
   was right (invited again after removal; a spare invitation not raising a lowered role); and
   browser tests of the list and its cancelling, and of the invitation's page for a member and
   for another account.
-- **Not changed:** an invitation lasts fourteen days. A paper cannot change owner. Everyone on
-  a paper sees the others' addresses.
+- **Not changed:** an invitation lasts fourteen days. Everyone on a paper sees the others'
+  addresses.
 - **How it was made.** Planned by one agent, probed and written by others, checked here.
+
+### The owner hands the paper to another member
+
+- **Before:** a paper could not change owner. Its importer was the sole owner for ever, and
+  `removeMember` refuses to let the owner leave.
+- **Now** (`transferOwnership` in `packages/server/src/projects.ts`; the page at
+  `/projects/<id>/owner`, linked from the owner's paper after People): the owner may hand the
+  paper to anyone else on it, of any role, and becomes an editor. Only the owner may
+  (`members.manage`, which only the owner holds). Others on the paper get `permission_denied`,
+  non-members `not_found`; handing it to oneself, to someone not on the paper, to a malformed
+  id, or to someone who only has an invitation gives `invalid_input`. It is one transaction:
+  the old owner is lowered first (the one-owner index allows no other order, and a second
+  handover at once finds nobody to lower and is refused), then the person is raised; if they
+  have left in between, all of it is taken back. Open editors are told through `acl`.
+- **The old owner** can then leave like any editor. Invitations not yet taken up stay.
+  The page says the person handing over cannot take it back, and that the new owner may remove
+  them or delete the paper.
+- **Open editors:** an editor open under the old role is told "You are now an editor on this
+  paper" and is not locked, as write access stays. The lock is only for losing it.
+- **Papers per hour:** `mayStartPapers` counts papers by who owns them now, not by who made
+  them. A handover moves a paper started in the last hour from the old owner's count to the new
+  owner's, so the limit on starting papers can be passed by giving papers away, and a new owner
+  can be held back by papers they were given. Accepted: the limit bounds what one account can
+  hold, and it is the owner who holds it.
+- **Held by** service tests (`projects.sandbox.test`: who may hand over and to whom, with the
+  rows unchanged; one owner after a handover, the old owner an editor who can leave and cannot
+  invite or delete; two at once, and a person who has left) and a browser test.
 
 ## What "ready to send" is worth
 
@@ -2653,21 +2680,21 @@ update` held the paper's file rows for **189.6 s** (until the proxy was cut; it 
   real papers use, the `.tar.gz` arXiv gives, two documents side by side, a split root, other
   encodings and names, an Overleaf export and a macOS ZIP; three of them also through the page.
 
-| Archive                                                                                  | Before                                                           | Now                                              |
-| ---------------------------------------------------------------------------------------- | ---------------------------------------------------------------- | ------------------------------------------------ |
-| `src/main.tex`, with `figures/` and `refs.bib` beside `src/`                             | **only `main.tex` kept; never built**                            | imported whole, root `src/main.tex`; builds      |
-| Two papers sharing `figures/` and `refs.bib`                                             | **each without them, "outside every paper"**                     | a reader keeps its layout and a copy, noted      |
-| An arXiv source: `main.bbl`, no `.bib`                                                   | **the `.bbl` dropped as build output; failed with no reason**    | kept, and said to be ready-made; builds          |
-| `.tikz`, `.pgf`, `.pdf_tex`, `.dat`, `.lua`, a font                                      | **dropped as "not a file type a paper uses"; never built**       | kept; builds                                     |
-| `.svg`, `.gif`                                                                           | dropped as not a type a paper uses                               | dropped: convert it to PDF or PNG                |
-| The `.tar.gz` arXiv gives; a gzipped `.tex`                                              | **"not a readable ZIP file"**                                    | says what it is, and to unpack it and make a ZIP |
-| `\documentclass` in a file the root reads                                                | **refused, with no way on**                                      | refused: put `\documentclass` in the main file   |
-| A Latin-1 root                                                                           | **refused as having no main file**                               | refused: it is not UTF-8, and how to make it so  |
-| A root named `my paper.tex` or `résumé (v2).tex`                                         | **imported, then "could not run this build. Try again", always** | builds                                           |
-| `paper.tex` with its sections beside `cover-letter.tex`                                  | **the cover letter taken as the root**                           | `paper.tex`                                      |
-| BibTeX finding no `.bib`, style or `\bibliography`                                       | **"failed without saying where"**                                | says which                                       |
-| One paper in a folder, as a Git host gives it                                            | named after the folder ("src")                                   | named after the ZIP                              |
-| A Git host's wrapping folder; an Overleaf export; a macOS ZIP; BOM, CRLF, accented names | built                                                            | the same                                         |
+| Archive                                                                                  | Before                                                           | Now                                                                        |
+| ---------------------------------------------------------------------------------------- | ---------------------------------------------------------------- | -------------------------------------------------------------------------- |
+| `src/main.tex`, with `figures/` and `refs.bib` beside `src/`                             | **only `main.tex` kept; never built**                            | imported whole, root `src/main.tex`; builds                                |
+| Two papers sharing `figures/` and `refs.bib`                                             | **each without them, "outside every paper"**                     | a reader keeps its layout and a copy, noted                                |
+| An arXiv source: `main.bbl`, no `.bib`                                                   | **the `.bbl` dropped as build output; failed with no reason**    | kept, and said to be ready-made; builds                                    |
+| `.tikz`, `.pgf`, `.pdf_tex`, `.dat`, `.lua`, a font                                      | **dropped as "not a file type a paper uses"; never built**       | kept; builds                                                               |
+| `.svg`, `.gif`                                                                           | dropped as not a type a paper uses                               | dropped: convert it to PDF or PNG                                          |
+| The `.tar.gz` arXiv gives; a gzipped `.tex`                                              | **"not a readable ZIP file"**                                    | said what it is (the `.tar.gz` is read since: see "A tar archive imports") |
+| `\documentclass` in a file the root reads                                                | **refused, with no way on**                                      | refused: put `\documentclass` in the main file                             |
+| A Latin-1 root                                                                           | **refused as having no main file**                               | refused: it is not UTF-8, and how to make it so                            |
+| A root named `my paper.tex` or `résumé (v2).tex`                                         | **imported, then "could not run this build. Try again", always** | builds                                                                     |
+| `paper.tex` with its sections beside `cover-letter.tex`                                  | **the cover letter taken as the root**                           | `paper.tex`                                                                |
+| BibTeX finding no `.bib`, style or `\bibliography`                                       | **"failed without saying where"**                                | says which                                                                 |
+| One paper in a folder, as a Git host gives it                                            | named after the folder ("src")                                   | named after the ZIP                                                        |
+| A Git host's wrapping folder; an Overleaf export; a macOS ZIP; BOM, CRLF, accented names | built                                                            | the same                                                                   |
 
 - **What was wrong.** The importer took the folder holding a root as the paper and left the rest
   out, though LaTeX reads `../` freely. It treated every `.bbl` as something a build makes again,
@@ -2688,7 +2715,8 @@ update` held the paper's file rows for **189.6 s** (until the proxy was cut; it 
   unit tests of each BibTeX sentence; and a browser test of the root in a folder. Each failed on
   the old code.
 - **Not changed:**
-  - A `.tar.gz` is refused with a sentence, not read.
+  - A `.tar.gz` was refused with a sentence, not read. It is read since (see "A tar archive
+    imports"); a gzipped single file is still refused.
   - Files shared between papers are copied only into a paper that reads them (`../`,
     `\graphicspath`, a `.sty`, `\bibliography`); a paper that reads none is as before. A copy is its
     own: a change to it does not reach the other papers. A paper reading a file inside another
@@ -7013,3 +7041,61 @@ of the paper's .bib files.`
     comes back to the file's page without the `#`.
   - Tried in headless Chromium only. Firefox and Safari call window listeners in the order
     added too (it is the standard's rule), but neither was run.
+
+## A tar archive imports
+
+- **What was wrong.** The `.tar.gz` arXiv gives and the archive a Git host gives were refused
+  with "Unpack it and make a ZIP" (see "A real paper brought in").
+- **Now** (`packages/server/src/archive.ts`; `apps/web/app/projects/page.tsx`,
+  `apps/web/app/api/projects/import/route.ts`): `.tar.gz`, `.tgz` and `.tar` are imported
+  directly, with no new dependency (`node:zlib` and a tar reader written here). What an archive is
+  is told by its first bytes, never its name: gzip (`1f 8b`) or `ustar` at offset 257 is read as
+  a tar, anything else as a ZIP. The page's file field, label and help say so, and the paper is
+  named after the file without `.zip`, `.tar.gz`, `.tgz` or `.tar`. Who may import is unchanged
+  (same origin, signed in, the upload taken once from `tmp/<userId>/`, the papers-per-hour limit;
+  the importer is the sole owner).
+- **One set of rules.** The per-entry rules and the `.bbl` and file-or-folder step at the end are
+  one `Intake` that the ZIP and the tar readers both use, so a tar keeps and leaves out exactly
+  what a ZIP does. The ZIP's behaviour is unchanged. Entries left out are never held: a tar is
+  read from the inflated stream, 512 bytes at a time, and only the files a paper keeps are put
+  together.
+- **Read:** ustar headers (the `prefix` field only where the magic is POSIX, not GNU's), GNU long
+  names (`L`), pax `path=` and `size=`; names go through the same NFC and `./` clean-up as a ZIP's.
+  Folders, pax global headers and GNU long link names are passed over.
+- **Refused, the whole archive, each with its own sentence ("This archive cannot be imported:
+  ..."):**
+  - the dialects that are not read: old V7 headers (no `ustar`), sparse files (type `S` and pax
+    `GNU.sparse.*`), and sizes in base-256 (files over 8 GB). Multi-volume and other special
+    types are refused too when named as a file of a paper;
+  - a bad header checksum; an archive that ends before its last file or its end blocks do (a
+    gzip cut short is the same);
+  - a symbolic or hard link, or a device or pipe, whose name is of a type a paper keeps (one with
+    a name that is left out is only listed or passed over);
+  - an absolute name, one that starts with a drive letter (`C:`), or one with `..` in it (any
+    entry, whatever its type), and a name that is not UTF-8; a pax `path` that is empty or has a
+    NUL in it; a pax record whose length is not plain decimal digits (`0x10` is refused);
+  - a GNU long name or pax header over `META_BYTES` (4 KB: a path of 255 characters is about 1 KB
+    in UTF-8, and the records around it are short; it was 1 MB, enough for 598 headers to cost
+    37 s of CPU);
+  - the same file twice, and anything over `LIMITS` (files, entries, a file, the total, a path).
+    Every header counts toward `entries`, the metadata ones (`L`, `x`, `g`, `K`) too. The reader
+    gives way to the event loop every 256 headers, so a plain tar in one chunk cannot starve it.
+- **A new limit, `LIMITS.inflatedBytes` (600 MB).** A ZIP passes over an entry it leaves out
+  without reading it; a tar.gz has to inflate everything to get past it, so `totalBytes` (which
+  holds only kept files) cannot stop a gzip bomb. The cap is twice `totalBytes`: room for the
+  largest paper allowed and as much again of left-out files, headers and padding, and no more.
+  The inflated stream is cut at the cap, so a bomb of zeros costs a chunk of memory, not the
+  bomb.
+- **A gzipped single file** (`paper.tex.gz`) is still refused, with its own sentence.
+- **Held by** `archive.test.ts` (a tar.gz and a plain tar read as the same files zipped; `../`
+  and `/`; links; 300-character paths by GNU `L` and by pax; a bad checksum; a cut-short archive;
+  the refused dialects; a gzip bomb; `.git` counting only toward `entries`), the sandbox tests in
+  `import.sandbox.test.ts` (an arXiv-shaped tar.gz; another person's key; a hostile tar makes no
+  rows) and three browser tests in `import.spec.ts`. Tars in tests are built from bytes
+  (`packages/server/src/tarbuild.ts`), never with the `tar` program.
+- **Not done.**
+  - The refusals above are of the archive, not the file: a tar written in a dialect that is
+    refused has to be repacked (`tar --format=ustar`) by the person.
+  - The words of other refusals that say "ZIP" (a paper with no main file, more than 50 papers,
+    an upload over 100 MB) are the same for a tar.
+  - `.tar.bz2`, `.tar.xz`, `.7z` and `.rar` are not read.

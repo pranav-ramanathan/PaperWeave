@@ -61,8 +61,9 @@ export default async function Projects({
               it is. Give it a name and choose one under &quot;Start from&quot;.
             </li>
             <li>
-              <strong>From a ZIP.</strong> A project from Overleaf or your own machine. You get a
-              report of what was found and what can be edited visually.
+              <strong>From a ZIP or a tar.</strong> A project from Overleaf, arXiv, a Git host or
+              your own machine, as a ZIP, .tar.gz, .tgz or .tar. You get a report of what was found
+              and what can be edited visually.
             </li>
             <li>
               <strong>From nothing.</strong> An empty paper, to which you add files.
@@ -92,10 +93,15 @@ export default async function Projects({
       </form>
       <DirectUpload action="/api/projects/import" kind="zip" field="zip">
         <label>
-          Or import a ZIP of a LaTeX project
-          <input type="file" name="zip" accept=".zip,application/zip" required />
+          Or import a ZIP of a LaTeX project, or a .tar.gz, .tgz or .tar of one
+          <input
+            type="file"
+            name="zip"
+            accept=".zip,.tar.gz,.tgz,.tar,application/zip,application/gzip,application/x-gzip,application/x-tar"
+            required
+          />
         </label>
-        <Once>Import ZIP</Once>
+        <Once>Import ZIP or tar</Once>
       </DirectUpload>
     </main>
   );

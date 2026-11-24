@@ -4,7 +4,9 @@ import { expect, test } from '@playwright/test';
 import { mkdtempSync, readdirSync, readFileSync, statSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join, relative } from 'node:path';
+import { gzipSync } from 'node:zlib';
 import { readZip, writeZip } from '../../packages/server/src/archive';
+import { tarFiles } from '../../packages/server/src/tarbuild';
 import {
   address,
   audit,
@@ -416,4 +418,75 @@ test('a paper whose \\documentclass is in an \\input-ed file imports and builds'
     'The PDF is up to date.',
     { timeout: 90_000 },
   );
+});
+
+test('a .tar.gz of a paper imports through the page and comes back byte for byte; nobody else is let in', async ({
+  browser,
+}) => {
+  const owner = await person(browser, 'tar-importer');
+  const other = await person(browser, 'tar-other');
+  const name = `Tarred paper ${run}`;
+  const files = fixtureFiles(`${name}/`);
+  const archive = join(mkdtempSync(join(tmpdir(), 'paperweave-e2e-')), `${name}.tar.gz`);
+  writeFileSync(archive, gzipSync(tarFiles(files)));
+
+  await owner.page.goto('/sign-in');
+  await signIn(owner.page, owner.email);
+  await owner.page.getByLabel('Or import a ZIP of a LaTeX project').setInputFiles(archive);
+  await owner.page.getByRole('button', { name: 'Import ZIP' }).click();
+
+  // The paper is named after the archive, without ".tar.gz".
+  await expect(owner.page.getByRole('heading', { name, exact: true })).toBeVisible();
+  await expect(owner.page.getByText('Root file: main.tex. Compiler: pdflatex.')).toBeVisible();
+  const paper = owner.page.url();
+
+  const [download] = await Promise.all([
+    owner.page.waitForEvent('download'),
+    owner.page.getByRole('link', { name: 'Download ZIP' }).click(),
+  ]);
+  const back = await readZip(readFileSync(await download.path()));
+  expect(back.entries.map((e) => e.path).sort()).toEqual(
+    files.map((f) => f.path.slice(name.length + 1)).sort(),
+  );
+  for (const f of files) {
+    const got = back.entries.find((e) => e.path === f.path.slice(name.length + 1))!;
+    expect(Buffer.from(got.bytes).equals(f.bytes), f.path).toBe(true);
+  }
+
+  // Someone else, signed in, is told there is nothing there: not that there is a paper.
+  await other.page.goto('/sign-in');
+  await signIn(other.page, other.email);
+  expect((await other.page.goto(paper))?.status()).toBe(404);
+  await expect(other.page.getByRole('heading', { name: 'Nothing here' })).toBeVisible();
+  expect((await other.page.request.get(`${paper}/export`)).status()).toBe(404);
+});
+
+test('a damaged .tar.gz is refused on the projects page and makes no paper', async ({
+  browser,
+}) => {
+  const visitor = await person(browser, 'bad-tar');
+  const dir = mkdtempSync(join(tmpdir(), 'paperweave-e2e-'));
+  const tar = tarFiles(fixtureFiles('paper/'));
+  // A header whose checksum no longer fits; and a gzip that stops short.
+  const flipped = Buffer.from(tar);
+  flipped[3] ^= 1;
+  writeFileSync(join(dir, 'flipped.tar.gz'), gzipSync(flipped));
+  const whole = gzipSync(tar);
+  writeFileSync(join(dir, 'cut.tar.gz'), whole.subarray(0, whole.length - 40));
+
+  await visitor.page.goto('/sign-in');
+  await signIn(visitor.page, visitor.email);
+  for (const [file, why] of [
+    ['flipped.tar.gz', 'This archive cannot be imported: a header in it has a bad checksum.'],
+    ['cut.tar.gz', 'This archive cannot be imported: '],
+  ]) {
+    await visitor.page
+      .getByLabel('Or import a ZIP of a LaTeX project')
+      .setInputFiles(join(dir, file));
+    await visitor.page.getByRole('button', { name: 'Import ZIP' }).click();
+    await expect(visitor.page).toHaveURL(/\/projects\?error=/);
+    await expect(visitor.page.locator('main [role=alert]')).toContainText(why);
+  }
+  // No paper was made: the page still offers a first one.
+  await expect(visitor.page.getByRole('heading', { name: 'Start your first paper' })).toBeVisible();
 });

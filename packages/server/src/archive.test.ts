@@ -1,6 +1,7 @@
-import { crc32 } from 'node:zlib';
+import { crc32, gzipSync } from 'node:zlib';
 import { expect, test } from 'vitest';
-import { checkPath, type Entry, LIMITS, readZip, writeZip } from './archive.ts';
+import { checkPath, type Entry, LIMITS, readTar, readZip, writeZip } from './archive.ts';
+import { gnuLongName, paxHeader, tarBlock, tarFiles, tarOf } from './tarbuild.ts';
 
 const small = { ...LIMITS, files: 3, fileBytes: 1000, totalBytes: 1500, entries: 40 };
 const tex = '\\documentclass{article}\\begin{document}x\\end{document}';
@@ -258,4 +259,311 @@ test('a cleaned name never climbs out or becomes absolute', async () => {
         ).toBe(true),
       () => undefined,
     ); // guard: refused, or safe
+});
+
+// ---- tar and tar.gz
+
+const refusal = async (bytes: Uint8Array, limits = small) => {
+  try {
+    await readZip(bytes, limits);
+    return 'read';
+  } catch (e) {
+    return (e as Error).message;
+  }
+};
+const tarOne = (name: string, data = tex) => tarBlock(name, data);
+
+test('a tar.gz and a plain tar give the same entries as the same files zipped', async () => {
+  const files = [
+    f('paper/main.tex'),
+    f('paper/sections/a.tex', '\\section{A} café'),
+    f('paper/refs.bib', '@book{a,title={T}}'),
+    { path: 'paper/figs/x.png', bytes: Buffer.from([0x89, 0x50, 0x4e, 0x47, 0, 255, 1]) },
+    f('paper/paperweave-review.json', '{}'),
+    f('paper/notes.docx', 'left out'),
+    f('paper/fig.svg', '<svg/>'),
+    f('paper/main.bbl', 'bibliography'),
+    f('paper/.git/HEAD', 'ref'),
+  ];
+  const zipped = await readZip(await writeZip(files), LIMITS);
+  const tar = tarFiles(files);
+  for (const archive of [tar, gzipSync(tar)]) {
+    const got = await readZip(archive, LIMITS);
+    expect(got).toEqual(zipped);
+  }
+  expect(zipped.entries.length).toBe(4);
+  expect(zipped.bbl.map((e) => e.path)).toEqual(['paper/main.bbl']);
+  expect(zipped.skipped.map((s) => s.path).sort()).toEqual([
+    'paper/fig.svg',
+    'paper/main.bbl',
+    'paper/notes.docx',
+  ]);
+});
+
+test('a tar is told by its first bytes, not its name, and a lone .gz is still refused', async () => {
+  const tar = tarFiles([f('main.tex')]);
+  expect((await readTar(gzipSync(tar))).entries.map((e) => e.path)).toEqual(['main.tex']);
+  expect(await refusal(gzipSync(Buffer.from(tex)))).toBe(
+    'This is a .gz, one compressed file. Unpack it and put it in a ZIP with the rest of the paper, then import that.',
+  );
+  // Refusals of a tar say "archive"; those of a ZIP still say "ZIP".
+  expect(await refusal(tarOf([tarOne('a.tex'), tarOne('a.tex')]))).toBe(
+    'This archive cannot be imported: it contains the same file twice.',
+  );
+  expect(await refusal(Buffer.from('not an archive at all'))).toBe(
+    'This ZIP cannot be imported: it is not a readable ZIP file.',
+  );
+});
+
+test('the ustar prefix is joined to the name, and GNU headers have none', async () => {
+  const posix = tarOf([tarBlock('main.tex', tex, { prefix: 'paper/sections' })]);
+  expect((await readZip(posix, small)).entries.map((e) => e.path)).toEqual([
+    'paper/sections/main.tex',
+  ]);
+  const gnu = tarOf([tarBlock('main.tex', tex, { prefix: 'junk', format: 'gnu' })]);
+  expect((await readZip(gnu, small)).entries.map((e) => e.path)).toEqual(['main.tex']);
+});
+
+test('names are cleaned as in a ZIP: ./ and // go, and the name is in NFC', async () => {
+  const r = await readZip(tarOf([tarOne('./paper//main.tex'), tarOne('paper/café.tex')]), small);
+  expect(r.entries.map((e) => e.path)).toEqual(['paper/main.tex', 'paper/café.tex']);
+});
+
+test('a name that climbs out or is absolute refuses the whole archive', async () => {
+  for (const name of ['../x.tex', '/x.tex', 'a/../../x.tex', 'a/..', '../x.docx', '.git/../x']) {
+    expect(await refusal(tarOf([tarOne('main.tex'), tarOne(name)])), name).toMatch(
+      /^This archive cannot be imported: a file name in it is absolute or has \.\. in it/,
+    );
+  }
+  // A name that only contains two dots is a name.
+  expect((await readZip(tarOf([tarOne('a..b.tex')]), small)).entries).toHaveLength(1);
+});
+
+test('a name that is not UTF-8 refuses the whole archive', async () => {
+  expect(
+    await refusal(tarOf([tarBlock(Buffer.from([0x61, 0xff, 0xfe, 0x2e, 0x74, 0x65, 0x78]))])),
+  ).toBe('This archive cannot be imported: a file name in it is not valid UTF-8.');
+});
+
+test('a link named as a file of a paper refuses the archive; one named as something else is skipped', async () => {
+  for (const type of ['2', '1'])
+    expect(
+      await refusal(
+        tarOf([tarOne('main.tex'), tarBlock('link.tex', '', { type, link: 'main.tex' })]),
+      ),
+    ).toBe(
+      `This archive cannot be imported: it contains a ${type === '2' ? 'symbolic' : 'hard'} link.`,
+    );
+  const r = await readZip(
+    tarOf([tarOne('main.tex'), tarBlock('fig.svg', '', { type: '2', link: '/etc/passwd' })]),
+    small,
+  );
+  expect(r.entries.map((e) => e.path)).toEqual(['main.tex']);
+  expect(r.skipped).toEqual([
+    { path: 'fig.svg', reason: expect.stringContaining('LaTeX cannot use this picture') },
+  ]);
+});
+
+test('a path of 300 characters works through a GNU long name and through pax', async () => {
+  const path = `${'d'.repeat(100)}/${'e'.repeat(100)}/${'f'.repeat(80)}/main.tex`.padStart(
+    300,
+    'a',
+  );
+  expect(path).toHaveLength(300);
+  const wide = { ...small, pathLength: 400 };
+  for (const blocks of [
+    [gnuLongName(path), tarBlock('long-name-stand-in.tex', tex)],
+    [paxHeader({ path }), tarBlock('pax-stand-in.tex', tex)],
+  ]) {
+    const r = await readZip(gzipSync(tarOf([...blocks, tarOne('b.tex')])), wide);
+    expect(r.entries.map((e) => e.path)).toEqual([path, 'b.tex']);
+    // The ordinary limit on a path still holds for a name given this way.
+    expect(await refusal(tarOf(blocks))).toBe(
+      'This archive cannot be imported: a file name in it is not usable.',
+    );
+  }
+});
+
+test('a long name or pax path applies to the next entry only, and a pax size is read', async () => {
+  const r = await readZip(
+    tarOf([
+      gnuLongName('first.tex'),
+      tarBlock('x', tex),
+      tarOne('second.tex'),
+      paxHeader({ path: 'third.tex', size: String(tex.length) }),
+      tarBlock('y', tex, { claim: 0 }),
+    ]),
+    small,
+  );
+  expect(r.entries.map((e) => [e.path, e.bytes.length])).toEqual([
+    ['first.tex', tex.length],
+    ['second.tex', tex.length],
+    ['third.tex', tex.length],
+  ]);
+});
+
+test('metadata headers count towards the number of entries', async () => {
+  const few = { ...small, entries: 5 };
+  const meta = [
+    paxHeader({ path: 'a.tex' }),
+    tarBlock('g', '', { type: 'g' }),
+    gnuLongName('b.tex'),
+    tarBlock('k', '', { type: 'K' }),
+  ];
+  // Two files and four headers about them: six headers, over the limit of five.
+  expect(await refusal(tarOf([...meta, tarOne('x'), tarOne('y')]), few)).toBe(
+    'This archive cannot be imported: it has too many files.',
+  );
+  // The same under the limit is read.
+  expect((await readZip(tarOf([...meta, tarOne('x')]), few)).entries).toHaveLength(1);
+  // Nothing but empty global headers is refused too.
+  const globals = Array.from({ length: 6 }, () => tarBlock('g', '', { type: 'g' }));
+  expect(await refusal(tarOf(globals), few)).toBe(
+    'This archive cannot be imported: it has too many files.',
+  );
+});
+
+test('a pax header or long name over the size read is refused', async () => {
+  const wide = { ...small, pathLength: 10_000 };
+  const long = 'a'.repeat(5000);
+  expect(await refusal(tarOf([paxHeader({ path: long }), tarOne('x')]), wide)).toBe(
+    'This archive cannot be imported: a header in it is too long.',
+  );
+  expect(await refusal(tarOf([gnuLongName(long), tarOne('x')]), wide)).toBe(
+    'This archive cannot be imported: a header in it is too long.',
+  );
+  // A path of the ordinary limit, in all four-byte characters, still fits.
+  const path = '\u{1F600}'.repeat(60) + '.tex';
+  expect((await readZip(tarOf([paxHeader({ path }), tarOne('x')]), small)).entries).toHaveLength(1);
+});
+
+test('a name that starts with a drive letter refuses the archive, as in a ZIP', async () => {
+  for (const name of ['C:/b.tex', 'c:b.tex', 'Z:\\b.tex'])
+    expect(await refusal(tarOf([tarOne(name)])), name).toMatch(
+      /^This archive cannot be imported: a file name in it is absolute or has \.\. in it/,
+    );
+  // A colon after more than one letter, or further in, is only a colon.
+  expect((await readZip(tarOf([tarOne('ab:c.tex')]), small)).entries).toHaveLength(1);
+  expect((await readZip(tarOf([tarOne('d/a:b.tex')]), small)).entries).toHaveLength(1);
+});
+
+test('a pax path that is empty or has a NUL in it refuses the archive', async () => {
+  for (const path of ['', 'a.tex\0b', '\0'])
+    expect(await refusal(tarOf([paxHeader({ path }), tarOne('x.tex')])), JSON.stringify(path)).toBe(
+      'This archive cannot be imported: a file name in it is empty or has a NUL in it.',
+    );
+});
+
+test('a pax record length must be plain decimal digits', async () => {
+  const raw = (text: string) => tarBlock('PaxHeader/x', Buffer.from(text), { type: 'x' });
+  const damaged = 'This archive cannot be imported: it is damaged or not what it claims to be.';
+  for (const text of [
+    '0x10 path=a.tex\n',
+    '16e0 path=aa.tex\n',
+    '+16 path=aa.tex\n',
+    ' 16 path=aa.tex\n',
+  ])
+    expect(await refusal(tarOf([raw(text), tarOne('x.tex')])), text).toBe(damaged);
+  // The same record with an honest length is read.
+  const ok = await readZip(tarOf([raw('14 path=a.tex\n'), tarOne('x.tex')]), small);
+  expect(ok.entries.map((e) => e.path)).toEqual(['a.tex']);
+});
+
+test('a bad checksum refuses the archive', async () => {
+  const tar = Buffer.from(tarOf([tarOne('main.tex')]));
+  tar[3] ^= 1; // a letter of the name, after the checksum was written
+  expect(await refusal(tar)).toBe(
+    'This archive cannot be imported: a header in it has a bad checksum.',
+  );
+  expect(await refusal(gzipSync(tar))).toBe(
+    'This archive cannot be imported: a header in it has a bad checksum.',
+  );
+});
+
+test('a truncated archive refuses the archive, plain or gzipped', async () => {
+  const tar = tarOf([tarOne('main.tex', 'x'.repeat(900)), tarOne('b.tex')]);
+  const cut =
+    'This archive cannot be imported: it is cut short: it ends before its last file does.';
+  expect(await refusal(tar.subarray(0, 512 + 300))).toBe(cut); // inside a file's data
+  expect(await refusal(tar.subarray(0, 512 + 1024 + 100))).toBe(cut); // inside a header
+  expect(await refusal(tar.subarray(0, 512 + 1024 + 512))).toBe(cut); // no end of archive
+  // The gzip itself cut short is as damaged, whatever tar is in it.
+  const gz = gzipSync(tar);
+  expect(await refusal(gz.subarray(0, gz.length - 20))).toMatch(
+    /^This archive cannot be imported: /,
+  );
+  expect(await refusal(gzipSync(tar.subarray(0, 512 + 300)))).toBe(cut);
+});
+
+test('a tar of an old kind, a sparse file and a base-256 size are refused with a sentence', async () => {
+  expect(await refusal(tarOf([tarOne('a.tex'), tarBlock('b.tex', tex, { format: 'v7' })]))).toMatch(
+    /^This archive cannot be imported: it is an old-style tar/,
+  );
+  expect(await refusal(tarOf([tarOne('a.tex'), tarBlock('b.tex', tex, { type: 'S' })]))).toMatch(
+    /holds a sparse file/,
+  );
+  expect(await refusal(tarOf([paxHeader({ 'GNU.sparse.major': '1' }), tarOne('b.tex')]))).toMatch(
+    /holds a sparse file/,
+  );
+  const wide = Buffer.alloc(12);
+  wide[0] = 0x80;
+  wide[11] = 5;
+  expect(
+    await refusal(tarOf([tarOne('a.tex'), tarBlock('b.tex', tex, { sizeField: wide })])),
+  ).toMatch(/size in base-256/);
+});
+
+test('a file of the paper over a limit refuses the archive, as in a ZIP', async () => {
+  expect(await refusal(tarOf([tarOne('a.tex', 'x'.repeat(1001))]))).toBe(
+    'This archive cannot be imported: a.tex is too large.',
+  );
+  expect(await refusal(tarOf(['a', 'b', 'c', 'd'].map((n) => tarOne(`${n}.tex`))))).toBe(
+    'This archive cannot be imported: it has too many files.',
+  );
+  expect(await refusal(tarOf(['a', 'b'].map((n) => tarOne(`${n}.tex`, 'x'.repeat(800)))))).toBe(
+    'This archive cannot be imported: it unpacks to too much data.',
+  );
+  expect(await refusal(tarOf([tarOne('a.tex')]), { ...small, archiveBytes: 1000 })).toBe(
+    'This archive cannot be imported: it is too large.',
+  );
+});
+
+test('a gzip bomb of zeros stops at the cap on inflated bytes', async () => {
+  const capped = { ...small, inflatedBytes: 1_000_000 };
+  // Left-out data is inflated to be passed over, so only the inflated cap stops a bomb of it.
+  const bomb = gzipSync(tarOf([tarBlock('notes.docx', Buffer.alloc(30_000_000))]));
+  expect(bomb.length).toBeLessThan(100_000);
+  expect(await refusal(bomb, capped)).toBe(
+    'This archive cannot be imported: it unpacks to too much data.',
+  );
+  // The same as it ends, with the end of the archive early and a long tail of zeros after it.
+  const tail = gzipSync(Buffer.concat([tarOf([tarOne('main.tex')]), Buffer.alloc(30_000_000)]));
+  expect(await refusal(tail, capped)).toBe(
+    'This archive cannot be imported: it unpacks to too much data.',
+  );
+  // And the same bomb under the ordinary cap is only read, not refused for its size.
+  expect(await refusal(bomb, { ...small, inflatedBytes: 40_000_000 })).toBe('read');
+  // Nothing but zeros is no tar at all.
+  expect(await refusal(gzipSync(Buffer.alloc(30_000_000)), capped)).toMatch(/^This is a \.gz/);
+});
+
+test('.git entries count only towards the number of entries, in a tar too', async () => {
+  const git = Array.from({ length: 20 }, (_, i) => tarOne(`paper/.git/objects/ab/${i}`, 'x'));
+  const blocks = [
+    tarOne('paper/main.tex'),
+    tarOne('paper/refs.bib', '@book{a,title={T}}'),
+    ...git,
+    tarOne('paper/.git/objects/pack/p.pack', 'p'.repeat(5000)),
+  ];
+  const r = await readZip(gzipSync(tarOf(blocks)), small);
+  expect(r.entries.map((e) => e.path).sort()).toEqual(['paper/main.tex', 'paper/refs.bib']);
+  expect(r.skipped).toEqual([]);
+  const many = Array.from({ length: 50 }, (_, i) => tarOne(`.git/x${i}`, 'x'));
+  expect(await refusal(tarOf([tarOne('main.tex'), ...many]))).toBe(
+    'This archive cannot be imported: it has too many files.',
+  );
+  // Unreadable names there are still not looked at.
+  expect(
+    (await readZip(tarOf([tarOne('main.tex'), tarOne('.git/a\u0001b')]), small)).entries,
+  ).toHaveLength(1);
 });

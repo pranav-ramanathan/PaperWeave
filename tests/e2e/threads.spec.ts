@@ -566,7 +566,13 @@ test('Resolve refuses a thread someone wrote in after it was drawn', async ({ br
   // The owner's page can no longer read the threads, so what it shows stays as it was drawn.
   await owner.page.route(/\/projects\/[^/]+\/threads\?file=/, (r) => r.abort());
   await thread(reviewer.page).getByLabel('Reply about “forty”').fill('Wait: the number is wrong.');
+  // The unsent draft in the reply box is part of the thread's text, so the words alone do not
+  // show that the server has the reply: wait for the POST that saves it to be answered.
+  const saved = reviewer.page.waitForResponse(
+    (r) => r.request().method() === 'POST' && /\/threads\/[0-9a-f-]+$/.test(r.url()) && r.ok(),
+  );
   await thread(reviewer.page).getByRole('button', { name: 'Reply' }).click();
+  await saved;
   await expect(thread(reviewer.page)).toContainText('Wait: the number is wrong.');
   await expect(thread(owner.page)).not.toContainText('Wait: the number is wrong.');
 
