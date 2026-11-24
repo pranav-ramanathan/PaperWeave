@@ -20,20 +20,49 @@ export const isNews = (number: number, seen: number | null) => seen !== null && 
  * is whether their own edits are waiting on their decision (they were offline with them), in
  * which case the status line beside this says what becomes of those.
  */
-export function restoredWords(r: RestoreNote, me: string, time: string, held = false): string {
+/** Who restored the paper, to what and when: the sentence both notes begin with. */
+function first(r: RestoreNote, me: string, time: string) {
   const name = r.fromName
     ? ` (${r.fromName.length > NAME_SHOWN ? `${r.fromName.slice(0, NAME_SHOWN)}…` : r.fromName})`
     : '';
   const to = r.from === null ? 'an earlier revision' : `revision ${r.from}${name}`;
   const who = r.by === me ? 'You restored this paper' : r.by ? `${r.by} restored this paper` : null;
-  const first = who
-    ? `${who} to ${to} at ${time}.`
-    : `This paper was restored to ${to} at ${time}.`;
+  return who ? `${who} to ${to} at ${time}.` : `This paper was restored to ${to} at ${time}.`;
+}
+
+export function restoredWords(r: RestoreNote, me: string, time: string, held = false): string {
   const kept = r.kept
     ? ` The paper as it was just before, with everything saved until then, is kept as revision ${r.kept.number}.`
     : '';
   const after = held ? '' : ' Anything typed after that moment is still in the text.';
-  return `${first} It is now revision ${r.number}.${kept}${after}`;
+  return `${first(r, me, time)} It is now revision ${r.number}.${kept}${after}`;
+}
+
+/**
+ * Why the file an editor has open is no longer served, as far as the paper's list of files says:
+ * the person is off the paper (`listing` is null), or the file is not in the list: the restore
+ * the answer names took it out, or else it was deleted. `null` if the list still has the file
+ * (it stopped being text, say): the status line's own words stand alone then.
+ */
+export type Left = { why: 'off' } | { why: 'deleted' } | { why: 'restore'; restore: RestoreNote };
+export function whyGone(
+  listing: { files: { id: string }[]; restore: RestoreNote | null } | null,
+  fileId: string,
+): Left | null {
+  if (!listing) return { why: 'off' };
+  if (listing.files.some((f) => f.id === fileId)) return null;
+  return listing.restore ? { why: 'restore', restore: listing.restore } : { why: 'deleted' };
+}
+
+/** The sentences for it. `time` is when the restore was made, as the reader's clock shows it. */
+export function goneWords(left: Left, me: string, time: string): string {
+  if (left.why === 'off') return 'You are no longer a member of this paper.';
+  if (left.why === 'deleted')
+    return 'This file has been deleted from the paper. The revision saved just before still has it.';
+  const kept = left.restore.kept
+    ? ` The paper as it was just before, with this file, is kept as revision ${left.restore.kept.number}.`
+    : '';
+  return `${first(left.restore, me, time)} This file is not in that revision, so it is no longer in the paper.${kept}`;
 }
 
 /** The page that shows what the restore took out and put back, if the paper before it was kept. */

@@ -73,6 +73,15 @@ const code = (p: Promise<unknown>) =>
     (e) => e.code ?? `unexpected: ${e.message}`,
   );
 
+test('the list of a paper’s files is for the people on the paper only', async () => {
+  const p = await paper();
+  // What the files route behind an open editor answers with: refused for a stranger, whatever
+  // the paper's files are called, and the same list for a member of any role.
+  expect(await code(listFiles(t.pool, outsider.id, p.id))).toBe('not_found');
+  expect(await code(listFiles(t.pool, outsider.id, 'not-an-id'))).toBe('not_found');
+  expect((await listFiles(t.pool, viewer.id, p.id)).map((f) => f.path)).toEqual(await paths(p.id));
+});
+
 test('a blank text file and an uploaded file can be added, edited and exported', async () => {
   const p = await paper();
   const notes = await createFile(t.pool, store, owner.id, p.id, 'sections/notes.tex');

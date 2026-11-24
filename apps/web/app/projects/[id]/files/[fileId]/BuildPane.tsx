@@ -7,6 +7,8 @@ import { setMarks } from '../../../../../lib/builds';
 import { type Numbers, setNumbers } from '../../../../../lib/numbers';
 import { onShow, showInEditor } from '../../../../../lib/pdfsync';
 import { onTyping } from '../../../../../lib/typing';
+import type { PaperFile } from '../../../../../lib/paperfiles';
+import { useFiles } from './Files';
 import PdfView, { type Mark } from './PdfView';
 
 /** A build takes a minute at most once it starts. Waiting twice that, it has not started. */
@@ -34,19 +36,20 @@ const time = (iso: string) =>
 export default function BuildPane({
   projectId,
   canBuild,
-  files,
-  paths,
   rootDir,
+  ...made
 }: {
   projectId: string;
   canBuild: boolean;
-  /** The paper's files that can be opened in the editor. */
-  files: { id: string; path: string }[];
-  /** Every path in the paper, binary files too. */
-  paths: string[];
+  /** Every file of the paper when the page was made. The pane follows the list from there. */
+  files: PaperFile[];
   /** The root file's folder with its trailing slash, or ''. */
   rootDir: string;
 }) {
+  const all = useFiles(projectId, made.files);
+  // The files that can be opened in the editor, and every path in the paper, binary files too.
+  const files = all.filter((f) => !f.readonly);
+  const paths = all.map((f) => f.path);
   const [builds, setBuilds] = useState<Builds | null>(null);
   const [auto, setAuto] = useState(true);
   const [problem, setProblem] = useState('');

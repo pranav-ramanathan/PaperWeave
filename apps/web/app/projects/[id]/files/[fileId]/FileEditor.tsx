@@ -35,7 +35,15 @@ import { pageNonce } from '../../../../../lib/nonce';
 import { atRisk, LEAVE, leavesPage } from '../../../../../lib/leaving';
 import { carry, onShow, showInPdf, taken } from '../../../../../lib/pdfsync';
 import { wordAt } from '../../../../../lib/pdfword';
-import { isNews, restoreChanges, restoredWords } from '../../../../../lib/restored';
+import { onFiles, refreshFiles } from '../../../../../lib/paperfiles';
+import {
+  goneWords,
+  isNews,
+  type Left,
+  restoreChanges,
+  restoredWords,
+  whyGone,
+} from '../../../../../lib/restored';
 import { setTyping } from '../../../../../lib/typing';
 import { createVisual, type Visual } from '../../../../../lib/visual';
 import type { LanguageFinding, Proposal, RestoreNote, Thread } from '@paperweave/server';
@@ -147,6 +155,17 @@ const rememberView = (m: Mode) => {
     // Shut: nothing is remembered.
   }
 };
+
+/**
+ * The source view's name, and an explicit tab stop, editable or not: a bare contenteditable reads
+ * as tabIndex -1 to tools that check whether a scrolling region can be reached by keyboard.
+ */
+const sourceNamed = (path: string) =>
+  EditorView.contentAttributes.of({ 'aria-label': `LaTeX source of ${path}`, tabindex: '0' });
+
+/** A moment as the reader's clock shows it. */
+const clock = (at: string) =>
+  new Date(at).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
 
 /**
  * One file, open for live editing. A .tex file has two views of the same text, visual and source;
@@ -344,6 +363,33 @@ export default function FileEditor(props: {
   // The paper was restored while this person had the file open: who did it, and to what. Kept
   // until they dismiss it; the status line goes on saying whether their own edits are saved.
   const [restore, setRestore] = useState<RestoreNote | null>(null);
+  // The file is no longer served, and the paper's list of files says why: said in the same place.
+  const [left, setLeft] = useState<Left | null>(null);
+  // The file's name: the one the page was made with, until the list of files, asked for again
+  // because someone renamed a file, has another for it. A page made later brings its own.
+  const [renamed, setRenamed] = useState<{ made: string; path: string } | null>(null);
+  const path = renamed?.made === props.path ? renamed.path : props.path;
+  // The editors are made once; what they say on leaving reads the name from here.
+  const pathNow = useRef(path);
+  pathNow.current = path;
+  const named = useRef(new Compartment());
+  useEffect(
+    () =>
+      onFiles(projectId, (files) => {
+        const now = files.find((f) => f.id === fileId)?.path;
+        if (now) setRenamed({ made: props.path, path: now });
+      }),
+    [projectId, fileId, props.path],
+  );
+  useEffect(() => {
+    // Both views are named after the file, for someone who cannot see the name above them.
+    live.current?.view.dispatch({ effects: named.current.reconfigure(sourceNamed(path)) });
+    live.current?.visual?.name(`${path}, visual editor`);
+    // The tab's title begins with the name the page was made with.
+    const title = `${props.path} · `;
+    if (path !== props.path && document.title.startsWith(title))
+      document.title = `${path} · ${document.title.slice(title.length)}`;
+  }, [path, props.path]);
 
   useEffect(() => {
     const doc = new Y.Doc();
@@ -425,6 +471,8 @@ export default function FileEditor(props: {
         // The file is here: it can be typed in. (Not again on a later reconnect: by then
         // something else may be holding the editor shut.)
         if (!arrived) setLocked(false);
+        // Back from being away: files may have been added, removed or renamed meanwhile.
+        else void refreshFiles(projectId, user);
         arrived = true;
         // Back in touch: find out whether what was typed meanwhile has arrived.
         saving.reconnected();
@@ -442,15 +490,22 @@ export default function FileEditor(props: {
       },
       onStateless: ({ payload }) => {
         const reply:
-          (Reply & { key: string }) | Saved | Role | { restored: number; restore?: RestoreNote } =
-          JSON.parse(payload);
+          | (Reply & { key: string })
+          | Saved
+          | Role
+          | { files: true }
+          | { restored: number; restore?: RestoreNote } = JSON.parse(payload);
         if ('role' in reply) return roleIs(reply);
+        // A file was added, removed or renamed: the list beside the text, and this file's name.
+        if ('files' in reply) return void refreshFiles(projectId, user);
         // A restore made while this tab is connected arrives as ordinary edits; this says it was one.
         if ('restored' in reply) {
           // Said to the person too, unless this is a restore the editor already knew of (the
           // button pressed twice; the server's listener catching up).
           if (reply.restore && isNews(reply.restored, restoreSeen)) setRestore(reply.restore);
           restoreSeen = Math.max(restoreSeen ?? 0, reply.restored);
+          // A restore brings files back, takes files out and gives files the names they had.
+          void refreshFiles(projectId, user);
           return;
         }
         if ('saved' in reply) return saving.answered(reply);
@@ -592,12 +647,7 @@ export default function FileEditor(props: {
             },
           }),
           EditorView.lineWrapping,
-          // An explicit tab stop, editable or not: a bare contenteditable reads as tabIndex -1
-          // to tools that check whether a scrolling region can be reached by keyboard.
-          EditorView.contentAttributes.of({
-            'aria-label': `LaTeX source of ${props.path}`,
-            tabindex: '0',
-          }),
+          named.current.of(sourceNamed(pathNow.current)),
           // Shut until the file has arrived. Typed into an editor still empty, words would
           // land at the top of the file, wherever the caret was meant to be.
           writable.of(lock(true)),
@@ -706,7 +756,7 @@ export default function FileEditor(props: {
           element: visualHost.current!,
           ytext: text,
           undo,
-          label: `${props.path}, visual editor`,
+          label: `${pathNow.current}, visual editor`,
           sourceOnly,
           editable: canWrite,
           say: setNote,
@@ -919,6 +969,11 @@ export default function FileEditor(props: {
       gone = true;
       update({ refused: true });
       setLocked(true);
+      // Why, if the paper's list of files says: the file is not in it any more (deleted, or
+      // taken out by a restore), or the list is no longer this person's to see.
+      void refreshFiles(projectId, user, fileId).then((listing) => {
+        if (listing !== undefined) setLeft(whyGone(listing, fileId));
+      });
     };
     // The server says what this person's role is when the editor connects and whenever it
     // changes. This page shows what they could do when it loaded. If they can no longer edit,
@@ -962,7 +1017,7 @@ export default function FileEditor(props: {
       });
     mayLeave.current = () => {
       if (!risky()) return true;
-      if (!window.confirm(LEAVE(props.path))) return false;
+      if (!window.confirm(LEAVE(pathNow.current))) return false;
       agreed = Date.now();
       return true;
     };
@@ -1022,7 +1077,7 @@ export default function FileEditor(props: {
       doc.destroy();
     };
     // The editor is rebuilt only when a different file is opened.
-  }, [projectId, fileId, canWrite, user, syncUrl, props.path, props.visual, sourceOnly]);
+  }, [projectId, fileId, canWrite, user, syncUrl, props.visual, sourceOnly]);
 
   const status = sync.refused
     ? `You no longer have access to this file, or it has been deleted.${sync.unsaved ? ' What you typed here was not saved. Copy what you need from it.' : ''}`
@@ -1043,10 +1098,13 @@ export default function FileEditor(props: {
                   : sync.unsaved
                     ? 'Saving your edits…'
                     : 'All edits saved.';
+  // The restore a note is about: the one that took this file out, or the one made under it.
+  const about = left ? (left.why === 'restore' ? left.restore : null) : restore;
+  const changes = about && restoreChanges(projectId, about);
   return (
-    <section aria-label={`Editor for ${props.path}`}>
+    <section aria-label={`Editor for ${path}`}>
       <div className="editor-bar">
-        <code>{props.path}</code>
+        <code>{path}</code>
         <span role="status" aria-live="polite" data-state={sync.connected ? 'online' : 'offline'}>
           {status}
         </span>
@@ -1183,20 +1241,16 @@ export default function FileEditor(props: {
       {/* Directly above the text, where the person is looking: the bar above may be scrolled away.
           Always there, so that a screen reader hears the words when they arrive. Not a second
           "status": the one in the bar stays the only one, and says whether edits are saved. */}
-      <div className={restore ? 'editor-notice' : undefined}>
+      <div className={restore || left ? 'editor-notice' : undefined}>
         <span aria-live="polite">
-          {restore &&
-            restoredWords(
-              restore,
-              user,
-              new Date(restore.at).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
-              sync.held,
-            )}
+          {left
+            ? goneWords(left, user, left.why === 'restore' ? clock(left.restore.at) : '')
+            : restore && restoredWords(restore, user, clock(restore.at), sync.held)}
         </span>
-        {restore && (
-          <span role="group" aria-label="About the restore">
-            {restoreChanges(projectId, restore) && (
-              <a href={restoreChanges(projectId, restore)!} target="_blank" rel="noreferrer">
+        {(restore || left) && (
+          <span role="group" aria-label={left ? 'About this file' : 'About the restore'}>
+            {changes && (
+              <a href={changes} target="_blank" rel="noreferrer">
                 Show what the restore changed (opens a new tab)
               </a>
             )}
@@ -1204,6 +1258,7 @@ export default function FileEditor(props: {
               type="button"
               onClick={() => {
                 setRestore(null);
+                setLeft(null);
                 // The button is gone: the keyboard goes back to the text.
                 if (mode === 'visual') live.current?.visual?.focus();
                 else live.current?.view.focus();
