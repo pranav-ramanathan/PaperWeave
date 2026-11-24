@@ -6671,3 +6671,39 @@ of the paper's .bib files.`
   - Nothing compares two PDFs, and nothing leads from a changed line to its place in the editor.
   - Not tried: a real browser on this machine; a screen reader.
   - Carry over, unchanged: the "Not done" of "A misspelt word is one line of the spelling list".
+
+## A long file whose changes lie far apart is compared line by line
+
+- **What was wrong.** The line comparison fills a table of the stretch from a file's first changed
+  line to its last, and gives up over 4,000,000 cells (about 2,000 lines on each side), however few
+  lines changed in between. Measured on the corpus (101 files of 29 papers, 20 draws each; a word
+  changed on 2, 5, 20, 60 and 300 prose lines): with 60 changed lines the main files of two papers
+  (2,547 and 3,079 lines) were never shown, and a third (2,176 lines) failed one time in three; four
+  papers have a file over 2,000 lines. Over all 2,020 comparisons per row, the table declined 1, 12,
+  29, 47 and 55 times for 2, 5, 20, 60 and 300 changed lines; with this change, never. The figures
+  come from the product's own functions run on corpus files changed at random by a probe that is not
+  kept.
+- **Now** (`diffLinesFar` in `textdiff.ts`, called by `diffRevisions` only). The table's own answer
+  wherever the table gives one; otherwise a shortest edit script (Myers) whose cost grows with the
+  number of changed lines, up to 2,000 lines removed and added together (`FAR_EDITS`; 16 MB, the
+  table's own ceiling) and 20,000,000 line comparisons; past that the page's sentence and ZIP links
+  as before. Removals come before additions within a run, as in the table's answer.
+- **Held by** five tests in `textdiff.test.ts` (run on the development machine with the unit suite,
+  typecheck and lint) and one in `revisions.sandbox.test.ts` (written but run only in CI; the local
+  blob store refuses writes). No browser test: the page is unchanged. No existing expectation was
+  changed.
+- **Not done.**
+  - **The restore still uses the table alone.** In the same long files, a restore across changes
+    that lie far apart deletes the whole stretch between the first and last changed line and types
+    it again as one piece (a median 84% of the file in the two corpus papers above). The text is
+    restored exactly, but comments and proposals anchored in that stretch lose their place.
+    `restoreEdits` could call `diffLinesFar`; it was left alone because the restore's store-backed
+    tests cannot be run on the development machine.
+  - The PDF's line map (`builds.ts`) also uses the table alone: between a build and now, in such a
+    file, a jump from the PDF lands on the old line number.
+  - More than 2,000 lines removed and added, in a stretch too long for the table, is still "too much
+    changed".
+  - A file that was added still shows "Added" and none of its text; a moved paragraph is a removal
+    and an addition.
+  - Not tried: a real browser on this machine.
+  - Carry over, unchanged: the rest of the "Not done" of "What changed since a revision you choose".

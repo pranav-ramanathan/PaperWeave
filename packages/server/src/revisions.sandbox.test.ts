@@ -287,6 +287,31 @@ test('a text file that changed too much to compare line by line is marked too la
   });
 });
 
+test('a few changes far apart in a long file are compared line by line', async () => {
+  const p = await paper();
+  const block = Array.from({ length: 5000 }, (_, i) => `line ${i}`).join('\n');
+  await replace(p.main, 'Second line.', block);
+  const a = await saveRevision(t.pool, store, owner.id, p.id, 'Long');
+  await replace(p.main, 'line 7\n', 'line seven\n');
+  await replace(p.main, 'line 4990\n', '');
+  const b = await saveRevision(t.pool, store, owner.id, p.id, 'Edited');
+
+  // 4,982 lines lie between the two changes: more than the table of the line diff takes.
+  const x = MAIN.replace('Second line.', block);
+  const y = x.replace('line 7\n', 'line seven\n').replace('line 4990\n', '');
+  expect(diffLines(x, y)).toBeNull();
+  const diff = await diffRevisions(t.pool, store, viewer.id, p.id, a.id, b.id);
+  expect(diff.files).toHaveLength(1);
+  expect(diff.files[0]).toMatchObject({ path: 'main.tex', status: 'changed' });
+  expect(diff.files[0].tooLarge).toBeUndefined();
+  expect(diff.files[0].lines!.filter((l) => l.op !== ' ')).toEqual([
+    { op: '-', text: 'line 7' },
+    { op: '+', text: 'line seven' },
+    { op: '-', text: 'line 4990' },
+  ]);
+  expect(diff.files[0].lines).toHaveLength(MAIN.split('\n').length - 1 + 5000 + 1);
+});
+
 test('restoring puts the paper back as a new revision and erases nothing', async () => {
   const p = await paper();
   const good = await saveRevision(t.pool, store, owner.id, p.id, 'Good');

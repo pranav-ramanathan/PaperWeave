@@ -31,7 +31,7 @@ import {
   readLogs,
   TEXT,
 } from './sync.ts';
-import { type DiffLine, diffLines } from './textdiff.ts';
+import { type DiffLine, diffLines, diffLinesFar } from './textdiff.ts';
 
 export type Revision = {
   id: string;
@@ -614,7 +614,7 @@ export async function diffRevisions(
     else if (old.digest !== f.digest) {
       const [x, y] = [text(old.digest), text(f.digest)];
       const was = old.path !== f.path ? old.path : undefined;
-      const lines = x != null && y != null ? diffLines(x, y) : null;
+      const lines = x != null && y != null ? diffLinesFar(x, y) : null;
       files.push({
         path: f.path,
         was,
