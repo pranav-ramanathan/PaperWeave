@@ -64,7 +64,14 @@ export const WEB_EDIT_BYTES_PER_HOUR = 100_000_000;
 /** What the smallest rewrite costs, even one that changes nothing. */
 export const WEB_EDIT_FLOOR = 256 * 1024;
 
-export type RewriteOpts = { bytesPerHour?: number };
+/**
+ * What the smallest edit costs where edits are small and many (accepting a proposal, renaming a
+ * label): a bulk accept of a few hundred must fit in one hour's budget, which 256 KB each would not.
+ */
+export const WEB_EDIT_SMALL_FLOOR = 4 * 1024;
+
+/** `bytesPerHour` and `floor` default to the settings above; tests and small edits pass their own. */
+export type RewriteOpts = { bytesPerHour?: number; floor?: number };
 const REFUSED = 'You have changed too much in the last hour. Try again in a little while.';
 const rewriteBudget = (opts: RewriteOpts) =>
   opts.bytesPerHour ?? envCount('WEB_EDIT_BYTES_PER_USER_HOUR', WEB_EDIT_BYTES_PER_HOUR);
@@ -84,7 +91,7 @@ const spentLastHour = async (db: Db, userId: string) =>
  * longer fits in this person's hour. The exact charge is `chargeRewrite`, made later.
  */
 export async function mayRewrite(db: Db, userId: string, opts: RewriteOpts = {}): Promise<void> {
-  if ((await spentLastHour(db, userId)) + WEB_EDIT_FLOOR > rewriteBudget(opts))
+  if ((await spentLastHour(db, userId)) + (opts.floor ?? WEB_EDIT_FLOOR) > rewriteBudget(opts))
     throw new AppError('conflict', REFUSED);
 }
 
@@ -103,7 +110,7 @@ export async function chargeRewrite(
 ): Promise<void> {
   await db.query('select pg_advisory_xact_lock(hashtext($1))', [`web_edits:${userId}`]);
   await db.query("delete from web_edits where created_at < now() - interval '1 day'");
-  const cost = Math.max(appended, WEB_EDIT_FLOOR);
+  const cost = Math.max(appended, opts.floor ?? WEB_EDIT_FLOOR);
   if ((await spentLastHour(db, userId)) + cost > rewriteBudget(opts))
     throw new AppError('conflict', REFUSED);
   await db.query('insert into web_edits (user_id, project_id, bytes) values ($1, $2, $3)', [

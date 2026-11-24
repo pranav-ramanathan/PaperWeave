@@ -1,7 +1,7 @@
 // Needs the services in infra/compose.yaml. Run: pnpm test:sandbox
 import { afterAll, beforeAll, expect, test } from 'vitest';
 import { transaction } from './db.ts';
-import { chargeRewrite, mayRewrite, WEB_EDIT_FLOOR } from './limits.ts';
+import { chargeRewrite, mayRewrite, WEB_EDIT_FLOOR, WEB_EDIT_SMALL_FLOOR } from './limits.ts';
 import { createProject } from './projects.ts';
 import { testDb } from './testing.ts';
 
@@ -53,6 +53,33 @@ test('charges add up for one person over all their papers, and a second person i
   expect(await spent(b.id)).toBe(700_000);
   // Not enough left for even the floor: refused early.
   expect(await code(mayRewrite(t.pool, a.id, { bytesPerHour: budget }))).toBe('conflict');
+});
+
+test('charges at the small floor and at the large one add up within one budget', async () => {
+  const a = await t.signIn('floors@example.org');
+  const p = await createProject(t.pool, a.id, 'Floors');
+  const small = { floor: WEB_EDIT_SMALL_FLOOR };
+  // Room for one 256 KB rewrite and exactly forty small edits.
+  const budget = WEB_EDIT_FLOOR + 40 * WEB_EDIT_SMALL_FLOOR;
+  const chargeSmall = () =>
+    transaction(t.pool, (db) =>
+      chargeRewrite(db, a.id, p.id, 1, { bytesPerHour: budget, ...small }),
+    );
+  await charge(a.id, p.id, 1, budget);
+  expect(await spent(a.id)).toBe(WEB_EDIT_FLOOR);
+  for (let i = 0; i < 40; i++) await chargeSmall();
+  expect(await spent(a.id)).toBe(budget);
+  // Nothing left, for either: the early check agrees with the charge.
+  expect(await code(chargeSmall())).toBe('conflict');
+  expect(await code(charge(a.id, p.id, 1, budget))).toBe('conflict');
+  expect(await code(mayRewrite(t.pool, a.id, { bytesPerHour: budget, ...small }))).toBe('conflict');
+  expect(await spent(a.id)).toBe(budget);
+  // A larger edit than its floor is charged its own size, whichever floor.
+  const b = await t.signIn('floors-big@example.org');
+  await transaction(t.pool, (db) =>
+    chargeRewrite(db, b.id, p.id, 10_000, { bytesPerHour: 100_000, ...small }),
+  );
+  expect(await spent(b.id)).toBe(10_000);
 });
 
 test('a charge 61 minutes old no longer counts', async () => {

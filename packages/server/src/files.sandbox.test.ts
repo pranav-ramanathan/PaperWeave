@@ -21,7 +21,7 @@ import {
   setRootFile,
 } from './files.ts';
 import { exportZip, importZip, listFiles } from './import.ts';
-import { WEB_EDIT_FLOOR } from './limits.ts';
+import { WEB_EDIT_FLOOR, WEB_EDIT_SMALL_FLOOR } from './limits.ts';
 import { addUploaded, startUpload } from './uploads.ts';
 import { acceptInvitation, createProject, getProject, invite, setRole } from './projects.ts';
 import { listRevisions, renameFile, restoreRevision, saveRevision } from './revisions.ts';
@@ -1383,4 +1383,105 @@ test('a file uploaded to replace one is charged like a replacement', async () =>
   expect(rows).toHaveLength(1);
   expect(rows[0].bytes).toBeGreaterThanOrEqual(BIG.length);
   expect(await textOf(main)).toBe(MAIN + BIG);
+});
+
+// A paper that names one file three hundred times, so that a long new name adds tens of kilobytes.
+const NAMES = Array.from({ length: 300 }, () => '\\input{sections/intro}').join('\n');
+async function namedOften(email: string) {
+  const me = await t.signIn(email);
+  const zip = await writeZip([
+    {
+      path: 'main.tex',
+      bytes: Buffer.from(
+        `\\documentclass{article}\n\\begin{document}\n${NAMES}\n\\end{document}\n`,
+      ),
+    },
+    { path: 'sections/intro.tex', bytes: Buffer.from('Intro.\n') },
+  ]);
+  const [project] = await importZip(t.pool, store, me.id, zip, 'Named often');
+  const files = await listFiles(t.pool, me.id, project.id);
+  const intro = files.find((f) => f.path === 'sections/intro.tex')!.id;
+  const main = files.find((f) => f.path === 'main.tex')!.id;
+  return { me, project: project.id, intro, main };
+}
+const LONG_NAME = `sections/${'y'.repeat(100)}.tex`;
+
+test('a file rename with references refused at the charge keeps the old name and the old lines', async () => {
+  const { me, project, intro, main } = await namedOften('rename-over@example.org');
+  const proposal = await proposeFileRename(t.pool, store, me.id, project, intro, LONG_NAME);
+  expect(proposal.changes).toHaveLength(300);
+  const before = await textOf(main);
+  // Room for the smallest edit, so the early check passes; the 300 lines add far more.
+  const budget = { bytesPerHour: WEB_EDIT_SMALL_FLOOR + 1000 };
+  await expect(
+    renameFileAndReferences(
+      t.pool,
+      store,
+      me.id,
+      project,
+      intro,
+      LONG_NAME,
+      proposal.digest,
+      budget,
+    ),
+  ).rejects.toMatchObject({ code: 'conflict' });
+  expect(await textOf(main)).toBe(before);
+  const paths = (await listFiles(t.pool, me.id, project)).map((f) => f.path);
+  expect(paths).toContain('sections/intro.tex');
+  expect(paths).not.toContain(LONG_NAME);
+  expect(await webRows(me.id)).toHaveLength(0);
+  // With no room even for the floor, it is refused before anything is read.
+  expect(
+    await code(
+      renameFileAndReferences(t.pool, store, me.id, project, intro, LONG_NAME, proposal.digest, {
+        bytesPerHour: 10,
+      }),
+    ),
+  ).toBe('conflict');
+  // Within a budget that holds it: renamed, the lines changed, and one row over the floor.
+  await renameFileAndReferences(t.pool, store, me.id, project, intro, LONG_NAME, proposal.digest, {
+    bytesPerHour: 1_000_000,
+  });
+  expect((await listFiles(t.pool, me.id, project)).map((f) => f.path)).toContain(LONG_NAME);
+  expect(await textOf(main)).toContain(`\\input{${LONG_NAME.replace(/\.tex$/, '')}}`);
+  const rows = await webRows(me.id);
+  expect(rows).toHaveLength(1);
+  expect(rows[0].bytes).toBeGreaterThan(WEB_EDIT_SMALL_FLOOR);
+});
+
+test('a rename that only changes the name is not charged, with or without room', async () => {
+  const { me, project, intro, main } = await namedOften('rename-only@example.org');
+  const before = await textOf(main);
+  // No digest: the lines that name the file are left as they are.
+  await renameFileAndReferences(t.pool, store, me.id, project, intro, 'sections/opening.tex');
+  expect((await listFiles(t.pool, me.id, project)).map((f) => f.path)).toContain(
+    'sections/opening.tex',
+  );
+  expect(await textOf(main)).toBe(before);
+  expect(await webRows(me.id)).toHaveLength(0);
+  // A file nothing names, renamed with the page's digest, edits no text and costs nothing.
+  const lone = await namedOften('rename-lone@example.org');
+  await createFile(t.pool, store, lone.me.id, lone.project, 'notes.txt', Buffer.from('Notes.\n'));
+  const notes = (await listFiles(t.pool, lone.me.id, lone.project)).find(
+    (f) => f.path === 'notes.txt',
+  )!;
+  const proposal = await proposeFileRename(
+    t.pool,
+    store,
+    lone.me.id,
+    lone.project,
+    notes.id,
+    'notes2.txt',
+  );
+  expect(proposal.changes).toEqual([]);
+  await renameFileAndReferences(
+    t.pool,
+    store,
+    lone.me.id,
+    lone.project,
+    notes.id,
+    'notes2.txt',
+    proposal.digest,
+  );
+  expect(await webRows(lone.me.id)).toHaveLength(0);
 });

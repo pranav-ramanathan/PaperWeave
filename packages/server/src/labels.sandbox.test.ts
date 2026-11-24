@@ -7,6 +7,7 @@ import { labelIndex } from '@paperweave/latex';
 import { readZip } from './archive.ts';
 import { exportZip } from './import.ts';
 import { labelReport, paperMacros, paperProse, proposeLabelRename, renameLabel } from './labels.ts';
+import { WEB_EDIT_SMALL_FLOOR } from './limits.ts';
 import { acceptInvitation, invite } from './projects.ts';
 import { editFile } from './sync.ts';
 import { TEST_ENV, testDb } from './testing.ts';
@@ -99,9 +100,9 @@ async function paper() {
   await acceptInvitation(t.pool, viewer.id, token);
   return project.id;
 }
-const texts = async (project: string) =>
+const texts = async (project: string, who = owner.id) =>
   Object.fromEntries(
-    (await readZip(await exportZip(t.pool, store, owner.id, project))).entries.map((e) => [
+    (await readZip(await exportZip(t.pool, store, who, project))).entries.map((e) => [
       e.path,
       Buffer.from(e.bytes).toString(),
     ]),
@@ -191,6 +192,80 @@ test('a rename is refused whole when the text has moved on, the name is taken or
     places: 6,
   });
   expect((await texts(project))['sections/a.tex']).toContain('Again \\ref{sec:alpha}.');
+});
+
+// A paper whose root holds a label and many references to it, so that a long new name grows it.
+const DENSE = [
+  '\\documentclass{article}',
+  '\\begin{document}',
+  '\\input{b}',
+  '\\label{a}',
+  ...Array.from({ length: 100 }, () => '\\ref{a}'),
+  '\\end{document}',
+  '',
+].join('\n');
+async function densePaper(who: { id: string }) {
+  const zip = await writeZip(
+    Object.entries({ 'main.tex': DENSE, 'b.tex': 'Also \\ref{a}.\n' }).map(([path, text]) => ({
+      path,
+      bytes: Buffer.from(text),
+    })),
+  );
+  const [project] = await importZip(t.pool, store, who.id, zip, 'Dense');
+  return project.id;
+}
+const webEdits = async (who: string) =>
+  (await t.pool.query('select bytes from web_edits where user_id = $1', [who])).rows.map((r) =>
+    Number(r.bytes),
+  );
+const LONG = 'x'.repeat(200);
+
+test('a rename that would take a file over the text limit is refused whole, with no file changed', async () => {
+  const who = await t.signIn('dense-limit@example.org');
+  const project = await densePaper(who);
+  const proposal = await proposeLabelRename(t.pool, store, who.id, project, 'a', LONG);
+  const before = await texts(project, who.id);
+  // The root holds 101 places: 100 characters of text, then about 20 000 more with the long name.
+  // The limit is lowered so that the test never builds a 50 MB file.
+  const limit = DENSE.length + 5000;
+  await expect(
+    renameLabel(t.pool, store, who.id, project, 'a', LONG, proposal.digest, {}, limit),
+  ).rejects.toMatchObject({ code: 'invalid_input' });
+  // b.tex would have fitted, and main.tex did not: neither changed, and nothing was charged.
+  expect(await texts(project, who.id)).toEqual(before);
+  expect(await webEdits(who.id)).toEqual([]);
+  // The same rename under the real limit goes through.
+  expect(await renameLabel(t.pool, store, who.id, project, 'a', LONG, proposal.digest)).toEqual({
+    places: 102,
+  });
+  expect((await texts(project, who.id))['main.tex']).toContain(`\\label{${LONG}}`);
+});
+
+test('a rename over the hour budget changes no file; within it, adds one row of at least the floor', async () => {
+  const who = await t.signIn('dense-budget@example.org');
+  const project = await densePaper(who);
+  const proposal = await proposeLabelRename(t.pool, store, who.id, project, 'a', LONG);
+  const before = await texts(project, who.id);
+  // Room for the floor, so the early check passes; the edit appends about 20 000 bytes, so the
+  // charge after it does not, and the edit is rolled back.
+  const small = { bytesPerHour: WEB_EDIT_SMALL_FLOOR + 1000 };
+  await expect(
+    renameLabel(t.pool, store, who.id, project, 'a', LONG, proposal.digest, small),
+  ).rejects.toThrow('You have changed too much in the last hour. Try again in a little while.');
+  expect(await texts(project, who.id)).toEqual(before);
+  expect(await webEdits(who.id)).toEqual([]);
+  // With room: one row, for the bytes appended, which here is over the floor.
+  await renameLabel(t.pool, store, who.id, project, 'a', LONG, proposal.digest, {
+    bytesPerHour: 1_000_000,
+  });
+  const rows = await webEdits(who.id);
+  expect(rows).toHaveLength(1);
+  expect(rows[0]).toBeGreaterThanOrEqual(WEB_EDIT_SMALL_FLOOR);
+  // A small rename costs the floor, not more and not less.
+  const other = await densePaper(who);
+  const p2 = await proposeLabelRename(t.pool, store, who.id, other, 'a', 'c');
+  await renameLabel(t.pool, store, who.id, other, 'a', 'c', p2.digest);
+  expect((await webEdits(who.id)).at(-1)).toBe(WEB_EDIT_SMALL_FLOOR);
 });
 
 test('hyperref, fref, Fref and zcref references follow a renamed label', async () => {

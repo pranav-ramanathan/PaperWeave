@@ -259,9 +259,12 @@ In rough order of how much they matter.
    limited the same way by size, for each person over all their papers: 100 MB an hour, each
    costing the bytes of edits it appends and at least 256 KB (`WEB_EDIT_BYTES_PER_USER_HOUR`),
    kept in the database (`web_edits`), so alternating two restores of a large paper no longer
-   gets round the sync budget. Reading pages, uploading within a paper's limit, imports,
-   accepting and undoing proposals, renaming labels and files are not limited this way, beyond
-   needing to be signed in. A proxy in front should limit requests per person. There is no limit on
+   gets round the sync budget. Accepting and undoing proposals, renaming labels and renaming
+   a file together with the lines that name it are limited the same way, each costing the bytes
+   it appends and at least 4 KB; a label rename that would take a file past the 50 MB text limit
+   is refused whole. Reading pages, uploading within a paper's limit, imports, creating or
+   uploading a new file, deleting, and a rename that only changes a name are not limited this
+   way, beyond needing to be signed in. A proxy in front should limit requests per person. There is no limit on
    what one person's papers add up to over time: that is a decision about accounts, not made
    here.
 2. **One advisory in a development tool.** `pnpm audit` on 18 November 2026, and again on

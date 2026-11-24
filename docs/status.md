@@ -7234,6 +7234,37 @@ restores of a large paper got round it (`docs/security-review.md`, Open 1).
 - **Held by** `limits.sandbox.test.ts` (sums per person, a charge 61 minutes old, two at once),
   `revisions.sandbox.test.ts` and `files.sandbox.test.ts`.
 - **Not done.** Accepting and undoing proposals, renaming labels and renaming files also edit
-  text from the web app and are still not counted. Imports are not counted. A refused request
-  has already done its reading and, for a restore, its storing of edited text, before the
-  charge; only the early check is free.
+  text from the web app and were not counted (done below). Imports are not counted. A refused
+  request has already done its reading and, for a restore, its storing of edited text, before
+  the charge; only the early check is free.
+
+### Accepts, undos and renames are counted, and a rename is capped
+
+- **A fault found.** `applySplices` appended its edit with no size check. A label can be renamed
+  to 200 characters, so a file dense with `\ref{a}` could be taken past `MAX_FILE_TEXT` (50 MB)
+  in one request. A sandbox test with a lowered limit (`renameLabel` and `applySplices` take
+  an optional `maxText`) took a file from about 900 characters to about 20 000 under a limit of
+  about 6 000, and failed on the old code. Now a file that would pass the limit refuses the whole
+  rename with `invalid_input`, "That rename cannot be made: it would make a file too large.",
+  and the transaction ends: no file is changed. A file renamed to a longer path is capped the
+  same way.
+- **What is counted now.** Accepting a proposal, undoing an accept, renaming a label, and
+  renaming a file _with_ the lines that name it (the digest branch). The cost is the bytes
+  appended, at least `WEB_EDIT_SMALL_FLOOR` (4 KB; 256 KB would have refused a bulk accept of
+  about 380 in an hour of the 100 MB). It is charged to the person acting, not the proposal's
+  author, in the transaction that made the edit, by `chargeRewrite` with the new `floor` option
+  of `RewriteOpts`. `runCommand` now passes `appended` (the update's length) to `within`; the sync
+  server passes no `within` and keeps its own budget.
+- **Over budget.** `conflict` with the same sentence, and everything rolls back: the edit, the
+  proposal's status, the file's name. `mayRewrite` runs first (after the permission check, and
+  for a proposal after the free cases below), so a person with no room left for the smallest
+  edit is refused before the file is read.
+- **Free.** Accepting a proposal that is already accepted, undoing one that is open, an accept or
+  undo that answers `conflict` (the edit was not made), a request refused for permission, a
+  rename that only changes the name (no digest), and a rename with a digest that names no
+  lines (no text is edited).
+- **Held by** new cases in `proposals`, `labels`, `files` and `limits` sandbox tests. Fifty
+  accepts in a row by one person took 630 ms (13 ms each), each charged the floor.
+- **Still not counted.** Imports (ZIP and the like), creating or uploading a file that does not
+  replace one, deleting, saving a revision, comments and proposals (limited separately by
+  `mayWrite`). The budget is kept per person over all their papers.

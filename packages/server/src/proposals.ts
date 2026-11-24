@@ -10,7 +10,13 @@ import { type ClaimChange, claimChanges, describeClaimChange, sentenceAround } f
 import { type DeleteSet, placeLost, runCommand } from './commands.ts';
 import type { Db } from './db.ts';
 import { AppError } from './errors.ts';
-import { mayWrite } from './limits.ts';
+import {
+  chargeRewrite,
+  mayRewrite,
+  mayWrite,
+  type RewriteOpts,
+  WEB_EDIT_SMALL_FLOOR,
+} from './limits.ts';
 import { id } from './projects.ts';
 import { docsOf, loadUpdates, TEXT } from './sync.ts';
 
@@ -332,7 +338,8 @@ export async function reattachProposal(
 
 /**
  * Accept a proposal: make its edit, as the person accepting. If the text no longer says what the
- * proposal expected, nothing is done and the answer is `conflict`.
+ * proposal expected, nothing is done and the answer is `conflict`. The edit is charged to the
+ * person accepting, in the same transaction (`budget` is for tests).
  */
 export async function acceptProposal(
   pool: pg.Pool,
@@ -341,14 +348,18 @@ export async function acceptProposal(
   projectId: string,
   proposalId: string,
   seen?: unknown,
+  budget: RewriteOpts = {},
 ): Promise<void> {
   await authorize(pool, userId, id(projectId), 'proposal.decide');
+  const small = { ...budget, floor: WEB_EDIT_SMALL_FLOOR };
   const p = await find(pool, projectId, proposalId);
-  // Asked twice (a retry whose answer was lost): the first time did it.
+  // Asked twice (a retry whose answer was lost): the first time did it, and this costs nothing.
   if (p.status === 'accepted') return;
   if (p.status !== 'open') throw notOpen();
   // Only what was shown is accepted: a proposal changed since reads differently now.
   if (unseen(p, seenOf(seen))) throw changed();
+  // Before the file is read: someone with no room left for even the smallest edit stops here.
+  await mayRewrite(pool, userId, small);
   const done = await runCommand(
     pool,
     store,
@@ -365,7 +376,7 @@ export async function acceptProposal(
       exactPlace: true,
       // In the same transaction as the edit: both happen, or neither. From here on the
       // proposal's stretch is the replacement where it stands, which is what an undo needs.
-      within: async (db, placed) => {
+      within: async (db, placed, appended) => {
         const marked = await db.query(
           `update proposals set status = 'accepted', decided_by = $2, decided_at = now(),
              anchor_from = $3, anchor_to = $4, command_key = gen_random_uuid()
@@ -380,6 +391,8 @@ export async function acceptProposal(
           ],
         );
         if (!marked.rowCount) throw await whyNot(db, p.id, changed);
+        // Over budget, the transaction ends: no edit and the proposal stays open.
+        await chargeRewrite(db, userId, projectId, appended, small);
       },
     },
   );
@@ -392,7 +405,7 @@ export async function acceptProposal(
 
 /**
  * Undo an accept: put back what the proposal replaced, and open the proposal again. Only while
- * the replacement still stands as it was accepted.
+ * the replacement still stands as it was accepted. Charged like an accept (`budget` is for tests).
  */
 export async function undoAccept(
   pool: pg.Pool,
@@ -400,11 +413,14 @@ export async function undoAccept(
   userId: string,
   projectId: string,
   proposalId: string,
+  budget: RewriteOpts = {},
 ): Promise<void> {
   await authorize(pool, userId, id(projectId), 'proposal.decide');
+  const small = { ...budget, floor: WEB_EDIT_SMALL_FLOOR };
   const p = await find(pool, projectId, proposalId);
   if (p.status === 'open') return;
   if (p.status !== 'accepted') throw new AppError('conflict', 'That proposal was not accepted.');
+  await mayRewrite(pool, userId, small);
   const done = await runCommand(
     pool,
     store,
@@ -419,7 +435,7 @@ export async function undoAccept(
     },
     {
       exactPlace: true,
-      within: async (db, placed) => {
+      within: async (db, placed, appended) => {
         const marked = await db.query(
           `update proposals set status = 'open', decided_by = null, decided_at = null,
              anchor_from = $2, anchor_to = $3, command_key = gen_random_uuid()
@@ -427,6 +443,7 @@ export async function undoAccept(
           [p.id, Buffer.from(placed.from), Buffer.from(placed.to)],
         );
         if (!marked.rowCount) throw new AppError('conflict', 'That proposal was not accepted.');
+        await chargeRewrite(db, userId, projectId, appended, small);
       },
     },
   );
