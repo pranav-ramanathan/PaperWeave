@@ -1052,3 +1052,123 @@ test('agreeing to leave with edits the sync service has not confirmed leaves onc
   await expect(page).toHaveURL(/\/projects\/[^/]+\/?(\?.*)?$/);
   expect(asked).toBe(1);
 });
+
+// What the editor says of a restore: beside the status line, which goes on saying whether this
+// person's own edits are saved.
+const notice = (page: Page) => page.locator('.editor-notice');
+
+test('a restore made while a file is open is said in its editor: who, to what, and where the paper as it was is kept', async ({
+  browser,
+}) => {
+  const { owner, editor, paper, restore } = await sharedPaper(browser, 'rec-told', [
+    { path: 'main.tex', text: MAIN },
+  ]);
+  const told = countAnnouncements(editor.page);
+  // The owner has the file open too, in a second tab.
+  const watch = await owner.page.context().newPage();
+  await watch.goto(paper);
+  await watch.getByRole('link', { name: 'main.tex' }).click();
+  await showSource(watch);
+  await editor.page.getByRole('link', { name: 'main.tex' }).click();
+  await showSource(editor.page);
+  await typeAtStart(editor.page, '% regretted\n');
+  await expect(status(editor.page)).toHaveText('All edits saved.');
+  await expect(source(watch)).toContainText('% regretted');
+  await expect(notice(editor.page)).toHaveCount(0);
+
+  await restore();
+  await expect(source(editor.page)).not.toContainText('% regretted');
+  await expect(notice(editor.page)).toContainText(
+    `${owner.email} restored this paper to revision 1 (Good) at `,
+  );
+  const words = (await notice(editor.page).locator('[aria-live]').textContent()) ?? '';
+  const now = Number(/It is now revision (\d+)\./.exec(words)?.[1]);
+  expect(now).toBeGreaterThan(1);
+  expect(words).toContain(
+    `The paper as it was just before, with everything saved until then, is kept as revision ${now - 1}.`,
+  );
+  // It is directly above the text, on the screen of someone whose caret is in the text.
+  await expect(notice(editor.page)).toBeInViewport();
+  // The status is still the one status of the editor, and still about this person's edits.
+  await expect(status(editor.page)).toHaveText('All edits saved.');
+  await expect(notice(editor.page).locator('[aria-live]')).toHaveAttribute('aria-live', 'polite');
+  // The person who restored it is told in their own words.
+  await expect(notice(watch)).toContainText('You restored this paper to revision 1 (Good) at ');
+  await audit(editor.page, 'an editor told of a restore');
+
+  // What went is one press away: the comparison of the paper as it was with the restore.
+  const [changes] = await Promise.all([
+    editor.page.context().waitForEvent('page'),
+    notice(editor.page)
+      .getByRole('link', { name: /^Show what the restore changed/ })
+      .click(),
+  ]);
+  await expect(
+    changes.getByRole('heading', { level: 1, name: `Revision ${now - 1} to revision ${now}` }),
+  ).toBeVisible();
+  await expect(changes.getByText('% regretted')).toBeVisible();
+  await changes.close();
+
+  // The same words in the visual view, and in a narrow window they stay inside it.
+  await showVisual(editor.page);
+  await expect(notice(editor.page)).toContainText('restored this paper to revision 1');
+  await editor.page.setViewportSize({ width: 320, height: 640 });
+  expect(await sticksOut(editor.page)).toEqual([]);
+  await editor.page.setViewportSize({ width: 1280, height: 720 });
+  await showSource(editor.page);
+
+  // Dismissed, it is gone, and the keyboard is back in the text.
+  await notice(editor.page).getByRole('button', { name: 'Dismiss' }).click();
+  await expect(notice(editor.page)).toHaveCount(0);
+  await expect(source(editor.page)).toBeFocused();
+  // "Restore" pressed again with nothing changed makes no second restore, and is not said again.
+  const before = told.n;
+  await restore();
+  await expect.poll(() => told.n).toBeGreaterThan(before);
+  await expect(notice(editor.page)).toHaveCount(0);
+});
+
+test('coming back online to a paper that was restored meanwhile, the editor says who restored it', async ({
+  browser,
+}) => {
+  const { owner, editor, restore } = await sharedPaper(browser, 'rec-back', [
+    { path: 'main.tex', text: MAIN },
+  ]);
+  await editor.page.getByRole('link', { name: 'main.tex' }).click();
+  await showSource(editor.page);
+  await typeAtStart(editor.page, '% regretted\n');
+  await expect(status(editor.page)).toHaveText('All edits saved.');
+
+  // Away with nothing unsent: on return the text has changed, and the editor says why.
+  await editor.page.context().setOffline(true);
+  await expect(status(editor.page)).toContainText('Offline.');
+  await restore();
+  await expect(notice(editor.page)).toHaveCount(0);
+  await editor.page.context().setOffline(false);
+  await expect(status(editor.page)).toHaveText('All edits saved.', { timeout: 30_000 });
+  await expect(source(editor.page)).not.toContainText('% regretted');
+  await expect(notice(editor.page)).toContainText(
+    `${owner.email} restored this paper to revision 1 (Good) at `,
+  );
+  await expect(notice(editor.page)).toContainText('Anything typed after that moment is still');
+  await notice(editor.page).getByRole('button', { name: 'Dismiss' }).click();
+  await expect(notice(editor.page)).toHaveCount(0);
+
+  // Away with an edit unsent: it is held as before, and beside the choice the editor says who
+  // restored the paper and to what.
+  await typeAtStart(editor.page, '% regretted\n');
+  await expect(status(editor.page)).toHaveText('All edits saved.');
+  await editor.page.context().setOffline(true);
+  await expect(status(editor.page)).toContainText('Offline.');
+  await typeAtStart(editor.page, '% typed offline\n');
+  await restore();
+  await editor.page.context().setOffline(false);
+  await expect(status(editor.page)).toContainText('was restored to an earlier revision', {
+    timeout: 30_000,
+  });
+  await expect(notice(editor.page)).toContainText(
+    `${owner.email} restored this paper to revision 1 (Good) at `,
+  );
+  await expect(notice(editor.page)).not.toContainText('still in the text');
+  await expect(editor.page.getByRole('button', { name: /Apply my edits/ })).toBeVisible();
+});

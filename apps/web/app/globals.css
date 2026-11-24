@@ -517,6 +517,24 @@ h1 {
 .editor-bar [data-state='offline']::before {
   content: '⚠ ';
 }
+.editor-notice {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.25rem 1rem;
+  align-items: baseline;
+  margin-bottom: 0.4rem;
+  padding: 0.4rem 0.6rem;
+  border: 1px solid var(--warn);
+  border-radius: 6px;
+  background: var(--warn-wash);
+  overflow-wrap: anywhere;
+}
+.editor-notice [role='group'] {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.25rem 1rem;
+  align-items: baseline;
+}
 .editor .source,
 .editor .visual {
   height: 74vh;
@@ -611,11 +629,13 @@ h1 {
 }
 .build button,
 .editor .toolbar button,
+.editor-notice button,
 .build input {
   font: inherit;
 }
 .build button,
 .threads button,
+.editor-notice button,
 .editor .toolbar button {
   padding: 0.15rem 0.55rem;
   border: 1px solid var(--line);

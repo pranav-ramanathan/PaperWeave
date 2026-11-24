@@ -6769,3 +6769,35 @@ of the paper's .bib files.`
   - The toolbar's own note says nothing after a press; what is said ("Shown on page N of the PDF.")
     is in the pane.
   - An invitation link opened signed out; Back/Forward with the sync service away (as before).
+
+## A restore is said to everyone who has the paper open
+
+- **Found by** the walk of plan 207: an editor typed while the owner restored a revision. The words
+  from before the restore went with it, the tail of a word typed during it stayed
+  (`...narrow ring2 during3...`), and the page said only "All edits saved." The sync server already
+  sent each editor the restore's number; the editor showed nothing for it. The same when coming back
+  online with nothing unsent.
+- **Now** the sync server sends, with the number, who restored the paper, to which revision, and
+  which revision holds the paper as it was (`restoreNote` in `packages/server/src/revisions.ts`;
+  always the revision numbered one below the restore). The ticket route returns the same for someone
+  coming back online. The editor shows it directly above the text, in both views
+  (`apps/web/lib/restored.ts`, `.editor-notice`): the sentences, a link to the comparison from the
+  kept revision to the restore, and "Dismiss", which returns the keyboard to the text. It is a
+  polite live region, not a second status: the status line still says whether the person's own
+  edits are saved. Where edits typed offline are held for the person's decision, the note stands
+  beside the choice.
+- **The words typed just before are not put back for the person.** They had reached the paper, and
+  the restore replaced them on purpose; they are in the kept revision, and the comparison shows them
+  as removed, to copy. Words still on their way at that moment are in the text, and the note says so.
+- **Held by** `restored.test.ts`, `revisions.sandbox.test.ts`, `sync.sandbox.test.ts` and two tests
+  in `recover.spec` (connected; back online with and without unsent edits; the person who restored;
+  visual view; 320 px; dismissed and not said twice).
+- **Not done.**
+  - A file that the restore removes (it was added after the restored revision) closes in its
+    editors with "You no longer have access to this file, or it has been deleted.", without saying a
+    restore did it.
+  - The list of files beside the editor, and the paper's own page in another tab, are not told:
+    files a restore brought back, removed or renamed show after a reload.
+  - The note is not kept across a reload, and there is no email about a restore.
+  - A renamed file keeps its old name in a co-author's open editor until they reload; an invitation
+    link opened signed out; Back/Forward with the sync service away (as before).

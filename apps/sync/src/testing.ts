@@ -28,6 +28,13 @@ export function connect(
     role?: string;
     canWrite?: boolean;
     restored?: number;
+    restore?: {
+      number: number;
+      from: number | null;
+      fromName: string | null;
+      by: string | null;
+      kept: { number: number } | null;
+    };
     had: string;
   }[] = [];
   const state = { refused: false, closed: 0, reasons: [] as string[], replies };

@@ -20,8 +20,10 @@ import {
   REVISIONS_SHOWN,
   renameFile,
   lastRestore,
+  lastRestoreNote,
   restoreEdits,
   cutRevision,
+  restoreNote,
   restoreRevision,
   revisionOfNow,
   revisionPdf,
@@ -351,6 +353,50 @@ test('restoring puts the paper back as a new revision and erases nothing', async
   );
   expect(regretted['main.tex']).toContain('Something we regret.');
   expect(regretted['moved.tex']).toContain('also regretted');
+});
+
+test('what the editors of a paper are told of a restore: who, to what, and the revision that keeps the paper as it was', async () => {
+  const p = await paper();
+  expect(await lastRestoreNote(t.pool, viewer.id, p.main)).toBeNull();
+  expect(await restoreNote(t.pool, p.id)).toBeNull();
+  const good = await saveRevision(t.pool, store, owner.id, p.id, 'Good');
+  // Typed since, and in no revision yet: the restore keeps it as a revision of its own.
+  await replace(p.main, 'Hello.', 'Typed a moment ago.');
+  const restored = await restoreRevision(t.pool, store, owner.id, p.id, good.id);
+  const all = await listRevisions(t.pool, owner.id, p.id);
+  const note = await lastRestoreNote(t.pool, viewer.id, p.main);
+  expect(note).toEqual({
+    id: restored.id,
+    number: 3,
+    from: 1,
+    fromName: 'Good',
+    by: 'owner@example.org',
+    at: new Date(all[0].createdAt).toISOString(),
+    kept: { id: all[1].id, number: 2 },
+  });
+  // The kept revision is the paper as it was: the comparison with the restore shows what went.
+  const kept = await files(
+    (await exportRevision(t.pool, store, owner.id, p.id, note!.kept!.id)).zip,
+  );
+  expect(kept['main.tex']).toContain('Typed a moment ago.');
+  // By number, as the sync server asks; a number that is not a restore is nothing.
+  expect(await restoreNote(t.pool, p.id, 3)).toEqual(note);
+  expect(await restoreNote(t.pool, p.id, 2)).toBeNull();
+  expect(await restoreNote(t.pool, p.id, 9)).toBeNull();
+  // Only for someone on the paper.
+  expect(await code(lastRestoreNote(t.pool, outsider.id, p.main))).toBe('not_found');
+  // Pressed again with nothing changed: the same restore, and the same paper kept.
+  await restoreRevision(t.pool, store, owner.id, p.id, good.id);
+  expect(await lastRestoreNote(t.pool, viewer.id, p.main)).toEqual(note);
+  // A later restore of a revision without a name.
+  await replace(p.main, 'Hello.', 'Typed again.');
+  const again = await restoreRevision(t.pool, store, owner.id, p.id, all[1].id);
+  expect(await restoreNote(t.pool, p.id)).toMatchObject({
+    number: again.number,
+    from: 2,
+    fromName: null,
+    kept: { number: again.number - 1 },
+  });
 });
 
 test('a restore first keeps the paper as it stood, unsaved edits included', async () => {
