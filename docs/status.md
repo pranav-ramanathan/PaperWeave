@@ -7200,9 +7200,13 @@ compaction runs only every 500 edits.
   person who is back to a full budget is forgotten, so the map holds only people who edited
   lately. The sync server will not start with a burst below the largest edit.
 - **What costs.** Each saved edit costs its size, or 512 bytes if that is more. Each structural
-  edit asked for over the connection costs 512. Edits refused as too large are refused first and
-  cost nothing. Only people who may write are charged; the question "do you have all my
-  changes?" and an empty edit are free.
+  edit asked for over the connection costs its size or 512 bytes, whichever is more: the
+  replacement's length is charged before anything is done, and what the edit comes to beyond that
+  is charged inside the transaction that appends it, which is undone if it is not there. Edits
+  refused as too large are refused first and cost nothing. Only people who may write (by their
+  role, not by whether the connection was since made read-only) are charged; the question "do
+  you have all my changes?" and an empty edit are free. A connection closed for an edit it sent
+  takes nothing more: edits and commands already queued on it are refused.
 - **What the server does.** An edit over budget is not saved, not applied and not passed on. The
   connection is made read-only, so the library answers "not saved" and applies nothing, and is
   closed with the code 1013 and the reason `over-budget`. A structural edit over budget is

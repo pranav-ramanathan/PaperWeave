@@ -475,7 +475,9 @@ export default function FileEditor(props: {
         // unsent: the text in front of them has changed all the same, and they are told.
         if (offeredNote && isNews(offeredNote.number, restoreSeen)) setRestore(offeredNote);
         restoreSeen = Math.max(restoreSeen ?? 0, restoreOffered ?? 0);
-        update({ loaded: true });
+        // Synced with nothing unsent: a pause that was for the reconnect's own payload (what an
+        // idle tab sends when it connects) is over. With edits unsent, the saved-check ends it.
+        setSync((s) => ({ ...s, loaded: true, paused: s.unsaved ? s.paused : false }));
         // Arrived from a place in the PDF: go to the line it named, once, now that there is text.
         const line = Number(new URLSearchParams(location.search).get('line'));
         if (line && !arrived) {
@@ -1154,12 +1156,12 @@ export default function FileEditor(props: {
       ? 'An edit of yours is too large to save, so your unsaved edits cannot be kept. Copy what you need from them, then discard them. To add a large file to the paper, upload it.'
       : sync.held
         ? 'This paper was restored to an earlier revision while you were offline. Your edits from before that are not saved.'
-        : sync.paused
-          ? 'Saving is paused for a moment: too many edits at once. Your edits are kept and will be saved.'
-          : sync.signedOut
-            ? `You are signed out. Sign in again in another tab and this page will carry on. ${sync.unsaved ? 'Your edits are kept here until then.' : ''}`.trim()
-            : sync.role
-              ? `You are now ${/^[aeiou]/.test(sync.role.now) ? 'an' : 'a'} ${sync.role.now} on this paper${sync.role.lost ? ` and can no longer edit. ${sync.unsaved ? 'What you typed last was not saved. ' : ''}` : '. '}Reload the page to carry on.`
+        : sync.signedOut
+          ? `You are signed out. Sign in again in another tab and this page will carry on. ${sync.unsaved ? 'Your edits are kept here until then.' : ''}`.trim()
+          : sync.role
+            ? `You are now ${/^[aeiou]/.test(sync.role.now) ? 'an' : 'a'} ${sync.role.now} on this paper${sync.role.lost ? ` and can no longer edit. ${sync.unsaved ? 'What you typed last was not saved. ' : ''}` : '. '}Reload the page to carry on.`
+            : sync.paused
+              ? 'Saving is paused for a moment: too many edits at once. Your edits are kept and will be saved.'
               : !sync.loaded
                 ? 'Opening…'
                 : !sync.connected

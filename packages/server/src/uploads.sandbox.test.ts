@@ -302,3 +302,27 @@ test("one person cannot take another's upload, and it is left where it was", asy
   expect(await gone(a.key)).toBe(true);
   expect(await gone(f.key)).toBe(true);
 });
+
+test('a replacement refused for the hour budget leaves the upload there to take again', async () => {
+  const bytes = Buffer.from('% replaced\n');
+  const { key, url } = await startUpload(
+    t.pool,
+    store,
+    owner.id,
+    { kind: 'file', projectId: paperId },
+    bytes.length,
+  );
+  await put(url, bytes);
+  // No room for even the smallest rewrite.
+  await expect(
+    addUploaded(t.pool, store, owner.id, paperId, key, 'main.tex', LIMITS, true, {
+      bytesPerHour: 1,
+    }),
+  ).rejects.toThrow('changed too much');
+  expect(await store.uploadSize(key)).toBe(bytes.length);
+  // Not taken: it can still be added, here as a new file, which costs nothing.
+  await addUploaded(t.pool, store, owner.id, paperId, key, 'kept.tex', LIMITS, true, {
+    bytesPerHour: 1,
+  });
+  expect(await gone(key)).toBe(true);
+});

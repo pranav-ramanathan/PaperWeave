@@ -3,14 +3,14 @@
 // temporary key, and then tells the app which key to take. Everything that was checked on an
 // upload is checked here all the same: the browser's word for what it sent is never taken.
 import type pg from 'pg';
-import { type Limits, LIMITS } from './archive.ts';
+import { type Limits, LIMITS, nfc } from './archive.ts';
 import { authorize } from './authz.ts';
 import type { BlobStore } from './blobs.ts';
 import type { Db } from './db.ts';
 import { AppError } from './errors.ts';
 import { createFile, replaceFile } from './files.ts';
 import { importZip } from './import.ts';
-import type { RewriteOpts } from './limits.ts';
+import { mayRewrite, type RewriteOpts } from './limits.ts';
 import { id } from './projects.ts';
 
 /** An upload nobody took is removed after this long: its address's ten minutes, then a margin. */
@@ -147,6 +147,14 @@ export async function addUploaded(
   // Before anything is read, and before the upload is touched: someone with no right to the
   // paper removes nothing.
   await authorize(db, userId, id(projectId), 'file.write');
+  // A replacement of a file that is there asks for room first, as `replaceFile` does: taking the
+  // upload comes before it, and someone with no room left must not lose the upload by asking.
+  if (replace && typeof path === 'string') {
+    const wanted = nfc(path) as string;
+    const { rows } = await db.query('select path from files where project_id = $1', [projectId]);
+    if (rows.some((r) => (r.path as string).normalize('NFC') === wanted))
+      await mayRewrite(db, userId, budget);
+  }
   return takeUpload(db, store, userId, key, limits.fileBytes, FILE_TOO_LARGE, (bytes) =>
     replace
       ? replaceFile(db as pg.Pool, store, userId, projectId, path, bytes, limits, budget)

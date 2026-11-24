@@ -25,7 +25,14 @@ import { metricsText, newCounts, serveMetrics } from './metrics.ts';
 
 /** Who a connection is, on which paper, in what role, and under which sign-in (null for a
  * ticket that names none). */
-type Context = { userId: string; projectId: string; sessionId: string | null; role: string };
+type Context = {
+  userId: string;
+  projectId: string;
+  sessionId: string | null;
+  role: string;
+  /** Whether the role may write, as last looked up. Who is charged for edits goes by this. */
+  canWrite: boolean;
+};
 
 /** y-protocols sync message types. Step 1 only asks what the server has; 1 and 2 carry edits. */
 const SYNC_STEP_1 = 0;
@@ -68,6 +75,14 @@ export async function startSync(opts: {
       `the edit budget's burst (${config.burst} bytes) is below the largest edit (${MAX_EDIT_BYTES}): check SYNC_EDIT_BURST_BYTES`,
     );
   const budget = editBudget(config);
+  /**
+   * Connections closed because of an edit the server would not take (too large, over budget).
+   * The library goes on through what was already queued on such a connection, and a later look at
+   * the person's role can make it writable again: nothing more is taken from it, whatever its
+   * `readOnly` says.
+   */
+  const shut = new WeakSet<Connection<Context>>();
+  const BUDGET_MESSAGE = 'Too many edits at once. Try again in a moment.';
   /** For a file being read from its log: where the log stood when the reading began. */
   const loadedAt = new Map<string, number>();
   /**
@@ -146,7 +161,13 @@ export async function startSync(opts: {
         });
         connectionConfig.readOnly = !file.canWrite;
         counts.connections++;
-        return { userId, projectId: file.projectId, sessionId, role: file.role };
+        return {
+          userId,
+          projectId: file.projectId,
+          sessionId,
+          role: file.role,
+          canWrite: file.canWrite,
+        };
       } catch (err) {
         counts.refusedConnections++;
         throw err;
@@ -222,11 +243,18 @@ export async function startSync(opts: {
             JSON.stringify({ n: c.n, saved: holds(document, Buffer.from(c.saved, 'base64url')) }),
           );
         key = c?.key;
-        // A writer's structural edits cost the least an edit costs. Keyed by who the ticket says
-        // this is, never by anything the client sent.
-        if (!connection.readOnly && !budget.take((connection.context as Context).userId, floor)) {
+        const { userId, canWrite } = connection.context as Context;
+        // Closed for an edit it sent: whatever else it had queued is not taken.
+        if (shut.has(connection)) return answer({ error: 'That edit could not be made.' });
+        // A writer's structural edits cost what they add, or the least an edit costs. Charged
+        // before anything is done, from the length of the replacement (the edit adds a little
+        // more than that: made up in `within`, below). Keyed by who the ticket says this is,
+        // never by anything the client sent.
+        const replacement = typeof c?.replacement === 'string' ? c.replacement : '';
+        const charged = Math.max(Buffer.byteLength(replacement), floor);
+        if (canWrite && !budget.take(userId, charged)) {
           counts.editsOverBudget++;
-          return answer({ error: 'Too many edits at once. Try again in a moment.' });
+          return answer({ error: BUDGET_MESSAGE });
         }
         const bytes = (v: unknown) =>
           typeof v === 'string' ? Buffer.from(v, 'base64url') : undefined;
@@ -234,10 +262,23 @@ export async function startSync(opts: {
         const done = await runCommand(
           pool,
           store,
-          (connection.context as Context).userId,
+          userId,
           documentName,
           { ...c, from: bytes(c?.from), to: bytes(c?.to) },
-          { notify: false, maxFileText: opts.maxFileText, exactPlace: true },
+          {
+            notify: false,
+            maxFileText: opts.maxFileText,
+            exactPlace: true,
+            // The edit as appended is known only inside the transaction that appends it. What it
+            // comes to beyond what was charged is taken now; if that is not there, the
+            // transaction is undone and nothing is applied.
+            within: async (_db, _placed, appended) => {
+              if (canWrite && appended > charged && !budget.take(userId, appended - charged)) {
+                counts.editsOverBudget++;
+                throw new AppError('conflict', BUDGET_MESSAGE);
+              }
+            },
+          },
         );
         // The editor waits eight seconds for an answer. One that took long was waiting for
         // something, and which file and how long is worth knowing. Never the text.
@@ -264,6 +305,8 @@ export async function startSync(opts: {
     // If the write fails this throws, the connection closes and the client resends on reconnect.
     async beforeSync({ type, payload, connection, context, document, documentName }) {
       if (type === SYNC_STEP_1 || isEmpty(payload)) return;
+      // Closed for an earlier edit, and a look at its role since may have made it writable.
+      if (shut.has(connection)) connection.readOnly = true;
       if (connection.readOnly) {
         // Not saved and not applied. Everyone sends what they have deleted when they connect, so
         // only something this file does not already hold counts as an edit that was refused.
@@ -274,6 +317,7 @@ export async function startSync(opts: {
         // Not saved and not applied. The editor would send it again on every reconnect, so the
         // connection is closed with the reason, and the editor stops and says so.
         counts.editsTooLarge++;
+        shut.add(connection);
         connection.readOnly = true;
         connection.close({ code: 1009, reason: TOO_LARGE });
         return;
@@ -283,6 +327,7 @@ export async function startSync(opts: {
       // then it is told why, and waits.
       if (!budget.take(context.userId, payload.length)) {
         counts.editsOverBudget++;
+        shut.add(connection);
         connection.readOnly = true;
         connection.close({ code: 1013, reason: OVER_BUDGET });
         return;
@@ -320,7 +365,8 @@ export async function startSync(opts: {
   const look = async (connection: Connection<Context>, name: string) => {
     try {
       const file = await openFile(pool, connection.context.userId, name);
-      connection.readOnly = !file.canWrite;
+      connection.readOnly = shut.has(connection) || !file.canWrite;
+      connection.context.canWrite = file.canWrite;
       if (connection.context.role !== file.role) {
         connection.context.role = file.role;
         tellRole(connection, file.role);

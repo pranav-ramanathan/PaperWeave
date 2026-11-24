@@ -1320,6 +1320,79 @@ test('a structural edit past the budget is answered with an error and changes no
   });
 });
 
+/** Ask for a structural edit over a client's socket and wait for the answer. */
+const askFor = async (c: Client, expected: string, replacement: string) => {
+  const key = crypto.randomUUID();
+  const i = c.text.toString().indexOf(expected);
+  const at = (n: number) =>
+    Buffer.from(
+      Y.encodeRelativePosition(Y.createRelativePositionFromTypeIndex(c.text, n)),
+    ).toString('base64url');
+  c.provider.sendStateless(
+    JSON.stringify({ key, from: at(i), to: at(i + expected.length), expected, replacement }),
+  );
+  await until('an answer', () => c.state.replies.some((r) => r.key === key));
+  return c.state.replies.find((r) => r.key === key)!;
+};
+
+test('a structural edit is charged what it adds, and one the budget cannot take changes nothing', async () => {
+  const { project, file } = await paper();
+  // Two megabytes at once and next to nothing given back; the least an edit costs is small.
+  await withBudget({ burst: 2_000_000, perMinute: 6_000, floor: 512 }, async (port) => {
+    const owner = client(users.owner, file, port);
+    await saved(owner);
+    const big = (ch: string) => ch.repeat(900_000);
+    expect((await askFor(owner, 'Hello', big('A'))).result).toBe('applied');
+    await until('the first to arrive', () => owner.text.toString().includes(big('A')));
+    expect((await askFor(owner, big('A'), big('B'))).result).toBe('applied');
+    await until('the second to arrive', () => owner.text.toString().includes(big('B')));
+    // 1.8 MB were added and 0.2 is left: a flat 512 each would let this in.
+    const refused = await askFor(owner, big('B'), big('C'));
+    expect(refused.error).toBe('Too many edits at once. Try again in a moment.');
+    expect(refused.result).toBeUndefined();
+    await new Promise((r) => setTimeout(r, 300));
+    const text = await stored(project);
+    expect(text.includes(big('B'))).toBe(true);
+    expect(text).not.toContain('C');
+    owner.provider.destroy();
+  });
+});
+
+test('commands sent on a connection after the edit that closed it are not applied', async () => {
+  const { project, file } = await paper();
+  await withBudget({ burst: 2_000_000, perMinute: 6_000, floor: 512 }, async (port) => {
+    const owner = client(users.owner, file, port);
+    await saved(owner);
+    owner.text.insert(0, 'X'.repeat(BIG));
+    await saved(owner);
+    // Past the budget. The commands are on the socket in the same burst, after the edit.
+    owner.text.insert(0, 'Y'.repeat(BIG));
+    const keys = [0, 1, 2].map(() => crypto.randomUUID());
+    const at = (n: number) =>
+      Buffer.from(
+        Y.encodeRelativePosition(Y.createRelativePositionFromTypeIndex(owner.text, n)),
+      ).toString('base64url');
+    const i = owner.text.toString().indexOf('Hello');
+    for (const key of keys)
+      owner.provider.sendStateless(
+        JSON.stringify({
+          key,
+          from: at(i),
+          to: at(i + 5),
+          expected: 'Hello',
+          replacement: 'CMD',
+        }),
+      );
+    await until('the edit to be refused', () => overBudget(owner));
+    await new Promise((r) => setTimeout(r, 500));
+    expect(owner.state.replies.filter((r) => r.result === 'applied')).toEqual([]);
+    const text = await stored(project);
+    expect(text).not.toContain('CMD');
+    expect(text).not.toContain('Y');
+    owner.provider.destroy();
+  });
+});
+
 test('the metrics count the edits refused for the budget', async () => {
   const { file } = await paper();
   await withBudget({ burst: 2_000_000, perMinute: 60_000, floor: 512 }, async (port) => {
