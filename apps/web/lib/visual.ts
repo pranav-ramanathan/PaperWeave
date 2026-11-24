@@ -917,6 +917,49 @@ export function createVisual(opts: {
     props: { decorations: (state) => marks.getState(state) },
   });
   /**
+   * The blocks of the document (a paragraph, a list, a formula) that the selection has been in
+   * lately, the last few, are marked `caret-block`, which the stylesheet leaves out of
+   * content-visibility. A block that is new, or has just been scrolled to, is skipped (no layout)
+   * until the next frame; the browser places the caret in text it typed there by that layout, and
+   * a key typed in that frame left the caret before the letter ("fterA"). A block that the
+   * selection leaves keeps the mark for a while: a block that is given the rule again is skipped
+   * for a frame too, and the ones below it jump.
+   */
+  const RECENT_BLOCKS = 8;
+  const caretBlocks: Plugin<{ at: number[]; set: DecorationSet }> = new Plugin({
+    state: {
+      init: () => ({ at: [] as number[], set: DecorationSet.empty }),
+      apply: (tr, prev, _before, state) => {
+        if (!tr.docChanged && !tr.selectionSet) return prev;
+        const { selection, doc } = state;
+        const top = selection.$head.depth ? selection.$head : selection.$from;
+        const now = top.depth
+          ? top.before(1)
+          : selection instanceof NodeSelection
+            ? selection.from
+            : -1;
+        // Where the earlier ones are now; one that is no longer a block of its own is dropped.
+        const kept = prev.at
+          .map((p) => tr.mapping.map(p, 1))
+          .filter((p) => p !== now && p <= doc.content.size && doc.resolve(p).nodeAfter)
+          .filter((p, i, all) => all.indexOf(p) === i && !doc.resolve(p).depth);
+        const at = now < 0 ? kept : [now, ...kept].slice(0, RECENT_BLOCKS);
+        if (!tr.docChanged && at.length === prev.at.length && at.every((p, i) => p === prev.at[i]))
+          return prev;
+        return {
+          at,
+          set: DecorationSet.create(
+            doc,
+            at.map((p) =>
+              Decoration.node(p, p + doc.resolve(p).nodeAfter!.nodeSize, { class: 'caret-block' }),
+            ),
+          ),
+        };
+      },
+    },
+    props: { decorations: (state) => caretBlocks.getState(state)?.set },
+  });
+  /**
    * Get ready to insert LaTeX where the caret is now. Returns the function that inserts it, by
    * way of the server, or null if the caret is not in running text.
    */
@@ -1214,6 +1257,7 @@ export function createVisual(opts: {
             },
           }),
           marks,
+          caretBlocks,
           // Where the other people are: a caret with their name, and their selection.
           new Plugin({
             props: {

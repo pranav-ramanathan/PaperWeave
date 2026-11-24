@@ -6912,6 +6912,27 @@ of the paper's .bib files.`
   A formula or table wider than the pane would be cut off by the same rule (the pane used to
   scroll sideways to reach it), so the editor's top-level `div` blocks (display formulas, figures,
   tables, raw LaTeX) now scroll sideways on their own.
+- **Found after CI failed on this change** (`insert.spec.ts` "a list is started from the toolbar…",
+  `toHaveCount(3)` received 1). The rule also skips a block the browser has not yet laid out in a
+  frame: a paragraph just opened with Enter is one, and a key typed into it in that frame is put in
+  by the browser, which finds the caret by that layout, and leaves the caret before the letter
+  (typing "After" gave "fterA"; Enter in a list item typed fast after the view switch did not
+  split). It showed on a fast machine and not under `E2E_CPU_THROTTLE`: with it, 0 of 10 at 4,
+  0 of 8 at 8 and 0 of 6 at 12 failed (CI's own run was at normal speed, 7.5 s); at normal speed
+  the same test failed 6 of 20 and 1 of 12 on this change and 0 of 20 on its parent. Only the CSS
+  rule does it: this change with the rule's `content-visibility` taken out, 0 of 20 (the marks in
+  plugin state are not involved). So the blocks the selection is in are now left out of the
+  rule: a plugin (`caretBlocks`, `apps/web/lib/visual.ts`) puts the class `caret-block` on the
+  top-level block with the selection and on the last seven it was in, and the rule is
+  `.visual .ProseMirror > *:not(.caret-block)`. The class is on a new block in the same drawing
+  that makes it, so it is never skipped. It stays on a block the selection has left because a
+  first version that took it off at once failed `keys.spec` "a reviewer selects words…" (3 of 4
+  runs): a block given the rule again is skipped for a frame, takes the guessed 4em, and the
+  blocks below it jump (tops 324 to 374 px) while the next key is on its way. With the last eight
+  kept, the list test passed 40 of 40, against 6 of 20 before, and that `keys.spec` test 15 of 15. Typing
+  speed is unchanged (150 KB: median 16–24 / p95 32–40 ms, no long task; 33 KB: 16 / 16–32).
+  Run locally, the sign-up limits (`INVITATIONS_PER_HOUR`, `SIGN_IN_EMAILS_PER_HOUR`) had to be
+  raised for so many runs of one test.
 
   Keydown time in the real editor (production build, 48 keys 70 ms apart in the middle of the
   file, the planner's `rounds` approach), median / p95 in ms and keys that were a long task, before

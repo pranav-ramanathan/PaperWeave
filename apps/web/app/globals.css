@@ -120,8 +120,11 @@ body {
 /* A paragraph, heading, list, formula or figure that is out of sight is not laid out or painted
    until it comes near: in a long file each key was paying for all of them. Its height is
    remembered once seen (4em until then). Another person's name stands above their caret, just
-   outside the first line of a paragraph: the margin keeps it drawn. */
-.visual .ProseMirror > * {
+   outside the first line of a paragraph: the margin keeps it drawn. Not the blocks the caret
+   is in or has just left (the class `caret-block`, see visual.ts): a block skipped for a frame
+   has no layout, and a key typed into one in that frame, a new paragraph just opened with Enter,
+   puts the caret back before the letter. */
+.visual .ProseMirror > *:not(.caret-block) {
   content-visibility: auto;
   contain-intrinsic-size: auto 4em;
   overflow-clip-margin: 1.5em;
