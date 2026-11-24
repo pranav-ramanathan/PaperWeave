@@ -765,3 +765,42 @@ test('a proposal changed since it was last seen is not accepted, rejected or ove
   });
   expect((await proposals(p)).find((x) => x.id === mine)?.status).toBe('dismissed');
 });
+
+test('accepting two proposals on overlapping words: the second, on its old card, is refused', async () => {
+  const p = await paper();
+  const first = await propose(t.pool, store, users.reviewer.id, p.id, p.file, {
+    ...(await ends(p.file, 'below 40')),
+    replacement: 'under 40',
+  });
+  const second = await propose(t.pool, store, users.reviewer.id, p.id, p.file, {
+    ...(await ends(p.file, '40 ms')),
+    replacement: '40 milliseconds',
+  });
+  const seen = async (which: string) => {
+    const x = (await proposals(p, 'owner')).find((q) => q.id === which)!;
+    return { expected: x.expected, replacement: x.replacement };
+  };
+  const [seen1, seen2] = [await seen(first), await seen(second)];
+  expect(await code(acceptProposal(t.pool, store, users.owner.id, p.id, first, seen1))).toBe('ok');
+  expect(await code(acceptProposal(t.pool, store, users.owner.id, p.id, second, seen2))).toBe(
+    'conflict',
+  );
+  expect(await saved(p)).toBe(MAIN.replace('below 40', 'under 40'));
+  expect((await proposals(p)).find((x) => x.id === second)?.status).toBe('open');
+});
+
+test('a reviewer cannot accept a proposal, and the text is unchanged', async () => {
+  const p = await paper();
+  const id = await propose(t.pool, store, users.reviewer.id, p.id, p.file, {
+    ...(await ends(p.file, 'below 40 ms')),
+    replacement: 'under 40 ms',
+  });
+  const [{ expected, replacement }] = await proposals(p, 'reviewer');
+  expect(
+    await code(
+      acceptProposal(t.pool, store, users.reviewer.id, p.id, id, { expected, replacement }),
+    ),
+  ).toBe('permission_denied');
+  expect(await saved(p)).toBe(MAIN);
+  expect((await proposals(p))[0].status).toBe('open');
+});

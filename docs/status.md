@@ -432,7 +432,14 @@ Read this first. Update it in every pull request.
     solid one). The paper's page lists open proposals and threads under "Review", and the checks
     before submitting mention unfinished review without letting it stand in the way.
   - A proposal marks only the words it changes (struck in "Now:", added in "Proposed:").
-  - Not yet: accepting several at once.
+  - Accepting several at once: for an owner or editor, with two or more plain proposals open, a
+    button above the list reads "Accept the N plain changes". A plain proposal is open, not out
+    of date, has no flag and no LaTeX warning, was not made by a model review, and is not the
+    one being changed. It accepts them oldest first, at most 50 a press (the button says so when
+    there are more), each with its own card's `seen`, so one changed since it was drawn is
+    refused and left open. Then it reads the list once and says how many were accepted and how
+    many were left. A lost connection stops it, and the note says how many were done. No server
+    change: each is the ordinary accept, checked for `proposal.decide`.
 - **E3: spelling and grammar.** A "Spelling and grammar" panel under the editor of a LaTeX
   file, and a wavy line under each finding in both views. Checked when the file opens and again
   once what was typed is saved and has been left alone for a moment.
@@ -6970,3 +6977,39 @@ of the paper's .bib files.`
     which is rare. Another person's name above their caret in the first line of a table cell
     or figure may be cut off by that block's own scroll (not checked).
   - Measured on one machine, in headless Chromium only.
+
+## Back and Forward ask before dropping what has not been saved
+
+- **What was wrong.** With the web app answering and the sync service away (restarting, the line
+  to it dropped, no network), the editor keeps what is typed and says it is waiting to be saved.
+  Back or Forward to another page of the app then threw the editor away with the only copy, and
+  asked nothing: the link guard hears clicks, and the browser's own prompt is not raised when
+  the page is swapped in place. Shown in the real app: Back, Forward, the service back, and the
+  file did not hold what had been typed.
+- **Now** Back and Forward ask what a link asks ("What you typed in main.tex has not been saved
+  yet… Leave anyway?") under the same rule (`atRisk`). Leaving goes where the browser was going.
+  Staying keeps the page, its editor and the words, and puts the address and the history back.
+- **How.** The browser has already moved when it says so, and cannot be refused; but the router
+  has not yet acted. Listeners on the window are called in the order they were added, and the
+  router adds its own when the page's scripts start, so a third constant script in
+  `app/layout.tsx` (`WENT_FIRST`) listens from the moment the page is read and hands the event
+  to the open editor (`wentTo` in `apps/web/lib/leaving.ts`). To stay, the editor keeps the event
+  from the router and steps the history back by as many entries as the browser moved
+  (`history.go`, the index from the Navigation API); in a browser without that API it puts the
+  page after the one arrived at (`pushState` with the entry's own state). A listener added by
+  the editor itself was tried first and is never called: the router has unmounted the editor by
+  then.
+- **Held by** `leaving.test.ts` and four tests in `recover.spec` (Back refused twice, then saved
+  and allowed; Back agreed to; Forward; a browser without the Navigation API).
+- **Not done.**
+  - Back to a page that is not this app's document (another site, or an entry from before a
+    reload) is the browser's own "Leave site?" prompt, as before.
+  - Closing the tab offline still loses unsaved edits after the browser's prompt; keeping them
+    on the device is an owner decision (Conventions).
+  - Where the browser gives no index, staying after Forward leaves the file's page after the
+    page that was ahead, instead of before it; and Chrome may skip an entry made without a
+    press when Back is next used. Neither loses anything.
+  - After steps within the page (a `#` link), a jump of several entries at once that is refused
+    comes back to the file's page without the `#`.
+  - Tried in headless Chromium only. Firefox and Safari call window listeners in the order
+    added too (it is the standard's rule), but neither was run.
