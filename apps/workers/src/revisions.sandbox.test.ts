@@ -364,7 +364,7 @@ test('the ZIP of only the files the paper uses leaves out a cover letter and an 
   expect(z.all).toEqual(['cover-letter.tex', 'main.tex', 'old/draft.pdf', 'refs.bib']);
   // Exactly the two, and nothing else, is gone. The manifest names them.
   expect(z.all.filter((p) => !z.used.includes(p))).toEqual(['cover-letter.tex', 'old/draft.pdf']);
-  expect(z.used).toEqual(['main.tex', 'paperweave-toolchain.json', 'refs.bib']);
+  expect(z.used).toEqual(['main.bbl', 'main.tex', 'paperweave-toolchain.json', 'refs.bib']);
   expect(z.manifest.unused).toEqual(['cover-letter.tex', 'old/draft.pdf']);
   expect(Object.keys(z.manifest.files).sort()).toEqual(['main.tex', 'refs.bib']);
   expect(await unusedInRevision(t.pool, owner.id, projectId, revision.id)).toEqual([
