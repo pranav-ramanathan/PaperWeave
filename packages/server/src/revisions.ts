@@ -1025,10 +1025,63 @@ async function prepareRestore(
  * A client that reconnects and finds this changed knows the paper was restored while it was away.
  */
 export async function lastRestore(db: Db, userId: string, fileId: string): Promise<number> {
-  const { projectId } = await openFile(db, userId, fileId);
+  return (await lastRestoreNote(db, userId, fileId))?.number ?? 0;
+}
+
+/** What the people who have a paper open are told of a restore of it. */
+export type RestoreNote = {
+  /** The restore: a revision of its own. */
+  id: string;
+  number: number;
+  /** The revision the paper was put back to, and the name it was given, if any. */
+  from: number | null;
+  fromName: string | null;
+  /** The address of whoever restored it. */
+  by: string | null;
+  at: string;
+  /** The revision made of the paper as it stood at that moment: what the restore replaced. */
+  kept: { id: string; number: number } | null;
+};
+
+/**
+ * Restore number `number` of a paper (the newest, if none is given), for telling its editors.
+ * Nothing is checked of who asks: the caller has. `null` if there is no such restore.
+ */
+export async function restoreNote(
+  db: Db,
+  projectId: string,
+  number?: number,
+): Promise<RestoreNote | null> {
   const { rows } = await db.query(
-    "select coalesce(max(number), 0)::int as n from revisions where project_id = $1 and kind = 'restore'",
-    [projectId],
+    `select r.id, r.number, f.number as "from", f.name as "fromName", u.email as by,
+            r.created_at as at, k.id as "keptId", k.number as "keptNumber"
+     from revisions r
+     left join revisions f on f.id = r.restored_from
+     left join "user" u on u.id = r.created_by
+     left join revisions k on k.project_id = r.project_id and k.number = r.number - 1
+     where r.project_id = $1 and r.kind = 'restore' and ($2::int is null or r.number = $2)
+     order by r.number desc limit 1`,
+    [projectId, number ?? null],
   );
-  return rows[0].n;
+  const r = rows[0];
+  if (!r) return null;
+  return {
+    id: r.id,
+    number: r.number,
+    from: r.from,
+    fromName: r.fromName,
+    by: r.by,
+    at: new Date(r.at).toISOString(),
+    kept: r.keptId ? { id: r.keptId, number: r.keptNumber } : null,
+  };
+}
+
+/** The newest restore of the paper a file belongs to, for someone who may open that file. */
+export async function lastRestoreNote(
+  db: Db,
+  userId: string,
+  fileId: string,
+): Promise<RestoreNote | null> {
+  const { projectId } = await openFile(db, userId, fileId);
+  return restoreNote(db, projectId);
 }

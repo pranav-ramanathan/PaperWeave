@@ -35,9 +35,10 @@ import { pageNonce } from '../../../../../lib/nonce';
 import { atRisk, LEAVE, leavesPage } from '../../../../../lib/leaving';
 import { carry, onShow, showInPdf, taken } from '../../../../../lib/pdfsync';
 import { wordAt } from '../../../../../lib/pdfword';
+import { isNews, restoreChanges, restoredWords } from '../../../../../lib/restored';
 import { setTyping } from '../../../../../lib/typing';
 import { createVisual, type Visual } from '../../../../../lib/visual';
-import type { LanguageFinding, Proposal, Thread } from '@paperweave/server';
+import type { LanguageFinding, Proposal, RestoreNote, Thread } from '@paperweave/server';
 import Language from './Language';
 import Proposals from './Proposals';
 import Toolbar from './Toolbar';
@@ -340,6 +341,9 @@ export default function FileEditor(props: {
   const keepEdits = useRef(() => {});
   const discardEdits = useRef(() => {});
   const [others, setOthers] = useState<string[]>([]);
+  // The paper was restored while this person had the file open: who did it, and to what. Kept
+  // until they dismiss it; the status line goes on saying whether their own edits are saved.
+  const [restore, setRestore] = useState<RestoreNote | null>(null);
 
   useEffect(() => {
     const doc = new Y.Doc();
@@ -379,6 +383,7 @@ export default function FileEditor(props: {
         // it, is not theirs: an empty ticket is refused, and the editor stops.
         if (answer.user !== user) return '';
         const { ticket, restored } = answer;
+        const note: RestoreNote | null = answer.restore ?? null;
         // Coming back online to a paper that was restored meanwhile: this person's unsent edits
         // were made to text that is no longer there. They are held until the person decides.
         // `null` is not a restore: the file is gone or this person has lost access. The ticket is
@@ -390,6 +395,7 @@ export default function FileEditor(props: {
           saving.unsaved
         ) {
           restoreHeld = restored;
+          if (note) setRestore(note);
           update({ held: true });
           setLocked(true);
           // Thrown, not sent: the connection attempt ends here, without bothering the server.
@@ -397,10 +403,16 @@ export default function FileEditor(props: {
         }
         // Only offered: it counts as seen once this connection has synced. If the attempt dies
         // first, edits typed meanwhile are still held back from the restored text.
-        if (restored != null) restoreOffered = restored;
+        if (restored != null) {
+          restoreOffered = restored;
+          offeredNote = note;
+        }
         return ticket ?? '';
       },
       onSynced: () => {
+        // Back from being away to a paper that was restored meanwhile, with nothing of their own
+        // unsent: the text in front of them has changed all the same, and they are told.
+        if (offeredNote && isNews(offeredNote.number, restoreSeen)) setRestore(offeredNote);
         restoreSeen = Math.max(restoreSeen ?? 0, restoreOffered ?? 0);
         update({ loaded: true });
         // Arrived from a place in the PDF: go to the line it named, once, now that there is text.
@@ -429,11 +441,15 @@ export default function FileEditor(props: {
         }, 1000);
       },
       onStateless: ({ payload }) => {
-        const reply: (Reply & { key: string }) | Saved | Role | { restored: number } =
+        const reply:
+          (Reply & { key: string }) | Saved | Role | { restored: number; restore?: RestoreNote } =
           JSON.parse(payload);
         if ('role' in reply) return roleIs(reply);
         // A restore made while this tab is connected arrives as ordinary edits; this says it was one.
         if ('restored' in reply) {
+          // Said to the person too, unless this is a restore the editor already knew of (the
+          // button pressed twice; the server's listener catching up).
+          if (reply.restore && isNews(reply.restored, restoreSeen)) setRestore(reply.restore);
           restoreSeen = Math.max(restoreSeen ?? 0, reply.restored);
           return;
         }
@@ -500,6 +516,7 @@ export default function FileEditor(props: {
     let restoreSeen: number | null = null;
     /** The newest restore the last ticket named: seen only once the connection has synced. */
     let restoreOffered: number | null = null;
+    let offeredNote: RestoreNote | null = null;
     let restoreHeld: number | null = null;
     /** Whether this tab should be connected: false only while the browser says it is offline. */
     let wantOpen = true;
@@ -1163,6 +1180,40 @@ export default function FileEditor(props: {
           </span>
         </Toolbar>
       )}
+      {/* Directly above the text, where the person is looking: the bar above may be scrolled away.
+          Always there, so that a screen reader hears the words when they arrive. Not a second
+          "status": the one in the bar stays the only one, and says whether edits are saved. */}
+      <div className={restore ? 'editor-notice' : undefined}>
+        <span aria-live="polite">
+          {restore &&
+            restoredWords(
+              restore,
+              user,
+              new Date(restore.at).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
+              sync.held,
+            )}
+        </span>
+        {restore && (
+          <span role="group" aria-label="About the restore">
+            {restoreChanges(projectId, restore) && (
+              <a href={restoreChanges(projectId, restore)!} target="_blank" rel="noreferrer">
+                Show what the restore changed (opens a new tab)
+              </a>
+            )}
+            <button
+              type="button"
+              onClick={() => {
+                setRestore(null);
+                // The button is gone: the keyboard goes back to the text.
+                if (mode === 'visual') live.current?.visual?.focus();
+                else live.current?.view.focus();
+              }}
+            >
+              Dismiss
+            </button>
+          </span>
+        )}
+      </div>
       <div id="text" tabIndex={-1}>
         <div className="visual" ref={visualHost} hidden={mode !== 'visual'} />
         <FormulaBox request={formula} macros={macros.current} onDone={() => setFormula(null)} />

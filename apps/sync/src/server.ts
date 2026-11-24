@@ -11,6 +11,7 @@ import {
   loadUpdates,
   openFile,
   MAX_EDIT_BYTES,
+  restoreNote,
   runCommand,
   tooLarge,
   verifyTicket,
@@ -76,19 +77,27 @@ export async function startSync(opts: {
     connection.sendStateless(JSON.stringify({ role, canWrite: !connection.readOnly }));
   /**
    * Tell the editors of a paper that it was restored, as number `n`. Their files are brought up
-   * to their logs first, so the restored text reaches each socket before this does.
+   * to their logs first, so the restored text reaches each socket before this does. With the
+   * number goes who restored it and to what, for the editor to say: read once, and left out if
+   * it cannot be read (the number is what the editor's own bookkeeping needs).
    */
   const tellRestored = async (projectId: string, n: number, catchUpFirst = true) => {
-    for (const [name, document] of [...server.hocuspocus.documents]) {
-      const mine = (document.getConnections() as Connection<Context>[]).filter(
+    const here = (document: { getConnections(): unknown[] }) =>
+      (document.getConnections() as Connection<Context>[]).filter(
         (c) => c.context.projectId === projectId,
       );
+    // Nobody has the paper open: nothing to read, nobody to tell.
+    if (![...server.hocuspocus.documents.values()].some((d) => here(d).length)) return;
+    const restore = n > 0 ? await restoreNote(pool, projectId, n).catch(() => null) : null;
+    for (const [name, document] of [...server.hocuspocus.documents]) {
+      const mine = here(document);
       if (!mine.length) continue;
       if (catchUpFirst) await catchUp(name, 1);
       // Hocuspocus holds document updates until the end of this turn of the event loop, but
       // sends a stateless message at once: send what it holds first, or the signal outruns it.
       document.flush();
-      for (const c of mine) c.sendStateless(JSON.stringify({ restored: n }));
+      for (const c of mine)
+        c.sendStateless(JSON.stringify({ restored: n, ...(restore && { restore }) }));
     }
   };
   const server = new Server<Context>({

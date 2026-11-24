@@ -527,6 +527,15 @@ test('a restore is announced to the people who have the file open, after its edi
   expect(told()[0].restored).toBe(made.number);
   // The restored text had reached it by then: the signal does not outrun the edits.
   expect(told()[0].had).toBe(MAIN.replaceAll('\r\n', '\n'));
+  // With it, what the editor says to the person: who restored the paper, to what, and which
+  // revision keeps the paper as it was.
+  expect(told()[0].restore).toMatchObject({
+    number: made.number,
+    from: good.number,
+    fromName: 'Good',
+    by: users.owner.email,
+    kept: { number: made.number - 1 },
+  });
 });
 
 test('deleting a file closes it for everyone; restoring brings back the same file without doubling text', async () => {
