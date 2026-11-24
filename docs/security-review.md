@@ -254,6 +254,19 @@ What it found is fixed in the same change, or listed under "Open" with what to d
   with `symlinkSync` in a temp directory and call `readOwn` directly; builds of ordinary papers
   are unchanged.
 
+- **One writer could freeze the sync server with one paragraph.** The parser scanned to the end
+  of the paragraph for a closer, and again from each later token when it found none, so a
+  paragraph of `\cite[` repeated took 9.8 s at 32 KB (twice: the window before and after the
+  edit) and `\lstinline[` repeated never finished. The sync server runs that parse on its one
+  thread for every structural command, so everyone's edits and answers waited: a second person's
+  query on another file waited 13 s. Every look-ahead is now memoized for the length of a parse
+  with the same tree as before (checked against a copy of the old parser on every fixture and
+  on random text), and `containedNear` counts the replacement against its window cap, which it
+  did not (a 300 KB replacement was parsed). Tests failed on the old code: parser timings, the
+  `containedNear` cases and a sandbox test that asks on another file while the command runs.
+  Not covered: text nested thousands deep is still a `RangeError` (refused by `containedNear`),
+  and the label, include, prose and macro indexes have the same pattern (see the status file).
+
 ## Open
 
 In rough order of how much they matter.

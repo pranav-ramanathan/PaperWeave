@@ -151,14 +151,22 @@ export function containedNear(
     start = Math.max(s, d + DOC.length);
     head = DOC;
   }
-  if (e - start > WINDOW_CAP) return false;
+  // The text after the edit is parsed too, and the replacement can be as long as the caller likes
+  // (up to 1 MB): it counts against the cap like the text around it.
+  if (e - start > WINDOW_CAP || e - start - was + replacement.length > WINDOW_CAP) return false;
   const before = head + now.slice(start, e);
   const after = head + now.slice(start, from) + replacement + now.slice(to, e);
-  return contained(
-    parse(before, transparent),
-    parse(after, transparent),
-    from - start + head.length,
-    was,
-    replacement.length,
-  );
+  try {
+    return contained(
+      parse(before, transparent),
+      parse(after, transparent),
+      from - start + head.length,
+      was,
+      replacement.length,
+    );
+  } catch (err) {
+    // Text nested deeper than the stack allows: refused, as a window past the cap is.
+    if (err instanceof RangeError) return false;
+    throw err;
+  }
 }

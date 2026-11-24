@@ -7385,3 +7385,54 @@ restores of a large paper got round it (`docs/security-review.md`, Open 1).
 - **Held by** a case in `csv.test.ts` (a line of `MAX_COLUMNS * 100` commas, as the first line
   and as a later one, under 250 ms; 500 columns is still allowed). On the old code the later-row
   half failed; the first-line half passed there too at that size, which is only 50 KB.
+
+### One writer could freeze the sync server with one paragraph
+
+- **A fault found.** `parse` (`packages/latex/src/parse.ts`) scanned forward to the end of the
+  paragraph for a closer (`bracket`, `group`, `rawGroup`, `mathEnd`, `findEnd`, `codeEnd`,
+  `citeUnit`, `limit`) and, when it found none, went on one token later and scanned the same text
+  again. A paragraph of `\cite[` repeated: 16 KB 2.3 s, 32 KB 9.8 s, 64 KB 38.9 s, 300 KB 581 s,
+  and `\lstinline[` repeated never finished (a bracket scan that ran a bracket scan: exponential).
+  The sync server runs `containedNear` on one thread for every structural command, so one writer
+  froze everyone: with a 32 KB hostile paragraph the server did not run for 13 s and a second
+  person's saved-query on another file waited 13.3 s. The web server's import and the browser
+  editor run the same parser.
+- **Now.** Each look-ahead is memoized for the length of one `parseInto`, and the tree is the
+  same. No work meter was needed: every helper is exact under a memo, and each memo has its
+  argument in a comment in `parse.ts`. Which helper got which:
+  - `bracket`: a walk has no state but its position, so every position a long walk stood on, and
+    its start, is recorded with the walk's answer (path memo). A `]` inside a braced group, a
+    comment or a verbatim argument is skipped by the same steps as before.
+  - `group`, `rawGroup` (as `rawEnd`), `findEnd` (a table per environment name) and the new
+    `mathGroup`: a walk carries only its depth, so every nested opener it passes is the start of a
+    walk of its own; each is recorded as it closes, a later walk jumps over a known one or fails
+    with it, and at a stop every open one fails (stack memo). `rawGroup`'s `lim` only cuts a walk
+    short, so it is applied to the memoized end.
+  - `mathEnd`: the first pass (braces counted) is memoized at its start and at the depth-0
+    positions it stood on, a closed brace group is skipped by `mathGroup`, and the second pass
+    (braces as characters) is `firstClose`, a path memo with one table for each closer. Only an
+    unclosed brace needs the second pass.
+  - `codeEnd`, `citeUnit` and the `$$`, `\[` and verbatim-end searches in `block`: `find`
+    remembers the last `indexOf` answer for each needle (valid for every start up to the answer,
+    and any start after a -1); `citeUnit`'s blank-line test uses the same for the regex.
+  - `limit`: the next heading and the next blank line are remembered the same way (`searcher`).
+    `eol`/`lineEnd` too, since one huge line was scanned again by each backslash on it.
+- **Also.** `containedNear` counted the text around the edit against `WINDOW_CAP` but not the
+  replacement (up to 1 MB); it does now, and returns `false` on a `RangeError` (text nested past
+  the stack) as it does for a window past the cap.
+- **Held by** `parse.differential.test.ts` (every fixture, 4000 random token strings, 1000 many-of-
+  one-opener strings and 100 sequences of 30 edits through `reparse`, each compared with
+  `parse.reference.ts`, the old parser copied unchanged; the seed is in the failure message;
+  200 000 seeds also pass; a deliberate off-by-one in `rawGroup` is caught at seed 871),
+  `parse.perf.test.ts` (14 hostile texts and one hostile paragraph in a document, each under 500 ms or 1 s; the old parser took 0.5 to 17 s on
+  each of them or never finished), two cases in `contained.test.ts` (a 300 KB replacement is
+  refused, a 32 KB hostile paragraph beside the edit is answered under 500 ms) and the sandbox
+  test in `sync.sandbox.test.ts` (a second client's question on another file is answered under
+  2 s while a writer's command works on a 32 KB hostile paragraph; old code: 13 262 ms). The
+  existing parser, bridge and fuzz tests pass unchanged.
+- **Not done:** the parser still recurses: `\emph{` or `\lstinline[` nested about 5000 deep is a
+  `RangeError` (the callers that matter, `containedNear`, refuse it). The indexes in the same
+  package have the same pattern and are not fixed: `labelIndex`'s `keyList` (`labels.ts`) builds
+  the key list to the end of the text for every `\label{` that never closes (140 KB of `\label{`:
+  14 s, on every paper page load), and `includeGraph`, `proseEnvs` and `mathMacros` were not
+  measured. Each wants the same memo, its own differential test and a perf test.

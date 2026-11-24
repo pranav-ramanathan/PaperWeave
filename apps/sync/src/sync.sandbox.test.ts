@@ -1393,6 +1393,73 @@ test('commands sent on a connection after the edit that closed it are not applie
   });
 });
 
+test('a structural edit against a hostile paragraph does not hold up people on other files', async () => {
+  // The server parses a window around the edit on its one thread. A paragraph of options that
+  // never close took that parse ten seconds for 32 KB (twice), and everyone's answers waited.
+  const a = await paper();
+  const b = await paper();
+  // A server of its own, in another process: a parse that blocks it must not block this test.
+  const port = sync.port + 2;
+  const env = { ...process.env, ...TEST_ENV, DATABASE_URL: t.url, SYNC_PORT: String(port) };
+  await new Promise<void>((resolve, reject) => {
+    child = spawn(process.execPath, [join(import.meta.dirname, 'main.ts')], {
+      env,
+      stdio: ['ignore', 'pipe', 'inherit'],
+    });
+    child.stdout!.once('data', () => resolve());
+    child.once('error', reject);
+  });
+  const owner = client(users.owner, a.file, port);
+  const other = client(users.editor, b.file, port);
+  await saved(owner, other);
+  const at = owner.text.toString().indexOf('Hello.');
+  owner.text.insert(at, `\\sys{} ${'\\cite['.repeat(5460)} `);
+  await saved(owner);
+
+  let asked = 1_000_000;
+  const answered = async (c: Client) => {
+    // A number of its own, so that no earlier answer is taken for this one.
+    const q = { ...c.changes.question(), n: asked++ };
+    const t0 = Date.now();
+    c.provider.sendStateless(JSON.stringify(q));
+    await until(
+      'an answer',
+      () => c.state.replies.some((r) => r.n === q.n && 'saved' in r),
+      120_000,
+    );
+    return Date.now() - t0;
+  };
+  const pos = (n: number) =>
+    Buffer.from(
+      Y.encodeRelativePosition(Y.createRelativePositionFromTypeIndex(owner.text, n)),
+    ).toString('base64url');
+  const key = crypto.randomUUID();
+  const i = owner.text.toString().indexOf('\\sys{}');
+  owner.provider.sendStateless(
+    JSON.stringify({
+      key,
+      from: pos(i),
+      to: pos(i + 6),
+      expected: '\\sys{}',
+      replacement: '\\cite{z}',
+      contained: true,
+    }),
+  );
+  // Asked again and again from the moment the command is sent until it is answered, so that one
+  // lands while the server works it out, at the least 20 times.
+  const waits: number[] = [];
+  const done = () => owner.state.replies.some((r) => r.key === key);
+  while (!done() || waits.length < 20) {
+    await new Promise((r) => setTimeout(r, 50));
+    waits.push(await answered(other));
+  }
+  expect(Math.max(...waits), `answers took ${waits.join(', ')} ms`).toBeLessThan(2000);
+  expect(owner.state.replies.find((r) => r.key === key)?.result).toBe('applied');
+  owner.provider.destroy();
+  other.provider.destroy();
+  child?.kill('SIGKILL');
+});
+
 test('the metrics count the edits refused for the budget', async () => {
   const { file } = await paper();
   await withBudget({ burst: 2_000_000, perMinute: 60_000, floor: 512 }, async (port) => {
