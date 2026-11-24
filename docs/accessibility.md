@@ -205,6 +205,11 @@ the keyboard (`insert.spec`).
   now goes to the next finding's first button, or to the panel's heading when none is left. Only
   when it had been lost: a click in the editor is not disturbed. The note says what was done
   ("Changed “recieve” to “receive”."). The words are shown on the page only, never logged.
+- The buttons that start a comment and a proposed change, and the open ones, stood after every
+  button of every spelling and grammar finding (2.4.1, 2.4.3): 196 Tab presses from the text in a
+  median paper's main file, measured on the corpus. The panels are now in the order Proposed
+  changes, Comments, Spelling and grammar, so the first Tab from the text is "Propose a change
+  here" and the second "Comment on the selected text". `grammar.spec` holds it.
 - A reply sent with Enter on a "Mention" checkbox left the keyboard on the page body, because the
   list of people closes after a send (2.4.3). The keyboard now goes to the reply's text box.
 - On a window 320 pixels wide the chart page scrolled sideways when a column heading was long,

@@ -453,3 +453,60 @@ test('a paper written in American English is checked as American from the start'
   await expect(finding(owner.page, 'Spelling: “recieved”')).toBeVisible({ timeout: 30_000 });
   await expect(finding(owner.page, 'Spelling: “color”')).toHaveCount(0);
 });
+
+test('comments and proposed changes come before a long list of findings', async ({ browser }) => {
+  test.setTimeout(120_000);
+  const owner = await person(browser, 'grammar-order');
+  // Twelve misspelt words, the same in British and American English, and no word that differs
+  // between the two: the real checker lists exactly twelve.
+  const main = [
+    '\\documentclass{article}',
+    '\\begin{document}',
+    'The sentense is short. It was recieved late.',
+    '',
+    'This occured twice. We keep them seperate.',
+    '',
+    'It is definately so. The adress is known.',
+    '',
+    'We beleive the result. The begining is slow.',
+    '',
+    'It lasts untill noon. The goverment agreed.',
+    '',
+    'It is neccessary here. The enviroment is dry.',
+    '\\end{document}',
+    '',
+  ].join('\n');
+  const zip = join(mkdtempSync(join(tmpdir(), 'paperweave-e2e-')), `Order ${run}.zip`);
+  writeFileSync(zip, await writeZip([{ path: 'main.tex', bytes: Buffer.from(main) }]));
+  await owner.page.goto('/sign-in');
+  await signIn(owner.page, owner.email);
+  await owner.page.getByLabel('Or import a ZIP of a LaTeX project').setInputFiles(zip);
+  await owner.page.getByRole('button', { name: 'Import ZIP' }).click();
+  await expect(owner.page.getByRole('heading', { name: 'Language' })).toBeVisible();
+  await owner.page.getByRole('link', { name: 'main.tex' }).first().click();
+  await expect(finding(owner.page, 'Spelling: “sentense”')).toBeVisible({ timeout: 30_000 });
+  await expect(panel(owner.page).getByRole('article')).toHaveCount(12);
+
+  const where = await owner.page.evaluate(() => {
+    const top = (el: Element) => el.getBoundingClientRect().top;
+    const button = (name: string) =>
+      [...document.querySelectorAll('button')].find((b) => b.textContent === name)!;
+    const language = document.getElementById('language')!;
+    const comment = button('Comment on the selected text');
+    const stops = [
+      ...document.querySelectorAll('button, a[href], textarea, input, select, [tabindex="0"]'),
+    ];
+    return {
+      proposeFirst: top(button('Propose a change here')) < top(language),
+      commentFirst: top(comment) < top(language),
+      // What the Tab key passes on its way from the text to the button: no finding's button.
+      findingStopsBefore: stops
+        .slice(0, stops.indexOf(comment))
+        .filter((el) => language.contains(el)).length,
+      findingStops: language.querySelectorAll('button').length,
+    };
+  });
+  expect(where).toMatchObject({ proposeFirst: true, commentFirst: true, findingStopsBefore: 0 });
+  // The list really is long: twelve findings, each with "Show in the text" and more.
+  expect(where.findingStops).toBeGreaterThanOrEqual(24);
+});
