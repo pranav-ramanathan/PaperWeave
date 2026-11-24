@@ -6499,3 +6499,64 @@ of the paper's .bib files.`
   - Not tried: a real browser on this machine.
   - Carry over, unchanged: the "Not done" of "Abbreviations and made-up names are not misspelt
     words", but for its line on British English, which this section replaces.
+
+## Comments and proposed changes come before the spelling list
+
+- **What was wrong.** Under the text the page drew Spelling and grammar, then Proposed changes,
+  then Comments, and the first has no end: every finding of the file, up to five buttons each.
+  "Propose a change here" and "Comment on the selected text", the only way to start either, and
+  every open proposal and thread, lay under it. Measured on the corpus (31 papers, 118 body files;
+  counts only):
+
+  | Findings                                   | Median | Upper quartile | Most |
+  | ------------------------------------------ | ------ | -------------- | ---- |
+  | In a file (118 files)                      | 8      | 24             | 380  |
+  | In the largest file of a paper (29 papers) | 48     | 76             | 192  |
+
+  | A window of 1280×800                       | "Comment on the selected text" below the text | Tab presses |
+  | ------------------------------------------ | --------------------------------------------- | ----------- |
+  | A file with nothing found                  | 268 px (0.3 of a window)                      | 2           |
+  | The median file (8 findings)               | 1,646 px (2.1 windows)                        | 32          |
+  | The median main file (48 findings)         | 8,172 px (10.2 windows)                       | 196         |
+  | The upper-quartile main file (76 findings) | 12,071 px (15.1 windows)                      | 242         |
+  | The largest main file (192 findings)       | 33,015 px (41.3 windows)                      | 721         |
+
+  More than one window below the text in 74 of 118 files (more than three windows in 43); at
+  320×480, 93 of 118 (67), and 24.5 windows in the median main file. No test saw it because the
+  test papers have one to three findings. The pixel figures are from the app's CSS on static
+  markup, not from the running page.
+
+- **Now** (`FileEditor.tsx`: the `<Language>` panel is drawn after `<Threads>`).
+
+  | Under the text of a `.tex` file           | Before                                | Now                                                                    |
+  | ----------------------------------------- | ------------------------------------- | ---------------------------------------------------------------------- |
+  | First panel                               | Spelling and grammar                  | Proposed changes                                                       |
+  | Second                                    | Proposed changes                      | Comments                                                               |
+  | Third                                     | Comments                              | Spelling and grammar                                                   |
+  | Tab from the text                         | every finding's buttons, then Propose | "Propose a change here", "Comment on the selected text", then the rest |
+  | A file that is not LaTeX (`.bib`, `.sty`) | Proposed changes, Comments            | the same                                                               |
+  | A finding in the text                     | underlined; listed                    | the same                                                               |
+
+  Both buttons are 57 and 181 px below the text in every file at both sizes; two Tab presses.
+  Nothing is folded or capped; nothing about a finding changes.
+
+- **Held by** one test in `tests/e2e/grammar.spec.ts`, written but not run on the development
+  machine (the local blob store refuses writes), so run only in CI. The unit suite, typecheck and
+  lint ran on the development machine. No existing expectation was changed.
+- **Not done.**
+  - The list of findings is as long as it was: 51 % of a paper's spelling lines repeat a word
+    already listed in the same file (1,089 of 2,147 in the corpus; a median paper 45 lines for 25
+    words). One line per word is the natural next step; what "Change to" then acts on is the
+    owner's to say.
+  - With many open proposals the Comment button is below them (decided proposals and resolved
+    threads are folded; open ones are not). The two buttons are not in the toolbar or the menu at
+    a place, and there is no key for either.
+  - With many open threads the spelling list is far down, and nothing at the head of the page says
+    how many findings there are or leads to them; a finding is still underlined in the text.
+  - Nothing at the text says that there are open proposals or comments further down, or how many.
+  - A name with one capital is 749 of the 2,147 spelling lines (`Eq`, `Eqs`, `Eqn`, `Alg` before a
+    reference: 103); `conv.\ layers` and `where` after a display formula are reported as a
+    sentence that starts without a capital (about 37 of 51 such findings).
+  - Not tried: a real browser on this machine; a screen reader.
+  - Carry over, unchanged: the "Not done" of "An imported paper starts in the spelling it is
+    written in".

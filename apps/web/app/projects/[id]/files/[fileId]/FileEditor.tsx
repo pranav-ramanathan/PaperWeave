@@ -1195,23 +1195,6 @@ export default function FileEditor(props: {
         />
         <div className="source" ref={host} hidden={mode !== 'source'} />
       </div>
-      {props.visual && (
-        <Language
-          projectId={projectId}
-          fileId={fileId}
-          canWrite={canWrite && !sync.refused}
-          canPropose={props.canComment}
-          unsaved={!sync.loaded || sync.unsaved}
-          change={(from, to, expected, replacement) =>
-            changeText.current(from, to, expected, replacement)
-          }
-          show={(from, to) => showStretch.current(from, to)}
-          onFindings={(list) => {
-            findingsNow.current = list;
-            markThreads.current();
-          }}
-        />
-      )}
       <Proposals
         projectId={projectId}
         fileId={fileId}
@@ -1239,6 +1222,25 @@ export default function FileEditor(props: {
         }}
         show={(from, to) => showStretch.current(from, to)}
       />
+      {/* Last, and on purpose: the findings of a real file run to several screens, and what people
+          say to each other must not lie under them. */}
+      {props.visual && (
+        <Language
+          projectId={projectId}
+          fileId={fileId}
+          canWrite={canWrite && !sync.refused}
+          canPropose={props.canComment}
+          unsaved={!sync.loaded || sync.unsaved}
+          change={(from, to, expected, replacement) =>
+            changeText.current(from, to, expected, replacement)
+          }
+          show={(from, to) => showStretch.current(from, to)}
+          onFindings={(list) => {
+            findingsNow.current = list;
+            markThreads.current();
+          }}
+        />
+      )}
     </section>
   );
 }
