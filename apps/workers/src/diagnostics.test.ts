@@ -578,10 +578,6 @@ test('BibTeX could not open the .bib file or the style, and says which', () => {
 
 test.each([
   [
-    'I found no \\citation commands---while reading file main.aux',
-    'The paper asks for a bibliography but cites nothing.',
-  ],
-  [
     'I found no \\bibdata command---while reading file main.aux',
     'The paper cites, but has no \\bibliography{\u2026}.',
   ],
@@ -597,6 +593,33 @@ test.each([
     '(There was 1 error message)',
   ].join('\n');
   expect(diagnostics('(./main.tex)', output)).toEqual([{ severity: 'error', message }]);
+});
+
+test('a bibliography with nothing cited is a warning: the paper still builds', () => {
+  // From a real build: BibTeX counts it as an error, writes an empty list, and latexmk goes on.
+  const output = [
+    "Latexmk: applying rule 'bibtex main'...",
+    'This is BibTeX, Version 0.99d (TeX Live 2022/Debian)',
+    'The top-level auxiliary file: main.aux',
+    'The style file: plain.bst',
+    'I found no \\citation commands---while reading file main.aux',
+    'Database file #1: refs.bib',
+    '(There was 1 error message)',
+    "Latexmk: applying rule 'pdflatex'...",
+    'Latexmk: All targets () are up-to-date',
+  ].join('\n');
+  expect(diagnostics('(./main.tex)', output)).toEqual([
+    {
+      severity: 'warning',
+      message:
+        'Bibliography empty: the paper cites nothing, so its reference list has no entries. Cite a reference, or list them all with \\nocite{*}.',
+    },
+  ]);
+  // It does not stand in for a failure latexmk reports: that is still said.
+  const failed =
+    output +
+    "\nCollected error summary (may duplicate other messages):\n  bibtex main: Bibtex errors: See file 'main.blg'\n";
+  expect(diagnostics('(./main.tex)', failed).map((d) => d.severity)).toEqual(['error', 'warning']);
 });
 
 test('a bibliography run that failed with no reason BibTeX gave still says it failed', () => {

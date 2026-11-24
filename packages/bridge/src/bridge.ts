@@ -10,12 +10,20 @@ import {
   sourceOnly,
 } from '@paperweave/latex';
 import type { Node as PMNode, Schema } from '@tiptap/pm/model';
-import { ReplaceStep } from '@tiptap/pm/transform';
+import { ReplaceAroundStep, ReplaceStep } from '@tiptap/pm/transform';
 import { type EditorState, Selection, TextSelection, type Transaction } from '@tiptap/pm/state';
 import * as Y from 'yjs';
 import { formulaText, needs, pasteable } from './clipboard.ts';
 import { locate, model, type Model, projector, toSrc } from './project.ts';
-import { diff, type Edit, emphEdit, guard, translate, type Translation } from './translate.ts';
+import {
+  type Across,
+  diff,
+  type Edit,
+  emphEdit,
+  guard,
+  translate,
+  type Translation,
+} from './translate.ts';
 
 export type Host = { getState(): EditorState; dispatch(tr: Transaction): void };
 
@@ -86,7 +94,31 @@ export class Bridge {
     const step = tr.steps.length === 1 ? tr.steps[0] : null;
     const plain = step instanceof ReplaceStep && !step.slice.openStart && !step.slice.openEnd;
     const hint = plain ? { from: step.from, to: step.to, size: step.slice.size } : undefined;
-    const t = translate(this.model, state.doc, tr.doc, hint);
+    // A selection from one text block into another, deleted or typed over in one step.
+    const sel = state.selection;
+    let across: Across | undefined;
+    if (
+      (step instanceof ReplaceStep || step instanceof ReplaceAroundStep) &&
+      sel instanceof TextSelection &&
+      !sel.empty &&
+      !sel.$from.sameParent(sel.$to) &&
+      // The step is the selection's own: it starts at the selection's start, or at the edge of
+      // that block, and ends in the block the selection ends in (the editor steps over block
+      // boundaries, and re-wraps a list item, at the edge of a heading or a list).
+      step.from <= sel.from &&
+      step.from >= sel.$from.before(1) &&
+      step.to >= sel.to - sel.$to.depth &&
+      step.to <= sel.$to.after(1)
+    ) {
+      let text = '';
+      let words = true;
+      step.slice.content.descendants((n) => {
+        if (n.isText) text += n.text;
+        if (n.isLeaf && (!n.isText || n.marks.length)) words = false;
+      });
+      if (words) across = { from: sel.from, to: sel.to, text };
+    }
+    const t = translate(this.model, state.doc, tr.doc, hint, across);
     if (!t) {
       // Backspace or Delete at an edge that cannot be joined, with nothing selected: nothing to say.
       const quiet = step instanceof ReplaceStep && step.slice.size === 0 && state.selection.empty;
@@ -246,8 +278,28 @@ export class Bridge {
     const y = locate(this.model, state.doc, to);
     const src = this.ytext.toString();
     if (!x || !y || x.block < 0 || y.block < x.block || src !== this.model.parsed.src) return null;
-    const a = toSrc(this.model, state.doc, from, 1);
-    const b = toSrc(this.model, state.doc, to, -1);
+    let a = toSrc(this.model, state.doc, from, 1);
+    let b = toSrc(this.model, state.doc, to, -1);
+    // From one block into another, a heading or list selected from its very start, or to its
+    // very end, comes whole, with its command; one the selection only reaches the start of is
+    // left out. These are the stretches a deletion of the same selection takes (see acrossBlocks in translate.ts).
+    if (y.block > x.block) {
+      const $f = state.doc.resolve(from);
+      const $t = state.doc.resolve(to);
+      const blocks = this.model.blocks;
+      const first = !$f.parentOffset && ($f.depth === 1 || $f.index(1) === 0);
+      if (first && blocks[x.block].body.kind !== 'para') a = blocks[x.block].start;
+      if (blocks[y.block].body.kind !== 'para') {
+        const last =
+          $t.parentOffset === $t.parent.content.size &&
+          ($t.depth === 1 || $t.index(1) === $t.node(1).childCount - 1);
+        const start = !$t.parentOffset && ($t.depth === 1 || $t.index(1) === 0);
+        const prev = blocks[y.block - 1];
+        if (last && $t.parent.content.size)
+          b = blocks[y.block].start + blocks[y.block].body.text.length;
+        else if (start) b = prev.start + prev.body.text.length;
+      }
+    }
     if (b <= a || inPair(src, a) || inPair(src, b)) return null;
     // Every group opened inside the stretch is closed inside it, and the other way round.
     let depth = 0;
@@ -268,6 +320,20 @@ export class Bridge {
     }
     const latex = src.slice(a, b);
     return depth === 0 && pasteable(latex) ? latex : null;
+  }
+
+  /**
+   * Whether the selection may be cut: its source can travel as LaTeX (sourceOf), or it lies in
+   * paragraphs only, where the words alone are what there is to lose. A stretch with a formula
+   * block, a figure, a heading or a list in it that cannot travel as LaTeX would be deleted with
+   * only its words on the clipboard.
+   */
+  mayCut(state: EditorState): boolean {
+    if (this.sourceOf(state) !== null) return true;
+    const { $from, $to } = state.selection;
+    for (let k = $from.index(0); k <= Math.min($to.index(0), state.doc.childCount - 1); k++)
+      if (state.doc.child(k).type.name !== 'paragraph') return $from.index(0) === $to.index(0);
+    return true;
   }
 
   /**

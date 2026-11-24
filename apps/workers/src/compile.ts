@@ -549,11 +549,20 @@ export function diagnostics(
   );
   // With no \bibdata or \bibstyle too, the citations are not what is missing (latexmk's first
   // run of BibTeX is on a stub .aux, which has none of the three).
-  if (!/^I found no \\(?:bibdata|bibstyle) command/m.test(output))
-    bibtex(
-      /^(I found no \\citation commands)---while reading file/gm,
-      () => 'The paper asks for a bibliography but cites nothing.',
-    );
+  // BibTeX calls this an error, but it writes a whole .bbl with no entries, latexmk goes on, and
+  // the PDF has the heading of the reference list with nothing under it: a warning, added after
+  // the check below with the others that did not fail.
+  const uncited: Diagnostic[] =
+    !/^I found no \\(?:bibdata|bibstyle) command/m.test(output) &&
+    /^I found no \\citation commands---while reading file/m.test(output)
+      ? [
+          {
+            severity: 'warning',
+            message:
+              'Bibliography empty: the paper cites nothing, so its reference list has no entries. Cite a reference, or list them all with \\nocite{*}.',
+          },
+        ]
+      : [];
   bibtex(
     /^(I found no \\bibdata command)/gm,
     () => 'The paper cites, but has no \\bibliography{\u2026}.',
@@ -651,7 +660,7 @@ export function diagnostics(
       severity: 'error',
       message: 'The bibliography could not be made. The build log has the details.',
     });
-  out.push(...abbreviations, ...notMade);
+  out.push(...abbreviations, ...notMade, ...uncited);
   // A custom-dependency rule (makeglossaries, or makeindex for nomencl) failed: latexmk says so
   // in its summary, and whatever the tool said went to its own .glg or .nlg file, not the TeX log.
   if (/^Collected error summary[^\n]*\n(?:[ \t]+.*\n)*?[ \t]+cusdep\b/m.test(output))

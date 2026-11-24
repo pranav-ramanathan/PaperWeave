@@ -6131,3 +6131,72 @@ of the paper's .bib files.`
 700`) would give 2.7 s from the last key for about a fifth more builds.
   - Carry over, unchanged: everything in the "Not done" of "A build starts from what the paper's
     last good build made" except its item on the wait around the build.
+
+## A selection across a formula, a figure, a heading or a list
+
+- **What was wrong.** In the visual view a selection that ran across anything but paragraphs
+  could not be deleted, typed over or cut: "That edit spans LaTeX structure. Make it in the
+  source editor." A section could not be deleted there at all. Counted on the corpus (31
+  papers, 118 body files) with the real bridge and the editor's own transactions
+  (`tr.deleteSelection()`, `tr.insertText()`), not in a browser:
+
+  | Selection made on every such place in the corpus                                                                                           | Before     | After          |
+  | ------------------------------------------------------------------------------------------------------------------------------------------ | ---------- | -------------- |
+  | Middle of a paragraph to the middle of the paragraph two on, typed over: 2,601 places, 1,999 with something other than a paragraph between | 0 of 1,999 | 1,620 of 1,999 |
+  | A section, from the start of its heading to the end of its last paragraph, deleted: 733 sections in 28 papers                              | 0          | 674            |
+  | From the start of a heading to the start of the next heading, deleted: 742                                                                 | 0          | 664            |
+  | Two neighbouring paragraphs, middle to middle, deleted: 1,911 pairs, 703 with something between                                            | 0 of 703   | 549 of 703     |
+
+  Of 4,052 accepted selections made for real on corpus files (random ends, 40% typed over),
+  every one changed the source by one splice, left it balanced in braces and environments, and
+  gave no file a frozen block; the view was the projection of the source every time.
+
+- **Now** (`acrossBlocks` in `packages/bridge/src/translate.ts`, `Bridge.filter`,
+  `Bridge.sourceOf`, `Bridge.mayCut`). A selection from one text block into another, that is not
+  paragraphs only and not inside one list, is deleted, typed over or cut. The ends are taken
+  from the selection in the editor's state, not from the step the editor makes:
+  - An end inside a paragraph keeps what is left of the paragraph; if both ends are like this
+    the two remnants join. At a paragraph's first (left end) or last (right end) character it
+    goes whole.
+  - A left end at the very start of a heading's title or of a list's first item takes the
+    heading or list whole, command and all; a right end at the very end of one does too; a right
+    end at its very start leaves it whole.
+  - Everything between goes if it may: paragraphs, headings and lists without definitions,
+    formulas, whole `\begin{L}...\end{L}` blocks, a lone `\label`, comments, layout-only lines
+    (`\vspace`, `\noindent`, `\newpage`, ...), and a theorem or abstract with both of its lines
+    inside.
+  - One splice; typed words that stand alone become a paragraph of their own; one blank line
+    is left, not two.
+  - Copy and cut say the same: a heading or list selected from its start or to its end is
+    copied as LaTeX with its command, so a section cut here and pasted elsewhere arrives byte
+    for byte. A cut whose LaTeX cannot travel (a stretch ending in a comment, 89 of 2,590 in
+    the probe) and that is not paragraphs only is not made, with the one new sentence: "That
+    selection cannot be cut as LaTeX. Cut it in the source editor."
+- **Still refused**, with "That edit spans LaTeX structure. Make it in the source editor.": an
+  end in the middle of a heading's title or a list item; a command line between the ends
+  (`\input`, `\bibliography`, `\maketitle`, `\newcommand`, `\def`); half of a theorem or
+  abstract; the preamble and `\end{document}`; a frozen block; Ctrl+A; Enter over such a
+  selection; a paragraph just opened with Enter.
+- **Held by** seventeen tests and the two new fuzzer kinds (`sdel`, `srep`) in
+  `packages/bridge/src/bridge.test.ts`, run on the development machine (`pnpm test`: 54 files,
+  730 tests; the range and interleaving fuzzers pass at 10,000 and at `FUZZ=40000`), and one
+  test in `tests/e2e/visual.spec.ts`, written and run only in CI (the local blob store refuses
+  writes).
+- **Not done.**
+  - An end inside a title or an item (477 + 422 of the neighbouring pairs in the corpus are
+    paragraph-to-heading or heading-to-paragraph, middle to middle): it needs the closing brace
+    or `\end{itemize}` kept, two splices.
+  - A reference to a label that went with a figure or a section prints `??`; the build and the
+    submit check say so, the editor does not warn before the deletion (the same as deleting one
+    figure today).
+  - Text someone else types inside a figure or formula while another person deletes across it
+    stays, on its own, where the block was (the same as in the source editor).
+  - A file whose every block is selected and deleted is left empty; the caret then has no text
+    to stand in.
+  - Not tried: an input method composing over such a selection; drag and drop of a selection;
+    Safari and Firefox.
+  - A selection ending in a comment cannot be cut (it can be deleted); the sentence says to use
+    the source editor.
+  - Carry over, unchanged: nested lists, `\item[..]` and `description` raw in the visual view;
+    Enter at the start of a list item after an empty one; everything in the "Not done" of "The
+    build pane hears from its own editor".

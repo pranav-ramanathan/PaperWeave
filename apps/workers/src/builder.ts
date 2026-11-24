@@ -58,9 +58,11 @@ import { compile, type Compiler, IMAGE } from './compile.ts';
  * one left open in a file read in is placed in that file.
  * '...-bibsaid': a BibTeX error about a name, a cross reference, the citations or the style says
  * what and where; a cached failed build keeps "The bibliography could not be made."
+ * '...-uncited': a bibliography with nothing cited is a warning; a cached build keeps it as an
+ * error beside its PDF.
  */
 const TEX_TEXT =
-  'utf8-biber-eps-glyphs-strings-forcedate-unicode-nullfont-csname-bbl-ended-unclosed-group-bibentry-minted-nobib-merged-opened-bibsaid';
+  'utf8-biber-eps-glyphs-strings-forcedate-unicode-nullfont-csname-bbl-ended-unclosed-group-bibentry-minted-nobib-merged-opened-bibsaid-uncited';
 
 /**
  * Where each paper's last good build leaves what it made (BUILD_WARM_DIR; empty turns it off).

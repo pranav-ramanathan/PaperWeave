@@ -924,6 +924,124 @@ test('a selection across list items is deleted or typed over; undo restores it; 
   await expect(other.page.locator(VISUAL)).toContainText('kiloZ papa');
 });
 
+test('a selection across a formula and a heading is deleted, typed over and cut; undo restores it; another person sees it', async ({
+  browser,
+}) => {
+  test.setTimeout(240_000);
+  const { page, email } = await person(browser, 'vis-xblock');
+  const other = await person(browser, 'vis-xblock-2');
+  await page.context().grantPermissions(['clipboard-read', 'clipboard-write'], {
+    origin: 'http://localhost:3100',
+  });
+  const main = [
+    '\\documentclass{article}',
+    '\\begin{document}',
+    'Alpha one two alphaend.',
+    '',
+    '\\[ x = 1 \\]',
+    '',
+    'Bravo three four bravoend.',
+    '',
+    '\\section{Charlie}',
+    '',
+    'Delta five six deltaend.',
+    '',
+    'Echo seven eight echoend.',
+    '\\end{document}',
+    '',
+  ].join('\n');
+  const zip = join(mkdtempSync(join(tmpdir(), 'paperweave-e2e-')), `Blocks ${run}.zip`);
+  writeFileSync(zip, await writeZip([{ path: 'main.tex', bytes: Buffer.from(main) }]));
+  await page.goto('/sign-in');
+  await signIn(page, email);
+  await page.getByLabel('Or import a ZIP of a LaTeX project').setInputFiles(zip);
+  await page.getByRole('button', { name: 'Import ZIP' }).click();
+  await page.getByLabel('Their email address').fill(other.email);
+  await page.getByLabel('Their role').selectOption('editor');
+  await page.getByRole('button', { name: 'Send invitation' }).click();
+  await expect(page.getByRole('status')).toContainText(other.email);
+  await other.page.goto(await emailedLink(other.email, '/invitations/'));
+  await signIn(other.page, other.email);
+  await other.page.getByRole('button', { name: 'Join this paper' }).click();
+  await expect(other.page.getByText('You are an editor')).toBeVisible();
+  await page.getByRole('link', { name: 'main.tex' }).first().click();
+  await expect(status(page)).toHaveText('All edits saved.');
+  await other.page.goto(page.url());
+  await expect(other.page.locator(`${VISUAL} h2`)).toHaveCount(1);
+  const note = page.locator('.editor .toolbar .note');
+  const text = async () => {
+    await expect(status(page)).toHaveText('All edits saved.');
+    await showSource(page);
+    await page.waitForTimeout(800);
+    const t = (await page.locator(SOURCE).innerText()).replace(/⁠/g, '');
+    await view(page, 'Visual').click();
+    await expect(page.locator(VISUAL)).toBeVisible();
+    return t;
+  };
+  const shiftTo = async (word: string) => {
+    await page.keyboard.down('Shift');
+    await clickAfter(page, VISUAL, word);
+    await page.keyboard.up('Shift');
+  };
+  const original = await text();
+
+  // From inside the first paragraph, across the formula, into the second: the two join.
+  await clickAfter(page, VISUAL, 'Alpha one');
+  await shiftTo('Bravo three');
+  await page.keyboard.press('Delete');
+  const joined = await text();
+  expect(joined).toMatch(/^Alpha one four bravoend\.$/m);
+  expect(joined).not.toContain('x = 1');
+  await expect(note).toHaveText('');
+  await expect(other.page.locator(VISUAL)).toContainText('Alpha one four bravoend.');
+  // The caret is where the text was.
+  await page.keyboard.type('Q');
+  expect(await text()).toContain('Alpha oneQ four');
+
+  // Undo brings back every byte.
+  await page.keyboard.press('ControlOrMeta+z');
+  await page.keyboard.press('ControlOrMeta+z');
+  expect(await text()).toBe(original);
+
+  // Typed over a selection across the second paragraph and a heading: no heading is left.
+  await clickAfter(page, VISUAL, 'Bravo three');
+  await shiftTo('Delta five');
+  await page.keyboard.type('Z');
+  expect(await text()).toMatch(/^Bravo threeZ six deltaend\.$/m);
+  expect(await text()).not.toContain('\\section{Charlie}');
+  await expect(page.locator(`${VISUAL} h2`)).toHaveCount(0);
+  await expect(other.page.locator(`${VISUAL} h2`)).toHaveCount(0);
+  await page.keyboard.press('ControlOrMeta+z');
+  expect(await text()).toBe(original);
+  await expect(other.page.locator(`${VISUAL} h2`)).toHaveCount(1);
+
+  // A section is cut whole and pasted after another paragraph, as LaTeX.
+  await clickAfter(page, VISUAL, 'Charlie');
+  await page.keyboard.press('Home');
+  await shiftTo('deltaend.');
+  await page.keyboard.press('ControlOrMeta+x');
+  const cut = await text();
+  expect(cut).not.toContain('\\section{Charlie}');
+  expect(cut).not.toContain('Delta');
+  await clickAfter(page, VISUAL, 'echoend.');
+  await page.keyboard.press('ControlOrMeta+v');
+  const pasted = await text();
+  expect(pasted).toMatch(/echoend\.\s*\\section\{Charlie\}\s+Delta five six deltaend\./);
+  expect(pasted.split('\\section{Charlie}').length - 1).toBe(1);
+  await expect(other.page.locator(`${VISUAL} h2`)).toHaveCount(1);
+  await expect(other.page.locator(VISUAL)).toContainText('echoend.');
+  await page.keyboard.press('ControlOrMeta+z');
+  await page.keyboard.press('ControlOrMeta+z');
+  expect(await text()).toBe(original);
+
+  // An end in the middle of a title is still refused, and the source is left alone.
+  await clickAfter(page, VISUAL, 'Bravo three');
+  await shiftTo('Char');
+  await page.keyboard.press('Delete');
+  await expect(note).toHaveText('That edit spans LaTeX structure. Make it in the source editor.');
+  expect(await text()).toBe(original);
+});
+
 /** The text of the caret's paragraph up to where another person's caret is drawn. */
 const textBeforeCaret = (page: Page, name: string) =>
   page.evaluate((n) => {

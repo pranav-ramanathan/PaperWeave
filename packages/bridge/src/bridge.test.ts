@@ -3,7 +3,7 @@ import { fragment, rng, soup } from '../../latex/src/testutil.ts';
 import { NodeSelection, TextSelection } from '@tiptap/pm/state';
 import { describe, expect, test } from 'vitest';
 import * as Y from 'yjs';
-import { fixtures, replica, shown, textblocks, visualOp } from './harness.ts';
+import { fixtures, replica, shown, textblocks, visualOp, type Replica } from './harness.ts';
 import { contained, DEFAULT_TRANSPARENT, parse } from '@paperweave/latex';
 import type { Command } from './bridge.ts';
 import { fromSrc, toSrc } from './project.ts';
@@ -260,7 +260,19 @@ test(`${N} generated visual edits stay inside their intended range`, () => {
         expect(textblocks(rep).filter((t) => t.para).length, where).toBeLessThanOrEqual(paras);
     }
   }
-  for (const k of ['ins', 'del', 'rep', 'enter', 'join', 'emph', 'xdel', 'xrep', 'xenter'])
+  for (const k of [
+    'ins',
+    'del',
+    'rep',
+    'enter',
+    'join',
+    'emph',
+    'xdel',
+    'xrep',
+    'xenter',
+    'sdel',
+    'srep',
+  ])
     expect(counts[k], k).toBeGreaterThan(N / 100);
   expect(counts.drop, 'drop').toBeGreaterThan(N / 500);
 });
@@ -769,6 +781,282 @@ test('an edit across paragraphs that ends inside a style, or reaches a heading, 
   ({ r, from, to } = span('Alpha \\emph{beta} gamma.\n\nDelta epsilon.\n', 0, 0, 1, 2));
   expect(r.dispatch(r.state.tr.delete(from, to))).toBe(true);
   expect(r.src).toBe('lta epsilon.\n');
+});
+
+describe('a selection across blocks that are not all paragraphs', () => {
+  const HEAD = '\\documentclass{article}\n\\begin{document}\n';
+  const TAIL = '\\end{document}\n';
+  const BODY = [
+    'Alpha one two alphaend.',
+    '',
+    '\\[ x = 1 \\]',
+    '',
+    'Bravo three four bravoend.',
+    '',
+    '\\section{Charlie}\\label{sec:c}',
+    '',
+    'Delta five six deltaend.',
+    '',
+    '\\begin{figure}',
+    '\\centering',
+    '\\caption{Echo.}',
+    '\\end{figure}',
+    '',
+    '\\begin{itemize}',
+    '  \\item foxtrot',
+    '  \\item golf',
+    '\\end{itemize}',
+    '',
+    'Hotel seven eight hotelend.',
+    '',
+  ].join('\n');
+  const DOC_ACROSS = HEAD + BODY + TAIL;
+  type Side = 'after' | 'before';
+  /** The position just after (or before) the first place `word` is shown. */
+  const pos = (r: Replica, word: string, side: Side = 'after') => {
+    let found = -1;
+    r.state.doc.descendants((n, p) => {
+      if (found < 0 && n.isText && n.text!.includes(word))
+        found = p + n.text!.indexOf(word) + (side === 'after' ? word.length : 0);
+    });
+    if (found < 0) throw new Error('not shown: ' + word);
+    return found;
+  };
+  /** Select from one place to another and delete (or type `text` over it); null if refused. */
+  const act = (
+    src: string,
+    from: [string, Side],
+    to: [string, Side],
+    text = '',
+  ): { src: string; r: Replica } | null => {
+    const r = replica(src);
+    const a = pos(r, ...from);
+    const b = pos(r, ...to);
+    r.select(a, b);
+    const before = r.src;
+    const ok = r.dispatch(text ? r.state.tr.insertText(text, a, b) : r.state.tr.deleteSelection());
+    r.check();
+    if (!ok) {
+      expect(r.src).toBe(before);
+      return null;
+    }
+    return { src: r.src, r };
+  };
+  const body = (x: { src: string } | null) =>
+    x && x.src.slice(HEAD.length, x.src.length - TAIL.length);
+
+  test('across a formula: the two paragraphs join and the formula goes', () => {
+    const gone = 'Alpha one two alphaend.\n\n\\[ x = 1 \\]\n\nBravo three four';
+    expect(body(act(DOC_ACROSS, ['Alpha one', 'after'], [' four', 'before']))).toBe(
+      BODY.replace(gone, 'Alpha one four'),
+    );
+    expect(body(act(DOC_ACROSS, ['Alpha one', 'after'], [' four', 'before'], 'Z'))).toBe(
+      BODY.replace(gone, 'Alpha oneZ four'),
+    );
+  });
+
+  test('across a heading, its label, a figure and a list', () => {
+    expect(body(act(DOC_ACROSS, ['Bravo three', 'after'], [' eight', 'before']))).toBe(
+      'Alpha one two alphaend.\n\n\\[ x = 1 \\]\n\nBravo three eight hotelend.\n',
+    );
+  });
+
+  test('a section: from the start of its heading to the end of its last paragraph', () => {
+    const sec = '\\section{Charlie}\\label{sec:c}\n\nDelta five six deltaend.';
+    expect(body(act(DOC_ACROSS, ['Charlie', 'before'], ['deltaend.', 'after']))).toBe(
+      BODY.replace(sec + '\n\n', ''),
+    );
+    expect(body(act(DOC_ACROSS, ['Charlie', 'before'], ['deltaend.', 'after'], 'Z'))).toBe(
+      BODY.replace(sec, 'Z'),
+    );
+    // Into the paragraph: what is left of it stays a paragraph.
+    expect(body(act(DOC_ACROSS, ['Charlie', 'before'], [' six', 'before']))).toBe(
+      BODY.replace('\\section{Charlie}\\label{sec:c}\n\nDelta five six', ' six'),
+    );
+  });
+
+  test('up to the start of a heading: the heading stays whole', () => {
+    expect(body(act(DOC_ACROSS, ['Bravo three', 'after'], ['Charlie', 'before']))).toBe(
+      BODY.replace('Bravo three four bravoend.', 'Bravo three'),
+    );
+    expect(body(act(DOC_ACROSS, ['Alpha one', 'after'], ['Charlie', 'before'], 'Z'))).toBe(
+      BODY.replace(
+        'Alpha one two alphaend.\n\n\\[ x = 1 \\]\n\nBravo three four bravoend.',
+        'Alpha oneZ',
+      ),
+    );
+  });
+
+  test('to the end of a heading: the heading goes, its label stays', () => {
+    expect(body(act(DOC_ACROSS, ['Bravo three', 'after'], ['Charlie', 'after']))).toBe(
+      BODY.replace('Bravo three four bravoend.\n\n\\section{Charlie}', 'Bravo three'),
+    );
+  });
+
+  test('a list goes whole from the start of its first item, or to the end of its last', () => {
+    const list = '\\begin{itemize}\n  \\item foxtrot\n  \\item golf\n\\end{itemize}';
+    const fig = '\\begin{figure}\n\\centering\n\\caption{Echo.}\n\\end{figure}';
+    expect(body(act(DOC_ACROSS, ['foxtrot', 'before'], [' eight', 'before']))).toBe(
+      BODY.replace(list + '\n\nHotel seven eight', ' eight'),
+    );
+    expect(body(act(DOC_ACROSS, ['Delta five', 'after'], ['golf', 'after']))).toBe(
+      BODY.replace('Delta five six deltaend.\n\n' + fig + '\n\n' + list, 'Delta five'),
+    );
+    // Up to the start of the first item: the list stays whole.
+    expect(body(act(DOC_ACROSS, ['Delta five', 'after'], ['foxtrot', 'before']))).toBe(
+      BODY.replace('Delta five six deltaend.\n\n' + fig, 'Delta five'),
+    );
+  });
+
+  test('still refused: an end inside a heading or a list item', () => {
+    expect(act(DOC_ACROSS, ['Bravo three', 'after'], ['Char', 'after'])).toBeNull();
+    expect(act(DOC_ACROSS, ['Char', 'after'], ['Delta five', 'after'])).toBeNull();
+    expect(act(DOC_ACROSS, ['Delta five', 'after'], ['fox', 'after'])).toBeNull();
+    expect(act(DOC_ACROSS, ['Delta five', 'after'], ['golf', 'before'])).toBeNull();
+    expect(act(DOC_ACROSS, ['fox', 'after'], ['Hotel seven', 'after'])).toBeNull();
+  });
+
+  test('still refused: a command line, a definition, half an environment, or styled text at an end', () => {
+    const doc = (mid: string) =>
+      HEAD + 'Alpha one two.\n\n' + mid + '\n\nBravo three four.\n' + TAIL;
+    for (const mid of [
+      '\\input{part}',
+      '\\newcommand{\\x}{y}',
+      '\\maketitle',
+      '\\bibliography{refs}',
+      '\\[ a \\]\n\n\\input{part}',
+    ])
+      expect(act(doc(mid), ['Alpha one', 'after'], [' four', 'before']), mid).toBeNull();
+    const thm =
+      HEAD +
+      'Alpha one two.\n\n\\begin{theorem}\nBravo three four.\n\\end{theorem}\n\nCharlie five six.\n' +
+      TAIL;
+    expect(act(thm, ['Alpha one', 'after'], [' four', 'before'])).toBeNull();
+    expect(act(thm, ['Bravo three', 'after'], [' six', 'before'])).toBeNull();
+    const em = HEAD + 'Alpha \\emph{one two}.\n\n\\[ a \\]\n\nBravo three four.\n' + TAIL;
+    expect(act(em, ['one', 'after'], [' four', 'before'])).toBeNull();
+  });
+
+  test('a whole theorem, comment lines and spacing between the ends go with the rest', () => {
+    const doc =
+      HEAD +
+      'Alpha one two.\n\n\\begin{theorem}[Name]\nBravo three four.\n\\end{theorem}\n\n% a note\n% more\n\n\\vspace{1em}\n\nCharlie five six.\n' +
+      TAIL;
+    expect(body(act(doc, ['Alpha one', 'after'], [' six', 'before']))).toBe('Alpha one six.\n');
+  });
+
+  test('text is not glued to a command, and a comment does not swallow what follows', () => {
+    const doc = HEAD + 'Alpha \\LaTeX\n\n\\[ a \\]\n\nBravo three four.\n' + TAIL;
+    expect(body(act(doc, ['Alpha ', 'after'], ['three', 'after']))).toBe('Alpha  four.\n');
+    const cmd = HEAD + 'Alpha \\LaTeX{} one\n\n\\[ a \\]\n\nBravo xfour.\n' + TAIL;
+    expect(body(act(cmd, ['Alpha ', 'after'], ['Bravo ', 'after'], 'q'))).toBe('Alpha qxfour.\n');
+  });
+
+  test('one undo step brings back every byte, and the caret is left in text', () => {
+    const r = replica(DOC_ACROSS);
+    const um = new Y.UndoManager(r.ytext, { trackedOrigins: new Set([r.bridge]) });
+    r.select(pos(r, 'Charlie', 'before'), pos(r, ' eight', 'before'));
+    expect(r.dispatch(r.state.tr.deleteSelection())).toBe(true);
+    r.check();
+    expect(r.state.selection.$head.parent.inlineContent).toBe(true);
+    expect(r.src).not.toContain('Charlie');
+    um.undo();
+    r.check();
+    expect(r.src).toBe(DOC_ACROSS);
+  });
+
+  test('two people: one deletes across blocks while the other types inside what goes and beside it', () => {
+    const a = replica(DOC_ACROSS);
+    const b = replica('', a.ydoc);
+    a.select(pos(a, 'Alpha one', 'after'), pos(a, ' four', 'before'));
+    expect(a.dispatch(a.state.tr.deleteSelection())).toBe(true);
+    expect(b.dispatch(b.state.tr.insertText('KEPT', pos(b, 'bravoend', 'after')))).toBe(true);
+    Y.applyUpdate(b.ydoc, Y.encodeStateAsUpdate(a.ydoc));
+    Y.applyUpdate(a.ydoc, Y.encodeStateAsUpdate(b.ydoc));
+    a.check();
+    b.check();
+    expect(a.src).toBe(b.src);
+    expect(a.src).toContain('Alpha one four bravoendKEPT.');
+  });
+
+  test('what is copied from such a selection is what a deletion takes', () => {
+    const r = replica(DOC_ACROSS);
+    r.select(pos(r, 'Charlie', 'before'), pos(r, 'deltaend.', 'after'));
+    expect(r.bridge.sourceOf(r.state)).toBe(
+      '\\section{Charlie}\\label{sec:c}\n\nDelta five six deltaend.',
+    );
+    expect(r.bridge.mayCut(r.state)).toBe(true);
+    r.select(pos(r, 'Bravo three', 'after'), pos(r, 'Charlie', 'before'));
+    expect(r.bridge.sourceOf(r.state)).toBe(' four bravoend.');
+    expect(r.bridge.mayCut(r.state)).toBe(true);
+    r.select(pos(r, 'Delta five', 'after'), pos(r, 'golf', 'after'));
+    expect(r.bridge.sourceOf(r.state)).toContain('\\end{itemize}');
+    expect(r.bridge.mayCut(r.state)).toBe(true);
+    r.select(pos(r, 'foxtrot', 'before'), pos(r, 'Hotel', 'after'));
+    expect(r.bridge.sourceOf(r.state)).toMatch(/^\\begin\{itemize\}[\s\S]*Hotel$/);
+    expect(r.bridge.mayCut(r.state)).toBe(true);
+  });
+
+  test('a cut that cannot travel as LaTeX is not offered', () => {
+    // The selection ends just after a comment: on its own the stretch would swallow what follows it.
+    const doc = (mid: string) =>
+      HEAD + 'Alpha one two.\n\n' + mid + 'Bravo three % note\nfour.\n\nCharlie five.\n' + TAIL;
+    let r = replica(doc('\\[ a \\]\n\n'));
+    let end = textblocks(r)[1].start + 'Bravo three '.length + 1;
+    r.select(pos(r, 'Alpha one'), end);
+    expect(r.bridge.sourceOf(r.state)).toBeNull();
+    expect(r.bridge.mayCut(r.state)).toBe(false);
+    // It can still be deleted.
+    expect(r.dispatch(r.state.tr.deleteSelection())).toBe(true);
+    r.check();
+    expect(r.src).toBe(HEAD + 'Alpha one\nfour.\n\nCharlie five.\n' + TAIL);
+    // Paragraphs only: the words are all there is, as before.
+    r = replica(doc(''));
+    end = textblocks(r)[1].start + 'Bravo three '.length + 1;
+    r.select(pos(r, 'Alpha one'), end);
+    expect(r.bridge.sourceOf(r.state)).toBeNull();
+    expect(r.bridge.mayCut(r.state)).toBe(true);
+    // Inside one heading: as before.
+    r = replica(HEAD + '\\section{Delta echo}\n' + TAIL);
+    r.select(pos(r, 'Delta', 'before'), pos(r, 'Delta'));
+    expect(r.bridge.mayCut(r.state)).toBe(true);
+  });
+
+  test('a paragraph just opened with Enter refuses it', () => {
+    const src = HEAD + 'Alpha one two.\n\n\\[ a \\]\n\nBravo three four.\n' + TAIL;
+    const r = replica(src);
+    const end = pos(r, 'two.');
+    r.select(end);
+    const tr = r.state.tr.split(end);
+    expect(r.dispatch(tr.setSelection(TextSelection.near(tr.doc.resolve(end + 2))))).toBe(true);
+    expect(r.bridge.model.phantom).not.toBeNull();
+    const a = r.state.selection.from;
+    const b = pos(r, 'three');
+    const st = r.state;
+    // Select without the bridge hearing of it, as while the caret is still in the new paragraph.
+    const sel = st.apply(st.tr.setSelection(TextSelection.create(st.doc, a, b)));
+    expect(r.bridge.filter(sel.tr.deleteSelection(), sel)).toBe(false);
+    expect(r.src).toBe(src);
+  });
+
+  test('without the selection the change is refused as before', () => {
+    const src = HEAD + 'Alpha one two.\n\n\\[ a \\]\n\nBravo three four.\n' + TAIL;
+    const r = replica(src);
+    expect(r.dispatch(r.state.tr.delete(pos(r, 'Alpha one'), pos(r, 'three')))).toBe(false);
+    expect(r.src).toBe(src);
+  });
+
+  test('nothing selected of the source changes nothing', () => {
+    const src = HEAD + 'Alpha one two.\n\n\\section{Charlie}\n\nBravo three four.\n' + TAIL;
+    const r = replica(src);
+    let refused = 0;
+    r.bridge.onReject = () => refused++;
+    r.select(pos(r, 'two.'), pos(r, 'Charlie', 'before'));
+    expect(r.dispatch(r.state.tr.deleteSelection())).toBe(true);
+    r.check();
+    expect(r.src).toBe(src);
+    expect(refused).toBe(0);
+  });
 });
 
 test('Enter over a selected word replaces it with a paragraph break', () => {

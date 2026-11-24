@@ -864,6 +864,40 @@ test.each(['article-basic', 'ieee-multifile', 'ams-multifile'])(
   },
 );
 
+// A new paper before its first \\cite, or a draft whose citations were all deleted.
+test('a paper with \\bibliography that cites nothing builds, with a warning', async () => {
+  const project = tmp();
+  cpSync(join(FIXTURES, 'article-basic'), project, { recursive: true });
+  writeFileSync(
+    join(project, 'main.tex'),
+    [
+      '\\documentclass{article}',
+      '\\begin{document}',
+      '\\section{One}\\label{s:one}',
+      'See Section~\\ref{s:two}.',
+      '\\section{Two}\\label{s:two}',
+      '\\bibliographystyle{plain}',
+      '\\bibliography{refs}',
+      '\\end{document}',
+      '',
+    ].join('\n'),
+  );
+  const r = await compile(project, 'main.tex', tmp());
+  expect(r.diagnostics.filter((d) => d.severity === 'error')).toEqual([]);
+  expect(r.ok).toBe(true);
+  expect(r.diagnostics).toContainEqual({
+    severity: 'warning',
+    message:
+      'Bibliography empty: the paper cites nothing, so its reference list has no entries. Cite a reference, or list them all with \\nocite{*}.',
+  });
+  // The build went on after BibTeX: the cross-references are resolved.
+  expect(r.labels).toEqual({
+    's:one': { number: '1', page: '1' },
+    's:two': { number: '2', page: '1' },
+  });
+  expect(r.diagnostics.filter((d) => /undefined/i.test(d.message))).toEqual([]);
+});
+
 // The `import` package: a file read through \import reads its own \subimport, \input and
 // pictures from the import folder first, as TeX does.
 test('\\import then \\subimport, \\input and a picture resolve from the import folder', async () => {
