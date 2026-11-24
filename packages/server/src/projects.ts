@@ -156,6 +156,99 @@ export async function renameProject(
   return { name: named };
 }
 
+/** What a paper holds, as the page that asks before deleting it says. */
+export type PaperHoldings = {
+  name: string;
+  files: number;
+  revisions: number;
+  /** People on the paper besides its owner, and invitations not yet taken up. */
+  others: number;
+  invited: number;
+};
+
+/** What deleting the paper would take with it. The owner's alone to ask, as deleting is. */
+export async function paperHoldings(
+  db: Db,
+  userId: string,
+  projectId: string,
+): Promise<PaperHoldings> {
+  await authorize(db, userId, id(projectId), 'project.settings');
+  const { rows } = await db.query(
+    `select p.name,
+       (select count(*)::int from files f where f.project_id = p.id) as files,
+       (select count(*)::int from revisions r where r.project_id = p.id) as revisions,
+       (select count(*)::int from project_members m
+         where m.project_id = p.id and m.role <> 'owner') as others,
+       (select count(*)::int from invitations i
+         where i.project_id = p.id and i.accepted_at is null and i.expires_at > now()) as invited
+     from projects p where p.id = $1`,
+    [projectId],
+  );
+  if (!rows[0]) throw new AppError('not_found', 'No such project.');
+  return rows[0];
+}
+
+/** How long deleting a paper waits for something that holds one of its rows (a running build). */
+const DELETE_WAITS_MS = 3000;
+
+/**
+ * Delete a paper, for everyone on it and for good: its files and their history, revisions,
+ * builds, comments, proposed changes, charts, people and invitations. The owner's decision
+ * alone. Everything goes with the paper's row, through the foreign keys, in one statement, so
+ * there is no moment at which half of it is left.
+ *
+ * - The person must give the paper's exact current name; this is asked again by the deleting
+ *   statement itself, so a wrong or missing name deletes nothing.
+ * - Whoever has a file of it open is closed at once (`acl`, as when someone is removed).
+ * - A build or chart being made holds its row until it is done; this does not wait behind it
+ *   for long, and says to try again.
+ * - The bytes in the object store are not touched: they are named by their content and may be
+ *   another paper's too. Nothing in the database points at them any more, so no page or route
+ *   can reach them. Removing them from the store is a sweep that waits on a retention rule.
+ */
+export async function deleteProject(
+  pool: pg.Pool,
+  userId: string,
+  projectId: string,
+  typedName: string,
+  waitsMs = DELETE_WAITS_MS,
+): Promise<{ name: string }> {
+  await authorize(pool, userId, id(projectId), 'project.settings');
+  try {
+    return await transaction(pool, async (db) => {
+      await db.query(`set local lock_timeout = ${Math.floor(waitsMs)}`);
+      // Whether the person is the owner is asked again by the statement that deletes.
+      const { rows } = await db.query(
+        `delete from projects p using project_members m
+         where p.id = $1 and m.project_id = p.id and m.user_id = $2 and m.role = 'owner'
+           and p.name = $3
+         returning p.name`,
+        [projectId, userId, typedName],
+      );
+      if (!rows[0]) {
+        const there = await db.query('select 1 from projects where id = $1', [projectId]);
+        if (!there.rows[0]) throw new AppError('not_found', 'No such project.');
+        throw new AppError(
+          'invalid_input',
+          'The name typed is not the name of this paper. Nothing was deleted.',
+        );
+      }
+      // Heard when this commits: open editors are looked at again, and closed.
+      await db.query("select pg_notify('acl', $1)", [projectId]);
+      return { name: rows[0].name as string };
+    });
+  } catch (err) {
+    // 55P03: a lock was not had in time. 40P01: this and something else each held what the
+    // other needed, and the database ended this one.
+    if (['55P03', '40P01'].includes((err as { code?: string }).code ?? ''))
+      throw new AppError(
+        'conflict',
+        'This paper is being built or changed at this moment. Nothing was deleted. Try again in a minute.',
+      );
+    throw err;
+  }
+}
+
 export async function listMembers(db: Db, userId: string, projectId: string): Promise<Member[]> {
   await authorize(db, userId, id(projectId), 'project.read');
   const { rows } = await db.query(

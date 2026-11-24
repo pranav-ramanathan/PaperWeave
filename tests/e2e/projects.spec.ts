@@ -662,3 +662,95 @@ test('an invitation opened before signing in says so and for which address; one 
   await expect(plain.page.getByRole('heading', { name: 'Sign in to PaperWeave' })).toBeVisible();
   await expect(plain.page.locator('main')).not.toContainText('nvit');
 });
+
+test('the owner deletes a paper after being shown what goes; an editor with a file open is told, and nobody can open it again', async ({
+  browser,
+}) => {
+  const owner = await person(browser, 'deletes-owner');
+  const guest = await person(browser, 'deletes-guest');
+  const { page } = owner;
+  const name = `Wrong archive ${run}`;
+  const zip = join(mkdtempSync(join(tmpdir(), 'paperweave-e2e-')), `${name}.zip`);
+  const main =
+    '\\documentclass{article}\n\\begin{document}\nNot for this place.\n\\end{document}\n';
+  writeFileSync(zip, await writeZip([{ path: 'main.tex', bytes: Buffer.from(main) }]));
+  await page.goto('/sign-in');
+  await signIn(page, owner.email);
+  await page.getByLabel('Or import a ZIP of a LaTeX project').setInputFiles(zip);
+  await page.getByRole('button', { name: 'Import ZIP' }).click();
+  await expect(page.getByRole('heading', { name })).toBeVisible();
+  const paper = new URL(page.url()).pathname;
+
+  await page.getByLabel('Their email address').fill(guest.email);
+  await page.getByRole('button', { name: 'Send invitation' }).click();
+  await expect(page.getByRole('status')).toContainText('Invitation sent');
+  await guest.page.goto('/sign-in');
+  await signIn(guest.page, guest.email);
+  await guest.page.goto(await emailedLink(guest.email, '/invitations/'));
+  await guest.page.getByRole('button', { name: 'Join this paper' }).click();
+  await expect(guest.page.getByText('You are an editor')).toBeVisible();
+
+  // An editor is not offered it, and the page that asks is the owner's alone.
+  await expect(guest.page.getByRole('link', { name: 'Delete this paper…' })).toHaveCount(0);
+  await guest.page.goto(`${paper}/delete`);
+  await expect(guest.page.getByRole('main').getByRole('alert')).toHaveText(
+    'Only the owner of a paper can delete it.',
+  );
+  await expect(guest.page.getByRole('button')).toHaveCount(0);
+  // The editor has the file open when the paper goes.
+  await guest.page.goto(paper);
+  await guest.page.getByRole('link', { name: 'main.tex', exact: true }).first().click();
+  const status = guest.page.getByRole('region', { name: /^Editor for/ }).getByRole('status');
+  await expect(status).toHaveText('All edits saved.');
+
+  // The owner is shown what goes, and nothing has gone yet.
+  await page.getByRole('link', { name: 'Delete this paper…' }).click();
+  await expect(page.getByRole('heading', { name: `Delete \u201C${name}\u201D` })).toBeVisible();
+  await expect(page.getByRole('main')).toContainText('one file');
+  await expect(page.getByRole('main')).toContainText(
+    'one other person is on the paper, and will lose it too',
+  );
+  await expect(page.getByRole('main')).toContainText('Nothing has been deleted yet.');
+  await audit(page, 'the page that asks before a paper is deleted');
+  await page.getByRole('link', { name: 'Back to the paper' }).click();
+  await expect(page.getByRole('heading', { name })).toBeVisible();
+
+  await page.getByRole('link', { name: 'Delete this paper…' }).click();
+  await expect(page.getByRole('main')).toContainText('It cannot be undone');
+  // Without the paper's exact name nothing is deleted, and the page says why.
+  await page.getByLabel(/To confirm, type the paper/).fill(`${name} `.toLowerCase());
+  await page.getByRole('button', { name: 'Delete this paper for everyone' }).click();
+  await expect(page.getByRole('main').getByRole('alert')).toContainText('Nothing was deleted');
+  await page.goto(paper);
+  await expect(page.getByRole('heading', { name })).toBeVisible();
+  await page.getByRole('link', { name: 'Delete this paper…' }).click();
+  await page.getByLabel(/To confirm, type the paper/).fill(name);
+  await page.getByRole('button', { name: 'Delete this paper for everyone' }).click();
+  await expect(page.getByRole('heading', { name: 'Your papers' })).toBeVisible();
+  await expect(page.getByRole('status')).toHaveText(
+    `Deleted \u201C${name}\u201D. It is gone for everyone who was on it.`,
+  );
+  await expect(page.getByRole('link', { name })).toHaveCount(0);
+  await audit(page, 'the list of papers after one is deleted');
+
+  // The editor's page says so, without a reload, and takes no more typing.
+  await expect(status).toHaveText(
+    'You no longer have access to this file, or it has been deleted.',
+    { timeout: 20_000 },
+  );
+  await expect(guest.page.locator('.editor-notice')).toHaveText(
+    /^You are no longer a member of this paper, or its owner has deleted it\./,
+  );
+
+  // Nobody can open it again: the paper, its file, its download, or the page that asks.
+  for (const who of [page, guest.page]) {
+    await who.goto(paper);
+    await expect(who.getByRole('heading', { name: 'Nothing here' })).toBeVisible();
+  }
+  await page.goto(`${paper}/delete`);
+  await expect(page.getByRole('heading', { name: 'Nothing here' })).toBeVisible();
+  expect((await page.request.get(`${paper}/export`)).status()).toBe(404);
+  await guest.page.goto('/projects');
+  await expect(guest.page.getByRole('heading', { name: 'Your papers' })).toBeVisible();
+  await expect(guest.page.getByRole('link', { name })).toHaveCount(0);
+});

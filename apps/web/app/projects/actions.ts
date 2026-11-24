@@ -8,6 +8,7 @@ import {
   createFromTemplate,
   createProject,
   deleteFile,
+  deleteProject,
   fileUses,
   invite,
   lookUpDoi,
@@ -238,6 +239,16 @@ export async function renamePaperAction(projectId: string, form: FormData) {
   await act(back, async () => {
     await renameProject(db(), user.id, projectId, text(form, 'name'));
     return `${back}?renamed=1`;
+  });
+}
+
+/** Delete the paper for everyone. Only from the page that says what goes with it. */
+export async function deletePaperAction(projectId: string, form: FormData) {
+  const back = `/projects/${projectId}/delete`;
+  const user = await requireUser(back);
+  await act(back, async () => {
+    const { name } = await deleteProject(db(), user.id, projectId, text(form, 'name'));
+    return `/projects?deleted=${encodeURIComponent(name)}`;
   });
 }
 

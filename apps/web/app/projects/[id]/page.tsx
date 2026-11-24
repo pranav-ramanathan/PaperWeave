@@ -1253,6 +1253,14 @@ async function Project({
             </label>
             <Once>Send invitation</Once>
           </form>
+          <h2 id="delete">Delete this paper</h2>
+          <p>
+            Takes the paper away from everyone on it, with its history. You are shown what goes, and
+            asked, before anything is deleted.{' '}
+            <Link prefetch={false} href={`/projects/${id}/delete`}>
+              Delete this paper…
+            </Link>
+          </p>
         </>
       )}
     </main>

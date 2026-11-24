@@ -6837,3 +6837,55 @@ of the paper's .bib files.`
 - **Not done:** the address is not filled in for the person; the paper's name, the role and who
   invited are shown only after signing in; the person still gets a second email to sign in; the
   invitation email's own text is unchanged.
+
+## A paper can be deleted
+
+- **Found by** the planner, stepping back from the walks: nothing could take a paper out. No
+  function, page or command deleted one, so a wrong ZIP, a trial paper or a manuscript someone
+  wanted gone stayed for ever, for everyone invited to it; the operator had nothing to run either.
+  And deleting the row, which every foreign key was written for, took 45 s for a paper of 5,000
+  revisions and 10 s for one of 2,000 files on the development database (17,000 papers): eight
+  columns that point at a paper, file, revision or build had no index.
+- **Now** the owner finds "Delete this paper" at the foot of the paper's page. It leads to a page
+  that says what goes (files, revisions, every build, comment, proposed change and chart; who
+  else is on the paper; invitations not taken up), offers the ZIP with its review data, and has
+  a field for the paper's exact name and one button, "Delete this paper for everyone".
+  Afterwards the list of papers says so.
+  `deleteProject` (`packages/server/src/projects.ts`) deletes the paper's row in one statement,
+  which asks again whether the person is the owner and whether the name typed is the paper's
+  current name (a wrong or missing name deletes nothing and says so on the page); everything else goes with it through the
+  foreign keys. Migration `0033` adds the eight indexes (0.6 s and 0.3 s for the same two papers).
+- **People with the paper open** are closed at once, as when someone is removed (`acl`); the note
+  above the text now reads "You are no longer a member of this paper, or its owner has deleted
+  it." The two are not told apart: a paper that is not yours and one that is not there answer
+  the same, by design.
+- **A build or chart being made** holds its row until it is done. The delete waits three seconds
+  and then says the paper is being built or changed, that nothing was deleted, and to try again.
+- **Why the name is typed.** Deleting cannot be undone from the service (no period to bring a
+  paper back, no email to co-authors), so the owner must type the paper's exact name, checked
+  on the server. This is the conservative default; the owner of the product can relax it to a
+  single press by dropping the name from `deleteProject` and the page.
+- **Who may:** the owner alone (`project.settings`, as for renaming). Anyone else on the paper is
+  refused; anyone not on it is told "not found".
+- **Held by** `projects.sandbox.test.ts` (every role; a wrong or missing name; a held row; all rows gone; another paper
+  with the same bytes untouched; every such column indexed), `sync.sandbox.test.ts` (editors
+  closed, the server serves on) and `projects.spec` (the page, the press, the co-author's open
+  editor, and nobody able to open it again).
+- **Not done.**
+  - The bytes in the object store are not removed. They are named by their content and can be
+    another paper's too; nothing in the database points at them once the paper is gone, so no
+    page or route can reach them. Removing them is a sweep of objects nothing refers to, and
+    backups keep what they held: both wait on the retention decision.
+  - What a worker kept from the paper's last build (headings, captions, the reference list)
+    stays on its disk until 200 other papers have built, as before.
+  - Nobody is sent an email, and there is no period in which a deleted paper can be brought
+    back.
+  - A deleted paper leaves the product metrics: papers made, downloads and two-author papers are
+    counted from the rows that are there.
+  - There is no way to delete an account, and the operator has no command of their own: they
+    delete as the owner would, or in SQL (`delete from projects where id = …` is now safe to run).
+  - Measured while choosing this, not changed: typing in the visual view of one 150 KB file took
+    a median of 56 ms a key (p95 80) in the real editor, against 24 ms in a 33 KB file and 16 ms in
+    the source view of either. One machine, once.
+  - The paper's own page in another tab; a restore-removed file's lines in the comparison; a
+    file renamed away from `.tex` (as before).

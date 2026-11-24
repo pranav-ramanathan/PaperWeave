@@ -40,7 +40,8 @@ export function restoredWords(r: RestoreNote, me: string, time: string, held = f
 
 /**
  * Why the file an editor has open is no longer served, as far as the paper's list of files says:
- * the person is off the paper (`listing` is null), or the file is not in the list: the restore
+ * the person is off the paper or the paper has been deleted (`listing` is null: the two cannot
+ * be told apart, by design), or the file is not in the list: the restore
  * the answer names took it out, or else it was deleted. `null` if the list still has the file
  * (it stopped being text, say): the status line's own words stand alone then.
  */
@@ -56,7 +57,8 @@ export function whyGone(
 
 /** The sentences for it. `time` is when the restore was made, as the reader's clock shows it. */
 export function goneWords(left: Left, me: string, time: string): string {
-  if (left.why === 'off') return 'You are no longer a member of this paper.';
+  if (left.why === 'off')
+    return 'You are no longer a member of this paper, or its owner has deleted it.';
   if (left.why === 'deleted')
     return 'This file has been deleted from the paper. The revision saved just before still has it.';
   const kept = left.restore.kept

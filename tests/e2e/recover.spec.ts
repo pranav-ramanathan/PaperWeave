@@ -562,7 +562,7 @@ test('someone taken off the paper while a file is open is told, and the page sto
   );
   // Which of the two it is, is said above the text.
   await expect(page.locator('.editor-notice')).toHaveText(
-    /^You are no longer a member of this paper\./,
+    /^You are no longer a member of this paper, or its owner has deleted it\./,
   );
   await expect(source(page)).toHaveAttribute('contenteditable', 'false');
   await Promise.all(told);
