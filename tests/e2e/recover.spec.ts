@@ -982,7 +982,11 @@ test('deleting one file does not stop another that was typed in offline from bei
 
 // The sync service is away (not the browser's network, so a link still opens the next page in
 // the app) and a person has typed. Opening another page would drop it without a word.
-async function typedWhileSyncIsAway(browser: Parameters<typeof person>[0], tag: string) {
+async function typedWhileSyncIsAway(
+  browser: Parameters<typeof person>[0],
+  tag: string,
+  first: (page: Page) => Promise<void> = async () => {},
+) {
   const { editor, paper } = await sharedPaper(browser, tag, [
     { path: 'main.tex', text: MAIN },
     { path: 'body.tex', text: 'Body text.\n' },
@@ -999,6 +1003,7 @@ async function typedWhileSyncIsAway(browser: Parameters<typeof person>[0], tag: 
   await page.getByRole('link', { name: 'main.tex' }).first().click();
   await showSource(page);
   await expect(status(page)).toHaveText('All edits saved.');
+  await first(page);
   up = false;
   for (const ws of open) await ws.close();
   await expect(status(page)).toContainText('Offline.');
@@ -1054,6 +1059,113 @@ test('agreeing to leave with edits the sync service has not confirmed leaves onc
   });
   await page.getByRole('link', { name: 'Paper overview' }).click();
   await expect(page).toHaveURL(/\/projects\/[^/]+\/?(\?.*)?$/);
+  expect(asked).toBe(1);
+});
+
+test('words typed while the sync service is away are not dropped by Back, which asks as a link does', async ({
+  browser,
+}) => {
+  const { page, back } = await typedWhileSyncIsAway(browser, 'rec-back-stay');
+  const url = page.url();
+  const asked: string[] = [];
+  page.on('dialog', (d) => {
+    asked.push(d.message());
+    void d.dismiss();
+  });
+  await page.goBack();
+  await expect.poll(() => asked.length).toBe(1);
+  expect(asked[0]).toContain('main.tex has not been saved yet');
+  await expect(page).toHaveURL(url);
+  await expect(source(page)).toContainText('% typed with sync away');
+  // Asked again each time, and the page still takes typing.
+  await page.goBack();
+  await expect.poll(() => asked.length).toBe(2);
+  await expect(page).toHaveURL(url);
+  await typeAtStart(page, '% and more\n');
+  await expect(source(page)).toContainText('% and more');
+
+  // The editor is the one that was there: the service comes back and the words are saved.
+  back();
+  await expect(status(page)).toHaveText('All edits saved.', { timeout: 20_000 });
+  // With nothing unsaved, Back asks nothing and goes to the paper's page; Forward comes back
+  // to the file, which has the words.
+  await page.goBack();
+  await expect(page.getByRole('heading', { name: 'People', exact: true })).toBeVisible();
+  await page.goForward();
+  await expect(page).toHaveURL(url);
+  await showSource(page);
+  await expect(source(page)).toContainText('% typed with sync away');
+  await expect(source(page)).toContainText('% and more');
+  expect(asked.length).toBe(2);
+});
+
+test('agreeing to go back with edits the sync service has not confirmed goes back once, asking once', async ({
+  browser,
+}) => {
+  const { page, paper } = await typedWhileSyncIsAway(browser, 'rec-back-go');
+  let asked = 0;
+  page.on('dialog', (d) => {
+    asked++;
+    void d.accept();
+  });
+  await page.goBack();
+  await expect(page).toHaveURL(paper);
+  await expect(page.getByRole('heading', { name: 'People', exact: true })).toBeVisible();
+  expect(asked).toBe(1);
+});
+
+test('Forward asks too, and staying leaves the page that was ahead where it was', async ({
+  browser,
+}) => {
+  // The paper's page is ahead of the file in the tab's history: opened from the file, then Back.
+  const { page, back } = await typedWhileSyncIsAway(browser, 'rec-forward', async (page) => {
+    await page.getByRole('link', { name: 'Paper overview' }).click();
+    await expect(page.getByRole('heading', { name: 'People', exact: true })).toBeVisible();
+    await page.goBack();
+    await showSource(page);
+    await expect(status(page)).toHaveText('All edits saved.');
+  });
+  const url = page.url();
+  let asked = 0;
+  page.on('dialog', (d) => {
+    asked++;
+    void d.dismiss();
+  });
+  await page.goForward();
+  await expect.poll(() => asked).toBe(1);
+  await expect(page).toHaveURL(url);
+  await expect(source(page)).toContainText('% typed with sync away');
+  back();
+  await expect(status(page)).toHaveText('All edits saved.', { timeout: 20_000 });
+  await page.goForward();
+  await expect(page.getByRole('heading', { name: 'People', exact: true })).toBeVisible();
+  expect(asked).toBe(1);
+});
+
+test('Back asks in a browser that does not say where in its history it is', async ({ browser }) => {
+  const { page, back } = await typedWhileSyncIsAway(browser, 'rec-back-old');
+  const url = page.url();
+  let asked = 0;
+  page.on('dialog', (d) => {
+    asked++;
+    void d.dismiss();
+  });
+  // A browser without the Navigation API (some Firefox and Safari versions) takes the other branch.
+  await page.evaluate(() =>
+    Object.defineProperty(window, 'navigation', { value: undefined, configurable: true }),
+  );
+  await page.goBack();
+  await expect.poll(() => asked).toBe(1);
+  await expect(page).toHaveURL(url);
+  await expect(source(page)).toContainText('% typed with sync away');
+  back();
+  await expect(status(page)).toHaveText('All edits saved.', { timeout: 20_000 });
+  await page.goBack();
+  await expect(page.getByRole('heading', { name: 'People', exact: true })).toBeVisible();
+  await page.goForward();
+  await expect(page).toHaveURL(url);
+  await showSource(page);
+  await expect(source(page)).toContainText('% typed with sync away');
   expect(asked).toBe(1);
 });
 

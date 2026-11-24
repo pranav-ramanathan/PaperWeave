@@ -32,7 +32,15 @@ import { yCollab, yUndoManagerKeymap } from 'y-codemirror.next';
 import * as Y from 'yjs';
 import { setBibliography } from '../../../../../lib/bibliography';
 import { pageNonce } from '../../../../../lib/nonce';
-import { atRisk, LEAVE, leavesPage } from '../../../../../lib/leaving';
+import {
+  atRisk,
+  LEAVE,
+  leavesPage,
+  place,
+  samePage,
+  stepsBack,
+  wentTo,
+} from '../../../../../lib/leaving';
 import { carry, onShow, showInPdf, taken } from '../../../../../lib/pdfsync';
 import { wordAt } from '../../../../../lib/pdfword';
 import { onFiles, refreshFiles } from '../../../../../lib/paperfiles';
@@ -1031,6 +1039,39 @@ export default function FileEditor(props: {
       }
     };
     window.addEventListener('click', onClick, true);
+    // Back and Forward to another page of the app swap the page in the browser too. By the time
+    // the browser says so it has moved and cannot be refused, but the router has not yet acted,
+    // and this is asked before it (see WENT in app/layout.tsx). The person is asked as for a
+    // link. Leaving lets the router have the event. Staying keeps it from the router, which
+    // never knows, and steps the history back to this page.
+    let here = place();
+    let returning = false;
+    const went = (e: PopStateEvent) => {
+      const back = returning && samePage(location.href, here.href);
+      returning = false;
+      if (back) {
+        // The step back that staying made.
+        e.stopImmediatePropagation();
+      } else if (samePage(location.href, here.href)) {
+        here = place();
+      } else if (risky()) {
+        if (window.confirm(LEAVE(pathNow.current))) {
+          agreed = Date.now();
+          return;
+        }
+        e.stopImmediatePropagation();
+        const steps = stepsBack(here.index, place().index);
+        if (steps) {
+          returning = true;
+          history.go(steps);
+        } else {
+          // A browser that does not say where in its history it is: this page is put after the
+          // one arrived at, which after Back is where it was.
+          history.pushState(here.state, '', here.href);
+        }
+      }
+    };
+    wentTo(went);
     const warn = (e: BeforeUnloadEvent) => {
       // Not again straight after the person has said to leave.
       if (saving.unsaved && !discarding && Date.now() - agreed > 10_000) e.preventDefault();
@@ -1058,6 +1099,7 @@ export default function FileEditor(props: {
       window.removeEventListener('online', online);
       window.removeEventListener('beforeunload', warn);
       window.removeEventListener('click', onClick, true);
+      wentTo(went, false);
       mayLeave.current = () => true;
       // A stretch still waiting to be marked has no view to be marked in.
       markThreads.current = () => {};

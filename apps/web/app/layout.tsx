@@ -3,6 +3,7 @@ import { connection } from 'next/server';
 import type { ReactNode } from 'react';
 import 'katex/dist/katex.min.css';
 import './globals.css';
+import { WENT } from '../lib/leaving';
 import Fresh from './Fresh';
 import Waiting from './Waiting';
 
@@ -28,6 +29,14 @@ const SENT = `(function(){var s=new WeakSet;addEventListener('submit',function(e
 // started since do not send it either. Only a page brought back by Back or Forward frees them:
 // the first pageshow comes when the scripts arrive, which may be mid-post. A GET form is not ours.
 
+/**
+ * The first to hear that the browser has gone Back or Forward, because it is listening before the
+ * router is: listeners on the window are called in the order they were added. It hands the event
+ * to whoever has asked for it (`wentTo` in lib/leaving.ts, the open file's editor), who may keep
+ * it from the router. Run as the page is read, like DROPPED.
+ */
+const WENT_FIRST = `addEventListener('popstate',function(e){var f=window[${JSON.stringify(WENT)}];if(f)f(e)})`;
+
 // Every page names itself, and the name is followed by the service's: "Papers — PaperWeave". The
 // title is the first thing a screen reader says of a page that has just opened.
 export const metadata = { title: { default: 'PaperWeave', template: '%s — PaperWeave' } };
@@ -46,6 +55,7 @@ export default async function Layout({ children }: { children: ReactNode }) {
       <body>
         <script nonce={nonce} dangerouslySetInnerHTML={{ __html: DROPPED }} />
         <script nonce={nonce} dangerouslySetInnerHTML={{ __html: SENT }} />
+        <script nonce={nonce} dangerouslySetInnerHTML={{ __html: WENT_FIRST }} />
         <Fresh />
         <Waiting />
         {children}

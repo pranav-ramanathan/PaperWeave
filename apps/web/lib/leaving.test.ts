@@ -1,5 +1,6 @@
 import { expect, test } from 'vitest';
 import { atRisk, leavesPage } from './leaving';
+import { samePage, stepsBack } from './leaving';
 
 test('only edits the sync service has not confirmed, and not just put on the socket, are at risk', () => {
   expect(atRisk({ unsaved: false, connected: false, sinceChange: 99999 })).toBe(false);
@@ -23,4 +24,19 @@ test('a click leaves the page only when it opens another page of the app in this
   expect(
     leavesPage(plain, { ...link, href: 'https://example.org/projects/p1/files/f2' }, here),
   ).toBe(false);
+});
+
+test('an address that differs only after the # is the same page', () => {
+  expect(samePage(here, `${here}#again`)).toBe(true);
+  expect(samePage(here, 'http://localhost:3100/projects/p1')).toBe(false);
+  expect(samePage(here, `${here}?view=source`)).toBe(false);
+  expect(samePage(here, 'https://example.org/projects/p1/files/f1')).toBe(false);
+});
+
+test('staying steps the history back by as many entries as the browser moved, when it says', () => {
+  expect(stepsBack(3, 2)).toBe(1);
+  expect(stepsBack(3, 4)).toBe(-1);
+  expect(stepsBack(5, 2)).toBe(3);
+  expect(stepsBack(undefined, 2)).toBe(0);
+  expect(stepsBack(3, undefined)).toBe(0);
 });
