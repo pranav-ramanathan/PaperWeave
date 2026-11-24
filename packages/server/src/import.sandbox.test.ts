@@ -8,6 +8,8 @@ import { afterAll, beforeAll, expect, test } from 'vitest';
 import { compile } from '../../../apps/workers/src/compile.ts';
 import { type Entry, LIMITS, readZip, writeZip } from './archive.ts';
 import { blobStore } from './blobs.ts';
+import { gnuLongName, tarBlock, tarFiles, tarOf } from './tarbuild.ts';
+import { importUploaded, startUpload } from './uploads.ts';
 import { exportRevision, listRevisions, saveRevision } from './revisions.ts';
 import { exportZip, importReport, importZip, listFiles } from './import.ts';
 import { createFile, setRootFile } from './files.ts';
@@ -593,19 +595,13 @@ test('the file types real papers use are kept; pictures LaTeX cannot read are sk
   expect(byPath.get('x.ttf')).toEqual({ path: 'x.ttf', readonly: 'binary' });
 });
 
-test('a .tar.gz, a .tar and a .gz are refused with a sentence that says what to do', async () => {
-  const tar = Buffer.alloc(1024);
-  tar.write('paper/main.tex');
-  tar.write('ustar', 257);
-  expect(await refused(gzipSync(tar))).toBe(
-    'invalid_input: This is a .tar.gz, as arXiv gives. Unpack it and make a ZIP of the folder, then import that.',
-  );
+test('a .tar.gz and a .tar import; a .gz is refused with a sentence that says what to do', async () => {
+  const tar = tarOf([tarBlock('paper/main.tex', doc())]);
+  expect(await refused(gzipSync(tar))).toBe('imported');
   expect(await refused(gzipSync(Buffer.from(doc())))).toBe(
     'invalid_input: This is a .gz, one compressed file. Unpack it and put it in a ZIP with the rest of the paper, then import that.',
   );
-  expect(await refused(tar)).toBe(
-    'invalid_input: This is a .tar, not a ZIP. Unpack it and make a ZIP of the folder, then import that.',
-  );
+  expect(await refused(tar)).toBe('imported');
 });
 
 test('an archive with no root says what a root is; a Latin-1 root says what is wrong with it', async () => {
@@ -846,4 +842,123 @@ test('a paper whose main file has one CRLF among LF lines imports, exports as up
   const after = (await out()).toString();
   expect(after).not.toContain('\r');
   expect(after).toContain('Zero. One.\nTwo.');
+});
+
+// ---- tar archives
+
+const rowCounts = async () =>
+  (
+    await t.pool.query(
+      `select (select count(*) from projects)::int as projects,
+              (select count(*) from project_members)::int as members,
+              (select count(*) from files)::int as files,
+              (select count(*) from import_reports)::int as reports`,
+    )
+  ).rows[0];
+
+test('an arXiv-shaped tar.gz keeps its .bbl and makes one paper, owned by the importer', async () => {
+  const author = await t.signIn('tar-author@example.org');
+  const source = [
+    '\\documentclass{article}\n\\begin{document}\nCited \\cite{k}.\n',
+    '\\bibliographystyle{plain}\n\\bibliography{main}\n\\end{document}\n',
+  ].join('');
+  const bbl =
+    '\\begin{thebibliography}{1}\n\\bibitem{k} A. Author, A book.\n\\end{thebibliography}\n';
+  // As arXiv gives it: no wrapping folder, a folder entry, a ./ in front, no .bib file.
+  const tar = tarOf([
+    tarBlock('./', '', { type: '5' }),
+    tarBlock('./main.tex', source),
+    tarBlock('./main.bbl', bbl),
+    tarBlock('./fig/', '', { type: '5' }),
+    tarBlock('./fig/plot.png', Buffer.from([0x89, 0x50, 0x4e, 0x47, 0, 1, 2])),
+    tarBlock('./00README.XXX', 'nohypertex'),
+  ]);
+  const made = await importZip(t.pool, store, author.id, gzipSync(tar), 'From arXiv');
+  expect(made).toHaveLength(1);
+  expect(made[0]).toMatchObject({ name: 'From arXiv', role: 'owner' });
+  const paths = (await listFiles(t.pool, author.id, made[0].id)).map((f) => f.path);
+  expect(paths).toEqual(['fig/plot.png', 'main.bbl', 'main.tex']);
+  const report = (await importReport(t.pool, author.id, made[0].id))!;
+  expect(report.root).toBe('main.tex');
+  expect(report.skipped.map((s) => s.path)).toEqual(['00README.XXX']);
+  expect(report.notes.join('\n')).toContain('The bibliography came ready-made (main.bbl)');
+  // Owned by the importer, and by nobody else.
+  const members = (
+    await t.pool.query('select user_id, role from project_members where project_id = $1', [
+      made[0].id,
+    ])
+  ).rows;
+  expect(members).toEqual([{ user_id: author.id, role: 'owner' }]);
+  // What goes out is what came in.
+  const back = await readZip(await exportZip(t.pool, store, author.id, made[0].id));
+  expect(Buffer.from(back.entries.find((e) => e.path === 'main.bbl')!.bytes).toString()).toBe(bbl);
+  // The same files as a plain tar, with the folder around them that a Git host adds.
+  const git = await importZip(
+    t.pool,
+    store,
+    author.id,
+    tarFiles([
+      { path: 'repo-main/main.tex', bytes: Buffer.from(source) },
+      { path: 'repo-main/main.bbl', bytes: Buffer.from(bbl) },
+    ]),
+    'From a Git host',
+  );
+  expect(git).toHaveLength(1);
+  expect((await listFiles(t.pool, author.id, git[0].id)).map((f) => f.path)).toEqual([
+    'main.bbl',
+    'main.tex',
+  ]);
+});
+
+test("another person's key finds nothing in a tar upload: nothing is made and the upload stays", async () => {
+  const maker = await t.signIn('tar-maker@example.org');
+  const thief = await t.signIn('tar-thief@example.org');
+  const tar = gzipSync(tarOf([tarBlock('paper/main.tex', doc('Mine.'))]));
+  const up = await startUpload(t.pool, store, maker.id, { kind: 'zip' }, tar.length);
+  expect((await fetch(up.url, { method: 'PUT', body: tar as BodyInit })).ok).toBe(true);
+  const before = await rowCounts();
+  const error = await importUploaded(t.pool, store, thief.id, up.key, 'Stolen').then(
+    () => null,
+    (e) => e,
+  );
+  expect(error).toMatchObject({ code: 'not_found' });
+  expect(await rowCounts()).toEqual(before);
+  expect(await store.uploadSize(up.key)).toBe(tar.length);
+  // The maker can still take it, once.
+  const made = await importUploaded(t.pool, store, maker.id, up.key, 'Mine');
+  expect(made).toHaveLength(1);
+  expect(made[0]).toMatchObject({ name: 'Mine', role: 'owner' });
+  expect(await store.uploadSize(up.key)).toBeNull();
+});
+
+test('a hostile tar creates no project rows', async () => {
+  const victim = await t.signIn('tar-victim@example.org');
+  const ok = tarBlock('main.tex', doc());
+  const longName = 'd/'.repeat(150) + 'main.tex';
+  const badSum = Buffer.from(tarOf([tarBlock('main.tex', doc())]));
+  badSum[2] ^= 1;
+  const whole = tarOf([tarBlock('main.tex', doc('x'.repeat(2000)))]);
+  const hostile: Record<string, Buffer> = {
+    climbing: tarOf([ok, tarBlock('../x.tex', 'x')]),
+    absolute: tarOf([ok, tarBlock('/etc/x.tex', 'x')]),
+    symlink: tarOf([ok, tarBlock('link.tex', '', { type: '2', link: '/etc/passwd' })]),
+    hardlink: tarOf([ok, tarBlock('link.tex', '', { type: '1', link: 'main.tex' })]),
+    twice: tarOf([ok, tarBlock('a.tex', 'x'), tarBlock('a.tex', 'y')]),
+    notUtf8: tarOf([ok, tarBlock(Buffer.from([0x61, 0xff, 0x2e, 0x74, 0x65, 0x78]), 'x')]),
+    badChecksum: badSum,
+    truncated: whole.subarray(0, 700),
+    sparse: tarOf([ok, tarBlock('s.tex', 'x', { type: 'S' })]),
+    longName: tarOf([gnuLongName(longName), tarBlock('stand-in', 'x'), ok]),
+  };
+  const before = await rowCounts();
+  for (const [what, tar] of Object.entries(hostile))
+    for (const archive of [tar, gzipSync(tar)]) {
+      const said = await refused(archive);
+      expect(said, what).toMatch(/^invalid_input: This archive cannot be imported: /);
+    }
+  // The same, from a person who is signed in and takes the usual way in.
+  await expect(
+    importZip(t.pool, store, victim.id, gzipSync(hostile.climbing), 'x'),
+  ).rejects.toThrow('This archive cannot be imported');
+  expect(await rowCounts()).toEqual(before);
 });

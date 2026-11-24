@@ -1,4 +1,5 @@
-// Turn a ZIP into a paper. A route handler, not a form action, because archives are far larger
+// Turn a ZIP, or a .tar.gz, .tgz or .tar (which one it is, is told by its bytes, not its name)
+// into a paper. A route handler, not a form action, because archives are far larger
 // than a form action may be. The browser puts the ZIP into the store itself (app/api/uploads) and
 // posts only its `key` here, because a function takes no more than 4.5 MB in a request. A ZIP
 // posted whole, as `zip`, is still taken, up to the same limit: for a browser with no scripts, and
@@ -28,7 +29,7 @@ export async function POST(request: Request) {
     return failed('Choose a ZIP file to import.');
   try {
     const name = (typeof key === 'string' ? String(form?.get('name') ?? '') : (file as File).name)
-      .replace(/\.zip$/i, '')
+      .replace(/\.(zip|tar\.gz|tgz|tar)$/i, '')
       .slice(0, 200);
     const made = await (typeof key === 'string'
       ? importUploaded(db(), blobs(), user.id, key, name)
