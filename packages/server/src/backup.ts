@@ -19,6 +19,7 @@ export async function checkBlobs(db: Db, store: BlobStore): Promise<BlobCheck> {
      union select digest from revision_files
      union select pdf_digest from builds where pdf_digest is not null
      union select synctex_digest from builds where synctex_digest is not null
+     union select bbl_digest from builds where bbl_digest is not null
      union select log_digest from builds where log_digest is not null
      union select pdf_digest from chart_draws
      union select png_digest from chart_draws`,

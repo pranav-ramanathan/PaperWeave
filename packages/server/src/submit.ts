@@ -9,7 +9,7 @@ import { chartPath, listCharts } from './charts.ts';
 import { citationReport } from './citations.ts';
 import { graphicsFolders, labelReport, texFiles } from './labels.ts';
 import { id, openProposalsSql, openThreadsSql } from './projects.ts';
-import { unusedInRevision } from './revisions.ts';
+import { bblInRevision, formatOfBbl, unusedInRevision } from './revisions.ts';
 import { inScope } from './scope.ts';
 
 export type Finding = {
@@ -77,6 +77,18 @@ export const unusedMessage = (paths: string[]) => {
   const rest = paths.length - 10;
   return `The last build never opened ${named}${rest > 0 ? ` and ${rest} more` : ''}. ${paths.length === 1 ? 'It is' : 'They are'} in the ZIP, and left out of the ZIP of only the files the paper uses.`;
 };
+
+/**
+ * Why the paper's own .bbl is not the bibliography its PDF was built from: the build made a new
+ * one from the .bib files and read that. The ZIP of only the files the paper uses keeps the
+ * paper's own file.
+ */
+export const staleBblMessage = (path: string) =>
+  `The PDF was built from another bibliography than ${path}, the paper's own file: the build made a new one from the .bib files. The ZIP of only the files the paper uses keeps ${path} as it is, so a venue that does not run BibTeX or Biber would print a different bibliography.`;
+
+/** Why a Biber .bbl in the ZIP may be refused, and by what. `format` is biblatex's .bbl version. */
+export const bblFormatMessage = (path: string, format: string) =>
+  `${path} was made for biblatex .bbl format ${format}. A venue with a different biblatex version will refuse the file.`;
 
 /**
  * The data files the paper reads (a table, a CSV, a plot's data) that are held back from
@@ -290,6 +302,15 @@ async function checksOf(
   if (fresh && latest.revisionId) {
     const unused = await unusedInRevision(pool, userId, projectId, latest.revisionId);
     if (unused.length) warning('file', unusedMessage(unused));
+    // The .bbl the build read goes into that ZIP, so a venue that runs neither BibTeX nor Biber
+    // has the bibliography.
+    const bbl = await bblInRevision(pool, userId, projectId, latest.revisionId);
+    if (bbl && bbl.own !== null && bbl.own !== bbl.digest)
+      warning('file', staleBblMessage(bbl.path), { path: bbl.path });
+    else if (bbl) {
+      const format = formatOfBbl((await store.get(bbl.digest)) ?? new Uint8Array());
+      if (format) warning('file', bblFormatMessage(bbl.path, format));
+    }
   }
 
   // A chart the paper shows must be drawn from the data as it is now.

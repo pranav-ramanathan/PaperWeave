@@ -1,6 +1,6 @@
 // Revisions: the paper frozen at a moment. Cutting, naming, comparing, restoring and exporting.
 import { createHash } from 'node:crypto';
-import { LATEXMK_RULES, decodeFile } from '@paperweave/latex';
+import { LATEXMK_RULES, bblFormat, decodeFile } from '@paperweave/latex';
 import type pg from 'pg';
 import {
   checkPath,
@@ -333,7 +333,8 @@ const LEFT_OUT = /\.(?:tex|ltx|pdf|png|jpe?g|eps)$/i;
 /**
  * Of these files (never the held ones), those the revision's newest succeeded build never
  * opened: not read, not the root, and of a type that can be left out. `null` if the revision has
- * no succeeded build; none if that build did not record what it read (an older one).
+ * no succeeded build; none if that build did not record what it read (an older one). Also the
+ * digest of the .bbl that same build read, if it kept one.
  */
 async function unusedPaths(
   db: Db,
@@ -341,22 +342,75 @@ async function unusedPaths(
   revisionId: string,
   root: string | null,
   files: RevisionFile[],
-): Promise<string[] | null> {
+): Promise<{ paths: string[]; bbl: string | null } | null> {
   const built = (
     await db.query(
-      `select read from builds where revision_id = $1 and project_id = $2 and status = 'succeeded'
+      `select read, bbl_digest from builds
+       where revision_id = $1 and project_id = $2 and status = 'succeeded'
        order by created_at desc limit 1`,
       [revisionId, projectId],
     )
   ).rows[0];
   if (!built) return null;
-  if (!Array.isArray(built.read)) return [];
+  const bbl: string | null = built.bbl_digest ?? null;
+  if (!Array.isArray(built.read)) return { paths: [], bbl };
   const read = new Set<string>(
     (built.read as unknown[]).flatMap((p) => (typeof p === 'string' ? [p.normalize('NFC')] : [])),
   );
-  return files
-    .filter((f) => f.path !== root && LEFT_OUT.test(f.path) && !read.has(f.path.normalize('NFC')))
-    .map((f) => f.path);
+  return {
+    paths: files
+      .filter((f) => f.path !== root && LEFT_OUT.test(f.path) && !read.has(f.path.normalize('NFC')))
+      .map((f) => f.path),
+    bbl,
+  };
+}
+
+/**
+ * The .bbl a build made for the paper: where the ZIP of only the files the paper uses puts it
+ * (beside the root, named for it), its digest, and the digest of the revision's own file at that
+ * path, if it has one. The revision's own file is never replaced.
+ */
+export type BuiltBbl = { path: string; digest: string; own: string | null };
+
+/** The .bbl `unusedPaths` found, placed beside the root. None where the root cannot name one. */
+function placeBbl(
+  root: string | null,
+  digest: string | null,
+  files: RevisionFile[],
+): BuiltBbl | null {
+  if (!digest || !root || !/\.(tex|ltx)$/i.test(root)) return null;
+  const path = root.replace(/\.(tex|ltx)$/i, '.bbl').normalize('NFC');
+  const own = files.find((f) => f.path.normalize('NFC') === path);
+  // A folder of that name stands in the way: the archive could not hold both.
+  if (
+    !own &&
+    pathClash(
+      path,
+      files.map((f) => f.path),
+    )
+  )
+    return null;
+  return { path, digest, own: own?.digest ?? null };
+}
+
+/** The biblatex format version of a .bbl's bytes, or null for a BibTeX one (see `bblFormat`). */
+export const formatOfBbl = (bytes: Uint8Array) =>
+  bblFormat(new TextDecoder('utf-8').decode(bytes.subarray(0, 2000)));
+
+/**
+ * The .bbl of the revision's newest succeeded build, as the ZIP of only the files the paper uses
+ * holds or would add it; null if there is none.
+ */
+export async function bblInRevision(
+  db: Db,
+  userId: string,
+  projectId: string,
+  revisionId: string,
+): Promise<BuiltBbl | null> {
+  await authorize(db, userId, id(projectId), 'project.read');
+  const { revision, files } = await load(db, projectId, revisionId);
+  const found = await unusedPaths(db, projectId, revisionId, revision.root, []);
+  return found ? placeBbl(revision.root, found.bbl, files) : null;
 }
 
 /**
@@ -374,13 +428,15 @@ export async function unusedInRevision(
   const { revision, files } = await load(db, projectId, revisionId);
   const held = await heldFileIds(db, projectId);
   return (
-    (await unusedPaths(
-      db,
-      projectId,
-      revisionId,
-      revision.root,
-      files.filter((f) => !held.has(f.file_id)),
-    )) ?? []
+    (
+      await unusedPaths(
+        db,
+        projectId,
+        revisionId,
+        revision.root,
+        files.filter((f) => !held.has(f.file_id)),
+      )
+    )?.paths ?? []
   );
 }
 
@@ -461,6 +517,7 @@ export async function exportRevision(
 ): Promise<{ zip: Uint8Array; paper: string; number: number }> {
   const { shared, rest, paper, number } = await revisionEntries(
     db,
+    store,
     userId,
     projectId,
     revisionId,
@@ -487,6 +544,7 @@ export async function exportRevisionStream(
 ): Promise<{ zip: ReadableStream<Uint8Array>; paper: string; number: number }> {
   const { shared, rest, paper, number } = await revisionEntries(
     db,
+    store,
     userId,
     projectId,
     revisionId,
@@ -509,15 +567,24 @@ export async function exportRevisionStream(
 /** What goes into a revision's archive: the files, whose bytes are still to be read, and the rest. */
 async function revisionEntries(
   db: Db,
+  store: BlobStore,
   userId: string,
   projectId: string,
   revisionId: string,
   manifest = false,
   /** More to put in the archive beside the paper's files. */
   extra: Entry[] = [],
-  /** Leave out the files the revision's last good build never opened (see `unusedPaths`). */
+  /**
+   * Leave out the files the revision's last good build never opened (see `unusedPaths`), and
+   * add the .bbl that build read, if the revision has no file of that name.
+   */
   used = false,
-): Promise<{ shared: RevisionFile[]; rest: Entry[]; paper: string; number: number }> {
+): Promise<{
+  shared: { path: string; digest: string }[];
+  rest: Entry[];
+  paper: string;
+  number: number;
+}> {
   await authorize(db, userId, id(projectId), 'project.export');
   const { revision, files } = await load(db, projectId, revisionId);
   // Data goes into a download only if its author has said so. A CSV file nobody has described
@@ -526,12 +593,16 @@ async function revisionEntries(
   let shared = files.filter((f) => !held.has(f.file_id));
   const kept = files.filter((f) => held.has(f.file_id));
   let unused: string[] = [];
+  // The .bbl the build made, when the archive gets it (the revision has no file of that name).
+  let added: BuiltBbl | null = null;
   if (used) {
     const found = await unusedPaths(db, projectId, revisionId, revision.root, shared);
     if (!found) throw new AppError('not_found', 'This revision has not been built.');
-    unused = found;
+    unused = found.paths;
     const gone = new Set(unused);
     shared = shared.filter((f) => !gone.has(f.path));
+    const bbl = placeBbl(revision.root, found.bbl, files);
+    if (bbl && !bbl.own) added = bbl;
   }
   const rest: Entry[] = [];
   if (manifest) {
@@ -602,6 +673,17 @@ async function revisionEntries(
         held: kept.map((f) => f.path),
         // Files this archive leaves out because the build never opened them (`?used` only).
         ...(used ? { unused } : {}),
+        // The .bbl this archive adds, for a venue that runs neither BibTeX nor Biber. `format`
+        // is the biblatex version a Biber .bbl is for, and null for a BibTeX one.
+        ...(added
+          ? {
+              bbl: {
+                path: added.path,
+                sha256: `sha256:${added.digest}`,
+                format: formatOfBbl(await blob(store, added.digest)),
+              },
+            }
+          : {}),
       },
       null,
       2,
@@ -610,7 +692,7 @@ async function revisionEntries(
   }
   await recordDownload(db, projectId, 'zip');
   return {
-    shared,
+    shared: added ? [...shared, { path: added.path, digest: added.digest }] : shared,
     rest: [...rest, ...extra],
     paper: revision.paper,
     number: revision.number,

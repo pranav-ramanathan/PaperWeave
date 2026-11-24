@@ -6,6 +6,7 @@ import {
   readdirSync,
   readFileSync,
   statSync,
+  unlinkSync,
   writeFileSync,
 } from 'node:fs';
 import { tmpdir } from 'node:os';
@@ -440,3 +441,69 @@ test('a paper with \\includeonly, an EPS picture and \\graphicspath rebuilds fro
   expect(text).toContain('Firstchaptertext');
   expect(text).not.toContain('Secondchaptertext');
 });
+
+test('the ZIP of only the files the paper uses holds the .bbl the build made, and builds without the .bib', async () => {
+  const projectId = await paperOf({}, 'article-basic');
+  const { revision, pdf } = await builtRevision(projectId);
+  const kept = (
+    await t.pool.query('select bbl_digest from builds where revision_id = $1', [revision.id])
+  ).rows[0].bbl_digest;
+  expect(kept).toMatch(/^[0-9a-f]{64}$/);
+  const z = await usedZip(projectId, revision.id, 'bbl');
+  // The plain ZIP has none; the other has it beside the root, and says what it is.
+  expect(z.all).not.toContain('main.bbl');
+  expect(z.used).toContain('main.bbl');
+  expect(sha256(readFileSync(join(z.dir, 'src/main.bbl')))).toBe(kept);
+  expect(z.manifest.bbl).toEqual({ path: 'main.bbl', sha256: `sha256:${kept}`, format: null });
+
+  // A venue that does not run BibTeX: no .bib, only the .bbl.
+  unlinkSync(join(z.dir, 'src/refs.bib'));
+  const rebuilt = await rebuild(z.dir, z.manifest);
+  expect(rebuilt.ok).toBe(true);
+  const text = execFileSync('pdftotext', [join(z.dir, 'out', rebuilt.pdf!), '-'], {
+    encoding: 'utf8',
+  });
+  expect(text).toContain('Conflict-free replicated data types');
+  expect(text).not.toContain('[?]');
+  expect(pdf.length).toBeGreaterThan(0);
+}, 300_000);
+
+test('a Biber paper has its .bbl in the ZIP, and the manifest says its biblatex format', async () => {
+  const projectId = await paperOf({
+    'main.tex':
+      '\\documentclass{article}\n\\usepackage[backend=biber]{biblatex}\n\\addbibresource{refs.bib}\n' +
+      '\\begin{document}\nCite \\cite{k}.\n\\printbibliography\n\\end{document}\n',
+    'refs.bib':
+      '@article{k,\n  author = {Author, Ann},\n  title = {Weaving},\n  journal = {J},\n  year = {2001}\n}\n',
+  });
+  const { revision } = await builtRevision(projectId);
+  const z = await usedZip(projectId, revision.id, 'biber');
+  expect(z.used).toContain('main.bbl');
+  expect(z.manifest.bbl.path).toBe('main.bbl');
+  expect(z.manifest.bbl.format).toMatch(/^\d+\.\d+$/);
+  expect(readFileSync(join(z.dir, 'src/main.bbl'), 'utf8')).toContain(
+    `biblatex bbl format version ${z.manifest.bbl.format}`,
+  );
+}, 300_000);
+
+test('a second revision with the same text hits the cache and has the same .bbl', async () => {
+  const projectId = await paperOf({}, 'article-basic');
+  // The first build is of the live paper, which cuts revision 1; then a revision of its text.
+  await requestBuild(t.pool, owner.id, projectId);
+  expect(await buildNext(t.pool, store, image)).toBe(true);
+  const second = await saveRevision(t.pool, store, owner.id, projectId, 'Same text');
+  expect(second.number).toBe(2);
+  await requestBuild(t.pool, owner.id, projectId, { revisionId: second.id });
+  expect(await buildNext(t.pool, store, image)).toBe(true);
+  const rows = (
+    await t.pool.query(
+      'select r.number, b.cached_from, b.bbl_digest from builds b join revisions r on r.id = b.revision_id where b.project_id = $1 order by r.number',
+      [projectId],
+    )
+  ).rows;
+  expect(rows.map((r) => r.number)).toEqual([1, 2]);
+  expect(rows[0].cached_from).toBeNull();
+  expect(rows[1].cached_from).not.toBeNull();
+  expect(rows[0].bbl_digest).toMatch(/^[0-9a-f]{64}$/);
+  expect(rows[1].bbl_digest).toBe(rows[0].bbl_digest);
+}, 300_000);

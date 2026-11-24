@@ -1,5 +1,6 @@
 import {
   AppError,
+  bblInRevision,
   withScope,
   can,
   type Finding,
@@ -91,9 +92,12 @@ async function Submit({
             [],
         )
       : null;
+  // The ZIP of only the files the paper uses differs from the plain one when it leaves a file
+  // out or holds the .bbl the build read.
   const anyUnused =
     checks.ready && checks.revisionId
-      ? (await unusedInRevision(db(), user.id, id, checks.revisionId)).length > 0
+      ? (await unusedInRevision(db(), user.id, id, checks.revisionId)).length > 0 ||
+        (await bblInRevision(db(), user.id, id, checks.revisionId)) !== null
       : false;
   const revision = `/projects/${id}/revisions/${checks.revisionId}`;
   return (

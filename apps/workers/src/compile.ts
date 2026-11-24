@@ -47,6 +47,12 @@ export type CompileResult = {
   /** Paths inside the output directory, when produced. */
   pdf?: string;
   synctex?: string;
+  /**
+   * The .bbl the build ended with, when a PDF was produced and the file is not empty (never the
+   * empty stand-in for a missing one). It may be a kept one TeX no longer reads: the caller
+   * checks it against `read`.
+   */
+  bbl?: string;
   /** The number and page LaTeX gave each label, when a PDF was produced. */
   labels?: Record<string, { number: string; page: string }>;
   /**
@@ -1360,6 +1366,11 @@ export async function compile(
       log,
       pdf,
       synctex: pdf && keep('.synctex.gz'),
+      // Not the empty file LATEXMK_RULES' pw_bbl puts where a paper's .bbl is missing.
+      bbl:
+        pdf && lstatSync(join(work, base + '.bbl'), { throwIfNoEntry: false })?.size
+          ? keep('.bbl')
+          : undefined,
       labels: pdf ? auxLabels(aux) : undefined,
     };
   } finally {

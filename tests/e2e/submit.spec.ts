@@ -254,9 +254,20 @@ test('a ready paper with a cover letter offers a ZIP of only the files it uses, 
   const files = [
     {
       path: 'main.tex',
-      bytes: Buffer.from(MAIN.replace('As Section~\\ref{sec:intro} says.', 'Plain.')),
+      bytes: Buffer.from(
+        MAIN.replace(
+          'As Section~\\ref{sec:intro} says.',
+          'Plain~\\cite{k}.\n\\bibliographystyle{plain}\n\\bibliography{refs}',
+        ),
+      ),
     },
     { path: 'cover-letter.tex', bytes: Buffer.from('Dear editor.\n') },
+    {
+      path: 'refs.bib',
+      bytes: Buffer.from(
+        '@article{k,\n  author = {Author, Ann},\n  title = {Weaving},\n  journal = {J},\n  year = {2001}\n}\n',
+      ),
+    },
   ];
   const zip = join(mkdtempSync(join(tmpdir(), 'paperweave-e2e-')), `Used ${run}.zip`);
   writeFileSync(zip, await writeZip(files));
@@ -281,4 +292,8 @@ test('a ready paper with a cover letter offers a ZIP of only the files it uses, 
   const used = (await readZip(readFileSync(await download.path()))).entries.map((e) => e.path);
   expect(used).toContain('main.tex');
   expect(used).not.toContain('cover-letter.tex');
+  // The build's .bbl is in it too, for a venue that does not run BibTeX. (Our reader sets a .bbl
+  // aside when the archive has a .bib, so it is read from there.)
+  const read = await readZip(readFileSync(await download.path()));
+  expect([...read.entries, ...read.bbl].map((e) => e.path)).toContain('main.bbl');
 });

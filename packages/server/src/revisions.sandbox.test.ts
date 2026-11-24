@@ -7,13 +7,14 @@ import { afterAll, beforeAll, expect, test } from 'vitest';
 import * as Y from 'yjs';
 import { LATEXMK_RULES } from '@paperweave/latex';
 import { readZip, writeZip } from './archive.ts';
-import { blobStore } from './blobs.ts';
+import { blobStore, sha256 } from './blobs.ts';
 import { createFile, deleteFile, replaceFile } from './files.ts';
 import { approveDataset, datasetProposal } from './data.ts';
 import { exportZip, importZip, listFiles } from './import.ts';
 import { acceptInvitation, getProject, invite } from './projects.ts';
 import { acceptProposal, listProposals, propose, undoAccept } from './proposals.ts';
 import {
+  bblInRevision,
   diffRevisions,
   exportRevision,
   exportRevisionStream,
@@ -1134,4 +1135,182 @@ test('who may have the ZIP of only the files used: those who may have any ZIP', 
   const other = await usedPaper(READ);
   expect(await ask(owner.id, p.id, other.revision.id)).toBe('not_found');
   expect(await code(unusedInRevision(t.pool, owner.id, p.id, other.revision.id))).toBe('not_found');
+});
+
+const BIBTEX_BBL = Buffer.from(
+  '\\begin{thebibliography}{1}\n\\bibitem{k} A. Author. Weaving. 2001.\n\\end{thebibliography}\n',
+);
+const BIBER_BBL = Buffer.from(
+  '% $ biblatex auxiliary file $\n% $ biblatex bbl format version 3.2 $\n% Do not modify the above lines!\n\\refsection{0}\n\\endrefsection\n',
+);
+
+/**
+ * A paper whose revision "was built" with a .bbl kept (no TeX here). `files` are the paper's own;
+ * `bbl` is what the build kept, or none.
+ */
+async function bblPaper(files: Record<string, string | Buffer>, bbl?: Buffer) {
+  const zip = await writeZip(
+    Object.entries(files).map(([path, bytes]) => ({ path, bytes: Buffer.from(bytes) })),
+  );
+  const [project] = await importZip(t.pool, store, owner.id, zip, 'Bbl');
+  const revision = await saveRevision(t.pool, store, owner.id, project.id, 'Cut');
+  const root: string = (
+    await t.pool.query('select root from revisions where id = $1', [revision.id])
+  ).rows[0].root;
+  const digest = bbl ? await store.put(bbl) : null;
+  const built = (
+    at: string,
+    kept: string | null,
+    project_id = project.id,
+    revision_id = revision.id,
+  ) =>
+    t.pool.query(
+      `insert into builds (project_id, status, pdf_digest, revision_id, finished_at, created_at, read, bbl_digest)
+       values ($1, 'succeeded', repeat('a', 64), $2, now(), $3, $4, $5)`,
+      [project_id, revision_id, at, JSON.stringify(Object.keys(files)), kept],
+    );
+  if (digest) await built('2030-01-01', digest);
+  return { id: project.id, revision, root, digest, built };
+}
+// (The system unzip: our own reader sets a .bbl aside when the archive has a .bib.)
+const bytesIn = async (zip: Uint8Array, path: string) => {
+  const file = join(mkdtempSync(join(tmpdir(), 'paperweave-test-')), 'revision.zip');
+  writeFileSync(file, zip);
+  return execFileSync('unzip', ['-p', file, path]);
+};
+
+test('only the ZIP of the used files holds the .bbl; the plain ZIP and its manifest stay as they were', async () => {
+  const p = await bblPaper({ 'main.tex': MAIN, 'refs.bib': '@book{k, title={T}, year=2001}\n' });
+  const plain = await exportRevision(t.pool, store, owner.id, p.id, p.revision.id);
+  const manifest = manifestOf(
+    (await exportRevision(t.pool, store, owner.id, p.id, p.revision.id, true)).zip,
+  );
+  await p.built('2030-01-01', await store.put(BIBTEX_BBL));
+  const after = await exportRevision(t.pool, store, owner.id, p.id, p.revision.id);
+  expect(Buffer.from(after.zip).equals(Buffer.from(plain.zip))).toBe(true);
+  expect(listing(after.zip)).toEqual(['main.tex', 'refs.bib']);
+  const afterManifest = manifestOf(
+    (await exportRevision(t.pool, store, owner.id, p.id, p.revision.id, true)).zip,
+  );
+  expect(afterManifest).toEqual(manifest);
+  expect('bbl' in afterManifest).toBe(false);
+
+  const used = await exportRevision(t.pool, store, owner.id, p.id, p.revision.id, true, [], true);
+  expect(listing(used.zip)).toEqual([
+    'main.bbl',
+    'main.tex',
+    'paperweave-toolchain.json',
+    'refs.bib',
+  ]);
+  expect(Buffer.from((await bytesIn(used.zip, 'main.bbl'))!).equals(BIBTEX_BBL)).toBe(true);
+  // A BibTeX file has no biblatex format.
+  expect(manifestOf(used.zip).bbl).toEqual({
+    path: 'main.bbl',
+    sha256: `sha256:${sha256(BIBTEX_BBL)}`,
+    format: null,
+  });
+  // The stream is the same archive.
+  const streamed = await exportRevisionStream(
+    t.pool,
+    store,
+    owner.id,
+    p.id,
+    p.revision.id,
+    false,
+    [],
+    true,
+  );
+  const chunks: Uint8Array[] = [];
+  for await (const c of streamed.zip) chunks.push(c);
+  expect(listing(Buffer.concat(chunks))).toEqual(['main.bbl', 'main.tex', 'refs.bib']);
+});
+
+test('a Biber .bbl is named in the manifest with its biblatex format', async () => {
+  const p = await bblPaper({ 'main.tex': MAIN }, BIBER_BBL);
+  const used = await exportRevision(t.pool, store, owner.id, p.id, p.revision.id, true, [], true);
+  expect(manifestOf(used.zip).bbl).toEqual({
+    path: 'main.bbl',
+    sha256: `sha256:${sha256(BIBER_BBL)}`,
+    format: '3.2',
+  });
+});
+
+test('a root in a folder gets the .bbl in that folder', async () => {
+  const p = await bblPaper(
+    // A file outside the folder, or the import would take the folder off every path.
+    { 'paper/main.tex': MAIN, 'paper/refs.bib': '@book{k, title={T}}\n', 'notes.txt': 'Notes.\n' },
+    BIBTEX_BBL,
+  );
+  expect(p.root).toBe('paper/main.tex');
+  const used = await exportRevision(t.pool, store, owner.id, p.id, p.revision.id, true, [], true);
+  expect(listing(used.zip)).toEqual([
+    'notes.txt',
+    'paper/main.bbl',
+    'paper/main.tex',
+    'paper/refs.bib',
+    'paperweave-toolchain.json',
+  ]);
+  expect(manifestOf(used.zip).bbl.path).toBe('paper/main.bbl');
+});
+
+test("a .bbl the revision already has is kept, as one entry with the revision's bytes", async () => {
+  const own = Buffer.from(
+    "\\begin{thebibliography}{1}\n\\bibitem{k} The paper's own.\n\\end{thebibliography}\n",
+  );
+  const p = await bblPaper({ 'main.tex': MAIN, 'main.bbl': own }, BIBTEX_BBL);
+  const used = await exportRevision(t.pool, store, owner.id, p.id, p.revision.id, true, [], true);
+  expect(listing(used.zip).filter((n) => n === 'main.bbl')).toHaveLength(1);
+  expect(Buffer.from((await bytesIn(used.zip, 'main.bbl'))!).equals(own)).toBe(true);
+  // Nothing was added, so the manifest has nothing to say of one.
+  expect('bbl' in manifestOf(used.zip)).toBe(false);
+  // The build read another file than the paper's own: the paper's own is only the same file when
+  // its digest is the build's.
+  const found = await bblInRevision(t.pool, owner.id, p.id, p.revision.id);
+  expect(found).toEqual({ path: 'main.bbl', digest: p.digest, own: sha256(own) });
+  const same = await bblPaper({ 'main.tex': MAIN, 'main.bbl': BIBTEX_BBL }, BIBTEX_BBL);
+  const alike = await bblInRevision(t.pool, owner.id, same.id, same.revision.id);
+  expect(alike!.own).toBe(alike!.digest);
+});
+
+test("a build of another revision or another paper, or an older one, is never the revision's .bbl", async () => {
+  const p = await bblPaper({ 'main.tex': MAIN });
+  const other = await bblPaper({ 'main.tex': MAIN }, BIBTEX_BBL);
+  const ask = () => exportRevision(t.pool, store, owner.id, p.id, p.revision.id, false, [], true);
+  // Not built with a .bbl by any build of its own.
+  await p.built('2030-01-01', null);
+  expect(listing((await ask()).zip)).toEqual(['main.tex']);
+  // Another paper's build, of that paper's revision, is not asked.
+  expect(await bblInRevision(t.pool, owner.id, p.id, p.revision.id)).toBeNull();
+  // Another paper's build row naming this revision is not asked either: the build is of this paper.
+  await p.built('2031-01-01', other.digest, other.id);
+  expect(listing((await ask()).zip)).toEqual(['main.tex']);
+  // Another revision of the same paper.
+  await createFile(t.pool, store, owner.id, p.id, 'extra.tex', Buffer.from('% more\n'));
+  const next = await saveRevision(t.pool, store, owner.id, p.id, 'Next');
+  expect(next.id).not.toBe(p.revision.id);
+  await p.built('2032-01-01', other.digest, p.id, next.id);
+  expect(listing((await ask()).zip)).toEqual(['main.tex']);
+  // Its own newest good build decides: one with a .bbl gives it, a newer one without takes it away.
+  await p.built('2033-01-01', other.digest);
+  expect(listing((await ask()).zip)).toEqual(['main.bbl', 'main.tex']);
+  await p.built('2034-01-01', null);
+  expect(listing((await ask()).zip)).toEqual(['main.tex']);
+});
+
+test('who may have the .bbl: those who may have the ZIP of the used files', async () => {
+  const p = await bblPaper({ 'main.tex': MAIN }, BIBTEX_BBL);
+  const people: Record<string, { id: string }> = { owner };
+  for (const role of ['editor', 'reviewer', 'viewer'] as const) {
+    const who = await t.signIn(`${role}-bbl@example.org`);
+    const { token } = await invite(t.pool, owner.id, p.id, `${role}-bbl@example.org`, role);
+    await acceptInvitation(t.pool, who.id, token);
+    people[role] = who;
+  }
+  const ask = (id: string) =>
+    code(exportRevision(t.pool, store, id, p.id, p.revision.id, false, [], true));
+  expect(await ask(people.owner.id)).toBe('ok');
+  expect(await ask(people.editor.id)).toBe('ok');
+  expect(await ask(people.reviewer.id)).toBe('permission_denied');
+  expect(await ask(people.viewer.id)).toBe('permission_denied');
+  expect(await ask(outsider.id)).toBe('not_found');
 });

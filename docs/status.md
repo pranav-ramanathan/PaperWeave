@@ -2791,6 +2791,35 @@ update` held the paper's file rows for **189.6 s** (until the proxy was cut; it 
     opened in that build, so a file read only under another condition (a changed
     `\includeonly`, another compiler, a date) may be missing from the ZIP. A file named by a
     macro and opened by a program other than TeX (a shell-escape tool) is not seen.
+- **The build's `.bbl` in that ZIP.** A venue such as arXiv runs neither BibTeX nor Biber, so
+  the ZIP of only the files the paper uses (`?used`, and only it: the plain ZIP, the review ZIP
+  and their manifests are byte for byte as before) also holds the `.bbl` the build read.
+  Migration 0035 adds `builds.bbl_digest`. The worker stores the blob only when a PDF was made,
+  `<root minus .tex>.bbl` is in `read`, and the file is not empty and under 5 MB; so the empty
+  stand-in `pw_bbl` writes for a missing `.bbl` (`compile()` does not return it) and a `.bbl` a
+  warm build kept that TeX no longer reads are never stored. A cache hit copies `bbl_digest`
+  (the cache tag is now `...-madebbl`, so older builds are rebuilt). It is the revision's newest
+  `succeeded` build, the row that decides `unused`, that is asked, for that revision and that
+  paper; any other build is ignored. Reading the `.bbl` is as for the ZIP: `project.export`.
+  - **Name and place.** Beside the root: `paper/main.tex` gives `paper/main.bbl`. When the
+    revision already has a file of that name, that file is kept and nothing is added (one entry,
+    its bytes); the same when a folder of that name stands in the way. With `?used&manifest` the
+    manifest gains `bbl: {path, sha256, format}` when the archive adds one. `format` is the
+    biblatex `.bbl` version read from its header (`bblFormat` in `bib.ts`), null for a BibTeX
+    `thebibliography`. Biber's header, seen in a sandbox build (biber from the image), is
+    `% $ biblatex bbl format version 3.2 $` under `% $ biblatex auxiliary file $`.
+  - **Check before submitting** gives two more warnings. For a Biber `.bbl` it says a venue with
+    another biblatex version will refuse the file. If the revision's own `.bbl` differs from the
+    one the build read (BibTeX had made a new one from the `.bib` files), it says the PDF was
+    built from another bibliography; the ZIP keeps the paper's own file. The link to the ZIP is
+    shown when the paper is ready and a file is unused or the build has a `.bbl`.
+  - **Measured.** A BibTeX paper gives `\bibitem`; a Biber paper the header above; a paper with
+    no bibliography, or one that names a `.bib` it lacks, none; a ready-made project `.bbl` with
+    no `.bib` comes out as the project's bytes. A paper built from that ZIP with its `.bib`
+    deleted shows its references and no `[?]`. `checkBlobs` counts `bbl_digest` as referenced.
+  - **Limits.** A ZIP that holds a `.bib` and this `.bbl` is read by our own import with the
+    `.bbl` set aside (it is build output there), as for any paper with a `.bib`. A `.bbl`
+    that only some other condition makes TeX read (another date) may differ from the venue's.
 - **How it was made.** Planned by one agent, probed and written by others, checked here.
 
 ## The emails

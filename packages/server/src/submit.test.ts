@@ -1,5 +1,11 @@
 import { expect, test } from 'vitest';
-import { leftOutMessage, readyMadeMessage, unusedMessage } from './submit.ts';
+import {
+  bblFormatMessage,
+  leftOutMessage,
+  readyMadeMessage,
+  staleBblMessage,
+  unusedMessage,
+} from './submit.ts';
 
 const TAIL =
   'out of the PDF. Take the \\includeonly line out to build the whole paper, or take out the \\include lines of what is not meant to be in it.';
@@ -33,4 +39,16 @@ test('the message about unused files names the first ten, then how many more', (
   const eleven = unusedMessage(n(11));
   expect(eleven).toContain('f9.tex and 1 more.');
   expect(eleven).not.toContain('f10.tex');
+});
+
+test('the message about the paper own .bbl says the PDF came from another bibliography', () => {
+  const m = staleBblMessage('paper/main.bbl');
+  expect(m).toContain('The PDF was built from another bibliography than paper/main.bbl');
+  expect(m).toContain('keeps paper/main.bbl as it is');
+});
+
+test('the message about a Biber .bbl names the format and that a venue may refuse it', () => {
+  expect(bblFormatMessage('main.bbl', '3.2')).toBe(
+    'main.bbl was made for biblatex .bbl format 3.2. A venue with a different biblatex version will refuse the file.',
+  );
 });
