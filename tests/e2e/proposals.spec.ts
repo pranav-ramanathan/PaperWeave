@@ -545,3 +545,63 @@ test('the review button keeps the keyboard while the model is asked', async ({ b
   await expect(ask).toBeFocused();
   expect(posts).toBe(1);
 });
+
+test('the owner accepts the plain proposals at once, and a flagged one stays open', async ({
+  browser,
+}) => {
+  test.setTimeout(150_000);
+  const owner = await person(browser, 'bulk-owner');
+  const reviewer = await person(browser, 'bulk-reviewer');
+  const zip = join(mkdtempSync(join(tmpdir(), 'paperweave-e2e-')), `Bulk ${run}.zip`);
+  writeFileSync(zip, await writeZip([{ path: 'main.tex', bytes: Buffer.from(MAIN) }]));
+  await owner.page.goto('/sign-in');
+  await signIn(owner.page, owner.email);
+  await owner.page.getByLabel('Or import a ZIP of a LaTeX project').setInputFiles(zip);
+  await owner.page.getByRole('button', { name: 'Import ZIP' }).click();
+  await owner.page.getByLabel('Their email address').fill(reviewer.email);
+  await owner.page.getByLabel('Their role').selectOption('reviewer');
+  await owner.page.getByRole('button', { name: 'Send invitation' }).click();
+  await expect(owner.page.getByRole('status')).toContainText(reviewer.email);
+  await reviewer.page.goto(await emailedLink(reviewer.email, '/invitations/'));
+  await signIn(reviewer.page, reviewer.email);
+  await reviewer.page.getByRole('button', { name: 'Join this paper' }).click();
+  await expect(reviewer.page.getByText('You are a reviewer')).toBeVisible();
+  await owner.page.getByRole('link', { name: 'main.tex' }).first().click();
+  await showSource(owner.page);
+  await reviewer.page.getByRole('link', { name: 'main.tex' }).first().click();
+  const proposal = (page: Page, word: string) =>
+    page.getByRole('article', { name: `Proposal to change “${word}”` });
+  const propose = async (word: string, replacement: string) => {
+    await selectWord(reviewer.page, VISUAL, word);
+    await panel(reviewer.page).getByRole('button', { name: 'Propose a change here' }).click();
+    await panel(reviewer.page).getByLabel('Replace it with').fill(replacement);
+    await panel(reviewer.page).getByRole('button', { name: 'Propose', exact: true }).click();
+    await expect(proposal(reviewer.page, word)).toContainText(`Proposed: ${replacement}`);
+  };
+  await propose('stays', 'remains');
+  await propose('below', 'above');
+  await propose('edits', 'changes');
+  await expect(proposal(reviewer.page, 'below')).toContainText(
+    'This changes more than the wording.',
+  );
+
+  // A reviewer cannot decide, and is not offered the button.
+  await expect(panel(reviewer.page).getByRole('button', { name: /plain changes/ })).toHaveCount(0);
+
+  await expect(proposal(owner.page, 'edits')).toContainText('Proposed: changes', {
+    timeout: 15_000,
+  });
+  const bulk = panel(owner.page).getByRole('button', { name: 'Accept the 2 plain changes' });
+  await bulk.click();
+  await expect(panel(owner.page)).toContainText('Accepted 2.');
+  await expect(panel(owner.page)).toContainText('1 was left: look at each.');
+  await expect(owner.page.locator(SOURCE)).toContainText('Latency remains below forty');
+  await expect(owner.page.locator(SOURCE)).toContainText('for most changes.');
+  // The flagged one is still open, with its Accept; the others are decided.
+  await expect(proposal(owner.page, 'below').getByRole('button', { name: 'Accept' })).toBeEnabled();
+  await expect(panel(owner.page).getByText('Decided (2)')).toBeVisible();
+  await expect(panel(owner.page).getByRole('button', { name: /plain changes/ })).toHaveCount(0);
+  await expect(reviewer.page.locator(VISUAL)).toContainText('for most changes.', {
+    timeout: 15_000,
+  });
+});

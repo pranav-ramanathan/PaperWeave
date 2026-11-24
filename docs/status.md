@@ -432,7 +432,14 @@ Read this first. Update it in every pull request.
     solid one). The paper's page lists open proposals and threads under "Review", and the checks
     before submitting mention unfinished review without letting it stand in the way.
   - A proposal marks only the words it changes (struck in "Now:", added in "Proposed:").
-  - Not yet: accepting several at once.
+  - Accepting several at once: for an owner or editor, with two or more plain proposals open, a
+    button above the list reads "Accept the N plain changes". A plain proposal is open, not out
+    of date, has no flag and no LaTeX warning, was not made by a model review, and is not the
+    one being changed. It accepts them oldest first, at most 50 a press (the button says so when
+    there are more), each with its own card's `seen`, so one changed since it was drawn is
+    refused and left open. Then it reads the list once and says how many were accepted and how
+    many were left. A lost connection stops it, and the note says how many were done. No server
+    change: each is the ordinary accept, checked for `proposal.decide`.
 - **E3: spelling and grammar.** A "Spelling and grammar" panel under the editor of a LaTeX
   file, and a wavy line under each finding in both views. Checked when the file opens and again
   once what was typed is saved and has been left alone for a moment.

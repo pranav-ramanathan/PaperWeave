@@ -4,6 +4,7 @@ import type { Proposal } from '@paperweave/server';
 import { diffWords } from '@paperweave/server/textdiff';
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { whenMarked } from '../../../../../lib/builds';
+import { MOST_AT_ONCE, plain } from '../../../../../lib/proposals';
 import type { Stretch } from './Threads';
 
 const day = (iso: string) => iso.slice(0, 10);
@@ -203,6 +204,8 @@ export default function Proposals(props: {
   useEffect(() => {
     if (moved && document.activeElement === document.body) heading.current?.focus();
   }, [moved]);
+  const bulk = useRef(false);
+  const [accepting, setAccepting] = useState(false);
   // The form for a new proposal takes the button's place, and the button comes back when it closes.
   useEffect(() => {
     if (wasStarting.current && !starting) opener.current?.focus();
@@ -224,6 +227,41 @@ export default function Proposals(props: {
         undo: 'Acceptance undone. The proposal is open again.',
         attach: 'The words were found again.',
       }[action] ?? '',
+    );
+    setMoved((n) => n + 1);
+  };
+  /** Accept the plain proposals one after another, oldest first, each as its card showed it. */
+  const acceptPlain = async () => {
+    // aria-disabled, not disabled, so the button keeps the keyboard while it is busy.
+    if (bulk.current) return;
+    const waiting = proposals?.filter((p) => p.status === 'open') ?? [];
+    const batch = waiting.filter((p) => plain(p, revising)).slice(0, MOST_AT_ONCE);
+    if (batch.length < 2) return;
+    bulk.current = true;
+    setAccepting(true);
+    setNote(`Accepting ${batch.length} changes…`);
+    let done = 0;
+    let stopped = false;
+    for (const p of batch) {
+      const res = await fetch(`${url}/${p.id}`, {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({ action: 'accept', seen: seen(p) }),
+      }).catch(() => null);
+      if (!res) {
+        stopped = true;
+        break;
+      }
+      if (res.ok) done++;
+    }
+    await read();
+    bulk.current = false;
+    setAccepting(false);
+    const left = waiting.length - done;
+    setNote(
+      `Accepted ${done}.` +
+        (stopped ? ' The connection failed, so the rest were not tried.' : '') +
+        (left > 0 ? ` ${left} ${left === 1 ? 'was' : 'were'} left: look at each.` : ''),
     );
     setMoved((n) => n + 1);
   };
@@ -401,6 +439,7 @@ export default function Proposals(props: {
   );
   const open = proposals?.filter((p) => p.status === 'open' || held(p)) ?? [];
   const decided = proposals?.filter((p) => p.status !== 'open' && !held(p)) ?? [];
+  const plainCount = proposals?.filter((p) => plain(p, revising)).length ?? 0;
   return (
     <section className="threads" id="proposals" aria-label="Proposed changes" ref={section}>
       <h2 ref={heading} tabIndex={-1}>
@@ -480,6 +519,13 @@ export default function Proposals(props: {
         {note}
       </p>
       {proposals && open.length === 0 && <p>No open proposals on this file.</p>}
+      {canDecide && plainCount >= 2 && (
+        <button type="button" aria-disabled={accepting || undefined} onClick={acceptPlain}>
+          {plainCount > MOST_AT_ONCE
+            ? `Accept the oldest ${MOST_AT_ONCE} of ${plainCount} plain changes`
+            : `Accept the ${plainCount} plain changes`}
+        </button>
+      )}
       <ul>{open.map(one)}</ul>
       {decided.length > 0 && (
         <details>
