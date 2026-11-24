@@ -1182,3 +1182,168 @@ test('a paper deleted under its editors closes them for good, and the server ser
   await saved(elsewhere);
   expect(await stored(other.project)).toContain('STILL ');
 });
+
+/** A server that holds each person to a small budget of edits, for as long as `run` takes. */
+async function withBudget(
+  editBudget: { burst: number; perMinute: number; floor: number },
+  run: (port: number) => Promise<void>,
+) {
+  const server = await startSync({
+    pool: t.pool,
+    store,
+    secret: SECRET,
+    port: sync.port + 300,
+    databaseUrl: t.url,
+    metricsToken: METRICS_TOKEN,
+    editBudget,
+  });
+  try {
+    await run(server.port);
+  } finally {
+    await server.stop();
+  }
+}
+const BIG = 1_200_000;
+// The server's code is 1013; the client library is handed the reason of the close message, with
+// the code 1000, and leaves its socket open: the editor closes it itself and connects again.
+const refusals = (c: Client) => c.state.reasons.filter((r) => r.endsWith(':over-budget')).length;
+const overBudget = (c: Client) => refusals(c) > 0;
+
+test('an edit past a budget is refused and kept by its editor, and saved once the budget is given back', async () => {
+  const { project, file } = await paper();
+  // Two megabytes at once, and 100 kB a second given back.
+  await withBudget({ burst: 2_000_000, perMinute: 6_000_000, floor: 512 }, async (port) => {
+    const owner = client(users.owner, file, port);
+    const editor = client(users.editor, file, port);
+    await saved(owner, editor);
+    owner.text.insert(0, 'X'.repeat(BIG));
+    await saved(owner);
+    // 0.8 MB is left, and this edit costs 1.2: refused, with the reason that makes the editor wait.
+    owner.text.insert(0, 'Y'.repeat(BIG));
+    await until('the edit to be refused', () => overBudget(owner));
+    expect(await stored(project)).not.toContain('Y');
+    // Someone else, and their own budget, are not touched.
+    editor.text.insert(0, '% small\n');
+    await saved(editor);
+    expect(editor.text.toString()).not.toContain('YYYY');
+    expect(await stored(project)).not.toContain('Y');
+    // Connecting again at once sends it again and is refused again, and still costs nothing.
+    owner.socket.disconnect();
+    // The library ignores a request to connect made while a close is still going on.
+    await until('the socket to close', () => owner.socket.status === 'disconnected');
+    await owner.socket.connect();
+    await until('the edit to be refused again', () => refusals(owner) >= 2);
+    expect(await stored(project)).not.toContain('Y');
+    // The rest is given back in four seconds: waited for, the owner's client connects again,
+    // sends it again, and it is saved. Nothing was lost.
+    owner.socket.disconnect();
+    await new Promise((r) => setTimeout(r, 4500));
+    await owner.socket.connect();
+    await saved(owner);
+    expect(owner.state.closed).toBeGreaterThanOrEqual(1);
+    const text = await stored(project);
+    expect(text.includes('Y'.repeat(BIG))).toBe(true);
+    expect(text.includes('X'.repeat(BIG))).toBe(true);
+    expect(text).toContain('% small');
+    await until('the editor to have it', () => editor.text.toString().includes('Y'.repeat(BIG)));
+    for (const c of [owner, editor]) c.provider.destroy();
+  });
+});
+
+test('one person on two files has one budget', async () => {
+  const { project, file } = await paper();
+  const other = await createFile(
+    t.pool,
+    store,
+    users.owner.id,
+    project,
+    'second.tex',
+    Buffer.from('% second\n'),
+  );
+  await withBudget({ burst: 2_000_000, perMinute: 60_000, floor: 512 }, async (port) => {
+    const a = client(users.owner, file, port);
+    const b = client(users.owner, other, port);
+    await saved(a, b);
+    const before = await headSeq(other);
+    a.text.insert(0, 'X'.repeat(BIG));
+    await saved(a);
+    // The other file has had nothing, but the person has had nearly all of theirs.
+    b.text.insert(0, 'Y'.repeat(BIG));
+    await until('the edit on the other file to be refused', () => overBudget(b));
+    expect(overBudget(a)).toBe(false);
+    expect(await headSeq(other)).toBe(before);
+    for (const c of [a, b]) c.provider.destroy();
+  });
+});
+
+test('a structural edit past the budget is answered with an error and changes nothing', async () => {
+  const { project, file } = await paper();
+  // Each costs a megabyte; nothing is given back during the test.
+  await withBudget({ burst: 2_000_000, perMinute: 60_000, floor: 1_000_000 }, async (port) => {
+    const owner = client(users.owner, file, port);
+    const reviewer = client(users.reviewer, file, port);
+    await saved(owner, reviewer);
+    const ask = async (c: Client, expected: string, replacement: string) => {
+      const key = crypto.randomUUID();
+      const i = c.text.toString().indexOf(expected);
+      const at = (n: number) =>
+        Buffer.from(
+          Y.encodeRelativePosition(Y.createRelativePositionFromTypeIndex(c.text, n)),
+        ).toString('base64url');
+      c.provider.sendStateless(
+        JSON.stringify({
+          key,
+          from: at(i),
+          to: at(i + expected.length),
+          expected,
+          replacement,
+        }),
+      );
+      await until('an answer', () => c.state.replies.some((r) => r.key === key));
+      return c.state.replies.find((r) => r.key === key)!;
+    };
+    expect((await ask(owner, 'Hello', 'W1')).result).toBe('applied');
+    await until('the first edit to arrive', () => owner.text.toString().includes('W1'));
+    expect((await ask(owner, 'W1', 'W2')).result).toBe('applied');
+    await until('the second edit to arrive', () => owner.text.toString().includes('W2'));
+    const refused = await ask(owner, 'W2', 'W3');
+    expect(refused.error).toBe('Too many edits at once. Try again in a moment.');
+    expect(refused.result).toBeUndefined();
+    await new Promise((r) => setTimeout(r, 200));
+    expect(owner.text.toString()).toContain('W2');
+    expect(owner.text.toString()).not.toContain('W3');
+    expect(await stored(project)).toBe(MAIN.replace('Hello', 'W2'));
+    // Someone who cannot edit is told so, as before, and is not charged for asking.
+    await until('the reviewer to have it', () => reviewer.text.toString().includes('W2'));
+    expect((await ask(reviewer, 'W2', 'W4')).error).toBe('You cannot edit this file.');
+    for (const c of [owner, reviewer]) c.provider.destroy();
+  });
+});
+
+test('the metrics count the edits refused for the budget', async () => {
+  const { file } = await paper();
+  await withBudget({ burst: 2_000_000, perMinute: 60_000, floor: 512 }, async (port) => {
+    const read = async () => {
+      const res = await fetch(`http://127.0.0.1:${port}/metrics`, {
+        headers: { authorization: `Bearer ${METRICS_TOKEN}` },
+      });
+      const text = await res.text();
+      return {
+        text,
+        n: Number(/^paperweave_sync_edits_over_budget_total (\S+)$/m.exec(text)?.[1]),
+      };
+    };
+    const first = await read();
+    expect(first.text).toMatch(/^# TYPE paperweave_sync_edits_over_budget_total counter$/m);
+    expect(first.n).toBe(0);
+    const owner = client(users.owner, file, port);
+    await saved(owner);
+    owner.text.insert(0, 'X'.repeat(BIG));
+    await saved(owner);
+    owner.text.insert(0, 'Y'.repeat(BIG));
+    await until('the edit to be refused', () => overBudget(owner));
+    await until('the refusal to be counted', async () => (await read()).n >= 1);
+    expect((await read()).text).not.toContain('XXXX');
+    owner.provider.destroy();
+  });
+});

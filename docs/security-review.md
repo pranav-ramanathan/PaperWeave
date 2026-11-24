@@ -249,8 +249,14 @@ In rough order of how much they matter.
    minute for a client, ten an hour to an address), builds (120 an hour for a paper, and 3 waiting and 120 an hour for a person), chart
    drawings (120 an hour for a paper), model reviews (30 an hour for a paper), invitations
    (30 an hour for a person, a burst of three then one an hour to an address, 200 an hour in all), and papers started (100 an hour for a person, which with 300
-   MB a paper is what bounds how fast one account can fill the store). Reading pages,
-   uploading within a paper's limit and typing are not, beyond needing to
+   MB a paper is what bounds how fast one account can fill the store). Edits taken over the
+   sync connection are now limited by size, for each person over all their files: a burst
+   of 20 MB and 2 MB a minute given back, each edit costing at least 512 bytes
+   (`SYNC_EDIT_BURST_BYTES`, `SYNC_EDIT_BYTES_PER_MINUTE`), so one account can no longer add
+   2 MB edits without pause. It is kept in the sync server's memory, so it starts afresh
+   when that restarts, and it counts bytes sent, not what they add up to once compacted.
+   Reading pages, uploading within a paper's limit, and changes made by the web app's own
+   requests (restores, imports, replacing a file) are not limited this way, beyond needing to
    be signed in. A proxy in front should limit requests per person. There is no limit on
    what one person's papers add up to over time: that is a decision about accounts, not made
    here.

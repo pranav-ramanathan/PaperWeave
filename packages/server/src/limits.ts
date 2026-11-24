@@ -9,6 +9,56 @@ export const envCount = (name: string, fallback: number) => {
   return Number.isInteger(n) && n > 0 ? n : fallback;
 };
 
+/** What one person may send over the sync connection: bytes of edits, as a token bucket. */
+export type EditBudgetConfig = {
+  /** The most that can be spent at once, and what a person who has been quiet has. */
+  burst: number;
+  /** What is given back, a minute's worth at a time, as it is spent. */
+  perMinute: number;
+  /** What the smallest edit costs, so that many tiny edits are not free. */
+  floor: number;
+};
+
+/** The settings of the edit budget: SYNC_EDIT_BURST_BYTES and SYNC_EDIT_BYTES_PER_MINUTE. */
+export const editBudgetFromEnv = (): EditBudgetConfig => ({
+  burst: envCount('SYNC_EDIT_BURST_BYTES', 20_000_000),
+  perMinute: envCount('SYNC_EDIT_BYTES_PER_MINUTE', 2_000_000),
+  floor: 512,
+});
+
+/**
+ * A budget of bytes for each person: spent by edits, given back over time, never more than
+ * `burst`. A person whose bucket is full again is forgotten, so what is held is only the people
+ * who have spent something lately. `take` says whether `bytes` (at least `floor`) may be spent
+ * now; if not, nothing is spent. `now` is for tests.
+ */
+export function editBudget({ burst, perMinute, floor }: EditBudgetConfig) {
+  const buckets = new Map<string, { tokens: number; at: number }>();
+  let swept = 0;
+  const refilled = (b: { tokens: number; at: number }, now: number) =>
+    Math.min(burst, b.tokens + (Math.max(0, now - b.at) * perMinute) / 60_000);
+  return {
+    take(userId: string, bytes: number, now = Date.now()): boolean {
+      // At most once a second: a sweep looks at everyone.
+      if (now - swept >= 1000 || now < swept) {
+        swept = now;
+        for (const [id, b] of buckets) if (refilled(b, now) >= burst) buckets.delete(id);
+      }
+      const cost = Math.max(bytes, floor);
+      const have = refilled(buckets.get(userId) ?? { tokens: burst, at: now }, now);
+      const ok = have >= cost;
+      const left = ok ? have - cost : have;
+      if (left >= burst) buckets.delete(userId);
+      else buckets.set(userId, { tokens: left, at: now });
+      return ok;
+    },
+    /** How many people are held. */
+    get size() {
+      return buckets.size;
+    },
+  };
+}
+
 export const COMMENTS_PER_USER = 60; // on one paper, in ten minutes
 export const COMMENTS_PER_PAPER = 2000; // in a day, from everyone
 

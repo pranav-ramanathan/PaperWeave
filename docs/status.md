@@ -922,8 +922,9 @@ Built after the security review, which had it as its second open item.
   connecting would send the same edit again. The text can still be selected and copied.
 - **Why everything unsaved goes, not just the large edit:** the editor cannot take one edit
   back out of what it has not yet sent; later edits may rest on it.
-- **Not limited:** how many files a paper holds, and how often someone edits. A member can
-  still grow the log by adding and deleting. Those are the review's "limits in general".
+- **Not limited:** how many files a paper holds. A member can still grow the log by adding
+  and deleting. That is the review's "limits in general". How often someone edits is limited
+  by size: see "A person's edits have a budget".
 
 ## A compiler warning says which file it is in
 
@@ -7172,3 +7173,38 @@ of the paper's .bib files.`
 - **Not done.**
   - A file deleted and made again as text on one side only is "Changed" with no lines.
   - A changed file's own "too much changed" sentence still links both ZIPs even for held data.
+
+## A person's edits have a budget
+
+Built from the security review's first open item: how often someone edits was not limited, and
+one writer could send 2 MB edits without pause, each stored as a `file_updates` row while
+compaction runs only every 500 edits.
+
+- **The budget.** A token bucket for each signed-in person, in the sync server's memory
+  (`editBudget` in `packages/server/src/limits.ts`): 20 MB at once, 2 MB a minute given back
+  (`SYNC_EDIT_BURST_BYTES`, `SYNC_EDIT_BYTES_PER_MINUTE`). It is kept by the user ID in the
+  ticket, so two files, or two tabs, share it, and nothing the client sends changes whose it is. A
+  person who is back to a full budget is forgotten, so the map holds only people who edited
+  lately. The sync server will not start with a burst below the largest edit.
+- **What costs.** Each saved edit costs its size, or 512 bytes if that is more. Each structural
+  edit asked for over the connection costs 512. Edits refused as too large are refused first and
+  cost nothing. Only people who may write are charged; the question "do you have all my
+  changes?" and an empty edit are free.
+- **What the server does.** An edit over budget is not saved, not applied and not passed on. The
+  connection is made read-only, so the library answers "not saved" and applies nothing, and is
+  closed with the code 1013 and the reason `over-budget`. A structural edit over budget is
+  answered with "Too many edits at once. Try again in a moment." and changes nothing. Both are
+  counted as `paperweave_sync_edits_over_budget_total`.
+- **What the editor does.** The status line says "Saving is paused for a moment: too many edits
+  at once. Your edits are kept and will be saved." Nothing is discarded: the editor keeps what
+  it has not sent and sends it when it connects again. The library does not connect again by
+  itself after the server's close message (it leaves the socket open and the file unsynced),
+  so the editor closes the socket and connects again after 10 seconds. The wait is there
+  because an immediate connect sends the same edit and is refused again, and a loop of that
+  would cost a ticket and a database look-up each time. The line goes when the server holds
+  everything again.
+- **Held by** `limits.test.ts` and the budget tests in `sync.sandbox.test.ts` (an edit over
+  budget is refused and later saved with nothing lost, one person on two files has one budget, a
+  structural edit over budget is answered with the error, and the metrics count it).
+- **Not done.** The budget is not shared between sync servers (there is one) and starts afresh
+  when the server restarts. Edits made by the web app's own requests are not counted.

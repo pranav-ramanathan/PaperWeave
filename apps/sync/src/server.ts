@@ -6,6 +6,9 @@ import {
   appendUpdate,
   type BlobStore,
   compactFile,
+  type EditBudgetConfig,
+  editBudget,
+  editBudgetFromEnv,
   holds,
   listen,
   loadUpdates,
@@ -32,6 +35,8 @@ const isEmpty = (update: Uint8Array) => update.length <= 2;
 const TRY_AGAIN = 'try-again';
 /** Why the server closes a connection whose edit it will not take. The editor knows the word. */
 export const TOO_LARGE = 'too-large';
+/** Why it closes a connection whose person has sent too many edits lately. Not final: the editor waits. */
+export const OVER_BUDGET = 'over-budget';
 
 export async function startSync(opts: {
   pool: pg.Pool;
@@ -45,6 +50,9 @@ export async function startSync(opts: {
   metricsToken?: string;
   /** The longest a file's text may be made by editing. The default is what could be imported. */
   maxFileText?: number;
+  /** How much each person may send in edits: the most at once, what is given back a minute, and
+   * the least an edit costs. The burst must hold the largest edit. */
+  editBudget?: EditBudgetConfig;
   /**
    * How often to look for sign-ins that have run out. Fixed at a minute in the service; only
    * tests shorten it.
@@ -53,6 +61,13 @@ export async function startSync(opts: {
 }) {
   const { pool, store, secret, compactEvery = 500, sessionCheckMs = 60_000 } = opts;
   const counts = newCounts();
+  const config = opts.editBudget ?? editBudgetFromEnv();
+  const floor = config.floor;
+  if (config.burst < MAX_EDIT_BYTES)
+    throw new Error(
+      `the edit budget's burst (${config.burst} bytes) is below the largest edit (${MAX_EDIT_BYTES}): check SYNC_EDIT_BURST_BYTES`,
+    );
+  const budget = editBudget(config);
   /** For a file being read from its log: where the log stood when the reading began. */
   const loadedAt = new Map<string, number>();
   /**
@@ -207,6 +222,12 @@ export async function startSync(opts: {
             JSON.stringify({ n: c.n, saved: holds(document, Buffer.from(c.saved, 'base64url')) }),
           );
         key = c?.key;
+        // A writer's structural edits cost the least an edit costs. Keyed by who the ticket says
+        // this is, never by anything the client sent.
+        if (!connection.readOnly && !budget.take((connection.context as Context).userId, floor)) {
+          counts.editsOverBudget++;
+          return answer({ error: 'Too many edits at once. Try again in a moment.' });
+        }
         const bytes = (v: unknown) =>
           typeof v === 'string' ? Buffer.from(v, 'base64url') : undefined;
         const began = Date.now();
@@ -255,6 +276,15 @@ export async function startSync(opts: {
         counts.editsTooLarge++;
         connection.readOnly = true;
         connection.close({ code: 1009, reason: TOO_LARGE });
+        return;
+      }
+      // Only now: an edit refused as too large is not charged. Not saved and not applied either.
+      // The editor sends it again on reconnect, and is let in once the budget has refilled; until
+      // then it is told why, and waits.
+      if (!budget.take(context.userId, payload.length)) {
+        counts.editsOverBudget++;
+        connection.readOnly = true;
+        connection.close({ code: 1013, reason: OVER_BUDGET });
         return;
       }
       const seq = await appendUpdate(pool, documentName, context.userId, payload);
