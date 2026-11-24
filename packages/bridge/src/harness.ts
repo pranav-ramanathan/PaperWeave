@@ -194,16 +194,35 @@ export function visualOp(r: Rng, rep: Replica, only?: 'ins'): Op | null {
     const i = tbs.indexOf(tb);
     const tb2 = tbs[i + 1 + r.int(Math.min(3, tbs.length - i - 1) || 1)];
     if (!tb2) return null;
-    const off2 = r.int(tb2.size + 1);
+    let off2 = r.int(tb2.size + 1);
+    const blocks = rep.bridge.model.blocks;
+    const k1 = state.doc.resolve(pos).index(0);
+    const k2 = state.doc.resolve(tb2.start).index(0);
+    let from = pos;
+    // Something other than paragraphs is at an end or between them: a selection across blocks.
+    let mixed = false;
+    for (let k = k1; k <= k2; k++) if (state.doc.child(k).type.name !== 'paragraph') mixed = true;
+    if (mixed && k1 !== k2) {
+      what = 'sdel';
+      // A heading or a list can only be taken from its very start, and to its very start or end.
+      // Chosen without the generator, so that a seed draws what it always drew.
+      if (!tb.para) {
+        from = tb.start;
+        lo = blocks[k1].start;
+      }
+      if (!tb2.para) off2 = off2 % 2 ? tb2.size : 0;
+    }
     const end = tb2.start + off2;
     const spot2 = locate(rep.bridge.model, state.doc, end)!;
     hi = spot2.base + unit(spot2.pieces, off2)[1];
     hi += /^[ \t]*\n/.exec(rep.src.slice(hi, hi + 80))?.[0].length ?? 0;
-    rep.select(pos, end);
+    // Whole blocks that go take the whitespace after them, up to the next block.
+    if (what === 'sdel') hi = Math.max(hi, blocks[k2 + 1]?.start ?? rep.src.length);
+    rep.select(from, end);
     if (r.int(2)) {
-      what = 'xrep';
-      accepted = rep.dispatch(rep.state.tr.insertText(token, pos, end));
-    } else accepted = rep.dispatch(rep.state.tr.delete(pos, end));
+      what = what === 'sdel' ? 'srep' : 'xrep';
+      accepted = rep.dispatch(rep.state.tr.insertText(token, from, end));
+    } else accepted = rep.dispatch(rep.state.tr.deleteSelection());
   } else {
     // Enter over a selected stretch of one paragraph.
     what = 'xenter';
@@ -228,6 +247,6 @@ export function visualOp(r: Rng, rep: Replica, only?: 'ins'): Op | null {
     hi,
     accepted,
     whole,
-    token: what === 'ins' || what === 'rep' || what === 'xrep' ? token : undefined,
+    token: ['ins', 'rep', 'xrep', 'srep'].includes(what) ? token : undefined,
   };
 }

@@ -256,6 +256,138 @@ function removeBlock(
   };
 }
 
+/** Commands on a line of their own that only make room or break a page: they go with what is around them. */
+const SPACING = new Set([
+  ...['vspace', 'vskip', 'smallskip', 'medskip', 'bigskip', 'noindent', 'newpage', 'clearpage'],
+  ...['pagebreak', 'par', 'vfill', 'bigbreak', 'medbreak', 'smallbreak', 'cleardoublepage'],
+]);
+
+/** A selection that was replaced: its ends in the document before, and the plain text put in. */
+export type Across = { from: number; to: number; text: string };
+
+/**
+ * A selection that runs from one block into another, deleted or typed over, where the blocks are
+ * not all paragraphs: a formula, a figure, a heading or a list lies between the ends, or an end is
+ * in a heading or a list. Undefined if the older rules decide (paragraphs only, or one list);
+ * null to refuse.
+ *
+ * Each end either keeps what is left of its paragraph, or stands at the edge of a heading or a
+ * list, which then goes or stays whole. Everything between goes, and must be something that may:
+ * text, formulas, whole environments, lone labels, comments, spacing.
+ */
+function acrossBlocks(m: Model, before: PMNode, across: Across): Translation | null | undefined {
+  const $f = before.resolve(across.from);
+  const $t = before.resolve(across.to);
+  if (!$f.parent.isTextblock || !$t.parent.isTextblock) return undefined;
+  const bi = $f.index(0);
+  const bj = $t.index(0);
+  if (bi === bj) return undefined;
+  const name = (i: number) => before.child(i).type.name;
+  let paras = true;
+  for (let k = bi; k <= bj; k++) if (name(k) !== 'paragraph') paras = false;
+  if (paras) return undefined;
+  if (m.phantom) return null;
+  const src = m.parsed.src;
+  const end = (k: number) => m.blocks[k].start + m.blocks[k].body.text.length;
+  const hasDef = (pieces: Piece[], lo: number, hi: number) =>
+    pieces.some((p) => p.type === 'def' && p.e > lo && p.s < hi);
+
+  // The left end: inside a paragraph (its head stays), or at the very start of a heading or list.
+  let from: number;
+  let first: number; // the first block that goes whole
+  // A paragraph selected from its first character goes whole, as a heading does.
+  const openL = name(bi) === 'paragraph' && $f.parentOffset > 0;
+  if (name(bi) === 'paragraph' && !openL) {
+    if (hasDef((m.blocks[bi].body as { pieces: Piece[] }).pieces, 0, Infinity)) return null;
+    from = m.blocks[bi].start;
+    first = bi;
+  } else if (openL) {
+    const x = locate(m, before, across.from)!;
+    const g = gapFor(x.pieces, x.off, '');
+    if (!g || hasDef(x.pieces, g.at, Infinity)) return null;
+    from = x.base + g.at;
+    first = bi + 1;
+  } else {
+    const atStart = !$f.parentOffset && ($f.depth === 1 || $f.index(1) === 0);
+    if (!atStart) return null;
+    from = m.blocks[bi].start;
+    first = bi;
+  }
+
+  // The right end: inside a paragraph (its tail stays), at the very end of a heading or list
+  // (it goes), or at its very start (it stays whole).
+  let to: number;
+  let last: number; // the last block that goes whole
+  // A paragraph selected to its last character goes whole too.
+  const openR = name(bj) === 'paragraph' && $t.parentOffset < $t.parent.content.size;
+  if (name(bj) === 'paragraph' && !openR) {
+    if (hasDef((m.blocks[bj].body as { pieces: Piece[] }).pieces, 0, Infinity)) return null;
+    last = bj;
+    to = end(bj);
+  } else if (openR) {
+    const y = locate(m, before, across.to)!;
+    const g = gapFor(y.pieces, y.off, '');
+    if (!g || hasDef(y.pieces, 0, g.at)) return null;
+    to = y.base + g.at;
+    last = bj - 1;
+  } else {
+    const top = before.child(bj);
+    const atStart = !$t.parentOffset && ($t.depth === 1 || $t.index(1) === 0);
+    const atEnd =
+      $t.parentOffset === $t.parent.content.size &&
+      ($t.depth === 1 || $t.index(1) === top.childCount - 1);
+    if (atEnd && $t.parent.content.size) {
+      last = bj;
+      to = end(bj);
+    } else if (atStart) {
+      last = bj - 1;
+      // Nothing between: the left paragraph's own tail is all that goes.
+      to = last >= first ? end(last) : end(bi);
+    } else return null;
+  }
+
+  // What lies between must be allowed to go.
+  const open: string[] = [];
+  for (let k = first; k <= last; k++) {
+    const body = m.blocks[k].body;
+    if (body.kind === 'para' || body.kind === 'heading') {
+      if (hasDef(body.pieces, 0, Infinity)) return null;
+    } else if (body.kind === 'list') {
+      if (body.items.some((it) => hasDef(it.pieces, 0, Infinity))) return null;
+    } else if (body.kind === 'raw') {
+      const w = TOP_WHOLE.exec(body.text);
+      if (w && w[1] === w[2] && w[1] === body.label && w[1] !== 'document') continue;
+      if (body.label === 'label' && /^\\label\{[^{}]*\}$/.test(body.text)) continue;
+      if (body.label === 'comment' || SPACING.has(body.label)) continue;
+      // A theorem or an abstract: its \begin line and its \end line, both inside.
+      if (m.parsed.transparent.has(body.label) && body.text.startsWith('\\begin'))
+        open.push(body.label);
+      else if (body.label === 'end' && open.length && body.text === `\\end{${open.at(-1)}}`)
+        open.pop();
+      else return null;
+    } else if (body.kind !== 'math') return null;
+  }
+  if (open.length) return null;
+
+  let insert = escape(across.text);
+  if (!openL && !openR) {
+    const prevEnd = first > 0 ? end(first - 1) : 0;
+    const nextStart = m.blocks[last + 1]?.start ?? src.length;
+    if (insert)
+      // The words typed are a paragraph of their own.
+      insert =
+        (breakBefore(src, from) ? '' : '\n\n') + insert + (breakAfter(src, to) ? '' : '\n\n');
+    else if (hasBlank(src.slice(prevEnd, from)) && hasBlank(src.slice(to, nextStart)))
+      // One blank line is left where there were two.
+      to = nextStart;
+  }
+  // Nothing of the source is selected (the end of a paragraph to the start of the heading after
+  // it): nothing changes, and the view is drawn again from the source.
+  if (from === to && !insert) return { edits: [], phantom: null };
+  const lead = guard(src.slice(0, from), insert || src[to] || '');
+  return { edits: [{ from, to, insert: lead + insert }], phantom: null };
+}
+
 /**
  * Work out the source edits for a change to the visual document, or null if the change is not one
  * the visual editor can express (the caller then refuses it and points the author to source mode).
@@ -266,8 +398,14 @@ export function translate(
   after: PMNode,
   /** Where a single plain replacement happened, if the change was one. */
   hint?: { from: number; to: number; size: number },
+  /** The selection the change replaced, if it ran from one text block into another. */
+  across?: Across,
 ): Translation | null {
   const dd = diff(before, after);
+  if (across) {
+    const s = acrossBlocks(m, before, across);
+    if (s !== undefined) return s;
+  }
   if (!dd) return { edits: [], phantom: m.phantom };
   // Comparing documents cannot tell where "ab" went into "abab". When the editor says exactly
   // where it replaced text, use that, so the splice lands under the caret and nowhere else.

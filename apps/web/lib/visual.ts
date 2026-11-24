@@ -1074,7 +1074,14 @@ export function createVisual(opts: {
     if (!data || (cut && !opts.editable)) return false;
     catchUp();
     const latex = bridge.sourceOf(view.state);
-    if (latex === null) return false;
+    if (latex === null) {
+      // A cut that would take a formula, a figure or a heading with only its words on the clipboard is not made.
+      if (!cut || bridge.mayCut(view.state)) return false;
+      event.preventDefault();
+      refused = true;
+      say('That selection cannot be cut as LaTeX. Cut it in the source editor.');
+      return true;
+    }
     const { dom, text } = view.serializeForClipboard(view.state.selection.content());
     event.preventDefault();
     data.clearData();
