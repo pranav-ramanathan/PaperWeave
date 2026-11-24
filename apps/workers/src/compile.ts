@@ -4,12 +4,12 @@
 // CLI: node apps/workers/src/cli.ts <project dir> <root .tex> <output dir>
 import { execFile } from 'node:child_process';
 import {
-  chownSync,
   closeSync,
   constants,
   cpSync,
   existsSync,
   fstatSync,
+  lchownSync,
   lstatSync,
   mkdirSync,
   mkdtempSync,
@@ -72,6 +72,24 @@ export type CompileResult = {
   passes?: number;
 };
 
+/**
+ * Give `path` and everything under it to `uid`, without following a link: a link is itself given
+ * over (lchown), never what it points to, and a link to a folder is not entered. `chown` is a
+ * parameter for tests.
+ */
+export function ownTree(
+  path: string,
+  uid: number,
+  chown: (p: string, uid: number, gid: number) => void = lchownSync,
+): void {
+  // A root that is a link is no folder of ours to walk.
+  if (lstatSync(path).isSymbolicLink()) return;
+  chown(path, uid, uid);
+  for (const e of readdirSync(path, { withFileTypes: true }))
+    if (e.isDirectory()) ownTree(join(path, e.name), uid, chown);
+    else chown(join(path, e.name), uid, uid);
+}
+
 /** Run a command in the sandbox with `work` mounted read-write at /work. */
 export function sandbox(
   work: string,
@@ -85,13 +103,7 @@ export function sandbox(
   // otherwise run as ourselves.
   let user = `${process.getuid!()}:${process.getgid!()}`;
   if (process.getuid!() === 0) {
-    const own = (p: string) => {
-      chownSync(p, TEX_UID, TEX_UID);
-      for (const e of readdirSync(p, { withFileTypes: true }))
-        if (e.isDirectory()) own(join(p, e.name));
-        else chownSync(join(p, e.name), TEX_UID, TEX_UID);
-    };
-    own(work);
+    ownTree(work, TEX_UID);
     user = `${TEX_UID}:${TEX_UID}`;
   }
   const args = [
@@ -340,6 +352,9 @@ function bibliography(
   const bbl = name === undefined ? undefined : read(name);
   if (!bbl || !/\\entry\{/.test(bbl)) return;
   const keys = [...new Set([...bbl.matchAll(/\\entry\{([^{}]+)\}\{/g)].map((m) => m[1].trim()))];
+  // How many of each entry `out` holds, kept up to date as entries are replaced.
+  const held = new Map<string, number>();
+  for (const d of out) held.set(JSON.stringify(d), (held.get(JSON.stringify(d)) ?? 0) + 1);
   for (let i = 0; i < out.length; i++) {
     const d = out[i];
     const chars = BARE_CHARS.find(([re]) => re.test(d.message))?.[1];
@@ -360,8 +375,11 @@ function bibliography(
     }
     if (!hits.length) continue;
     // The same error comes again for each pass; its replacement is made once.
-    const have = (e: Diagnostic) => out.some((o) => JSON.stringify(o) === JSON.stringify(e));
-    out.splice(i, 1, ...hits.slice(0, 5).filter((h) => !have(h)));
+    const fresh = hits.slice(0, 5).filter((h) => !(held.get(JSON.stringify(h)) ?? 0));
+    const gone = JSON.stringify(out[i]);
+    held.set(gone, (held.get(gone) ?? 1) - 1);
+    for (const h of fresh) held.set(JSON.stringify(h), (held.get(JSON.stringify(h)) ?? 0) + 1);
+    out.splice(i, 1, ...fresh);
     i--;
   }
 }
@@ -466,6 +484,33 @@ export function diagnostics(
     !out.some((d) => d.severity === 'error' && d.message.startsWith('File ended while scanning'))
   )
     out.push({ severity: 'error', message: 'The paper ends without \\end{document}.' });
+  // What `out` holds, as whole entries and as messages, so that "is it there already" is a lookup
+  // and not a scan. Entries are picked up lazily, where they were pushed; `resync` starts over
+  // after code that replaces or removes entries.
+  const keys = new Set<string>();
+  const messages = new Set<string>();
+  let synced = 0;
+  const sync = () => {
+    for (; synced < out.length; synced++) {
+      keys.add(JSON.stringify(out[synced]));
+      messages.add(out[synced].message);
+    }
+  };
+  const resync = () => {
+    keys.clear();
+    messages.clear();
+    synced = 0;
+  };
+  const has = (d: Diagnostic) => (sync(), keys.has(JSON.stringify(d)));
+  /** Push `d` unless an entry the same in every field is there. */
+  const add = (d: Diagnostic) => {
+    if (!has(d)) out.push(d);
+  };
+  /** Push `d` unless an entry with its message is there. */
+  const addByMessage = (d: Diagnostic) => {
+    sync();
+    if (!messages.has(d.message)) out.push(d);
+  };
   // BibTeX says where in its own way: "I was expecting a `,' or a `}'---line 9 of file refs.bib".
   // That is in latexmk's output and in main.blg, never in the TeX log.
   const beforeBibtex = out.length;
@@ -476,16 +521,14 @@ export function diagnostics(
       line: Number(m[2]),
       message: `BibTeX: ${m[1]}.`,
     };
-    if (!out.some((e) => JSON.stringify(e) === JSON.stringify(d))) out.push(d);
+    add(d);
   }
   // The rest of BibTeX's errors name no line of a .bib; the build still fails on each. Three shapes:
   // one found while the style runs ("Name 2 in "..." has a comma at the end for entry b", then
   // "while executing---line 1049 of file plain.bst") names the reference, which is looked up in
   // the .bib files; one in the .aux ("White space in argument---line 3 of file main.aux") is about
   // a command of the paper's; one in a style file is placed there if the style is the paper's.
-  const said = (d: Diagnostic) => {
-    if (!out.some((e) => JSON.stringify(e) === JSON.stringify(d))) out.push(d);
-  };
+  const said = add;
   // The line of a field of a reference (else the reference's own), in the .bib that has it.
   const inBib = (key: string, field: (fields: Record<string, string>) => string | undefined) => {
     for (const file of read ? bibFiles(output) : []) {
@@ -533,7 +576,7 @@ export function diagnostics(
           ? 'ends with a comma. Put only "and" between names, with no comma before it.'
           : 'has too many commas. Write each name as "First Last" or "Last, First", with "and" between names.'),
     };
-    if (out.some((e) => JSON.stringify(e) === JSON.stringify(d))) continue;
+    if (has(d)) continue;
     if (++nameErrors <= 10) out.push(d);
   }
   for (const m of output.matchAll(
@@ -600,13 +643,17 @@ export function diagnostics(
   // Collected here and added after the check below, which counts only what failed. The other
   // warnings ("empty journal in he16", "entry type ... isn't style-file defined") are noise.
   const abbreviations: Diagnostic[] = [];
+  const abbreviated = new Set<string>();
   const abbreviation = (name: string, file: string | undefined, line: number) => {
     const d: Diagnostic = {
       severity: 'warning',
       ...(file ? { file, line } : {}),
       message: `Abbreviation not defined: "${name}" is used in ${file ?? 'a .bib file'} but no @string defines it; the reference is printed without that field.`,
     };
-    if (!abbreviations.some((e) => JSON.stringify(e) === JSON.stringify(d))) abbreviations.push(d);
+    const key = JSON.stringify(d);
+    if (abbreviated.has(key)) return;
+    abbreviated.add(key);
+    abbreviations.push(d);
   };
   for (const m of output.matchAll(
     /^Warning--string name "(.+?)" is undefined\r?\n--line (\d+) of file (?:\.\/)?(.+?\.bib)\r?$/gm,
@@ -616,7 +663,7 @@ export function diagnostics(
   const bibtex = (re: RegExp, say: (found: string) => string) => {
     for (const m of output.matchAll(re)) {
       const d: Diagnostic = { severity: 'error', message: say(m[1]) };
-      if (!out.some((e) => e.message === d.message)) out.push(d);
+      addByMessage(d);
     }
   };
   bibtex(
@@ -657,9 +704,7 @@ export function diagnostics(
   // BibTeX data source 'refs.bib'", and an error in that file comes after. The line is the .bib's
   // own (biber's copy of it, which the message names, has the same lines), counted from 1.
   let source: string | undefined;
-  const biber = (d: Diagnostic) => {
-    if (!out.some((e) => JSON.stringify(e) === JSON.stringify(d))) out.push(d);
-  };
+  const biber = add;
   for (const m of output.matchAll(
     /^(?:INFO - Found BibTeX data source '(.+)'|ERROR - (.+?)|WARN - (.+?))\r?$/gm,
   )) {
@@ -760,7 +805,7 @@ export function diagnostics(
       ...(path ? { file: m[1] } : {}),
       message: `${path ?? m[1]} is an EPS file, which XeLaTeX cannot convert here. Convert it to PDF.`,
     };
-    if (!out.some((e) => e.message === d.message)) out.push(d);
+    addByMessage(d);
   }
   // A bare _, & or # in a .bib entry: which reference, and where it is in the .bib.
   if (read) bibliography(out, log, output, read);
@@ -782,6 +827,8 @@ export function diagnostics(
     else if (/\.(aux|toc|out|lof|lot|nav|snm)$/.test(file))
       own(`In what the last pass left for this one (${base}): ${message}`);
   }
+  // Entries were replaced above, and bibliography() may have replaced some: look again.
+  resync();
   // A warning gives a line but not the file the line is in. That is whichever of the paper's
   // files TeX was reading when it wrote the warning.
   // A font that lacks a size is one warning for the paper, not one for each shape it is asked
@@ -818,7 +865,7 @@ export function diagnostics(
       line,
     };
     // The same warning is written once for each pass over the paper.
-    if (!out.some((d) => JSON.stringify(d) === JSON.stringify(warning))) out.push(warning);
+    add(warning);
   }
   if (sizes.length > 0) {
     const shown = sizes
@@ -876,7 +923,7 @@ export function diagnostics(
       message: `Characters not shown: ${list} ${chars.length === 1 ? 'is' : 'are'} not in the font (${fonts[0]}${fonts.length > 1 ? ' and others' : ''}); the PDF leaves ${chars.length === 1 ? 'it' : 'them'} out.`,
       ...(file ? { file } : {}),
     };
-    if (!out.some((d) => JSON.stringify(d) === JSON.stringify(warning))) out.push(warning);
+    add(warning);
   }
   // Text outside a node in a TikZ picture is set in nullfont and thrown away. Its own warning:
   // the paper is fine, so it must not start with "Characters not shown: " (that refuses a submit).
@@ -889,7 +936,7 @@ export function diagnostics(
       message: `Stray character${one ? '' : 's'} in a picture: ${list} ${one ? 'is' : 'are'} typed where TikZ draws no text (outside a node), so the PDF does not show ${one ? 'it' : 'them'}. Delete ${one ? 'it' : 'them'}, or put ${one ? 'it' : 'them'} in a node.`,
       ...(file ? { file } : {}),
     };
-    if (!out.some((d) => JSON.stringify(d) === JSON.stringify(warning))) out.push(warning);
+    add(warning);
   }
   // Groups and conditionals still open at \end{document}: the build works, and the rest of the
   // paper is in a font, or skipped. Not after an error: that leaves groups open as a knock-on.
@@ -952,7 +999,7 @@ export function diagnostics(
         message: `Never closed: ${what}`,
         ...(file ? { file, line } : {}),
       };
-      if (!out.some((d) => JSON.stringify(d) === JSON.stringify(warning))) out.push(warning);
+      add(warning);
     }
   }
   return capDiagnostics(out);

@@ -1,4 +1,4 @@
-import { mkdirSync, mkdtempSync, rmSync, symlinkSync, writeFileSync } from 'node:fs';
+import { lstatSync, mkdirSync, mkdtempSync, rmSync, symlinkSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterAll, beforeAll, describe, expect, test } from 'vitest';
@@ -8,6 +8,7 @@ import {
   dedupeDiagnostics,
   diagnostics,
   MAX_DIAGNOSTICS,
+  ownTree,
   readFiles,
   readOwn,
 } from './compile.ts';
@@ -154,6 +155,148 @@ describe('diagnostics: the same error again and again, and very many different o
     });
     expect(ms, `took ${ms} ms`).toBeLessThan(5000);
   });
+});
+
+// Logs and tool output made here, line by line; no TeX, BibTeX or biber is run.
+describe('diagnostics: 20,000 different warnings and tool messages, through the whole function', () => {
+  const N = 20_000;
+  // Wide margin: a pass over the entries takes tens of milliseconds, a scan per entry seconds.
+  const LIMIT_MS = 5000;
+
+  test('20,000 distinct log warnings, each written twice: first of each kept, in order, quickly', () => {
+    const lines: string[] = [];
+    for (let i = 1; i <= N; i++)
+      lines.push(`LaTeX Warning: Reference \`r${i}' on page 1 undefined on input line ${i}.`);
+    const log = [...lines, ...lines].join('\n');
+    const { result, ms } = timedRun(() => diagnostics(log));
+    expect(result).toHaveLength(MAX_DIAGNOSTICS + 1);
+    expect(result[0]).toMatchObject({ severity: 'warning', line: 1 });
+    expect(result[MAX_DIAGNOSTICS - 1]).toMatchObject({
+      severity: 'warning',
+      line: MAX_DIAGNOSTICS,
+    });
+    expect(result.at(-1)).toEqual({
+      severity: 'warning',
+      message: `${N - MAX_DIAGNOSTICS} more messages left out. The build log has them all.`,
+    });
+    expect(ms, `took ${ms} ms`).toBeLessThan(LIMIT_MS);
+  });
+
+  test('a repeated warning is kept once, where it first was', () => {
+    const log = [
+      "LaTeX Warning: Reference `a' on page 1 undefined on input line 4.",
+      "LaTeX Warning: Reference `b' on page 1 undefined on input line 5.",
+      "LaTeX Warning: Reference `a' on page 2 undefined on input line 4.",
+      "LaTeX Warning: Reference `a' on page 1 undefined on input line 4.",
+    ].join('\n');
+    const messages = diagnostics(log).map((d) => d.message);
+    expect(messages).toHaveLength(3);
+    expect(messages[0]).toContain("`a' on page 1");
+    expect(messages[1]).toContain("`b'");
+    expect(messages[2]).toContain("`a' on page 2");
+  });
+
+  test('20,000 distinct BibTeX errors on a .bib line: same bound, same first-seen order', () => {
+    const lines: string[] = [];
+    for (let i = 1; i <= N; i++)
+      lines.push(`I was expecting a thing ${i}---line ${i} of file refs.bib`);
+    const output = [...lines, ...lines].join('\n');
+    const { result, ms } = timedRun(() => diagnostics('', output));
+    expect(result).toHaveLength(MAX_DIAGNOSTICS + 1);
+    expect(result[0]).toMatchObject({ file: 'refs.bib', line: 1 });
+    expect(result[MAX_DIAGNOSTICS - 1]).toMatchObject({ line: MAX_DIAGNOSTICS });
+    expect(ms, `took ${ms} ms`).toBeLessThan(LIMIT_MS);
+  });
+
+  test('20,000 distinct biber errors, each twice', () => {
+    const lines = ["INFO - Found BibTeX data source 'refs.bib'"];
+    for (let i = 1; i <= N; i++)
+      lines.push(`ERROR - BibTeX subsystem: /tmp/x.bib_1, line ${i}, syntax error: bad ${i}`);
+    const output = [...lines, ...lines.slice(1)].join('\n');
+    const { result, ms } = timedRun(() => diagnostics('', output));
+    expect(result).toHaveLength(MAX_DIAGNOSTICS + 1);
+    expect(result[0]).toMatchObject({ file: 'refs.bib', line: 1, message: 'Biber: bad 1.' });
+    expect(ms, `took ${ms} ms`).toBeLessThan(LIMIT_MS);
+  });
+
+  test('20,000 distinct missing-.bib messages, each twice: kept by message, once each', () => {
+    const lines: string[] = [];
+    for (let i = 1; i <= N; i++) lines.push(`I couldn't open database file db${i}.bib`);
+    const output = [...lines, ...lines].join('\n');
+    const { result, ms } = timedRun(() => diagnostics('', output));
+    expect(result).toHaveLength(MAX_DIAGNOSTICS + 1);
+    expect(result[0].message).toBe('BibTeX could not find the bibliography file db1.bib.');
+    expect(ms, `took ${ms} ms`).toBeLessThan(LIMIT_MS);
+  });
+});
+
+// Links made here with symlinkSync in a temp directory; no docker and no TeX.
+describe('ownTree: a link is not followed', () => {
+  let top: string;
+  let work: string;
+  let outside: string;
+  const chowned: string[] = [];
+  const spy = (p: string) => void chowned.push(p);
+  beforeAll(() => {
+    top = mkdtempSync(join(tmpdir(), 'paperweave-own-'));
+    work = join(top, 'work');
+    outside = join(top, 'outside');
+    mkdirSync(join(work, 'sub'), { recursive: true });
+    mkdirSync(join(outside, 'deep'), { recursive: true });
+    writeFileSync(join(work, 'main.tex'), 'x');
+    writeFileSync(join(work, 'sub', 'a.tex'), 'x');
+    writeFileSync(join(outside, 'secret.txt'), 'x');
+    writeFileSync(join(outside, 'deep', 'inner.txt'), 'x');
+    symlinkSync(join(outside, 'secret.txt'), join(work, 'file-link'));
+    symlinkSync(outside, join(work, 'dir-link'));
+    symlinkSync(join(work, 'sub'), join(work, 'inside-dir-link'));
+    symlinkSync(work, join(top, 'work-link'));
+    ownTree(work, 1234, spy);
+  });
+  afterAll(() => rmSync(top, { recursive: true, force: true }));
+
+  test('regular files and folders are all given over, as before', () => {
+    for (const p of ['', 'main.tex', 'sub', join('sub', 'a.tex')])
+      expect(chowned).toContain(join(work, p));
+  });
+
+  test('a link is itself the thing handed to chown, and nothing behind it is walked', () => {
+    expect(chowned).toContain(join(work, 'dir-link'));
+    expect(chowned.filter((p) => p.startsWith(outside))).toEqual([]);
+    expect(chowned.filter((p) => p.includes('inside-dir-link/'))).toEqual([]);
+    expect(chowned.filter((p) => p.includes('dir-link/'))).toEqual([]);
+  });
+
+  test('a root that is a link is not walked at all', () => {
+    const before = chowned.length;
+    ownTree(join(top, 'work-link'), 1234, spy);
+    expect(chowned).toHaveLength(before);
+  });
+
+  // The default lchown needs root to change an owner.
+  test.runIf(process.getuid?.() === 0)(
+    'with the real lchown, a link target keeps its owner',
+    () => {
+      const real = mkdtempSync(join(tmpdir(), 'paperweave-own-real-'));
+      try {
+        const w = join(real, 'w');
+        const o = join(real, 'o');
+        mkdirSync(w);
+        mkdirSync(o);
+        writeFileSync(join(o, 'secret.txt'), 'x');
+        writeFileSync(join(w, 'plain.tex'), 'x');
+        symlinkSync(join(o, 'secret.txt'), join(w, 'link'));
+        symlinkSync(o, join(w, 'dir-link'));
+        ownTree(w, 12345);
+        expect(lstatSync(join(w, 'plain.tex')).uid).toBe(12345);
+        expect(lstatSync(join(w, 'link')).uid).toBe(12345);
+        expect(lstatSync(join(o, 'secret.txt')).uid).toBe(0);
+        expect(lstatSync(o).uid).toBe(0);
+      } finally {
+        rmSync(real, { recursive: true, force: true });
+      }
+    },
+  );
 });
 
 describe('dedupeDiagnostics and capDiagnostics', () => {

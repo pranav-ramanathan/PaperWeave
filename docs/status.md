@@ -7321,7 +7321,30 @@ restores of a large paper got round it (`docs/security-review.md`, Open 1).
 - **Held by** new cases in `compile.test.ts`: logs built line by line (no TeX) of 20,000
   identical and 20,000 different errors, and the two functions on 20,000 entries each, each with
   an elapsed-time assertion (limits 2 to 5 s).
-- **Not changed.** The other repeat checks in `diagnostics()` (`out.some` with `JSON.stringify`,
-  for warnings and BibTeX/Biber messages) are the same shape and not yet changed. A log with
-  many thousands of different warnings is still slow. `TEX_TEXT` is not bumped: below 1,000
-  entries nothing changes.
+- **The other sites, now done.** The remaining `out.some` checks with `JSON.stringify` in
+  `diagnostics()` (log warnings, "Characters not shown", stray characters, "Never closed", the
+  BibTeX and Biber messages, the abbreviation list) and in `bibliography()` are lookups in a
+  `Set` (a count map in `bibliography()`, where entries are replaced). Each site keeps its own
+  notion of "same": the whole entry, or, for the missing-file and EPS messages, the message.
+  The set is filled lazily and rebuilt after the code that replaces entries. 20,000 different
+  warnings, each written twice, took 203 s on the old code and 0.18 s now. `TEX_TEXT` is not
+  bumped: output is the same entry for entry.
+- **Held by** four more cases in `compile.test.ts` through `diagnostics()` (warnings, BibTeX
+  `---line` errors, biber errors, missing-.bib messages, 20,000 each, limit 5 s) and one for
+  first-seen order.
+
+### The container user's `chown` does not follow links
+
+- **A fault found.** `sandbox()` (as root) walked the copy of the project and called `chownSync`,
+  which follows links: a link in it would have handed its target, possibly outside the build
+  folder, to the container user.
+- **When it runs.** Before every container run in `compile()`, on the whole work folder: the
+  files the worker copied there (the project, and the kept files put back for a warm build),
+  never on what TeX wrote in the same run. The kept files are regular files only (`eachFile`),
+  so a link TeX made does not come back through the warm folder; the project copy keeps links as
+  they are (`cpSync`), so that was the way in. A defence, not a known hole: the builder writes
+  regular files.
+- **Now.** `ownTree()` uses `lchownSync`, does not enter a link to a folder, and does nothing for
+  a root that is a link. Ordinary files and folders are handled as before.
+- **Held by** four cases in `compile.test.ts` with `symlinkSync` in a temp directory (a
+  recording chown, and with the real one when run as root, where the target keeps its owner).
