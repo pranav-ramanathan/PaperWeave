@@ -1,6 +1,7 @@
 'use client';
 
 import { useEffect, useRef, useState } from 'react';
+import { intoWindow } from '../../../../../lib/pdfsync';
 import { wordIn, wordSpan } from '../../../../../lib/pdfword';
 
 /**
@@ -333,6 +334,11 @@ export default function PdfView(props: {
       top: Math.max(0, top - el.clientHeight / 3),
       ...(across !== null && { left: Math.max(0, across - el.clientWidth / 2) }),
     });
+    // In a narrow window the pane is under the editor, off the screen: the band was shown to
+    // nobody. Only the window is moved, and only when the band is not on the screen.
+    const at = band.getBoundingClientRect();
+    const by = intoWindow(at.top, at.bottom, window.innerHeight);
+    if (by) window.scrollBy({ top: by });
     return () => band.remove();
   }, [mark, drawn, src]);
 

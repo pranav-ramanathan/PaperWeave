@@ -649,3 +649,56 @@ test('a double-click on the first word of a source line is on that line, not the
     await expect.poll(() => selected(page)).toBe(word);
   }
 });
+
+test('in a narrow window, where the PDF is under the editor, "Show in PDF" brings the line onto the screen', async ({
+  browser,
+}) => {
+  test.setTimeout(180_000);
+  const { page, email } = await person(browser, 'synctex-narrow');
+  // Under 60rem the files, the editor and the PDF are one under another: half a laptop's screen.
+  await page.setViewportSize({ width: 700, height: 800 });
+  const zip = join(mkdtempSync(join(tmpdir(), 'paperweave-e2e-')), `SyncTeX narrow ${run}.zip`);
+  writeFileSync(
+    zip,
+    await writeZip([
+      { path: 'main.tex', bytes: Buffer.from(MAIN) },
+      { path: 'second.tex', bytes: Buffer.from(SECOND) },
+    ]),
+  );
+  await page.goto('/sign-in');
+  await signIn(page, email);
+  await page.getByLabel('Or import a ZIP of a LaTeX project').setInputFiles(zip);
+  await page.getByRole('button', { name: 'Import ZIP' }).click();
+  await page.getByRole('link', { name: 'second.tex' }).first().click();
+  await expect(page.getByRole('region', { name: 'Editor for second.tex' })).toBeVisible();
+  await expect(build(page).getByRole('status')).toHaveText('The PDF is up to date.', {
+    timeout: 90_000,
+  });
+  await expect(build(page).getByRole('group', { name: 'Page 2 of 2' })).toBeAttached();
+  const mark = build(page).locator('.pdf-mark');
+  const show = page
+    .getByRole('group', { name: 'Go to' })
+    .getByRole('button', { name: 'Show in PDF' });
+
+  // From the visual view. The band is on the screen, all of it, and so is what was said.
+  await clickAfter(page, '.editor .visual .ProseMirror', 'last paragraph');
+  await show.click();
+  await expect(mark).toHaveAttribute('data-page', '2');
+  await expect(mark).toBeInViewport({ ratio: 1 });
+  await expect(build(page).locator('.pdf-said')).toHaveText('Shown on page 2 of the PDF.');
+  // The way back is the pane's own: the caret returns to the text, on the screen.
+  await build(page)
+    .getByRole('button', { name: 'Go to the text for the middle of the pages shown' })
+    .click();
+  await expect(build(page).locator('.pdf-said')).toHaveText(/^That is line \d+ of second\.tex\./);
+  await expect(page.locator('.editor .visual .ProseMirror')).toBeFocused();
+  await expect(mark).not.toBeInViewport();
+
+  // From the source view, and at the width of a window zoomed to 400%.
+  await page.setViewportSize({ width: 320, height: 568 });
+  await showSource(page);
+  await clickAfter(page, '.editor .cm-content', 'Text on the second page');
+  await show.click();
+  await expect(mark).toBeInViewport({ ratio: 1 });
+  expect(await page.evaluate(() => document.documentElement.scrollWidth)).toBe(320);
+});

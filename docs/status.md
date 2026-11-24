@@ -6741,3 +6741,31 @@ of the paper's .bib files.`
   - An invitation link opened signed out shows the plain sign-in page, with nothing about the
     invitation.
   - Back/Forward with the sync service away can still drop edits that were never confirmed.
+
+## "Show in PDF" in a narrow window
+
+- **Found by** walking two people through one paper and the PDF pane at 320 px. Two editors in one
+  paragraph, a build broken by a co-author, a file renamed or deleted under someone typing, the
+  template-to-submission path and the data-to-chart path all held.
+- **What was wrong.** Under 60rem the PDF is under the editor. "Show in PDF" scrolled the PDF's own
+  box to the line and marked it, but the box was off the screen (the band 600-800 px below the
+  bottom of the window at 320, 768 and 959 px wide), so nothing was seen to happen. Half a laptop
+  screen, a tablet held upright and a 1280 px window at 150% zoom are all under 60rem.
+- **Now** `PdfView` asks `intoWindow` (`apps/web/lib/pdfsync.ts`) how far the window must go for
+  the band to be on the screen, and scrolls it by that: nothing when the band is already there,
+  otherwise its top a third of the way down. Focus stays on the button. The way back was already
+  there: a double-click on the page or "Go to the text for the middle of the pages shown" puts the
+  caret in the text and the window follows it.
+- **Held by** `pdfsync.test.ts` and a test in `synctex.spec` at 700 and 320 px, both views. In a
+  wide window the band was measured at the same pixel before and after.
+- **Not done.**
+  - Nobody with the paper open is told when someone restores a revision: words typed just before
+    go with the restore (they are in the revision it keeps) and the page says only "All edits
+    saved." The sync server already sends each editor the restore's number; the editor shows
+    nothing for it.
+  - A renamed file keeps its old name in a co-author's open editor until they reload.
+  - A paper made from a template passes the checks before submitting with the template's
+    placeholder sentences still in it.
+  - The toolbar's own note says nothing after a press; what is said ("Shown on page N of the PDF.")
+    is in the pane.
+  - An invitation link opened signed out; Back/Forward with the sync service away (as before).

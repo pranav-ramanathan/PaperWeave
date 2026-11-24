@@ -41,3 +41,12 @@ export function taken(fileId: string): SourcePlace | null {
   carried = null;
   return place;
 }
+
+/**
+ * How far the window has to be scrolled for a band on a page of the PDF to be on the screen.
+ * `top` and `bottom` are the band's edges measured from the top of the window, which is
+ * `height` tall. Nothing when all of the band is on the screen already. Otherwise enough to
+ * put its top a third of the way down, which is where the pane puts it within itself.
+ */
+export const intoWindow = (top: number, bottom: number, height: number) =>
+  top >= 0 && bottom <= height ? 0 : Math.round(top - height / 3);
