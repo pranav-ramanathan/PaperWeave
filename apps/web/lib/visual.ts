@@ -1328,9 +1328,13 @@ export function createVisual(opts: {
           )
             return refuse();
         }
+        // A printable key too: typed over a selection that was just made with the mouse, it must
+        // replace the selection the person sees. If the editor still held an older, collapsed one,
+        // the browser would make the change itself, across blocks, and the bridge would refuse it.
         if (
           !view.composing &&
-          ['Enter', 'Backspace', 'Delete', 'ArrowLeft', 'ArrowRight'].includes(e.key)
+          (['Enter', 'Backspace', 'Delete', 'ArrowLeft', 'ArrowRight'].includes(e.key) ||
+            (e.key.length === 1 && !e.ctrlKey && !e.metaKey))
         )
           catchUp();
         return false;
