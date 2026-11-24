@@ -46,6 +46,8 @@ import {
   CitationPicker,
   EditorMenu,
   FloatBox,
+  FootnoteBox,
+  type FootnoteRequest,
   HeadingBox,
   type HeadingRequest,
   type FloatRequest,
@@ -233,6 +235,7 @@ export default function FileEditor(props: {
   const [citing, setCiting] = useState<{ apply: FormulaRequest['apply'] } | null>(null);
   const [float, setFloat] = useState<FloatRequest | null>(null);
   const [heading, setHeading] = useState<HeadingRequest | null>(null);
+  const [footnote, setFootnote] = useState<FootnoteRequest | null>(null);
   const [menu, setMenu] = useState<{
     x: number;
     y: number;
@@ -253,6 +256,13 @@ export default function FileEditor(props: {
     insertHere((apply) => setFormula({ src: '', place: 'inline', apply }), false, true);
   const askReference = () => insertHere((apply) => setPicker({ apply }));
   const askCitation = () => insertHere((apply) => setCiting({ apply }));
+  const askFootnote = () => {
+    const apply = live.current?.visual?.footnote();
+    if (apply === 'heading')
+      setNote('A footnote in a heading stops the build. Put the caret in the text below it.');
+    else if (apply) setFootnote({ apply });
+    else setNote('Put the caret in the text where it should go, then try again.');
+  };
   const askFigure = () => insertHere((apply) => setFloat({ kind: 'figure', apply }), true);
   const askTable = () => insertHere((apply) => setFloat({ kind: 'table', apply }), true);
   const askHeading = () => {
@@ -277,6 +287,7 @@ export default function FileEditor(props: {
     equation: askEquation,
     reference: askReference,
     citation: askCitation,
+    footnote: askFootnote,
     figure: askFigure,
     table: askTable,
     heading: askHeading,
@@ -287,7 +298,7 @@ export default function FileEditor(props: {
   asks.current = all;
   // When a window closes, the keyboard goes back to the text. This runs after the window's own
   // effect has closed it, which is when the browser has handed focus back.
-  const windowOpen = !!formula || !!picker || !!citing || !!float || !!heading;
+  const windowOpen = !!formula || !!picker || !!citing || !!float || !!heading || !!footnote;
   const hadWindow = useRef(false);
   useEffect(() => {
     if (hadWindow.current && !windowOpen && mode === 'visual') live.current?.visual?.focus();
@@ -1093,6 +1104,9 @@ export default function FileEditor(props: {
               <button type="button" onClick={askEquation} aria-keyshortcuts="Alt+=" title="Alt+=">
                 Equation
               </button>
+              <button type="button" onClick={askFootnote} aria-keyshortcuts="Alt+O" title="Alt+O">
+                Footnote
+              </button>
               <button type="button" onClick={askFigure} aria-keyshortcuts="Alt+G" title="Alt+G">
                 Figure
               </button>
@@ -1159,6 +1173,10 @@ export default function FileEditor(props: {
           request={heading}
           onDone={(was) => setHeading((now) => (now === was ? null : now))}
         />
+        <FootnoteBox
+          request={footnote}
+          onDone={(was) => setFootnote((now) => (now === was ? null : now))}
+        />
         <EditorMenu
           at={menu}
           onClose={() => {
@@ -1167,6 +1185,7 @@ export default function FileEditor(props: {
           }}
           onReference={askReference}
           onCitation={askCitation}
+          onFootnote={askFootnote}
           onEquation={askEquation}
           onFigure={askFigure}
           onTable={askTable}

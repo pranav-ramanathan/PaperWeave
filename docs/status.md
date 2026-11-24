@@ -6200,3 +6200,240 @@ of the paper's .bib files.`
   - Carry over, unchanged: nested lists, `\item[..]` and `description` raw in the visual view;
     Enter at the start of a list item after an empty one; everything in the "Not done" of "The
     build pane hears from its own editor".
+
+## A footnote can be added in the visual view
+
+- **What was missing.** The visual view had a tool for a reference, a citation, an equation, a
+  figure, a table, a heading and a list, and none for a footnote; typed there, `\footnote{..}` went
+  in as its characters. Counted over the 31 corpus papers (29 with body text, 118 body files) with
+  the real bridge, counts only: 24 of 29 papers have at least one footnote; 164 are shown as a chip
+  (174 `\footnote{` in the source); 159 stand in a paragraph, 4 in a list item, 1 in a heading; 126
+  of the 164 hold LaTeX (a formula 47, `\url`/`\href` 34, a citation 24, a reference 18, styled text 10) and 38 are words only.
+- **Now** (`footnoteBody` in `packages/latex/src/floats.ts`, `Bridge.footnoteCommand`,
+  `footnote()` in `apps/web/lib/visual.ts`, `FootnoteBox` in `Tools.tsx`): with the caret in
+  running text, a toolbar button "Footnote", Alt+O or "Insert a footnote…" in the menu opens a
+  window with one field, "Text". Enter or "Insert" puts `\footnote{text}` at the caret and leaves
+  the caret just after it; one undo takes it back. The field takes words and LaTeX that is running
+  text (`\$ \% \& \# \_`, a formula, `\cite`, `\ref`, `\url`, `\emph`, `\textbf`, `\\`); line breaks
+  and runs of spaces become one space. What would stop the build is refused with what to write: an
+  empty text, a bare `%` or `&`, unbalanced braces or a trailing backslash, a bare `#`, `_` or `^`
+  outside a formula, a `$` that does not close, `\verb`. A list, heading, `\item`, a display
+  equation or anything that would not be read as one footnote where it stands is refused as "only
+  running text". In a heading nothing opens and the note says a footnote there stops the build; not
+  in running text says to put the caret in the text. Six new sentences, all in the window or the
+  note. Corpus result: 4,514 put in at 6,056 carets, each exactly one new chip holding the text
+  given, no file gained a frozen block, `check()` held every time, every refusal left the source
+  untouched, and all 1,476 heading carets were refused. Builds (pdfLaTeX, made-up papers): the ten
+  accepted texts build; the eleven refused texts fail the build; a footnote in a list item, in
+  `\emph{}`, and in IEEEtran, amsart, llncs, acmart, elsarticle, revtex4-2, beamer and two-column
+  article builds; a footnote in a heading's title fails in five of five classes.
+- **Held by** two tests in `floats.test.ts`, eleven in `bridge.test.ts` (the fixture guard among
+  them) and one in `compile.sandbox.test.ts`, all run on the development machine, and one in
+  `insert.spec.ts`, written but run only in CI (the local blob store refuses writes). Two existing
+  browser expectations were changed on purpose and not run locally: the toolbar in `keys.spec.ts`
+  has 16 buttons, was 15; the menu list in `insert.spec.ts` gains "Insert a footnote…" after
+  "Insert an equation…".
+- **Not done.**
+  - A caret after a space leaves the space before the note mark (`word \footnote{..}`); the tool
+    does not move the place.
+  - `\footnote[2]{..}`, `\footnotemark`/`\footnotetext` and `\thanks` are not offered; nor a
+    footnote in a table cell or a caption (they are fields, and need other LaTeX).
+  - A new footnote is running text only; a list or a display in one is made with "Edit
+    footnote…" or in the source. `\input` and definitions typed into one are not refused (as in
+    "Edit footnote…").
+  - `\url` in a footnote needs the paper to load hyperref or url; without, the build says so.
+  - No footnote at the very start of a paragraph that begins with a comment line or a `{\bf ..}`
+    group (62 of 4,320 carets tried).
+  - The words of a footnote are still not read by the grammar check.
+  - Not tried: an input method in the field; Safari and Firefox; Alt+O on a Mac keyboard layout
+    that types a letter with it (the other Alt keys are in the same position).
+  - Found while measuring, not changed: Enter at the start of a list's first item is refused (40
+    of 40 lists, 19 papers); Enter in the middle of a heading is refused (927 of 927); Backspace or
+    Delete where a heading meets a paragraph does nothing (1,814 places).
+  - Carry over, unchanged: nested lists, `\item[..]` and `description` raw in the visual view;
+    everything in the "Not done" of "A selection across a formula, a figure, a heading or a
+    list".
+
+## Enter at the start of a list item always opens an item above it
+
+- **What was wrong.** At the start of a list's first item Enter was refused with "That edit spans
+  LaTeX structure. Make it in the source editor." (40 of 40 editable lists in the corpus, in 19 of
+  the 20 papers with a list; counted with the real bridge and the editor's own Enter, counts only).
+  At the start of an item after an empty one it did nothing and said nothing (carried in "Not
+  done" since the list work). The second happened because Enter at the end of an empty item and
+  Enter at the start of the item after it give the same document; the change was placed at the
+  second, which is inside an empty item, and an empty item does nothing. Only the place of the
+  split tells the two keys apart, and `translate` was not told it.
+- **Now** (`translate.ts`, the list-item Enter branch; `filter` in `bridge.ts` passes where the
+  split was made):
+
+  | Caret at the start of               | Before                                                        | Now                                            |
+  | ----------------------------------- | ------------------------------------------------------------- | ---------------------------------------------- |
+  | The first item                      | Refused with the sentence above                               | An empty item above it                         |
+  | An item that follows an empty one   | Nothing happens, nothing is said                              | An empty item above it (Enter twice gives two) |
+  | Any other later item                | An empty item above it                                        | Unchanged, byte for byte                       |
+  | An empty item (first, middle, only) | Nothing happens; in the last of two or more, the list is left | Unchanged                                      |
+
+  The source gets `\item `, a line break and the indentation of the item's own `\item`, directly
+  before that `\item`; an option, comment lines or a length between `\begin` and the first
+  `\item` stay above it. The caret stays with the text. Corpus result: 40 of 40 accepted, each one
+  run of `\item `, a line break and the list's indentation before the first item's own `\item`,
+  one more empty item, nothing else changed, no frozen block, `check()` every time; a second
+  Enter gave a second item in 40 of 40; Backspace gave the original bytes back in 38 and the same
+  but for spaces after `\item` in 2. Builds: an empty first item in five classes, 5 of 5.
+
+- **Held by** six tests in `bridge.test.ts` (one of them over every fixture) and the fuzzers, run
+  on the development machine, with the sandbox build of 150 generated visual edits (three
+  cases); one test in `visual.spec.ts`, written but not run on the development machine (the
+  local blob store refuses writes), so run only in CI. One existing test's last two expectations
+  were changed on purpose (they pinned the refusal and the nothing). `harness.ts` tells the
+  fuzzers where the new rule writes.
+- **Not done.**
+  - The caret stays with the text; it does not go into the new item (ArrowLeft or ArrowUp does).
+    The owner may prefer the other.
+  - Enter at the start of a later item after an item with text still writes its `\item` at the
+    end of the item before, with that item's indentation; the new rule writes before the item's
+    own. The view is the same either way.
+  - Enter in an empty item that is not the last still does nothing.
+  - Backspace at the start of the first item still does nothing (it does not turn the item into a
+    paragraph); Backspace at the start of a paragraph after a list, and Delete at the end of a
+    list's last item, are still refused (24 places each in the corpus).
+  - Enter over a selection in a list is still refused.
+  - Not tried: a real browser on this machine; an input method; Safari and Firefox.
+  - Found while measuring, not changed (plan 178's survey): Enter in the middle of a heading is
+    refused (927 of 927); Backspace or Delete where a heading meets a paragraph does nothing
+    (1,814 places).
+  - Carry over, unchanged: nested lists, `\item[..]` and `description` raw in the visual view;
+    LaTeX's own "Empty `thebibliography' environment" line still shows beside "Bibliography
+    empty"; everything in the "Not done" of "A footnote can be added in the visual view".
+
+## Captions and footnotes in the grammar check
+
+- **What was wrong.** The check read paragraphs, headings and list items. A float was one hard
+  stretch and a footnote one stand-in word, so a mistake in a caption or a footnote was never
+  listed, and a file with no other finding said "Nothing found in this file." Over the corpus
+  (31 papers, 118 body files; counts only): 15,448 words in 513 captions and 3,597 words in 164
+  footnotes were never read, against 223,110 read: 7.9 % of the corpus's prose, in 27 of the 28
+  papers with body text. Two smaller faults were found with it: a footnote's mark and a `\label`
+  read as "Dummy", glued to the word before. That hid a misspelling in the word before a footnote
+  or at the end of a caption, and put a stand-in at the head of the next sentence.
+- **Now** (`prose` and `placed` in `packages/latex/src/prose.ts`, `argumentsOf` in
+  `packages/latex/src/floats.ts`, a few lines of `checkGrammar`). A mistake in a caption or in a
+  footnote is listed like any other, with the same buttons; "Change to ..." changes those
+  characters and nothing else, and the source view underlines it where it is written.
+
+  |                                                                                                                                                                                                                | Before                                                          | Now                                                        |
+  | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | --------------------------------------------------------------- | ---------------------------------------------------------- |
+  | A caption (`\caption{..}`, `\caption*{..}`, `\subcaption{..}`, the long form of `\caption[short]{long}`) in a `figure`, `table`, `algorithm`, `wrapfigure`, `longtable`, `subfigure` ...                       | never read                                                      | read, as a paragraph of its own                            |
+  | A footnote (`\footnote{..}`, `\footnote[2]{..}`) in a paragraph, a heading, a list item, a raw list, a caption, another footnote                                                                               | never read; its mark reads as "Dummy", glued to the word before | read, as a paragraph of its own; the mark reads as nothing |
+  | The sentence a footnote hangs on                                                                                                                                                                               | read with "Dummy" where the mark is                             | read whole, as if the footnote were not there              |
+  | `\label{..}` in running text or at the end of a caption                                                                                                                                                        | reads as "Dummy"                                                | reads as nothing                                           |
+  | A formula, citation, reference, command, file name, label or code inside a caption or footnote                                                                                                                 | -                                                               | never to be changed, as everywhere else                    |
+  | The short form `[short]`, a commented-out caption, `\captionof`, `\captionsetup`, `\footnotetext`, `\footnotemark`, a `\caption` in a listing, verbatim or a formula, a footnote inside `\texttt`, table cells | not read                                                        | not read                                                   |
+
+  How it works: a footnote's words cannot be read where they are written without breaking the
+  sentence around them, so where a caption or footnote stands its body is sent as markup that
+  reads as nothing. After the whole source each body is sent again, opened by a paragraph break,
+  and read from inside by the same walk as everything else. An offset past the source's length
+  is mapped back to where the words are written with a small table (`asides`), and a finding
+  that is not inside one stretch of the source is dropped. The segments are filled in for each
+  body when it is read and sorted, so they still tile the source and `inProse` and `readAs` work
+  unchanged.
+
+  Against the real checker over the corpus: 4,533 findings before, all kept at the same places;
+  483 more, 421 in captions and 58 in footnotes, in 26 papers, 4 of them beside a footnote that
+  the stand-in had hidden; 431 spelling, 46 grammar, 6 style; no rule fires on captions as such.
+  The checker took 3 % longer on 5.9 % more characters.
+
+- **Held by** six new tests in `prose.test.ts` and one against the real checker in
+  `grammar-benchmark.sandbox.test.ts`, both run on the development machine; one in
+  `grammar.sandbox.test.ts` and one in `tests/e2e/grammar.spec.ts`, written but not run on the
+  development machine (the local blob store refuses writes), so run only in CI. One existing
+  expectation was changed on purpose, in "every character of every fixture is in the annotation,
+  in order": what is sent is now the source, then each caption and footnote again (it was the
+  source alone), and more than five are read over the fixtures.
+- **Not done.**
+  - In the visual view a finding in a caption or a footnote has no underline, and "Show in the
+    text" puts the caret beside the figure or the chip (as for a raw list). The source view
+    underlines and selects it.
+  - Table cells, `\thanks`, `\footnotetext`, `\captionof`, the short form of a caption and a
+    `\caption` written outside a float environment are not read. A footnote inside `\texttt` is
+    not read.
+  - A caption or footnote is checked as a paragraph of its own: a rule that needs the sentence it
+    hangs on (agreement with the word before a footnote's mark) does not see it.
+  - No more than 2,000 captions and footnotes are read in one file (the most in one corpus file
+    is 48).
+  - Not tried: a real browser on this machine; languages other than English (none is offered).
+  - Carry over, unchanged: Enter in the middle of a heading is refused (927 of 927); Backspace or
+    Delete where a heading meets a paragraph does nothing (1,814 places); nested lists,
+    `\item[..]` and `description` raw in the visual view; LaTeX's own "Empty `thebibliography'
+    environment" line still shows beside "Bibliography empty"; everything in the "Not done" of
+    "Enter at the start of a list item always opens an item above it".
+
+## Abbreviations and made-up names are not misspelt words
+
+- **What was wrong.** The checker knows no model, data set, laboratory or funder by name, and
+  every one it met was listed under "Spelling" with its nearest dictionary word to change it to
+  (`ResNet`: "Reset"). Over the corpus (31 papers, 118 body files; counts only), checked as
+  British English as an imported paper is: 4,329 of 5,071 findings were spelling; 1,903 of those
+  (44 %), in 28 of 28 papers, were on a word written as an abbreviation or a made-up name, 1,521
+  of them a word the paper uses three times or more. A median paper showed 121 spelling findings.
+- **Now** (`coined` in `packages/server/src/grammar.ts`, one line of `checkGrammar`). A word the
+  checker does not know is not listed under "Spelling" when it is written as an abbreviation or
+  a made-up name. Everything else is as before: the same findings, at the same places, with the
+  same buttons.
+
+  | The word                                                                                           | Before                       | Now                                                             |
+  | -------------------------------------------------------------------------------------------------- | ---------------------------- | --------------------------------------------------------------- |
+  | All capitals, two or more: `QNLI`, `MSCOCO`, `QA`; with a plural or possessive `s`: `NNs`, `GPU's` | Spelling: "ONLY"? "MSC OCO"? | not listed                                                      |
+  | A capital after a small letter: `ResNet`, `mAP`, `arXiv`, `GoogLeNet`, `SpanBERT`                  | Spelling: "Reset"? "map"?    | not listed                                                      |
+  | Three capitals or more: `RMSProp`, `MBConv`, `XLNet`                                               | Spelling                     | not listed                                                      |
+  | A digit in it: `word2vec`, `x86`, `CO2`                                                            | Spelling (when not known)    | not listed                                                      |
+  | Such names joined by a hyphen, or with a single character: `CLIP-ResNet`, `BiT-L`                  | Spelling                     | not listed                                                      |
+  | An ordinary word, however misspelt: `teh`, `recieved`, `pre-trianed`                               | Spelling                     | Spelling, unchanged                                             |
+  | A slip of the Shift key: `THe`, `ANd`, `WHen`, `THis`                                              | Spelling                     | Spelling, unchanged                                             |
+  | A name with one capital: `Lamport`, `Frobnet`, `Kovač`                                             | Spelling                     | Spelling, unchanged ("It is a word of this paper" is for these) |
+  | A name joined to an ordinary word: `GPU-acelerated`, `DBN-based`, `ResNet-like`                    | Spelling                     | Spelling, unchanged: the ordinary part may be the mistake       |
+  | A grammar or style finding on any of these words (`an ResNet`, a repeated `QA QA`)                 | Grammar                      | Grammar, unchanged: the rule is for spelling only               |
+  | A word of the paper's own list ("It is a word of this paper")                                      | not listed                   | not listed                                                      |
+
+  The checker is asked and answers as before; the rule is applied to each answer after the
+  paper's own list. It reads the stretch as the checker read it (`\'e` already `é`), splits it at
+  hyphens, dashes, slashes and spaces, sets parts of one character aside, and says yes when every
+  part left has a digit, a capital directly after a small letter, three capitals, or two capitals
+  and no small letter. There is no dictionary, no list of names and nothing stored.
+
+  Corpus result: 1,903 spelling findings go and 2,426 stay; a median paper shows 52 spelling
+  findings (was 121) and 75 findings in all (was 140); the 742 grammar and style findings are
+  untouched. Of the 222 different words dropped that a paper uses once, none is an ordinary word;
+  about five are a name misspelt, for none of which the checker had offered the name.
+
+- **Held by** two tests in `grammar.test.ts` and one against the real checker in
+  `grammar-benchmark.sandbox.test.ts`, run on the development machine (the benchmark document came
+  out unchanged); one in `grammar.sandbox.test.ts`, written but not run on the development machine
+  (the local blob store refuses writes), so run only in CI. No existing expectation was changed
+  and no browser test was added.
+- **Not done.**
+  - A made-up name misspelt (a letter missing in a model's name) is no longer listed. The checker
+    never offered the right name for one.
+  - A slip that puts a capital after a small letter in an ordinary word (`tHe`) is no longer
+    listed; `THe` and `ANd` still are.
+  - A name joined to an ordinary word (`DBN-based`, `ResNet-like`) is still listed: 163 findings in
+    the corpus, none a mistake in the sample read. Telling a right ordinary part from a wrong one
+    needs a second question to the checker.
+  - A name with one capital (an author, a town, an institute) is still listed until it is made a
+    word of the paper: 770 findings, 403 of them in two papers. 139 of the 770 are a word of the
+    paper's own reference list.
+  - A word the paper uses many times is listed each time; "It is a word of this paper" takes all
+    of them at once. After this change a median paper's 52 spelling findings are 26 different
+    words.
+  - Every imported paper is checked as British English until someone changes it on the paper's
+    page. 20 of the 28 corpus papers are written in American English and show 291 more spelling
+    findings for it (median 9 a paper, at most 52); the 7 British ones would show 252 more if the
+    default were American. Choosing the spelling at import from the paper's own words is the
+    natural next step.
+  - The panel, the paper's page and the benchmark document do not say that such names are not
+    checked.
+  - Not tried: a real browser on this machine (nothing in the browser changes).
+  - Carry over, unchanged: everything in the "Not done" of "Captions and footnotes in the grammar
+    check".

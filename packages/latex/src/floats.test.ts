@@ -6,6 +6,7 @@ import {
   cellText,
   fieldText,
   floatParts,
+  footnoteBody,
   stray,
   strayAdvice,
   tableEdit,
@@ -515,6 +516,35 @@ test('atomProblem lets through what builds', () => {
 test('text that already had it is not locked', () => {
   expect(atomProblem('\\footnote{a_c}', '\\footnote{a_b}')).toBeNull();
   expect(atomProblem('\\footnote{R & E}', '\\footnote{R & D}')).toBeNull();
+});
+
+test('words and LaTeX become the text; line breaks become spaces', () => {
+  expect(footnoteBody('  See the\nappendix. ')).toEqual({ text: 'See the appendix.' });
+  for (const t of [
+    'Costs \\$5 and 100\\% of it, R\\&D, item \\#3, a\\_b.',
+    'With $x^2_i$ and \\(a_1\\) and \\emph{stress}.',
+    'See \\url{https://example.org/a_b?x=1\\&y=2\\#top} and \\cite{k}.',
+    'A break \\\\ here.',
+  ])
+    expect(footnoteBody(t)).toEqual({ text: t });
+});
+
+test('what would stop the build is refused with what to write, and never quoted', () => {
+  const said = (t: string) => {
+    const r = footnoteBody(t);
+    return 'problem' in r ? r.problem : null;
+  };
+  expect(said('   ')).toBe('A footnote needs some text.');
+  for (const t of ['100% sure', 'R & D', 'open {brace', 'close } brace', 'ends in \\'])
+    expect(said(t)).toMatch(/^A footnote cannot hold an unescaped % or &/);
+  expect(said('Item #3')).toMatch(/^A # stops the build/);
+  expect(said('See \\url{http://a.b/#x}')).toMatch(/^A # stops the build/);
+  expect(said('a_b')).toMatch(/^An underscore outside a formula/);
+  expect(said('x^2')).toMatch(/^A \^ outside a formula/);
+  expect(said('Costs $5')).toMatch(/^A \$ starts a formula/);
+  expect(said('Code \\verb|x| here')).toMatch(/^A footnote cannot hold \\verb/);
+  for (const t of ['100% sure', 'Item #3', 'a_b', 'Costs $5', 'secretword_x'])
+    expect(said(t)).not.toContain(t.split(' ')[0]);
 });
 
 test('stray still lets an ampersand through', () => {

@@ -1,6 +1,6 @@
 import { expect, test } from 'vitest';
 import { DEFAULT_TRANSPARENT } from './parse.ts';
-import { inProse, prose, readAs } from './prose.ts';
+import { inProse, placed, prose, readAs } from './prose.ts';
 import { fixtureFiles } from './testutil.ts';
 
 // The fixtures that are UTF-8 LaTeX, as text.
@@ -24,9 +24,14 @@ const kindOf = (src: string, word: string) => {
 
 test('every character of every fixture is in the annotation, in order', () => {
   expect(Object.keys(texts).length).toBeGreaterThan(8);
+  let read = 0;
   for (const [path, src] of Object.entries(texts)) {
-    const { annotation, segments } = prose(src);
-    expect(annotation.map((a) => ('text' in a ? a.text : a.markup)).join(''), path).toBe(src);
+    const { annotation, segments, asides } = prose(src);
+    // The source, then each caption and footnote again: they are read after the text.
+    expect(annotation.map((a) => ('text' in a ? a.text : a.markup)).join(''), path).toBe(
+      src + asides.map((a) => src.slice(a.from, a.from + a.length)).join(''),
+    );
+    read += asides.length;
     // The segments tile the source: a finding's place is always in exactly one of them.
     let at = 0;
     for (const s of segments) {
@@ -36,6 +41,8 @@ test('every character of every fixture is in the annotation, in order', () => {
     }
     expect(at, path).toBe(src.length);
   }
+  // The fixtures have captions and footnotes of their own.
+  expect(read).toBeGreaterThan(5);
 });
 
 test('a sentence with LaTeX in it still reads as a sentence', () => {
@@ -347,4 +354,227 @@ test('commands that print nothing say nothing', () => {
     expect(inProse(segments, i, i + q.length), q).toBe(false);
   }
   expect(readAs(src, segments, at, at + word.length)).toBe('Schmidhuber');
+});
+
+/** What the checker is sent, markup and all: the source, then each caption and footnote again. */
+const sent = (src: string) =>
+  prose(src)
+    .annotation.map((a) => ('text' in a ? a.text : a.markup))
+    .join('');
+/** Where the checker's `word`, found after the source's own length, is in the source. */
+const at = (src: string, word: string) => {
+  const { asides } = prose(src);
+  return placed(src, asides, sent(src).indexOf(word, src.length), word.length);
+};
+const doc = (...lines: string[]) =>
+  ['\\begin{document}', ...lines, '\\end{document}', ''].join('\n');
+
+test("a caption's words are prose, read after the text as a paragraph of their own", () => {
+  const src = doc(
+    'Before the figure.',
+    '\\begin{figure}[t]',
+    '  \\centering',
+    '  \\includegraphics[width=\\linewidth]{plotfile}',
+    '  %\\caption{Oldword caption.}',
+    '  \\caption[Shortword list entry]{Latency by \\textbf{writers} at $n=4$ and 5\\% loss, see \\cite{keyword}.\\label{fig:labelword}}',
+    '\\end{figure}',
+    'After the figure.',
+  );
+  for (const word of ['Latency', 'writers', 'loss']) expect(kindOf(src, word), word).toBe('text');
+  for (const word of [
+    'centering',
+    'plotfile',
+    'Oldword',
+    'Shortword',
+    'n=4',
+    'keyword',
+    'labelword',
+  ])
+    expect(kindOf(src, word), word).toBe('hard');
+  // The text reads as it did: the figure is a break between two paragraphs.
+  expect(read(src)).toMatch(
+    /^\s*Before the figure\.\s*\n\n\s*After the figure\.\s*\n\nLatency by writers at Dummy and 5% loss, see \[1\]\.\s*$/,
+  );
+  // What is sent is the source, then the caption again; a place in the second is a place in the first.
+  expect(sent(src).startsWith(src)).toBe(true);
+  expect(sent(src).slice(src.length)).toBe(
+    src.slice(src.indexOf('Latency'), src.indexOf('}}') + 1),
+  );
+  const [from, to] = at(src, 'Latency')!;
+  expect(src.slice(from, to)).toBe('Latency');
+  expect(from).toBe(src.indexOf('Latency'));
+  const { segments } = prose(src);
+  expect(inProse(segments, from, to)).toBe(true);
+  expect(readAs(src, segments, src.indexOf('5\\%'), src.indexOf('5\\%') + 3)).toBe('5%');
+  // The segments still tile the source, in order.
+  let end = 0;
+  for (const s of segments) {
+    expect(s.from).toBe(end);
+    end = s.to;
+  }
+  expect(end).toBe(src.length);
+});
+
+test('each caption of a float is read: a table, a starred float, sub-captions, an algorithm', () => {
+  const src = doc(
+    '\\begin{table*}',
+    '\\caption{Tableword results.}',
+    '\\begin{tabular}{ll} cellword & 1 \\\\ \\end{tabular}',
+    '\\end{table*}',
+    '\\begin{figure}',
+    '\\begin{subfigure}{.5\\linewidth}\\includegraphics{a}\\caption{Leftword panel.}\\end{subfigure}',
+    '\\begin{subfigure}{.5\\linewidth}\\includegraphics{b}\\subcaption{Rightword panel.}\\end{subfigure}',
+    '\\caption*{Bothword panels.}',
+    '\\end{figure}',
+    '\\begin{algorithm}',
+    '\\caption',
+    '  {Algoword steps.}',
+    '\\end{algorithm}',
+  );
+  for (const word of ['Tableword', 'Leftword', 'Rightword', 'Bothword', 'Algoword'])
+    expect(kindOf(src, word), word).toBe('text');
+  expect(kindOf(src, 'cellword')).toBe('hard');
+  expect(
+    read(src)
+      .trim()
+      .split(/\n\n+/)
+      .map((s) => s.trim()),
+  ).toEqual([
+    'Tableword results.',
+    'Leftword panel.',
+    'Rightword panel.',
+    'Bothword panels.',
+    'Algoword steps.',
+  ]);
+  expect(prose(src).asides).toHaveLength(5);
+});
+
+test('a footnote says nothing where its mark is, and its words are read after the text', () => {
+  const src = doc(
+    '\\section{Method\\footnote{Headword note.}}',
+    'The method\\footnote{See the appendixword\\footnote[2]{Innerword note.} for more.} works. Done.\\footnote{Lastword note.}',
+    'It goes on.',
+    '\\begin{itemize}',
+    '  \\item one\\footnote{Itemword note.}',
+    '\\end{itemize}',
+    '\\begin{description}',
+    '  \\item[Term] two\\footnote{Rawword note.}',
+    '\\end{description}',
+    '\\begin{figure}\\caption{Shown\\footnote{Capword note.} here.}\\end{figure}',
+  );
+  for (const word of [
+    'Headword',
+    'appendixword',
+    'Innerword',
+    'Lastword',
+    'Itemword',
+    'Rawword',
+    'Capword',
+    'Shown',
+  ])
+    expect(kindOf(src, word), word).toBe('text');
+  // The sentence a footnote hangs on reads whole, with nothing where the mark is.
+  expect(read(src).slice(0, read(src).indexOf('Headword'))).toContain(
+    'The method works. Done. It goes on.',
+  );
+  expect(read(src)).toContain('• one');
+  // Each is a paragraph of its own, in the order they are met: the text's, then those inside them.
+  expect(
+    read(src)
+      .slice(read(src).indexOf('Headword'))
+      .trim()
+      .split(/\n\n+/)
+      .map((s) => s.trim()),
+  ).toEqual([
+    'Headword note.',
+    'See the appendixword for more.',
+    'Lastword note.',
+    'Itemword note.',
+    'Rawword note.',
+    'Shown here.',
+    'Innerword note.',
+    'Capword note.',
+  ]);
+  for (const word of ['Headword', 'Innerword', 'Rawword', 'Capword']) {
+    const [from, to] = at(src, word)!;
+    expect(src.slice(from, to), word).toBe(word);
+    expect(inProse(prose(src).segments, from, to), word).toBe(true);
+  }
+  // The command, its option and its braces are never to be changed.
+  const open = src.indexOf('\\footnote[2]{');
+  expect(inProse(prose(src).segments, open - 4, open + 20)).toBe(false);
+});
+
+test('what is not a caption or a footnote of the paper is not read as one', () => {
+  const src = doc(
+    'Text\\footnotemark{} and \\footnotetext{Textword note.} and \\texttt{code\\footnote{Codeword}}.',
+    '\\captionsetup{font=smallword}',
+    '\\begin{verbatim}',
+    '\\caption{Verbword}',
+    '\\end{verbatim}',
+    '\\begin{lstlisting}[caption={Listword}]',
+    '\\caption{Lstword}',
+    '\\end{lstlisting}',
+    '\\begin{equation}',
+    '\\caption{Mathword}',
+    '\\end{equation}',
+    '\\begin{figure}',
+    '\\captionof{figure}{Ofword}',
+    '\\caption{Openword',
+    '\\end{figure}',
+  );
+  for (const word of [
+    'Textword',
+    'Codeword',
+    'smallword',
+    'Verbword',
+    'Listword',
+    'Lstword',
+    'Mathword',
+    'Ofword',
+    'Openword',
+  ])
+    expect(kindOf(src, word), word).toBe('hard');
+  expect(prose(src).asides).toEqual([]);
+  expect(sent(src)).toBe(src);
+});
+
+test('a place the checker gives is a place in the source, or none', () => {
+  const src = doc('Text.\\footnote{One.}\\footnote{Two.}');
+  const { asides } = prose(src);
+  expect(asides).toHaveLength(2);
+  // In the text itself: as it is.
+  expect(placed(src, asides, 17, 4)).toEqual([17, 21]);
+  // In a footnote read after the text: where the footnote is written.
+  expect(placed(src, asides, src.length, 3)).toEqual([src.indexOf('One'), src.indexOf('One') + 3]);
+  expect(placed(src, asides, src.length + 4, 4)).toEqual([
+    src.indexOf('Two'),
+    src.indexOf('Two') + 4,
+  ]);
+  // From one into the next, from the text into the first, or past the end: nowhere.
+  expect(placed(src, asides, src.length + 2, 4)).toBeNull();
+  expect(placed(src, asides, src.length - 2, 4)).toBeNull();
+  expect(placed(src, asides, src.length + 8, 1)).toBeNull();
+});
+
+test('a file with more captions and footnotes than are read still tiles', () => {
+  const src = doc(
+    Array.from({ length: 2100 }, (_, i) => `Word${i}\\footnote{Note${i}.}`).join(' '),
+  );
+  const { asides, segments, annotation } = prose(src);
+  expect(asides).toHaveLength(2000);
+  expect(kindOf(src, 'Note1999')).toBe('text');
+  expect(kindOf(src, 'Note2000')).toBe('hard');
+  let end = 0;
+  for (const s of segments) {
+    expect(s.from).toBe(end);
+    end = s.to;
+  }
+  expect(end).toBe(src.length);
+  expect(
+    annotation
+      .map((a) => ('text' in a ? a.text : a.markup))
+      .join('')
+      .startsWith(src),
+  ).toBe(true);
 });

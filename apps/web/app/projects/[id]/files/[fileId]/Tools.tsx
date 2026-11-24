@@ -3,7 +3,7 @@
 // The small windows the visual editor opens: a formula's LaTeX with its preview, the list of
 // labels to refer to, and the menu of things to do at a place in the text.
 import type { CommandResult } from '@paperweave/bridge';
-import { captionText, cellText, stray, strayAdvice } from '@paperweave/latex';
+import { captionText, cellText, footnoteBody, stray, strayAdvice } from '@paperweave/latex';
 import { type RefObject, useEffect, useLayoutEffect, useRef, useState } from 'react';
 import { numbers } from '../../../../../lib/numbers';
 import { renderMath } from '../../../../../lib/visual';
@@ -524,6 +524,112 @@ export function HeadingBox(props: {
   );
 }
 
+/** A footnote to insert where the caret was when it was asked for. */
+export type FootnoteRequest = { apply: (text: string) => Promise<CommandResult | 'spills'> };
+
+/** The window that asks what a new footnote says, and inserts it. */
+export function FootnoteBox(props: {
+  request: FootnoteRequest | null;
+  /** Done with this request: a later one, if there is one, is not done with. */
+  onDone(request: FootnoteRequest | null): void;
+}) {
+  const { request, onDone } = props;
+  const box = useDialog(!!request);
+  const field = useRef<HTMLTextAreaElement>(null);
+  /** The request the window was last opened for. */
+  const shown = useRef<FootnoteRequest | null>(null);
+  const [draft, setDraft] = useState('');
+  const [problem, setProblem] = useState('');
+  const [busy, setBusy] = useState(false);
+  useEffect(() => {
+    setDraft('');
+    setProblem('');
+  }, [request]);
+  // As in the heading window: a request that replaces another at once finds the window shut.
+  useEffect(() => {
+    if (request && !box.current?.open) box.current?.showModal();
+  }, [request, box]);
+  useEffect(() => {
+    if (!request) return;
+    shown.current = request;
+    field.current?.focus();
+  }, [request]);
+  const insert = async () => {
+    if (!request || busy) return;
+    const body = footnoteBody(draft);
+    if ('problem' in body) return setProblem(body.problem);
+    setProblem('');
+    setBusy(true);
+    try {
+      const result = await request.apply(body.text);
+      if (result === 'spills')
+        setProblem(
+          'Only running text can go in a footnote added here: no list, heading or equation on a line of its own, and nothing left open. Add anything else in the source.',
+        );
+      else if (result === 'conflict')
+        setProblem(
+          'The text changed where the footnote was going. Copy your text if you want to keep it, cancel, and try again.',
+        );
+      else onDone(request);
+    } catch (err) {
+      console.warn('edit not made:', (err as Error).message);
+      setProblem('That edit could not be made. Check the connection and try again.');
+    } finally {
+      setBusy(false);
+    }
+  };
+  return (
+    <dialog
+      ref={box}
+      className="tool"
+      aria-labelledby="footnote-title"
+      onClose={() => !box.current?.open && onDone(shown.current)}
+    >
+      <form
+        onSubmit={(e) => {
+          e.preventDefault();
+          void insert();
+        }}
+      >
+        <h2 id="footnote-title">Insert a footnote</h2>
+        <label>
+          Text
+          <textarea
+            ref={field}
+            rows={3}
+            value={draft}
+            aria-invalid={!!problem}
+            onChange={(e) => {
+              setDraft(e.target.value);
+              setProblem('');
+            }}
+            onKeyDown={(e) => {
+              // One paragraph: Enter inserts, as in the heading window.
+              if (e.key === 'Enter' && !e.shiftKey && !e.nativeEvent.isComposing) {
+                e.preventDefault();
+                void insert();
+              }
+            }}
+          />
+        </label>
+        <p className="note">
+          Goes in where the caret is, as a numbered note at the foot of the page. LaTeX works here
+          too: a formula between $ signs, {'\\cite'}, {'\\url'}.
+        </p>
+        {problem && <p role="alert">{problem}</p>}
+        <p>
+          <button type="submit" disabled={busy}>
+            Insert
+          </button>{' '}
+          <button type="button" onClick={() => onDone(request)}>
+            Cancel
+          </button>
+        </p>
+      </form>
+    </dialog>
+  );
+}
+
 /** One thing that can be chosen: what the list shows, what typing matches, and what it inserts. */
 type Choice = { key: string; text: string; match: string; latex: string };
 
@@ -711,6 +817,7 @@ export function EditorMenu(props: {
   onClose(): void;
   onReference(): void;
   onCitation(): void;
+  onFootnote(): void;
   onEquation(): void;
   onFigure(): void;
   onTable(): void;
@@ -752,6 +859,7 @@ export function EditorMenu(props: {
     ['Insert a reference…', props.onReference],
     ['Insert a citation…', props.onCitation],
     ['Insert an equation…', props.onEquation],
+    ['Insert a footnote…', props.onFootnote],
     ['Insert a figure…', props.onFigure],
     ['Insert a table…', props.onTable],
     ['Insert a heading…', props.onHeading],

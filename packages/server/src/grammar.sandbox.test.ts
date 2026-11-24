@@ -427,6 +427,86 @@ test('mistakes in a description list and in a nested list are found', async () =
   expect(text.slice(0, from) + fix + text.slice(to)).toContain('\\item[Parser] reads the source.');
 });
 
+test('mistakes in a caption and in a footnote are found', async () => {
+  const src = [
+    '\\documentclass{article}',
+    '\\usepackage{graphicx}',
+    '\\begin{document}',
+    '\\section{Results}',
+    'The method\\footnote{See the the appendix for a longer acount.} works well on every run.',
+    'It is fast.\\footnote{Measured on one machine.} We report the mean.',
+    '',
+    '\\begin{figure}',
+    '  \\centering',
+    '  \\includegraphics[width=\\linewidth]{teh-plot}',
+    '  \\caption[Latency]{Merge latency by number of concurent writters\\label{fig:teh}}',
+    '\\end{figure}',
+    '',
+    '\\begin{table}',
+    '  \\caption{An summary of the runs.}',
+    '  \\begin{tabular}{ll} recieve & 1 \\\\ \\end{tabular}',
+    '\\end{table}',
+    'The end is short.',
+    '\\end{document}',
+    '',
+  ].join('\n');
+  const p = await paper(src, false);
+  const found = await check(p, 'owner');
+  const doc = new Y.Doc();
+  for (const u of await loadUpdates(t.pool, store, p.file)) Y.applyUpdate(doc, u);
+  const text = doc.getText(TEXT).toString();
+  const at = (b64: string) =>
+    Y.createAbsolutePositionFromRelativePosition(
+      Y.decodeRelativePosition(Buffer.from(b64, 'base64')),
+      doc,
+    )!.index;
+  for (const words of ['the the', 'acount', 'concurent', 'writters', 'An'])
+    expect(
+      found.some((f) => f.words === words),
+      words,
+    ).toBe(true);
+  for (const f of found) expect(text.slice(at(f.from), at(f.to)), f.words).toBe(f.words);
+  const concurent = found.find((f) => f.words === 'concurent')!;
+  const end = at(concurent.to);
+  expect(text.slice(text.lastIndexOf('\n', end - 1) + 1, end)).toBe(
+    '  \\caption[Latency]{Merge latency by number of concurent',
+  );
+  // Nothing in the file name, the label or the table's cell.
+  for (const f of found) expect(f.words).not.toMatch(/teh|recieve/);
+  const fix = concurent.replacements.find((r) => r === 'concurrent');
+  expect(fix).toBe('concurrent');
+  expect(text.slice(0, at(concurent.from)) + fix + text.slice(end)).toContain(
+    '\\caption[Latency]{Merge latency by number of concurrent writters\\label{fig:teh}}',
+  );
+});
+
+test('an abbreviation or a made-up name is not listed as misspelt', async () => {
+  const src = [
+    '\\documentclass{article}',
+    '\\begin{document}',
+    'We train a ResNet and an EfficientNet with RMSProp, and report mAP on QNLI and on MSCOCO.',
+    'THe GPU-acelerated run recieved two SVHNs, a BiT-L model and word2vek features.',
+    'Our Frobnet baseline uses teh same DBN-based setup.\\footnote{As in SpanBERT, with a smal change.}',
+    '\\end{document}',
+    '',
+  ].join('\n');
+  const p = await paper(src, false);
+  const spelt = async () =>
+    (await check(p, 'owner')).filter((f) => f.kind === 'spelling').map((f) => f.words);
+  expect(await spelt()).toEqual([
+    'THe',
+    'GPU-acelerated',
+    'recieved',
+    'Frobnet',
+    'teh',
+    'DBN-based',
+    'smal',
+  ]);
+  // The paper's own list still works beside the rule.
+  await setLanguageSettings(t.pool, users.owner.id, p.id, { glossary: ['Frobnet'] });
+  expect(await spelt()).toEqual(['THe', 'GPU-acelerated', 'recieved', 'teh', 'DBN-based', 'smal']);
+});
+
 test("a paper's own text macros are read as the words they print, from the package that defines them", async () => {
   const p = await paper(
     [

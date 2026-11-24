@@ -56,11 +56,14 @@ Where this stands, what holds it there, and what nobody has checked yet.
   text. People who cannot edit get Find only. `find.spec` holds it, with axe passing while the
   panel is open. The visual view keeps the browser's own Ctrl+F.
 - **The keys that insert in the visual view**: Alt+R (reference), Alt+C (citation), Alt+= (equation),
-  Alt+G (figure), Alt+T (table), Alt+H (heading), Alt+L (bulleted list) and Alt+N (numbered
+  Alt+O (footnote), Alt+G (figure), Alt+T (table), Alt+H (heading), Alt+L (bulleted list) and Alt+N (numbered
   list), Ctrl+I (emphasis), Ctrl+B (bold) and Shift+F10 (the menu at
   the caret). Each toolbar button names its key in `aria-keyshortcuts`. The heading window opens
   on its Title, Enter inserts, Escape closes it and gives the caret back, a refusal is read from
   its alert, and axe passes with the window open and a refusal showing (`insert.spec`).
+  The footnote window opens on its Text field, Enter inserts, Escape closes it and gives the caret
+  back, and a refusal is read from its alert (`insert.spec`); Alt+F was not used because it is the
+  browser's menu key in Chrome and Firefox.
   Alt+H is Firefox's Help menu key on Windows and Linux when the page does not take it, as Alt+T
   is Tools; the editor takes both while it has the keyboard. Alt+L and Alt+N have no menu in
   Firefox. A list is put in at once; the caret goes into its item.

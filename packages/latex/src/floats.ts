@@ -180,6 +180,25 @@ function tableOf(src: string, text: string): Table | null {
 }
 
 /**
+ * The braced argument of each `command` in `src`, after an option if it has one: the `long` of
+ * `\\caption[short]{long}`. Commented-out ones are not found. Each span is the text inside the braces.
+ */
+export function argumentsOf(src: string, command: RegExp): Span[] {
+  const text = live(src);
+  const out: Span[] = [];
+  for (const m of text.matchAll(command)) {
+    let at = m.index + m[0].length;
+    if (out.length && m.index < out[out.length - 1].end) continue;
+    while (text[at] === ' ' || text[at] === '\n') at++;
+    if (text[at] === '[') at = closeOf(text, at, '[', ']');
+    while (text[at] === ' ' || text[at] === '\n') at++;
+    const close = at >= 0 && text[at] === '{' ? closeOf(text, at) : -1;
+    if (close > 0) out.push(span(src, at + 1, close - 1));
+  }
+  return out;
+}
+
+/**
  * Read a figure or table environment: `src` is the whole of it, from `\begin` to `\end`.
  * Returns null for anything else.
  */
@@ -448,6 +467,28 @@ export function atomProblem(text: string, was: string): string | null {
   const kind = find(text);
   if (!kind || find(was)) return null;
   return kind === 'env' ? ENV_ADVICE : strayAdvice(kind);
+}
+
+/**
+ * What a new footnote will hold, from what was typed for it (words, or LaTeX as in "Edit
+ * footnote"), or what to tell the person if it would stop the build. Whether it is read as one
+ * footnote where it is put is the bridge's to say (`footnoteCommand`). Never quotes the text.
+ */
+export function footnoteBody(typed: string): { text: string } | { problem: string } {
+  // One paragraph: a line break is a space, and a blank line would end the paragraph it is in.
+  const text = typed.replace(/\s+/g, ' ').trim();
+  if (!text) return { problem: 'A footnote needs some text.' };
+  if (!captionText(text))
+    return {
+      problem:
+        'A footnote cannot hold an unescaped % or &, its braces must match, and it cannot end in a backslash. Write \\% for a percent sign and \\& for an ampersand.',
+    };
+  // In an argument a # stops the build wherever it is, an address in \url included.
+  if (/(?<!\\)(?:\\\\)*#/.test(text)) return { problem: strayAdvice('#') };
+  if (/\\(?:verb|lstinline|mintinline)(?![a-zA-Z])/.test(text))
+    return { problem: 'A footnote cannot hold \\verb. Write \\texttt{...} for text set as code.' };
+  const stops = atomProblem(`\\footnote{${text}}`, '');
+  return stops ? { problem: stops } : { text };
 }
 
 export type TableOp =

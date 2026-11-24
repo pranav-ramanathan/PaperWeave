@@ -1,7 +1,7 @@
 // Spelling and grammar. The prose of a file is sent to a LanguageTool server we run ourselves
 // (GRAMMAR_URL); nothing goes to anyone else. Formulas, references, citations, commands and
 // code are sent as markup the checker skips, and a finding that touches any of them is dropped.
-import { DEFAULT_TRANSPARENT, escape, inProse, prose, readAs } from '@paperweave/latex';
+import { DEFAULT_TRANSPARENT, escape, inProse, placed, prose, readAs } from '@paperweave/latex';
 import type pg from 'pg';
 import * as Y from 'yjs';
 import { authorize } from './authz.ts';
@@ -49,6 +49,31 @@ export const NEVER = [
   ...['EN_QUOTES', 'EN_UNPAIRED_QUOTES', 'WHITESPACE_RULE', 'CONSECUTIVE_SPACES'],
   'OXFORD_SPELLING_Z_NOT_S',
 ];
+/**
+ * Whether a word the checker does not know is written as an abbreviation or a made-up name, not
+ * as an ordinary word: `QNLI`, `ResNet`, `mAP`, `RMSProp`, `word2vec`, `GPUs`. The checker
+ * knows no such name and answers with a guess (`ResNet`: "Reset"); half of what it calls
+ * misspelt in a paper is one. Each part between hyphens or spaces must be written so (a single
+ * character aside), so an ordinary word joined to a name is still checked: `GPU-acelerated`.
+ * `THe` and `ANd` are ordinary words typed with a slip, and are not names.
+ */
+export function coined(word: string): boolean {
+  const parts = word.split(/[\s\-–—/]+/).filter((part) => [...part].length > 1);
+  return (
+    parts.length > 0 &&
+    parts.every((part) => {
+      const capitals = part.match(/\p{Lu}/gu)?.length ?? 0;
+      return (
+        /\p{N}/u.test(part) ||
+        // A capital after a small letter: ResNet, mAP, arXiv.
+        /\p{Ll}\p{Lu}/u.test(part) ||
+        capitals >= 3 ||
+        // All capitals, with or without a plural s: QA, NNs.
+        (capitals >= 2 && !/\p{Ll}/u.test(part.replace(/['’]?s$/, '')))
+      );
+    })
+  );
+}
 /** A word: letters, digits, and the marks that join them. No spaces. */
 const WORD = /^[\p{L}\p{N}'’.-]+$/u;
 const fits = (s: string) => s.length <= 60 && WORD.test(s);
@@ -219,7 +244,11 @@ export async function checkGrammar(
   const own = await proseOf(pool, store, projectId);
   // So are the paper's macros that only print words: the checker reads what they print.
   const words = await textMacrosOf(pool, store, projectId);
-  const { annotation, segments } = prose(src, new Set([...DEFAULT_TRANSPARENT, ...own]), words);
+  const { annotation, segments, asides } = prose(
+    src,
+    new Set([...DEFAULT_TRANSPARENT, ...own]),
+    words,
+  );
   const disabled = [...NEVER, ...settings.off].join(',');
   // The same annotation, language and rules give the same answer: the annotation holds the text,
   // and what every macro and environment of the paper makes of it. Only its hash is kept.
@@ -281,13 +310,18 @@ export async function checkGrammar(
     ).toString('base64');
   const findings: LanguageFinding[] = [];
   for (const m of matches) {
-    const [from, to] = [m.offset, m.offset + m.length];
+    // A caption's and a footnote's words are read after the text: back to where they are written.
+    const at = placed(src, asides, m.offset, m.length);
+    if (!at) continue;
+    const [from, to] = at;
     // Never in a formula, a unit, code, a path or a citation: only where all of it is prose.
     if (to <= from || !inProse(segments, from, to)) continue;
     const words = src.slice(from, to);
     const reads = readAs(src, segments, from, to).normalize('NFC');
     const spelling = m.rule.category.id === 'TYPOS';
     if (spelling && (known.has(reads.toLowerCase()) || known.has(words.toLowerCase()))) continue;
+    // An abbreviation or a made-up name is not a misspelt word.
+    if (spelling && coined(reads)) continue;
     findings.push({
       from: place(from, 0),
       to: place(to, -1),

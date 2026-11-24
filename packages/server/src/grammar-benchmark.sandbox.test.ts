@@ -4,9 +4,9 @@
 // Needs the grammar checker of infra/compose.yaml.
 import { existsSync, readFileSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
-import { inProse, prose } from '@paperweave/latex';
+import { inProse, placed, prose, readAs } from '@paperweave/latex';
 import { expect, test } from 'vitest';
-import { NEVER } from './grammar.ts';
+import { coined, NEVER } from './grammar.ts';
 import { TEST_ENV } from './testing.ts';
 
 const ROOT = join(import.meta.dirname, '../../..');
@@ -17,7 +17,7 @@ const corpus: {
   clean: string[];
 } = JSON.parse(readFileSync(join(ROOT, 'fixtures/grammar/corpus.json'), 'utf8'));
 
-type Match = { offset: number; length: number; rule: { id: string } };
+type Match = { offset: number; length: number; rule: { id: string; category: { id: string } } };
 /** What the checker points at in a paragraph, as the product would show it. */
 async function findings(latex: string, language: string) {
   const src = `\\begin{document}\n${latex}\n\\end{document}\n`;
@@ -39,6 +39,12 @@ async function findings(latex: string, language: string) {
   return {
     shown: matches
       .filter((m) => inProse(segments, m.offset, m.offset + m.length))
+      // An abbreviation or a made-up name is not shown as misspelt.
+      .filter(
+        (m) =>
+          m.rule.category.id !== 'TYPOS' ||
+          !coined(readAs(src, segments, m.offset, m.offset + m.length)),
+      )
       .map((m) => ({ words: src.slice(m.offset, m.offset + m.length), rule: m.rule.id })),
     // Findings that touch something that is not prose. They are never shown.
     dropped: hard.length,
@@ -132,3 +138,112 @@ test('the checker on the labelled sentences', async () => {
   expect(hits / total).toBeGreaterThanOrEqual(0.8);
   expect(flagged.size / corpus.clean.length).toBeLessThanOrEqual(0.15);
 }, 120_000);
+
+test('mistakes in a caption and in a footnote are found where they are written, and the sentence around a footnote is left alone', async () => {
+  const src = [
+    '\\documentclass{article}',
+    '\\usepackage{graphicx}',
+    '\\begin{document}',
+    '\\section{Results}',
+    'The method\\footnote{See the the appendix for a longer acount.} works well on every run.',
+    'It is fast.\\footnote{Measured on one machine.} We report the mean.',
+    '',
+    '\\begin{figure}',
+    '  \\centering',
+    '  \\includegraphics[width=\\linewidth]{teh-plot}',
+    '  \\caption[Latency]{Merge latency by number of concurent writters\\label{fig:teh}}',
+    '\\end{figure}',
+    '',
+    '\\begin{table}',
+    '  \\caption{An summary of the runs.}',
+    '  \\begin{tabular}{ll} recieve & 1 \\\\ \\end{tabular}',
+    '\\end{table}',
+    'The end is short.',
+    '\\end{document}',
+    '',
+  ].join('\n');
+  const { annotation, segments, asides } = prose(src);
+  const res = await fetch(`${TEST_ENV.GRAMMAR_URL}/v2/check`, {
+    method: 'POST',
+    body: new URLSearchParams({
+      data: JSON.stringify({ annotation }),
+      language: 'en-GB',
+      disabledRules: NEVER.join(','),
+    }),
+  });
+  if (!res.ok) throw new Error(`the checker answered ${res.status}: ${await res.text()}`);
+  const { matches } = (await res.json()) as {
+    matches: { offset: number; length: number; replacements: { value: string }[] }[];
+  };
+  const shown = matches.flatMap((m) => {
+    const at = placed(src, asides, m.offset, m.length);
+    return at && inProse(segments, at[0], at[1])
+      ? [{ from: at[0], words: src.slice(at[0], at[1]), first: m.replacements[0]?.value }]
+      : [];
+  });
+  // Each where it is written, in the order they are read: the footnotes, then the captions.
+  expect(shown.map((f) => f.words)).toEqual(['the the', 'acount', 'concurent', 'writters', 'An']);
+  for (const f of shown) expect(f.from).toBe(src.indexOf(f.words));
+  expect(shown[0].first).toBe('the');
+  expect(shown[2].first).toBe('concurrent');
+  expect(shown[4].first).toBe('A');
+  // Nothing in the sentences the footnotes hang on, the file name, the label or the table's cell.
+});
+
+test('an abbreviation or a made-up name is not called misspelt, and a slip beside one still is', async () => {
+  const src = [
+    '\\documentclass{article}',
+    '\\begin{document}',
+    'We train a ResNet and an EfficientNet with RMSProp, and report mAP on QNLI and on MSCOCO.',
+    'THe GPU-acelerated run recieved two SVHNs, a BiT-L model and word2vek features.',
+    'Our Frobnet baseline uses teh same DBN-based setup.\\footnote{As in SpanBERT, with a smal change.}',
+    '\\end{document}',
+    '',
+  ].join('\n');
+  const { annotation, segments, asides } = prose(src);
+  const res = await fetch(`${TEST_ENV.GRAMMAR_URL}/v2/check`, {
+    method: 'POST',
+    body: new URLSearchParams({
+      data: JSON.stringify({ annotation }),
+      language: 'en-GB',
+      disabledRules: NEVER.join(','),
+    }),
+  });
+  if (!res.ok) throw new Error(`the checker answered ${res.status}: ${await res.text()}`);
+  const { matches } = (await res.json()) as {
+    matches: {
+      offset: number;
+      length: number;
+      rule: { category: { id: string } };
+      replacements: { value: string }[];
+    }[];
+  };
+  const all = matches.flatMap((m) => {
+    const at = placed(src, asides, m.offset, m.length);
+    return at && inProse(segments, at[0], at[1])
+      ? [
+          {
+            words: src.slice(at[0], at[1]),
+            reads: readAs(src, segments, at[0], at[1]),
+            spelling: m.rule.category.id === 'TYPOS',
+            first: m.replacements[0]?.value,
+          },
+        ]
+      : [];
+  });
+  const shown = all.filter((f) => !(f.spelling && coined(f.reads)));
+  // What the checker calls misspelt before the rule: the names too.
+  expect(all.map((f) => f.words)).toEqual(
+    expect.arrayContaining(['ResNet', 'RMSProp', 'mAP', 'QNLI', 'SpanBERT']),
+  );
+  expect(shown.map((f) => f.words)).toEqual([
+    'THe',
+    'GPU-acelerated',
+    'recieved',
+    'Frobnet',
+    'teh',
+    'DBN-based',
+    'smal',
+  ]);
+  expect(shown[1].first).toBe('GPU-accelerated');
+}, 60_000);
