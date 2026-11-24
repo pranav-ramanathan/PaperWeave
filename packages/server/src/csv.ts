@@ -2,7 +2,7 @@
 // whether the guess is right. Nothing here decides: the author approves a schema.
 
 const MAX_ROWS = 200_000;
-const MAX_COLUMNS = 500;
+export const MAX_COLUMNS = 500;
 
 export type Csv = { delimiter: ',' | ';' | '\t'; header: string[]; rows: string[][] };
 export const COLUMN_TYPES = ['number', 'text', 'date'] as const;
@@ -35,6 +35,8 @@ export function parseCsv(text: string): Csv {
   let closed = false;
   const endField = () => {
     record.push(field);
+    // At once, not after the last line: a line of delimiters would otherwise be one huge array.
+    if (record.length > MAX_COLUMNS) throw new Error(`it has more than ${MAX_COLUMNS} columns`);
     field = '';
     closed = false;
   };

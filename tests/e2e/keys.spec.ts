@@ -113,7 +113,10 @@ const caretAt = (page: Page) =>
       first ??= n;
       last = n;
     }
-    if (!sel || !sel.isCollapsed) return sel ? 'selection' : 'none';
+    // No caret in the editor yet: it takes the keyboard first, and puts its caret in the text a
+    // frame later (onFocus in visual.ts). That is not "elsewhere in the text".
+    if (!sel?.anchorNode || !el.contains(sel.anchorNode)) return 'none';
+    if (!sel.isCollapsed) return 'selection';
     if (sel.anchorNode === first && sel.anchorOffset === 0) return 'start';
     if (sel.anchorNode === last && sel.anchorOffset === (last?.textContent?.length ?? -1))
       return 'end';
@@ -652,6 +655,8 @@ test('Ctrl+Home and Ctrl+End go to the start and the end of the text, with Shift
   // own caret back for a moment (ProseMirror, within 20 ms), so the move is made again until it
   // has stuck; no person types that fast.
   const middle = async () => {
+    // Keys pressed before the editor has put its caret in the text go nowhere.
+    await expect.poll(() => caretAt(page)).not.toBe('none');
     for (let i = 0; i < 5 && (await caretAt(page)) !== 'elsewhere'; i++) {
       await page.keyboard.press('ArrowDown');
       await page.keyboard.press('ArrowRight');

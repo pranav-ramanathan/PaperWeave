@@ -1,5 +1,5 @@
 import { expect, test } from 'vitest';
-import { asDate, asNumber, guessSchema, parseCsv } from './csv.ts';
+import { asDate, asNumber, guessSchema, MAX_COLUMNS, parseCsv } from './csv.ts';
 
 test('quoted fields may hold delimiters, quotes and line breaks', () => {
   const csv = parseCsv(
@@ -31,6 +31,19 @@ test('the delimiter is found, and a file that is not a table says why', () => {
     ['a,b\n"x"y,2\n', 'row 2 has text after a closing quote'],
   ])
     expect(() => parseCsv(text), text).toThrow(why);
+});
+
+test('a line with far too many columns is refused quickly, whichever row it is', () => {
+  const commas = ','.repeat(MAX_COLUMNS * 100);
+  for (const text of [commas, `a,b\n1,2\n${commas}\n`]) {
+    const started = performance.now();
+    expect(() => parseCsv(text)).toThrow(`it has more than ${MAX_COLUMNS} columns`);
+    expect(performance.now() - started).toBeLessThan(250);
+  }
+  // Exactly the most is still a table.
+  const names = Array.from({ length: MAX_COLUMNS }, (_, i) => `c${i}`);
+  expect(parseCsv(`${names.join(',')}\n`).header).toHaveLength(MAX_COLUMNS);
+  expect(() => parseCsv(`${[...names, 'x'].join(',')}\n`)).toThrow('more than 500 columns');
 });
 
 test('numbers and dates are read as data writes them, and nothing is assumed', () => {

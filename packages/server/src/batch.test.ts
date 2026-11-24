@@ -63,6 +63,57 @@ test('readAhead starts nothing it is not asked for, and starts no more once it i
   expect(g.started.length).toBeLessThanOrEqual(8);
 });
 
+test('readAhead with weights never has more than the budget started and not handed out', async () => {
+  const weights = [4, 3, 5, 2, 2, 6, 1, 1, 4, 4, 3, 2];
+  const items = weights.map((_, i) => i);
+  let done = 0; // the items the reader has finished with
+  let peakBytes = 0;
+  let peakCount = 0;
+  const got: number[] = [];
+  const gen = readAhead(
+    items,
+    16,
+    async (i) => {
+      const held = weights.slice(done, i + 1).reduce((a, b) => a + b, 0);
+      peakBytes = Math.max(peakBytes, held);
+      peakCount = Math.max(peakCount, i + 1 - done);
+      await sleep(3);
+      return i;
+    },
+    { weight: (i) => weights[i], budget: 10 },
+  );
+  for await (const v of gen) {
+    got.push(v);
+    done++;
+  }
+  expect(got).toEqual(items);
+  expect(peakBytes).toBeLessThanOrEqual(10);
+  // It does read ahead: more than one at a time, where the weights allow.
+  expect(peakCount).toBeGreaterThan(2);
+});
+
+test('readAhead sends an item that is over the budget on its own', async () => {
+  const weights = [1, 30, 1, 1];
+  const started: number[] = [];
+  const seenWithBig: number[][] = [];
+  const gen = readAhead(
+    [0, 1, 2, 3],
+    16,
+    async (i) => {
+      started.push(i);
+      await sleep(3);
+      if (i === 1) seenWithBig.push([...started]);
+      return i;
+    },
+    { weight: (i) => weights[i], budget: 10 },
+  );
+  const got: number[] = [];
+  for await (const v of gen) got.push(v);
+  expect(got).toEqual([0, 1, 2, 3]);
+  // The big one was not started beside the first, and nothing was started beside it.
+  expect(seenWithBig).toEqual([[0, 1]]);
+});
+
 test('readAhead raises a failure when its turn comes, and not before', async () => {
   const items = [0, 1, 2, 3];
   const seen: number[] = [];

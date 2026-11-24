@@ -3,6 +3,8 @@
 
 /** Store reads, which use no connection of the pool, go this many at a time. */
 export const READS = 16;
+/** Of the blobs read ahead for a stream, those started and not yet used may hold this many bytes. */
+export const READ_BYTES = 16 * 1024 * 1024;
 /** Anything that takes a connection of the pool for each item goes this many at a time. */
 export const CONNECTIONS = 8;
 
@@ -34,23 +36,39 @@ export async function mapLimit<T, R>(
 /**
  * `fn` of each item, handed out in the order of the items as each is done, with up to `limit`
  * started ahead of the one being waited for. Stopping early stops starting more.
+ *
+ * With `weight` and `budget` (bytes, say), an item is also not started while the items started
+ * and not yet handed out, with it, would weigh more than the budget. The one being waited for
+ * always goes, even if it weighs more than the budget alone. Without them, only `limit` counts.
  */
 export async function* readAhead<T, R>(
   items: readonly T[],
   limit: number,
   fn: (item: T) => Promise<R>,
+  opts: { weight?: (item: T) => number; budget?: number } = {},
 ): AsyncGenerator<R> {
+  const { weight, budget = Infinity } = opts;
   const started: Promise<R>[] = [];
+  const weights: number[] = [];
   let next = 0;
-  const fill = (upTo: number) => {
-    for (; next < items.length && next < upTo; next++) {
+  let held = 0; // the weight of what is started and not yet handed out
+  const fill = (waited: number) => {
+    for (; next < items.length && next < waited + limit; next++) {
+      const w = weight ? weight(items[next]) : 0;
+      if (next > waited && held + w > budget) break;
+      held += w;
+      weights.push(w);
       const p = fn(items[next]);
       p.catch(() => {}); // seen when its turn comes, not before
       started.push(p);
     }
   };
   for (let i = 0; i < items.length; i++) {
-    fill(i + limit);
-    yield await started[i];
+    fill(i);
+    try {
+      yield await started[i];
+    } finally {
+      held -= weights[i];
+    }
   }
 }
