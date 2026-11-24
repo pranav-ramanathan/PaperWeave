@@ -7208,3 +7208,32 @@ compaction runs only every 500 edits.
   structural edit over budget is answered with the error, and the metrics count it).
 - **Not done.** The budget is not shared between sync servers (there is one) and starts afresh
   when the server restarts. Edits made by the web app's own requests are not counted.
+
+## Restores and replaced files have a budget too
+
+The sync budget did not count what the web app writes as edits itself, so alternating two
+restores of a large paper got round it (`docs/security-review.md`, Open 1).
+
+- **The budget.** `WEB_EDIT_BYTES_PER_USER_HOUR`, default 100 MB, summed for each person over all
+  their papers for the last hour. Kept in the database (`web_edits`, migration 0036), because
+  two web apps may run. A row keeps the person, the paper (left empty if the paper is deleted)
+  and the bytes; nothing of the text.
+- **What costs.** A restore or a replacement costs the bytes of edit it appends, at least 256 KB.
+  The floor also applies to a restore that changes nothing and to a replaced picture or other
+  file that is not text. `editLocked` now returns the bytes it appended. A replace that finds no
+  file at the path adds a file and is not charged. A file uploaded to replace one
+  (`addUploaded` with `replace`) goes through `replaceFile` and is charged.
+- **How.** `mayRewrite` runs after the permission check and before any blob is read or stored,
+  and refuses if even the floor no longer fits. `chargeRewrite` runs in the transaction, after
+  the edits are appended (in `within` for a replace), under `pg_advisory_xact_lock` on the
+  person, and deletes rows a day old. Over budget it throws `conflict`, "You have changed too
+  much in the last hour. Try again in a little while.", and the transaction ends: no edits, no
+  revision, no notice. A viewer or someone not on the paper is refused first and not charged.
+  The budget is an optional last argument (`restoreRevision`, `replaceFile`, `addUploaded`) so
+  tests can use a small one.
+- **Held by** `limits.sandbox.test.ts` (sums per person, a charge 61 minutes old, two at once),
+  `revisions.sandbox.test.ts` and `files.sandbox.test.ts`.
+- **Not done.** Accepting and undoing proposals, renaming labels and renaming files also edit
+  text from the web app and are still not counted. Imports are not counted. A refused request
+  has already done its reading and, for a restore, its storing of edited text, before the
+  charge; only the early check is free.

@@ -237,27 +237,33 @@ export function editFile(
   userId: string,
   change: (text: Y.Text) => void,
 ): Promise<void> {
-  return transaction(pool, (db) => editLocked(db, store, fileId, userId, change));
+  return transaction(pool, async (db) => {
+    await editLocked(db, store, fileId, userId, change);
+  });
 }
 
-/** The same as one step of a larger transaction. People see the edit when it commits. */
+/**
+ * The same as one step of a larger transaction. People see the edit when it commits. Returns the
+ * bytes of edit appended: 0 if nothing changed.
+ */
 export async function editLocked(
   db: Db,
   store: BlobStore,
   fileId: string,
   userId: string,
   change: (text: Y.Text) => void,
-): Promise<void> {
+): Promise<number> {
   const doc = new Y.Doc();
   for (const update of await lockedUpdates(db, store, fileId)) Y.applyUpdate(doc, update);
   const before = Y.encodeStateVector(doc);
   change(doc.getText(TEXT));
   const update = Y.encodeStateAsUpdate(doc, before);
   // Two zero bytes: nothing was inserted or deleted.
-  if (update.length <= 2) return;
+  if (update.length <= 2) return 0;
   const seq = await appendUpdate(db, fileId, userId, update);
   if (seq === null) throw new AppError('permission_denied', 'You cannot edit this file.');
   await db.query("select pg_notify('file_edits', $1)", [`${fileId}:${seq}`]);
+  return update.length;
 }
 
 /**

@@ -10,6 +10,7 @@ import type { Db } from './db.ts';
 import { AppError } from './errors.ts';
 import { createFile, replaceFile } from './files.ts';
 import { importZip } from './import.ts';
+import type { RewriteOpts } from './limits.ts';
 import { id } from './projects.ts';
 
 /** An upload nobody took is removed after this long: its address's ten minutes, then a margin. */
@@ -141,13 +142,14 @@ export async function addUploaded(
   path: unknown,
   limits: Limits = LIMITS,
   replace = false,
+  budget: RewriteOpts = {},
 ): Promise<string> {
   // Before anything is read, and before the upload is touched: someone with no right to the
   // paper removes nothing.
   await authorize(db, userId, id(projectId), 'file.write');
   return takeUpload(db, store, userId, key, limits.fileBytes, FILE_TOO_LARGE, (bytes) =>
     replace
-      ? replaceFile(db as pg.Pool, store, userId, projectId, path, bytes, limits)
+      ? replaceFile(db as pg.Pool, store, userId, projectId, path, bytes, limits, budget)
       : createFile(db, store, userId, projectId, path, bytes, limits),
   );
 }

@@ -18,6 +18,7 @@ import type { BlobStore } from './blobs.ts';
 import { type Db, transaction } from './db.ts';
 import { AppError } from './errors.ts';
 import { fileMeta, filesChanged, removeFile } from './files.ts';
+import { chargeRewrite, mayRewrite, type RewriteOpts } from './limits.ts';
 import { recordDownload } from './metrics.ts';
 import { id } from './projects.ts';
 import * as Y from 'yjs';
@@ -1027,7 +1028,8 @@ export function restoreEdits(
 
 /**
  * Put the paper back to how it was in a revision, as new edits on top of what is there now.
- * Nothing is erased: the restore is itself a new revision, and the ones in between remain.
+ * Nothing is erased: the restore is itself a new revision, and the ones in between remain. It
+ * costs the person the bytes of edits it adds, at least the floor, from their hour's budget.
  */
 export async function restoreRevision(
   pool: pg.Pool,
@@ -1035,8 +1037,10 @@ export async function restoreRevision(
   userId: string,
   projectId: string,
   revisionId: string,
+  budget: RewriteOpts = {},
 ): Promise<{ id: string; number: number }> {
   await authorize(pool, userId, id(projectId), 'revision.write');
+  await mayRewrite(pool, userId, budget);
   const { revision, files } = await load(pool, projectId, revisionId);
   const ready = await putEdited(pool, store, projectId);
   // Everything that can be worked out without holding anything is, here: the revision's files are
@@ -1096,6 +1100,8 @@ export async function restoreRevision(
       readonly: string | null;
     }[] = [];
     let leftText = false;
+    // The bytes of edit this restore adds, for the person's budget.
+    let appended = 0;
     for (const target of files) {
       const file = live.find((f) => f.id === target.file_id);
       if (!file) throw new Error(`file ${target.file_id} of revision ${revisionId} is gone`);
@@ -1109,6 +1115,7 @@ export async function restoreRevision(
         if (had && had.seenSeq === String(locked.get(file.id)?.head_seq) && had.eol === file.eol) {
           if (had.update) {
             appends.push({ fileId: file.id, update: had.update });
+            appended += had.update.length;
             // The restored file is the revision's bytes, if they are what its row would encode.
             if (
               decoded.meta.eol === file.eol &&
@@ -1119,7 +1126,7 @@ export async function restoreRevision(
           }
           continue;
         }
-        await editLocked(db, store, file.id, userId, (text) => {
+        appended += await editLocked(db, store, file.id, userId, (text) => {
           for (const e of restoreEdits(text.toString(), want)) {
             if (e.del) text.delete(e.at, e.del);
             if (e.ins) text.insert(e.at, e.ins);
@@ -1161,7 +1168,7 @@ export async function restoreRevision(
             if (!read.editable)
               throw new Error(`file ${file.id} is text in one place and not in another`);
             const want = read.text;
-            await editLocked(db, store, file.id, userId, (text) => {
+            appended += await editLocked(db, store, file.id, userId, (text) => {
               for (const e of restoreEdits(text.toString(), want)) {
                 if (e.del) text.delete(e.at, e.del);
                 if (e.ins) text.insert(e.at, e.ins);
@@ -1178,6 +1185,8 @@ export async function restoreRevision(
         [renames.map((r) => r.id), renames.map((r) => r.path)],
       );
     const seqs = await appendUpdates(db, projectId, userId, appends);
+    // Charged with every edit made: over budget, the transaction ends and none of it is kept.
+    await chargeRewrite(db, userId, projectId, appended, budget);
     await notifyEdits(db, seqs);
     if (others.length)
       await db.query(

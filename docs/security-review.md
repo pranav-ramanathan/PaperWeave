@@ -255,9 +255,13 @@ In rough order of how much they matter.
    (`SYNC_EDIT_BURST_BYTES`, `SYNC_EDIT_BYTES_PER_MINUTE`), so one account can no longer add
    2 MB edits without pause. It is kept in the sync server's memory, so it starts afresh
    when that restarts, and it counts bytes sent, not what they add up to once compacted.
-   Reading pages, uploading within a paper's limit, and changes made by the web app's own
-   requests (restores, imports, replacing a file) are not limited this way, beyond needing to
-   be signed in. A proxy in front should limit requests per person. There is no limit on
+   Restores and replaced files (by form or by upload), which the web app makes as edits, are
+   limited the same way by size, for each person over all their papers: 100 MB an hour, each
+   costing the bytes of edits it appends and at least 256 KB (`WEB_EDIT_BYTES_PER_USER_HOUR`),
+   kept in the database (`web_edits`), so alternating two restores of a large paper no longer
+   gets round the sync budget. Reading pages, uploading within a paper's limit, imports,
+   accepting and undoing proposals, renaming labels and files are not limited this way, beyond
+   needing to be signed in. A proxy in front should limit requests per person. There is no limit on
    what one person's papers add up to over time: that is a decision about accounts, not made
    here.
 2. **One advisory in a development tool.** `pnpm audit` on 18 November 2026, and again on

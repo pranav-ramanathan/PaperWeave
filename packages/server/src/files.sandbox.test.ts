@@ -21,6 +21,8 @@ import {
   setRootFile,
 } from './files.ts';
 import { exportZip, importZip, listFiles } from './import.ts';
+import { WEB_EDIT_FLOOR } from './limits.ts';
+import { addUploaded, startUpload } from './uploads.ts';
 import { acceptInvitation, createProject, getProject, invite, setRole } from './projects.ts';
 import { listRevisions, renameFile, restoreRevision, saveRevision } from './revisions.ts';
 import * as Y from 'yjs';
@@ -1247,4 +1249,138 @@ test('the lines that name a file are found before it is deleted', async () => {
   );
   // Looking changes nothing.
   expect(await paths(project.id)).toContain('sections/intro.tex');
+});
+
+// What a person has put through the web app, as the budget counts it.
+const webRows = async (userId: string) =>
+  (
+    await t.pool.query(
+      'select bytes::float8 as bytes, project_id from web_edits where user_id = $1 order by id',
+      [userId],
+    )
+  ).rows as { bytes: number; project_id: string }[];
+// A paper of its own owner, so that the budget spent here is spent by no other test.
+async function budgetPaper(email: string) {
+  const me = await t.signIn(email);
+  const zip = await writeZip([{ path: 'main.tex', bytes: Buffer.from(MAIN) }]);
+  const [project] = await importZip(t.pool, store, me.id, zip, 'Budget');
+  const main = (await listFiles(t.pool, me.id, project.id)).find((f) => f.path === 'main.tex')!.id;
+  return { me, project: project.id, main };
+}
+const textOf = async (fileId: string) => Buffer.from(await bytesOf(fileId)).toString();
+const BIG = '% filler line to make the text large\n'.repeat(11_000); // about 400 KB
+
+test('replacing an edited text file costs the bytes of the edit it appends', async () => {
+  const { me, project, main } = await budgetPaper('replace-charge@example.org');
+  await editFile(t.pool, store, main, me.id, (text) => text.insert(text.length, '% typed\n'));
+  await replaceFile(t.pool, store, me.id, project, 'main.tex', Buffer.from(MAIN + BIG));
+  const rows = await webRows(me.id);
+  expect(rows).toHaveLength(1);
+  expect(rows[0].project_id).toBe(project);
+  // The added text is in the edit, so it costs at least its length, and more than the floor.
+  expect(rows[0].bytes).toBeGreaterThanOrEqual(BIG.length);
+  expect(rows[0].bytes).toBeGreaterThan(WEB_EDIT_FLOOR);
+  expect(await textOf(main)).toBe(MAIN + BIG);
+});
+
+test('a replacement over budget is refused before anything is stored, and changes nothing', async () => {
+  const { me, project, main } = await budgetPaper('replace-over@example.org');
+  await editFile(t.pool, store, main, me.id, (text) => text.insert(text.length, '% typed\n'));
+  let puts = 0;
+  const counting = { ...store, put: (b: Uint8Array) => (puts++, store.put(b)) };
+  const budget = { bytesPerHour: WEB_EDIT_FLOOR };
+  // A small change costs the floor, which is all of this budget.
+  await replaceFile(
+    t.pool,
+    counting,
+    me.id,
+    project,
+    'main.tex',
+    Buffer.from(MAIN + 'a\n'),
+    LIMITS,
+    budget,
+  );
+  expect(puts).toBeGreaterThan(0);
+  const bytes = await textOf(main);
+  const revisions = (await listRevisions(t.pool, me.id, project)).length;
+  puts = 0;
+  await expect(
+    replaceFile(
+      t.pool,
+      counting,
+      me.id,
+      project,
+      'main.tex',
+      Buffer.from(MAIN + 'b\n'),
+      LIMITS,
+      budget,
+    ),
+  ).rejects.toMatchObject({
+    code: 'conflict',
+    message: 'You have changed too much in the last hour. Try again in a little while.',
+  });
+  expect(puts).toBe(0);
+  expect(await textOf(main)).toBe(bytes);
+  expect((await listRevisions(t.pool, me.id, project)).length).toBe(revisions);
+  expect(await webRows(me.id)).toHaveLength(1);
+});
+
+test('a replacement refused at the exact charge is undone whole', async () => {
+  const { me, project, main } = await budgetPaper('replace-exact@example.org');
+  await editFile(t.pool, store, main, me.id, (text) => text.insert(text.length, '% typed\n'));
+  const bytes = await textOf(main);
+  const revisions = (await listRevisions(t.pool, me.id, project)).length;
+  // Room for the floor, not for the 400 KB this adds.
+  await expect(
+    replaceFile(t.pool, store, me.id, project, 'main.tex', Buffer.from(MAIN + BIG), LIMITS, {
+      bytesPerHour: WEB_EDIT_FLOOR + 1000,
+    }),
+  ).rejects.toMatchObject({ code: 'conflict' });
+  expect(await textOf(main)).toBe(bytes);
+  expect((await listRevisions(t.pool, me.id, project)).length).toBe(revisions);
+  expect(await webRows(me.id)).toHaveLength(0);
+});
+
+test('a viewer replacing a file is refused first and is not charged', async () => {
+  const p = await paper();
+  expect(
+    await code(replaceFile(t.pool, store, viewer.id, p.id, 'main.tex', Buffer.from('x'))),
+  ).toBe('permission_denied');
+  expect(await webRows(viewer.id)).toHaveLength(0);
+});
+
+test('a replacement of a picture costs the floor', async () => {
+  const { me, project } = await budgetPaper('replace-picture@example.org');
+  await createFile(t.pool, store, me.id, project, 'fig.png', Buffer.from([1, 2, 3]));
+  await replaceFile(t.pool, store, me.id, project, 'fig.png', Buffer.from([4, 5, 6]));
+  expect((await webRows(me.id)).map((r) => r.bytes)).toEqual([WEB_EDIT_FLOOR]);
+});
+
+test('a replace that makes a new file is not charged', async () => {
+  const { me, project } = await budgetPaper('replace-new@example.org');
+  // Even with no budget at all: nothing is rewritten.
+  await replaceFile(t.pool, store, me.id, project, 'fresh.tex', Buffer.from('New.\n'), LIMITS, {
+    bytesPerHour: 1,
+  });
+  expect((await listFiles(t.pool, me.id, project)).map((f) => f.path)).toContain('fresh.tex');
+  expect(await webRows(me.id)).toHaveLength(0);
+});
+
+test('a file uploaded to replace one is charged like a replacement', async () => {
+  const { me, project, main } = await budgetPaper('replace-upload@example.org');
+  await editFile(t.pool, store, main, me.id, (text) => text.insert(text.length, '% typed\n'));
+  const body = Buffer.from(MAIN + BIG);
+  const { key, url } = await startUpload(
+    t.pool,
+    store,
+    me.id,
+    { kind: 'file', projectId: project },
+    body.length,
+  );
+  expect((await fetch(url, { method: 'PUT', body: body as BodyInit })).ok).toBe(true);
+  await addUploaded(t.pool, store, me.id, project, key, 'main.tex', LIMITS, true);
+  const rows = await webRows(me.id);
+  expect(rows).toHaveLength(1);
+  expect(rows[0].bytes).toBeGreaterThanOrEqual(BIG.length);
+  expect(await textOf(main)).toBe(MAIN + BIG);
 });

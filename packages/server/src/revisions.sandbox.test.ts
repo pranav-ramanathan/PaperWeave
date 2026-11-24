@@ -11,6 +11,7 @@ import { blobStore, sha256 } from './blobs.ts';
 import { createFile, deleteFile, replaceFile } from './files.ts';
 import { approveDataset, datasetProposal } from './data.ts';
 import { exportZip, importZip, listFiles } from './import.ts';
+import { WEB_EDIT_FLOOR } from './limits.ts';
 import { acceptInvitation, getProject, invite } from './projects.ts';
 import { acceptProposal, listProposals, propose, undoAccept } from './proposals.ts';
 import {
@@ -1580,4 +1581,89 @@ test('an added data file held out of downloads shows its lines, like a changed o
   // Taken out again, the same.
   const back = await diffRevisions(t.pool, store, viewer.id, p.id, b.id, a.id);
   expect(back.files[1]).toMatchObject({ path: 'runs.csv', status: 'removed', held: true });
+});
+
+// What a person has put through the web app's restores, as the budget counts it.
+const webSpent = async (userId: string) =>
+  Number(
+    (
+      await t.pool.query(
+        'select coalesce(sum(bytes), 0)::float8 as n from web_edits where user_id = $1',
+        [userId],
+      )
+    ).rows[0].n,
+  );
+// A paper of its own owner, so that the budget spent here is spent by no other test.
+async function budgetPaper(email: string) {
+  const me = await t.signIn(email);
+  const zip = await writeZip([{ path: 'main.tex', bytes: Buffer.from(MAIN) }]);
+  const [project] = await importZip(t.pool, store, me.id, zip, 'Budget');
+  const main = (await listFiles(t.pool, me.id, project.id)).find((f) => f.path === 'main.tex')!.id;
+  return { me, project: project.id, main };
+}
+// What a refused restore must leave alone.
+const standing = async (me: { id: string }, project: string, main: string) => {
+  const text = new Y.Doc();
+  for (const u of await loadUpdates(t.pool, store, main)) Y.applyUpdate(text, u);
+  return {
+    text: text.getText(TEXT).toString(),
+    revisions: (await listRevisions(t.pool, me.id, project)).length,
+    head: (await t.pool.query('select head_seq from files where id = $1', [main])).rows[0].head_seq,
+  };
+};
+
+test('alternating restores succeed until the hour budget is spent, and the refused one changes nothing', async () => {
+  const { me, project, main } = await budgetPaper('rewrite-alternate@example.org');
+  const first = await saveRevision(t.pool, store, me.id, project, 'first');
+  await editFile(t.pool, store, main, me.id, (text) => text.insert(text.length, '% second\n'));
+  const second = await saveRevision(t.pool, store, me.id, project, 'second');
+  const budget = { bytesPerHour: 3 * WEB_EDIT_FLOOR };
+  for (const to of [first, second, first])
+    await restoreRevision(t.pool, store, me.id, project, to.id, budget);
+  expect(await webSpent(me.id)).toBe(3 * WEB_EDIT_FLOOR);
+  const before = await standing(me, project, main);
+  expect(before.text).toBe(MAIN);
+  await expect(restoreRevision(t.pool, store, me.id, project, second.id, budget)).rejects.toThrow(
+    'You have changed too much in the last hour. Try again in a little while.',
+  );
+  expect(await standing(me, project, main)).toEqual(before);
+  expect(await webSpent(me.id)).toBe(3 * WEB_EDIT_FLOOR);
+});
+
+test('a restore that adds more than the budget allows is undone whole', async () => {
+  const { me, project, main } = await budgetPaper('rewrite-exact@example.org');
+  const first = await saveRevision(t.pool, store, me.id, project, 'first');
+  // About 400 KB of text, saved, then taken away: putting it back appends more than the floor.
+  const big = '% filler line to make the edit large\n'.repeat(11_000);
+  await editFile(t.pool, store, main, me.id, (text) => text.insert(text.length, big));
+  const withBig = await saveRevision(t.pool, store, me.id, project, 'big');
+  await restoreRevision(t.pool, store, me.id, project, first.id);
+  const before = await standing(me, project, main);
+  expect(before.text).toBe(MAIN);
+  const spentBefore = await webSpent(me.id);
+  // Room for the floor, so the early check passes; not for what the restore adds.
+  const budget = { bytesPerHour: spentBefore + WEB_EDIT_FLOOR + 1000 };
+  await expect(
+    restoreRevision(t.pool, store, me.id, project, withBig.id, budget),
+  ).rejects.toMatchObject({ code: 'conflict' });
+  expect(await standing(me, project, main)).toEqual(before);
+  expect(await webSpent(me.id)).toBe(spentBefore);
+});
+
+test('a viewer cannot restore, and is not charged', async () => {
+  const p = await paper();
+  const saved = await saveRevision(t.pool, store, owner.id, p.id, 'kept');
+  expect(await code(restoreRevision(t.pool, store, viewer.id, p.id, saved.id))).toBe(
+    'permission_denied',
+  );
+  expect(await code(restoreRevision(t.pool, store, outsider.id, p.id, saved.id))).not.toBe('ok');
+  expect(await webSpent(viewer.id)).toBe(0);
+  expect(await webSpent(outsider.id)).toBe(0);
+});
+
+test('a restore that changes nothing costs the floor', async () => {
+  const { me, project } = await budgetPaper('rewrite-nothing@example.org');
+  const saved = await saveRevision(t.pool, store, me.id, project, 'same');
+  await restoreRevision(t.pool, store, me.id, project, saved.id);
+  expect(await webSpent(me.id)).toBe(WEB_EDIT_FLOOR);
 });

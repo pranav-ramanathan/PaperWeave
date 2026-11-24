@@ -59,6 +59,60 @@ export function editBudget({ burst, perMinute, floor }: EditBudgetConfig) {
   };
 }
 
+/** What one person may rewrite through the web app (restores, replaced files), in bytes an hour. */
+export const WEB_EDIT_BYTES_PER_HOUR = 100_000_000;
+/** What the smallest rewrite costs, even one that changes nothing. */
+export const WEB_EDIT_FLOOR = 256 * 1024;
+
+export type RewriteOpts = { bytesPerHour?: number };
+const REFUSED = 'You have changed too much in the last hour. Try again in a little while.';
+const rewriteBudget = (opts: RewriteOpts) =>
+  opts.bytesPerHour ?? envCount('WEB_EDIT_BYTES_PER_USER_HOUR', WEB_EDIT_BYTES_PER_HOUR);
+const spentLastHour = async (db: Db, userId: string) =>
+  Number(
+    (
+      await db.query(
+        `select coalesce(sum(bytes), 0)::float8 as spent from web_edits
+         where user_id = $1 and created_at > now() - interval '1 hour'`,
+        [userId],
+      )
+    ).rows[0].spent,
+  );
+
+/**
+ * An early check, before any file is read or stored: refuses if even the smallest rewrite no
+ * longer fits in this person's hour. The exact charge is `chargeRewrite`, made later.
+ */
+export async function mayRewrite(db: Db, userId: string, opts: RewriteOpts = {}): Promise<void> {
+  if ((await spentLastHour(db, userId)) + WEB_EDIT_FLOOR > rewriteBudget(opts))
+    throw new AppError('conflict', REFUSED);
+}
+
+/**
+ * Charge a rewrite of `appended` bytes of edits (at least the floor) to this person, over all
+ * their papers. Called inside the transaction that made the edits, after them, so that a refusal
+ * rolls them back. The person is locked for the rest of the transaction, so two rewrites at once
+ * cannot both take the last of the budget. Rows a day old are removed.
+ */
+export async function chargeRewrite(
+  db: Db,
+  userId: string,
+  projectId: string,
+  appended: number,
+  opts: RewriteOpts = {},
+): Promise<void> {
+  await db.query('select pg_advisory_xact_lock(hashtext($1))', [`web_edits:${userId}`]);
+  await db.query("delete from web_edits where created_at < now() - interval '1 day'");
+  const cost = Math.max(appended, WEB_EDIT_FLOOR);
+  if ((await spentLastHour(db, userId)) + cost > rewriteBudget(opts))
+    throw new AppError('conflict', REFUSED);
+  await db.query('insert into web_edits (user_id, project_id, bytes) values ($1, $2, $3)', [
+    userId,
+    projectId,
+    cost,
+  ]);
+}
+
 export const COMMENTS_PER_USER = 60; // on one paper, in ten minutes
 export const COMMENTS_PER_PAPER = 2000; // in a day, from everyone
 
