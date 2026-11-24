@@ -6889,3 +6889,63 @@ of the paper's .bib files.`
     the source view of either. One machine, once.
   - The paper's own page in another tab; a restore-removed file's lines in the comparison; a
     file renamed away from `.tex` (as before).
+
+## Typing in the visual view of a long file is fast again
+
+- **What was wrong.** In the visual view of a 150 KB file a key took a median of 48 to 80 ms
+  (p95 72 to 112) and up to 21 of 48 keys were a long task; the spec asks for 50. Two causes:
+  every key paid for every block of the file, on screen or not (the editor is one `contenteditable`
+  of some 35,000 elements: the browser's own text insertion, hit testing and paint grew with the
+  file); and once a comment, proposed change or spelling finding stood after the caret in the same
+  paragraph, each key drew that paragraph twice (the marks were placed from source offsets that
+  were one letter behind, and again a moment later when they were set), and the second drawing
+  wrote the selection to the screen again, which costs about 20 ms in a long editable document.
+- **Now** the blocks of the editor that are out of sight are not laid out or painted until they
+  come near (`content-visibility: auto` on `.visual .ProseMirror > *`, `apps/web/app/globals.css`),
+  and the marks are kept in plugin state and moved through each transaction
+  (`apps/web/lib/visual.ts`, `marks`, `drawMarks`). They are still placed afresh when they are set
+  (after every change to the text) and when the document is drawn from the source, so the
+  mapping only makes the first drawing of a key the right one; the second finds nothing to change
+  and leaves the selection alone. A block's height is remembered once seen (4em until then), and
+  `overflow-clip-margin: 1.5em` keeps another person's name above their caret from being cut off
+  by the paint containment that comes with the rule.
+  A formula or table wider than the pane would be cut off by the same rule (the pane used to
+  scroll sideways to reach it), so the editor's top-level `div` blocks (display formulas, figures,
+  tables, raw LaTeX) now scroll sideways on their own.
+
+  Keydown time in the real editor (production build, 48 keys 70 ms apart in the middle of the
+  file, the planner's `rounds` approach), median / p95 in ms and keys that were a long task, before
+  and after:
+
+  | File   | Round                           | Before              | After             |
+  | ------ | ------------------------------- | ------------------- | ----------------- |
+  | 33 KB  | 1–3, no finding after the caret | 16–24 / 24–32 / 0   | 16 / 16–32 / 0    |
+  | 33 KB  | 4–5, a finding after the caret  | 24 / 32–40 / 0      | 16 / 24 / 0       |
+  | 150 KB | 1–3                             | 48–56 / 72–88 / 2–5 | 16–24 / 24–32 / 0 |
+  | 150 KB | 4–5                             | 72–80 / 112 / 14–21 | 24 / 32 / 0       |
+
+  One machine, headless Chromium, one run of each. The browser's event timing rounds to 8 ms and
+  does not report keys under 16 ms, so 16 is its floor.
+
+- **Held by** `tests/e2e/large.spec.ts` (a long file in the visual view: blocks far down have
+  `content-visibility: auto`, a formula wider than the pane scrolls in its own block and the pane
+  does not scroll sideways, and a word typed before a marked finding in the same paragraph leaves
+  the mark on its own word and is saved). No timing is asserted, as it would flake in CI; the
+  numbers are in `docs/benchmarks.md`. The speed limits of `spike.spec` still apply.
+- **Not done.**
+  - React still commits two or three times a key (`setSync`, and `setOthers` with a new array at
+    every awareness change, the person's own caret included), and each commit reads the
+    selection by walking the text up to the caret: 6 to 7 ms a key in the middle of a 150 KB
+    file. Fewer commits would take most of it; it needs a decision on whether "All edits saved."
+    may lag a moment. Left for later.
+  - Selecting everything, or finding in the page, makes every block count as seen: typing with
+    the whole file selected is as slow as before.
+  - Until a block has been seen its height is a guess of 4em, so the scroll bar's thumb moves a
+    little while a long file is first scrolled through.
+  - A formula inside a paragraph that cannot be broken and is wider than the pane is cut off at
+    the pane's edge (plus 1.5em), where the pane used to scroll sideways to it. A paragraph
+    cannot scroll on its own without cutting off the name above a caret on its first line. Such
+    a formula breaks after each plus or equals sign, so it takes one with no operator in it,
+    which is rare. Another person's name above their caret in the first line of a table cell
+    or figure may be cut off by that block's own scroll (not checked).
+  - Measured on one machine, in headless Chromium only.
