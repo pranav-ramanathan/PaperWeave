@@ -400,6 +400,8 @@ export function translate(
   hint?: { from: number; to: number; size: number },
   /** The selection the change replaced, if it ran from one text block into another. */
   across?: Across,
+  /** Where the change split a block in two (Enter), if that is all it did. */
+  cut?: number,
 ): Translation | null {
   const dd = diff(before, after);
   if (across) {
@@ -465,6 +467,37 @@ export function translate(
         : item($a.parent) && $a.parentOffset === 0 && $a.index(1) > 0
           ? a - 2
           : item($a.parent) && $a.parentOffset > 0 && a;
+    // Enter at the very start of a list's first item, or of an item that follows an empty one:
+    // an empty \item opens above it, and the caret stays with the text. (After an empty item the
+    // same document comes from Enter in that empty item, which does nothing: only where the
+    // split was made tells them apart.)
+    if (
+      $a.depth === 2 &&
+      item($a.parent) &&
+      !$a.parentOffset &&
+      $a.parent.content.size &&
+      (!$a.index(1) || (cut === a && !$a.node(1).child($a.index(1) - 1).content.size))
+    ) {
+      let above: PMNode | null;
+      try {
+        above = new Transform(before).split(a).doc;
+      } catch {
+        above = null;
+      }
+      const spot = above?.eq(after) ? locate(m, before, a) : null;
+      if (!spot || spot.block < 0) return null;
+      const head = spot.pieces[0];
+      const at = spot.text.lastIndexOf('\\item', head.e - 1);
+      // Only spaces may stand between this \item and its text: a comment there could hold another.
+      if (head.k !== 'pre' || at < head.s || !/^\s*$/.test(spot.text.slice(at + 5, head.e)))
+        return null;
+      const lead = spot.text.slice(spot.text.lastIndexOf('\n', at - 1) + 1, at);
+      const indent = /^[ \t]*$/.test(lead) ? lead : '';
+      return {
+        edits: abs(spot.base, [{ from: at, to: at, insert: `\\item \n${indent}` }]),
+        phantom: m.phantom,
+      };
+    }
     let split: PMNode | null = null;
     if (c) {
       try {

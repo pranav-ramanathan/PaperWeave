@@ -685,6 +685,94 @@ test('Enter in a list item opens a new item; undo takes it back; another person 
   await expect(other.page.locator(`${VISUAL} li`)).toHaveCount(2);
 });
 
+test("Enter at the start of a list's first item opens an item above it, twice over; typing fills it; undo takes it back", async ({
+  browser,
+}) => {
+  test.setTimeout(180_000);
+  const { page, email } = await person(browser, 'vis-listtop');
+  const other = await person(browser, 'vis-listtop-2');
+  const main = [
+    '\\documentclass{article}',
+    '\\begin{document}',
+    'Alpha one two alphaend.',
+    '',
+    '\\begin{itemize}',
+    '  \\item item uno',
+    '  \\item item dos',
+    '\\end{itemize}',
+    '\\end{document}',
+    '',
+  ].join('\n');
+  const zip = join(mkdtempSync(join(tmpdir(), 'paperweave-e2e-')), `ListTop ${run}.zip`);
+  writeFileSync(zip, await writeZip([{ path: 'main.tex', bytes: Buffer.from(main) }]));
+  await page.goto('/sign-in');
+  await signIn(page, email);
+  await page.getByLabel('Or import a ZIP of a LaTeX project').setInputFiles(zip);
+  await page.getByRole('button', { name: 'Import ZIP' }).click();
+  await page.getByLabel('Their email address').fill(other.email);
+  await page.getByLabel('Their role').selectOption('editor');
+  await page.getByRole('button', { name: 'Send invitation' }).click();
+  await expect(page.getByRole('status')).toContainText(other.email);
+  await other.page.goto(await emailedLink(other.email, '/invitations/'));
+  await signIn(other.page, other.email);
+  await other.page.getByRole('button', { name: 'Join this paper' }).click();
+  await expect(other.page.getByText('You are an editor')).toBeVisible();
+  await page.getByRole('link', { name: 'main.tex' }).first().click();
+  await expect(status(page)).toHaveText('All edits saved.');
+  await other.page.goto(page.url());
+  await expect(other.page.locator(VISUAL)).toContainText('item dos');
+  await expect(other.page.locator(`${VISUAL} li`)).toHaveCount(2);
+  const note = page.locator('.editor .toolbar .note');
+  const text = async () => {
+    await expect(status(page)).toHaveText('All edits saved.');
+    await showSource(page);
+    await page.waitForTimeout(800);
+    const t = (await page.locator(SOURCE).innerText()).replace(/⁠/g, '');
+    await view(page, 'Visual').click();
+    await expect(page.locator(VISUAL)).toBeVisible();
+    return t;
+  };
+
+  // 1. Enter at the start of the first item: an empty item above it, and nothing is said.
+  await clickAfter(page, VISUAL, 'item uno');
+  await page.keyboard.press('Home');
+  await page.keyboard.press('Enter');
+  await expect(page.locator(`${VISUAL} li`)).toHaveText(['', 'item uno', 'item dos']);
+  await expect(note).toHaveText('');
+  await expect(other.page.locator(`${VISUAL} li`)).toHaveCount(3);
+
+  // 2. The caret stayed with the text.
+  await page.keyboard.type('ZZ');
+  await expect(page.locator(VISUAL)).toContainText('ZZitem uno');
+  await page.keyboard.press('Backspace');
+  await page.keyboard.press('Backspace');
+  await expect(page.locator(`${VISUAL} li`)).toHaveText(['', 'item uno', 'item dos']);
+
+  // 3. ArrowLeft goes into the new item, which takes what is typed.
+  await page.keyboard.press('ArrowLeft');
+  await page.keyboard.type('cero');
+  await expect(page.locator(`${VISUAL} li`)).toHaveText(['cero', 'item uno', 'item dos']);
+  expect(await text()).toMatch(
+    /\\begin\{itemize\}\n {2}\\item cero\n {2}\\item item uno\n {2}\\item item dos/,
+  );
+  await expect(other.page.locator(VISUAL)).toContainText('cero');
+
+  // 4. After an empty one: Enter twice at the start of the first item gives two.
+  await clickAfter(page, VISUAL, 'cero');
+  await page.keyboard.press('Home');
+  await page.keyboard.press('Enter');
+  await page.keyboard.press('Enter');
+  await expect(page.locator(`${VISUAL} li`)).toHaveText(['', '', 'cero', 'item uno', 'item dos']);
+  await expect(note).toHaveText('');
+
+  // 5. Undo takes it all back.
+  for (let i = 0; i < 8 && (await page.locator(`${VISUAL} li`).count()) > 2; i++)
+    await page.keyboard.press('ControlOrMeta+z');
+  await expect(page.locator(`${VISUAL} li`)).toHaveCount(2);
+  expect(await text()).toMatch(/\\begin\{itemize\}\n {2}\\item item uno\n {2}\\item item dos/);
+  await expect(other.page.locator(`${VISUAL} li`)).toHaveCount(2);
+});
+
 test('a list with an option is an editable list in the visual view', async ({ browser }) => {
   test.setTimeout(180_000);
   const { page, email } = await person(browser, 'vis-listopt');

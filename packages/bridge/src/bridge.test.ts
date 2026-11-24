@@ -1796,15 +1796,15 @@ test('Enter at the start of a list item opens the new item at the end of the ite
     r.check();
     if (off === 0) expect(r.state.selection.from).toBe(caret);
   }
-  // The first item has nothing before it: refused, nothing changes.
+  // The first item has nothing before it: the new \item opens above its own.
   let r = replica(B + '\\item  it\n\\item two\n' + E);
-  expect(enterAt(r, items(r)[0].start)).toBe(false);
-  expect(r.src).toBe(B + '\\item  it\n\\item two\n' + E);
+  expect(enterAt(r, items(r)[0].start)).toBe(true);
+  expect(r.src).toBe(B + '\\item \n\\item  it\n\\item two\n' + E);
   r.check();
-  // After an empty item the Enter is accepted and the source stays as it was.
+  // After an empty item too (Enter in the empty item itself does nothing: see below).
   r = replica(B + '\\item \n\\item  it\n' + E);
   expect(enterAt(r, items(r)[1].start)).toBe(true);
-  expect(r.src).toBe(B + '\\item \n\\item  it\n' + E);
+  expect(r.src).toBe(B + '\\item \n\\item \n\\item  it\n' + E);
   r.check();
 });
 
@@ -1827,6 +1827,188 @@ test('text typed in the item Enter opened goes after \\item, and Backspace undoe
     expect(q.src).toBe(LIST);
     q.check();
   }
+});
+
+test("Enter at the start of a list's first item opens an empty \\item above it", () => {
+  const B = '\\begin{itemize}\n';
+  const E = '\\end{itemize}\n';
+  // [source, result]
+  const cases: [string, string][] = [
+    [B + '\\item  it\n\\item two\n' + E, B + '\\item \n\\item  it\n\\item two\n' + E],
+    [B + '  \\item one\n  \\item two\n' + E, B + '  \\item \n  \\item one\n  \\item two\n' + E],
+    [B + '\t\\item one\n' + E, B + '\t\\item \n\t\\item one\n' + E],
+    // An \item on the \begin line gives no indentation.
+    [
+      '\\begin{itemize}\\item a\n\\item b\n' + E,
+      '\\begin{itemize}\\item \n\\item a\n\\item b\n' + E,
+    ],
+    // An option, a comment head and a length before the first \item stay where they are.
+    [
+      '\\begin{enumerate}[label=(\\alph*)]\n  % first\n  \\setlength\\itemsep{0pt}\n  \\item one\n\\end{enumerate}\n',
+      '\\begin{enumerate}[label=(\\alph*)]\n  % first\n  \\setlength\\itemsep{0pt}\n  \\item \n  \\item one\n\\end{enumerate}\n',
+    ],
+    [B + '%\\item old\n  \\item one\n' + E, B + '%\\item old\n  \\item \n  \\item one\n' + E],
+    [B + '\\itemsep 0pt \\item one\n' + E, B + '\\itemsep 0pt \\item \n\\item one\n' + E],
+    // The item starts with something that is not a word.
+    [B + '\\item \\emph{one} two\n' + E, B + '\\item \n\\item \\emph{one} two\n' + E],
+    [B + '\\item $x$ is\n' + E, B + '\\item \n\\item $x$ is\n' + E],
+    [B + '\\item\n  one\n' + E, B + '\\item \n\\item\n  one\n' + E],
+    // A comment between \item and its text stays with the text.
+    [
+      B + '\\item % \\item old\n  one\n\\item two\n' + E,
+      B + '\\item \n\\item % \\item old\n  one\n\\item two\n' + E,
+    ],
+    [
+      'Intro.\n\n' + B + '\\item one\n' + E + '\nOutro.\n',
+      'Intro.\n\n' + B + '\\item \n\\item one\n' + E + '\nOutro.\n',
+    ],
+  ];
+  for (const [src, out] of cases) {
+    const r = replica(src);
+    const n = items(r).length;
+    const first = items(r)[0];
+    expect(enterAt(r, first.start), src).toBe(true);
+    expect(r.src).toBe(out);
+    r.check();
+    const li = items(r);
+    expect(li.length).toBe(n + 1);
+    expect(li[0].size).toBe(0);
+    expect(li[1].size).toBe(first.size);
+    // The caret stays with the text, at the start of what is now the second item.
+    expect(r.state.selection.from).toBe(li[1].start);
+    expect(r.state.selection.empty).toBe(true);
+  }
+});
+
+test('the new first item takes what is typed, and Backspace at the start of the old one undoes the Enter', () => {
+  const B = '\\begin{itemize}\n';
+  const E = '\\end{itemize}\n';
+  const src = 'Intro.\n\n' + B + '  \\item one\n  \\item two\n' + E;
+  const r = replica(src);
+  expect(enterAt(r, items(r)[0].start)).toBe(true);
+  expect(r.dispatch(r.state.tr.insertText('New', items(r)[0].start))).toBe(true);
+  expect(r.src).toBe(src.replace('  \\item one', '  \\item New\n  \\item one'));
+  r.check();
+  // A [ typed first in it does not become the item's label.
+  const q = replica(src);
+  expect(enterAt(q, items(q)[0].start)).toBe(true);
+  expect(q.dispatch(q.state.tr.insertText('[', items(q)[0].start))).toBe(true);
+  expect(q.src).toContain('\\item {}[');
+  q.check();
+  // Enter, then Backspace where the caret was left: the bytes are the original ones.
+  const u = replica(src);
+  expect(enterAt(u, items(u)[0].start)).toBe(true);
+  expect(u.dispatch(u.state.tr.join(items(u)[1].start - 1))).toBe(true);
+  expect(u.src).toBe(src);
+  u.check();
+  // Twice: two empty items above, and the caret still with the text.
+  const t = replica(src);
+  expect(enterAt(t, items(t)[0].start)).toBe(true);
+  expect(enterAt(t, items(t)[1].start)).toBe(true);
+  expect(t.src).toBe(src.replace('  \\item one', '  \\item \n  \\item \n  \\item one'));
+  t.check();
+  expect(items(t).map((x) => x.size)).toEqual([0, 0, 3, 3]);
+  expect(t.state.selection.from).toBe(items(t)[2].start);
+});
+
+test('Enter at the start of an item that follows an empty one opens another above it', () => {
+  const B = '\\begin{itemize}\n';
+  const E = '\\end{itemize}\n';
+  // [source, index of the item, result]
+  const cases: [string, number, string][] = [
+    [B + '\\item \n\\item  it\n' + E, 1, B + '\\item \n\\item \n\\item  it\n' + E],
+    [
+      B + '  \\item one\n  \\item \n  \\item two\n' + E,
+      2,
+      B + '  \\item one\n  \\item \n  \\item \n  \\item two\n' + E,
+    ],
+    [B + '\\item\n\t\\item two\n' + E, 1, B + '\\item\n\t\\item \n\t\\item two\n' + E],
+    [B + '\\item \\item two\n' + E, 1, B + '\\item \\item \n\\item two\n' + E],
+  ];
+  for (const [src, k, out] of cases) {
+    const r = replica(src);
+    const li = items(r);
+    expect(enterAt(r, li[k].start), src).toBe(true);
+    expect(r.src).toBe(out);
+    r.check();
+    expect(items(r).length).toBe(li.length + 1);
+    expect(r.state.selection.from).toBe(items(r)[k + 1].start);
+  }
+  // Enter in the empty item itself (the same document) still does nothing.
+  const src = B + '  \\item one\n  \\item \n  \\item two\n' + E;
+  const r = replica(src);
+  expect(enterAt(r, items(r)[1].start)).toBe(true);
+  expect(r.src).toBe(src);
+  r.check();
+  expect(items(r).length).toBe(3);
+});
+
+test('Enter at the start of an empty first item still does nothing', () => {
+  const B = '\\begin{itemize}\n';
+  const E = '\\end{itemize}\n';
+  // An empty first item: accepted, nothing changes (as any empty item that is not the last).
+  const empty = B + '  \\item \n  \\item two\n' + E;
+  let r = replica(empty);
+  enterAt(r, items(r)[0].start);
+  expect(r.src).toBe(empty);
+  r.check();
+  expect(items(r).length).toBe(2);
+  // A list's only, empty item.
+  const sole = B + '  \\item \n' + E;
+  r = replica(sole);
+  enterAt(r, items(r)[0].start);
+  expect(r.src).toBe(sole);
+  r.check();
+});
+
+test('one replica opens an item above the first while another types in the first, and both converge', () => {
+  const B = '\\begin{itemize}\n';
+  const E = '\\end{itemize}\n';
+  const src = B + '  \\item one\n  \\item two\n' + E;
+  const a = replica(src);
+  const { b, merge } = peer(a);
+  expect(enterAt(a, items(a)[0].start)).toBe(true);
+  expect(b.dispatch(b.state.tr.insertText('X', items(b)[0].start + 3))).toBe(true);
+  merge();
+  Y.applyUpdate(b.ydoc, Y.encodeStateAsUpdate(a.ydoc));
+  expect(a.src).toBe(b.src);
+  expect(a.src).toBe(B + '  \\item \n  \\item oneX\n  \\item two\n' + E);
+  a.check();
+  b.check();
+});
+
+test("in every fixture Enter at the start of a list's first item opens one empty item above it", () => {
+  let lists = 0;
+  for (const [path, src] of Object.entries(fixtures)) {
+    const count = replica(src).state.doc.childCount;
+    for (let i = 0; i < count; i++) {
+      const r = replica(src);
+      const list = r.state.doc.child(i);
+      if (list.type.name !== 'list' || !list.child(0).content.size) continue;
+      lists++;
+      let at = 2;
+      for (let k = 0; k < i; k++) at += r.state.doc.child(k).nodeSize;
+      const tr = r.state.tr.split(at);
+      expect(r.dispatch(tr.setSelection(TextSelection.near(tr.doc.resolve(at + 2)))), path).toBe(
+        true,
+      );
+      r.check();
+      const now = r.state.doc.child(i);
+      expect(r.state.doc.childCount, path).toBe(count);
+      expect(now.childCount, path).toBe(list.childCount + 1);
+      expect(now.child(0).content.size, path).toBe(0);
+      expect(now.child(1).eq(list.child(0)), path).toBe(true);
+      expect(r.state.selection.from, path).toBe(at + 2);
+      // One run went in, and it is an \item on a line of its own.
+      expect(r.src.length - src.length, path).toBeGreaterThan(6);
+      expect(r.src.replace(/\\item \n[ \t]*(?=\\item)/, ''), path).toBe(src);
+      // Backspace where the caret is takes it back.
+      expect(r.dispatch(r.state.tr.join(at + 1)), path).toBe(true);
+      r.check();
+      expect(r.src.replace(/\s+/g, ' '), path).toBe(src.replace(/\s+/g, ' '));
+    }
+  }
+  expect(lists).toBeGreaterThan(2);
 });
 
 test('Enter inside \\emph{} or in an empty item changes nothing', () => {

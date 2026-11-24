@@ -170,6 +170,9 @@ export function visualOp(r: Rng, rep: Replica, only?: 'ins'): Op | null {
       lo = prev.base + unit(prev.pieces, prev.off - 1)[0];
       hi = prev.base + unit(prev.pieces, prev.off)[1];
     }
+    // At the start of a list's first item the new \item opens above it, before its own \item.
+    else if (off === 0 && $p.parent.type.name === 'list_item' && tb.size)
+      lo = spot.base + spot.pieces[0].s;
     accepted = rep.dispatch(caret(state.tr.split(pos), pos + 2));
   } else if (roll < 92) {
     what = 'join';

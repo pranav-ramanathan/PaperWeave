@@ -119,7 +119,16 @@ export class Bridge {
       });
       if (words) across = { from: sel.from, to: sel.to, text };
     }
-    const t = translate(this.model, state.doc, tr.doc, hint, across);
+    // Enter: one cut through a text block and nothing else.
+    const split =
+      step instanceof ReplaceStep &&
+      step.from === step.to &&
+      step.slice.size === 2 &&
+      step.slice.openStart === 1 &&
+      step.slice.openEnd === 1
+        ? step.from
+        : undefined;
+    const t = translate(this.model, state.doc, tr.doc, hint, across, split);
     if (!t) {
       // Backspace or Delete at an edge that cannot be joined, with nothing selected: nothing to say.
       const quiet = step instanceof ReplaceStep && step.slice.size === 0 && state.selection.empty;

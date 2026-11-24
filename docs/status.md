@@ -6253,3 +6253,56 @@ of the paper's .bib files.`
   - Carry over, unchanged: nested lists, `\item[..]` and `description` raw in the visual view;
     everything in the "Not done" of "A selection across a formula, a figure, a heading or a
     list".
+
+## Enter at the start of a list item always opens an item above it
+
+- **What was wrong.** At the start of a list's first item Enter was refused with "That edit spans
+  LaTeX structure. Make it in the source editor." (40 of 40 editable lists in the corpus, in 19 of
+  the 20 papers with a list; counted with the real bridge and the editor's own Enter, counts only).
+  At the start of an item after an empty one it did nothing and said nothing (carried in "Not
+  done" since the list work). The second happened because Enter at the end of an empty item and
+  Enter at the start of the item after it give the same document; the change was placed at the
+  second, which is inside an empty item, and an empty item does nothing. Only the place of the
+  split tells the two keys apart, and `translate` was not told it.
+- **Now** (`translate.ts`, the list-item Enter branch; `filter` in `bridge.ts` passes where the
+  split was made):
+
+  | Caret at the start of               | Before                                                        | Now                                            |
+  | ----------------------------------- | ------------------------------------------------------------- | ---------------------------------------------- |
+  | The first item                      | Refused with the sentence above                               | An empty item above it                         |
+  | An item that follows an empty one   | Nothing happens, nothing is said                              | An empty item above it (Enter twice gives two) |
+  | Any other later item                | An empty item above it                                        | Unchanged, byte for byte                       |
+  | An empty item (first, middle, only) | Nothing happens; in the last of two or more, the list is left | Unchanged                                      |
+
+  The source gets `\item `, a line break and the indentation of the item's own `\item`, directly
+  before that `\item`; an option, comment lines or a length between `\begin` and the first
+  `\item` stay above it. The caret stays with the text. Corpus result: 40 of 40 accepted, each one
+  run of `\item `, a line break and the list's indentation before the first item's own `\item`,
+  one more empty item, nothing else changed, no frozen block, `check()` every time; a second
+  Enter gave a second item in 40 of 40; Backspace gave the original bytes back in 38 and the same
+  but for spaces after `\item` in 2. Builds: an empty first item in five classes, 5 of 5.
+
+- **Held by** six tests in `bridge.test.ts` (one of them over every fixture) and the fuzzers, run
+  on the development machine, with the sandbox build of 150 generated visual edits (three
+  cases); one test in `visual.spec.ts`, written but not run on the development machine (the
+  local blob store refuses writes), so run only in CI. One existing test's last two expectations
+  were changed on purpose (they pinned the refusal and the nothing). `harness.ts` tells the
+  fuzzers where the new rule writes.
+- **Not done.**
+  - The caret stays with the text; it does not go into the new item (ArrowLeft or ArrowUp does).
+    The owner may prefer the other.
+  - Enter at the start of a later item after an item with text still writes its `\item` at the
+    end of the item before, with that item's indentation; the new rule writes before the item's
+    own. The view is the same either way.
+  - Enter in an empty item that is not the last still does nothing.
+  - Backspace at the start of the first item still does nothing (it does not turn the item into a
+    paragraph); Backspace at the start of a paragraph after a list, and Delete at the end of a
+    list's last item, are still refused (24 places each in the corpus).
+  - Enter over a selection in a list is still refused.
+  - Not tried: a real browser on this machine; an input method; Safari and Firefox.
+  - Found while measuring, not changed (plan 178's survey): Enter in the middle of a heading is
+    refused (927 of 927); Backspace or Delete where a heading meets a paragraph does nothing
+    (1,814 places).
+  - Carry over, unchanged: nested lists, `\item[..]` and `description` raw in the visual view;
+    LaTeX's own "Empty `thebibliography' environment" line still shows beside "Bibliography
+    empty"; everything in the "Not done" of "A footnote can be added in the visual view".
