@@ -793,6 +793,11 @@ dialog.tool legend {
   box-shadow: 0 6px 20px rgb(0 0 0 / 0.15);
   max-height: calc(100vh - 1rem);
   overflow-y: auto;
+  /* Its own width wherever it is opened: near the right edge a fixed box would otherwise shrink
+     to the room left, wrap every item and grow taller than the window. Where it goes is then
+     worked out from that width (Tools.tsx). */
+  width: max-content;
+  max-width: calc(100vw - 1rem);
 }
 .menu button {
   display: block;
@@ -815,7 +820,6 @@ dialog.tool legend {
   color: var(--muted);
   font-size: 0.8rem;
 }
-
 /* A figure or table in the visual view: its caption and cells are edited where they stand. */
 .pw-float {
   border: 1px dashed var(--line);
