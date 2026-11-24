@@ -27,6 +27,7 @@ export function connect(
     saved?: boolean;
     role?: string;
     canWrite?: boolean;
+    files?: true;
     restored?: number;
     restore?: {
       number: number;

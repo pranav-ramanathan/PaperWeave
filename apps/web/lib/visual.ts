@@ -1118,6 +1118,13 @@ export function createVisual(opts: {
       view.dispatch(view.state.tr.deleteSelection().scrollIntoView().setMeta('uiEvent', 'cut'));
     return true;
   };
+  /** What the view says of itself to a screen reader: its name, and that it is a text box. */
+  const attributes = (label: string) => ({
+    'aria-label': label,
+    role: 'textbox',
+    'aria-multiline': 'true',
+    ...(opts.editable ? {} : { 'aria-readonly': 'true', inputmode: 'none', spellcheck: 'false' }),
+  });
   const editor: Editor = new Editor({
     element: opts.element,
     injectNonce: pageNonce(),
@@ -1337,14 +1344,7 @@ export function createVisual(opts: {
       }),
     ],
     editorProps: {
-      attributes: {
-        'aria-label': opts.label,
-        role: 'textbox',
-        'aria-multiline': 'true',
-        ...(opts.editable
-          ? {}
-          : { 'aria-readonly': 'true', inputmode: 'none', spellcheck: 'false' }),
-      },
+      attributes: attributes(opts.label),
       // These keys act where the caret is on the screen, even straight after a caret key.
       handleKeyDown: (view, e) => {
         if (!opts.editable && !view.composing) {
@@ -1468,6 +1468,12 @@ export function createVisual(opts: {
     footnote,
     heading,
     list,
+    /** The file has another name: the view is called after it. */
+    name(label: string) {
+      editor.setOptions({
+        editorProps: { ...editor.options.editorProps, attributes: attributes(label) },
+      });
+    },
     /** Put the keyboard back in the visual view, with the caret where it should be. */
     focus() {
       const kept = resume;

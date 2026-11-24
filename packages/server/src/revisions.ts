@@ -17,7 +17,7 @@ import { authorize } from './authz.ts';
 import type { BlobStore } from './blobs.ts';
 import { type Db, transaction } from './db.ts';
 import { AppError } from './errors.ts';
-import { fileMeta, removeFile } from './files.ts';
+import { fileMeta, filesChanged, removeFile } from './files.ts';
 import { recordDownload } from './metrics.ts';
 import { id } from './projects.ts';
 import * as Y from 'yjs';
@@ -676,6 +676,7 @@ export async function renameFile(
   await db.query('update projects set manifest_version = manifest_version + 1 where id = $1', [
     projectId,
   ]);
+  await filesChanged(db, projectId);
 }
 
 /** A root file's path as a shell would take it: "./" in front, and quoted if it needs to be. */
@@ -1074,6 +1075,27 @@ export async function restoreNote(
     at: new Date(r.at).toISOString(),
     kept: r.keptId ? { id: r.keptId, number: r.keptNumber } : null,
   };
+}
+
+/**
+ * The restore that took a file out of the paper, for telling whoever had it open. A restore
+ * removes the files its revision lacks in the transaction that makes its own revision, so the
+ * file's removal and that revision carry the same moment. `null` if the file is in the paper, or
+ * was deleted some other way. Nothing is checked of who asks: the caller has.
+ */
+export async function restoreThatRemoved(
+  db: Db,
+  projectId: string,
+  fileId: string,
+): Promise<RestoreNote | null> {
+  const { rows } = await db.query(
+    `select r.number from all_files f
+     join revisions r on r.project_id = f.project_id and r.kind = 'restore'
+       and r.created_at = f.deleted_at
+     where f.project_id = $1 and f.id = $2`,
+    [projectId, id(fileId)],
+  );
+  return rows[0] ? restoreNote(db, projectId, rows[0].number) : null;
 }
 
 /** The newest restore of the paper a file belongs to, for someone who may open that file. */

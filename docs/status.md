@@ -6801,3 +6801,18 @@ of the paper's .bib files.`
   - The note is not kept across a reload, and there is no email about a restore.
   - A renamed file keeps its old name in a co-author's open editor until they reload; an invitation
     link opened signed out; Back/Forward with the sync service away (as before).
+
+## An open editor follows the paper's files
+
+- **Found by** the walks of plans 207 and 209: the list of files beside the text, the open file's name and the build pane's files were the ones the page was made with. A file a co-author added was not in the list; a renamed file kept its old name everywhere; a file deleted, or taken out by a restore, closed with "You no longer have access to this file, or it has been deleted." either way, as it did for someone taken off the paper.
+- **Now** `createFile`, `putFile` (when it adds), `removeFile` and `renameFile` announce `files` (`filesChanged` in `packages/server/src/files.ts`); the sync server passes `{ files: true }` to everyone with the paper open, and the editor asks the web app for the list (`GET /projects/:id/files`, `apps/web/lib/paperfiles.ts`). It asks again after a restore, on reconnecting, and when its file is refused. The list (`Files.tsx`), the build pane and the editor's own name for its file (above the text, the tab's title, both views' names) follow. The editor is not rebuilt for a rename: `props.path` is no longer a dependency of the effect that makes it.
+- **Not a page refresh.** One that fails makes the browser load the page afresh (see `Fresh.tsx`), and one that works hands the editor new `canWrite`/`visual` props, which rebuild it under the person.
+- **A file that is gone says why**, above the text where a restore is said: taken out by a restore (who, to what, the revision that keeps it, and the comparison), deleted, or the person is no longer a member. Which restore took a file out is the server's answer (`restoreThatRemoved`: the file's removal and the restore's revision carry the same transaction time), not a guess from what the editor has heard. The status line keeps its sentence.
+- **Held by** `restored.test.ts`, `revisions.sandbox.test.ts`, `sync.sandbox.test.ts`, `files.sandbox.test.ts` (the list is for people on the paper only) and `recover.spec` (added, renamed with Undo kept, deleted, taken out by a restore, taken off the paper).
+- **Not done.**
+  - The paper's own page in another tab is still not told; it shows the change after a reload or on coming back to it.
+  - A rename is not announced, and who renamed or deleted a file is not said.
+  - The comparison a restore's note links to lists a removed file as "Removed" without its lines. The locked editor still shows them, to copy.
+  - A file renamed from `.tex` to something else keeps its visual view until reload; a file that stopped being text (replaced by a picture, or by a restore) closes with the either-or sentence alone.
+  - The root file's folder in the build pane, the paper's macros and the people who can be mentioned are still as the page was made.
+  - An invitation link opened signed out; Back/Forward with the sync service away (as before).

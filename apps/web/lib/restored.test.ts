@@ -1,6 +1,6 @@
 import type { RestoreNote } from '@paperweave/server';
 import { expect, test } from 'vitest';
-import { isNews, restoreChanges, restoredWords } from './restored';
+import { goneWords, isNews, restoreChanges, restoredWords, whyGone } from './restored';
 
 const note = (more: Partial<RestoreNote> = {}): RestoreNote => ({
   id: 'id-9',
@@ -63,4 +63,36 @@ test('a long name is cut short', () => {
 
 test('the changes shown are from the paper as it was to the restore', () => {
   expect(restoreChanges('p1', note())).toBe('/projects/p1/revisions/id-9/diff/id-8');
+});
+
+test('why an open file is no longer served is read off the list of files', () => {
+  const files = [{ id: 'f1' }, { id: 'f2' }];
+  // Not theirs to list any more: they are off the paper.
+  expect(whyGone(null, 'f1')).toEqual({ why: 'off' });
+  // Still in the list (it stopped being text, say): nothing more is known.
+  expect(whyGone({ files, restore: null }, 'f1')).toBe(null);
+  // Not in the list: the restore the server names took it out, or else it was deleted.
+  expect(whyGone({ files, restore: note() }, 'f3')).toEqual({ why: 'restore', restore: note() });
+  expect(whyGone({ files, restore: null }, 'f3')).toEqual({ why: 'deleted' });
+});
+
+test('the words for a file that is gone say what took it and where it still is', () => {
+  expect(goneWords({ why: 'restore', restore: note() }, 'ben@example.org', '14:02')).toBe(
+    'ana@example.org restored this paper to revision 3 (Sent to the workshop) at 14:02. This file is not in that revision, so it is no longer in the paper. The paper as it was just before, with this file, is kept as revision 8.',
+  );
+  expect(
+    goneWords(
+      { why: 'restore', restore: note({ kept: null, by: null }) },
+      'b@example.org',
+      '14:02',
+    ),
+  ).toBe(
+    'This paper was restored to revision 3 (Sent to the workshop) at 14:02. This file is not in that revision, so it is no longer in the paper.',
+  );
+  expect(goneWords({ why: 'deleted' }, 'ben@example.org', '')).toBe(
+    'This file has been deleted from the paper. The revision saved just before still has it.',
+  );
+  expect(goneWords({ why: 'off' }, 'ben@example.org', '')).toBe(
+    'You are no longer a member of this paper.',
+  );
 });

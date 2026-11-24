@@ -8,7 +8,7 @@ import * as Y from 'yjs';
 import { LATEXMK_RULES } from '@paperweave/latex';
 import { readZip, writeZip } from './archive.ts';
 import { blobStore } from './blobs.ts';
-import { replaceFile } from './files.ts';
+import { createFile, deleteFile, replaceFile } from './files.ts';
 import { exportZip, importZip, listFiles } from './import.ts';
 import { acceptInvitation, getProject, invite } from './projects.ts';
 import { acceptProposal, listProposals, propose, undoAccept } from './proposals.ts';
@@ -24,6 +24,7 @@ import {
   restoreEdits,
   cutRevision,
   restoreNote,
+  restoreThatRemoved,
   restoreRevision,
   revisionOfNow,
   revisionPdf,
@@ -397,6 +398,31 @@ test('what the editors of a paper are told of a restore: who, to what, and the r
     fromName: null,
     kept: { number: again.number - 1 },
   });
+});
+
+test('a file a restore takes out is known to have gone by that restore, and a deleted one is not', async () => {
+  const p = await paper();
+  const good = await saveRevision(t.pool, store, owner.id, p.id, 'Good');
+  const notes = await createFile(t.pool, store, owner.id, p.id, 'notes.tex');
+  const other = await createFile(t.pool, store, owner.id, p.id, 'other.tex');
+  // In the paper: nothing took it out.
+  expect(await restoreThatRemoved(t.pool, p.id, notes)).toBeNull();
+  // Deleted by hand, with a restore before it and one after: neither took it out.
+  await restoreRevision(t.pool, store, owner.id, p.id, good.id);
+  const back = (await listRevisions(t.pool, owner.id, p.id))[1];
+  await restoreRevision(t.pool, store, owner.id, p.id, back.id);
+  await deleteFile(t.pool, store, owner.id, p.id, other);
+  const restored = await restoreRevision(t.pool, store, owner.id, p.id, good.id);
+  expect(await restoreThatRemoved(t.pool, p.id, other)).toBeNull();
+  // The restore of a revision without the file took it out: that restore, with its details.
+  expect(await restoreThatRemoved(t.pool, p.id, notes)).toEqual(
+    await restoreNote(t.pool, p.id, restored.number),
+  );
+  expect((await restoreThatRemoved(t.pool, p.id, notes))!.kept).not.toBeNull();
+  // A file the restore kept, and a file of another paper asked about under this one.
+  expect(await restoreThatRemoved(t.pool, p.id, p.main)).toBeNull();
+  const elsewhere = await paper();
+  expect(await restoreThatRemoved(t.pool, elsewhere.id, notes)).toBeNull();
 });
 
 test('a restore first keeps the paper as it stood, unsaved edits included', async () => {

@@ -100,6 +100,15 @@ export async function startSync(opts: {
         c.sendStateless(JSON.stringify({ restored: n, ...(restore && { restore }) }));
     }
   };
+  /**
+   * Tell the editors of a paper that its list of files changed: one was added, removed or
+   * renamed. Each asks the web app for the list; nothing of it is sent from here.
+   */
+  const tellFiles = (projectId: string) => {
+    for (const document of server.hocuspocus.documents.values())
+      for (const c of document.getConnections() as Connection<Context>[])
+        if (c.context.projectId === projectId) c.sendStateless(JSON.stringify({ files: true }));
+  };
   const server = new Server<Context>({
     port: opts.port,
     quiet: true,
@@ -333,9 +342,10 @@ export async function startSync(opts: {
   // is found by the timed check below, and when a connection is made.
   const stopListening = await listen(
     opts.databaseUrl,
-    ['acl', 'file_edits', 'session_ended', 'restored'],
+    ['acl', 'file_edits', 'session_ended', 'restored', 'files'],
     async (channel, payload) => {
       if (channel === 'session_ended') return signedOut(payload);
+      if (channel === 'files') return tellFiles(payload);
       if (channel === 'restored') {
         const [projectId, number] = payload.split(':');
         return tellRestored(projectId, Number(number));
@@ -366,6 +376,8 @@ export async function startSync(opts: {
           [projectId],
         );
         await tellRestored(projectId, rows[0].n, false);
+        // Nor was a file added, removed or renamed meanwhile.
+        tellFiles(projectId);
       }
     },
   );

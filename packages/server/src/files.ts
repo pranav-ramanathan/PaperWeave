@@ -118,6 +118,7 @@ export async function createFile(
      where id = $1`,
     [projectId, fileId, root],
   );
+  await filesChanged(db, projectId);
   return fileId;
 }
 
@@ -246,6 +247,7 @@ export async function putFile(
   await db.query('update projects set manifest_version = manifest_version + 1 where id = $1', [
     projectId,
   ]);
+  if (!replaced.rowCount) await filesChanged(db, projectId);
   return digest;
 }
 
@@ -308,7 +310,16 @@ export async function removeFile(db: Db, projectId: string, fileId: string) {
   ]);
   // Open connections to the file are re-checked, find it gone, and are closed.
   await db.query("select pg_notify('acl', $1)", [projectId]);
+  await filesChanged(db, projectId);
 }
+
+/**
+ * Tell the sync server that the paper's list of files changed (one added, removed or renamed),
+ * for the editors that have the paper open: each shows the list, and the name of its own file.
+ * Heard when the change commits. A restore says so itself (`restored`).
+ */
+export const filesChanged = (db: Db, projectId: string) =>
+  db.query("select pg_notify('files', $1)", [projectId]);
 
 /**
  * Make a .tex file the one the paper is built from. The files are held first and the paper

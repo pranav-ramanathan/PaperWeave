@@ -16,6 +16,7 @@ import { blobs, db, filesOf, forTitle, paperOf, requireUser } from '../../../../
 import { rootDir } from '@paperweave/latex';
 import BuildPane from './BuildPane';
 import FileEditor from './FileEditor';
+import Files from './Files';
 
 export const dynamic = 'force-dynamic';
 
@@ -62,25 +63,11 @@ async function FilePage({
         </Link>
       </header>
       <div className="workspace">
-        <nav aria-label="Files">
-          <ul>
-            {files.map((f) => (
-              <li key={f.id}>
-                {f.readonly ? (
-                  <span title="Cannot be edited as text">{f.path}</span>
-                ) : (
-                  <Link
-                    prefetch={false}
-                    href={`/projects/${id}/files/${f.id}`}
-                    aria-current={f.id === fileId ? 'page' : undefined}
-                  >
-                    {f.path}
-                  </Link>
-                )}
-              </li>
-            ))}
-          </ul>
-        </nav>
+        <Files
+          projectId={id}
+          fileId={fileId}
+          files={files.map((f) => ({ id: f.id, path: f.path, readonly: f.readonly }))}
+        />
         <FileEditor
           key={fileId}
           projectId={id}
@@ -104,8 +91,7 @@ async function FilePage({
         <BuildPane
           projectId={id}
           canBuild={can(project.role, 'build.run')}
-          files={files.filter((f) => !f.readonly).map((f) => ({ id: f.id, path: f.path }))}
-          paths={files.map((f) => f.path)}
+          files={files.map((f) => ({ id: f.id, path: f.path, readonly: f.readonly }))}
           rootDir={rootDir(report?.root ?? '')}
         />
       </div>

@@ -560,6 +560,10 @@ test('someone taken off the paper while a file is open is told, and the page sto
     'You no longer have access to this file, or it has been deleted.',
     { timeout: 20_000 },
   );
+  // Which of the two it is, is said above the text.
+  await expect(page.locator('.editor-notice')).toHaveText(
+    /^You are no longer a member of this paper\./,
+  );
   await expect(source(page)).toHaveAttribute('contenteditable', 'false');
   await Promise.all(told);
   // Then it stops. Before, a page left open went on asking every few seconds, for as long as it
@@ -1171,4 +1175,137 @@ test('coming back online to a paper that was restored meanwhile, the editor says
   );
   await expect(notice(editor.page)).not.toContainText('still in the text');
   await expect(editor.page.getByRole('button', { name: /Apply my edits/ })).toBeVisible();
+});
+
+const BODY = 'The body.\n';
+const READS = '\\documentclass{article}\n\\begin{document}\n\\input{body}\n\\end{document}\n';
+const fileLinks = (page: Page) => page.getByRole('navigation', { name: 'Files' }).getByRole('link');
+
+test('a file a co-author adds, renames or deletes shows in an open editor at once, and the editor goes on', async ({
+  browser,
+}) => {
+  const { owner, editor } = await sharedPaper(browser, 'rec-files', [
+    { path: 'main.tex', text: READS },
+    { path: 'body.tex', text: BODY },
+  ]);
+  const { page } = editor;
+  await page.getByRole('link', { name: 'body.tex' }).first().click();
+  await showSource(page);
+  await typeAtStart(page, '% before the rename\n');
+  await expect(status(page)).toHaveText('All edits saved.');
+  await expect(fileLinks(page)).toHaveText(['body.tex', 'main.tex']);
+
+  // Added by the owner: it is in the editor's list, to open, with no reload.
+  await owner.page.getByLabel('Name, with folders if you like').fill('notes.tex');
+  await owner.page.getByRole('button', { name: 'Add file' }).click();
+  await expect(owner.page.getByRole('status')).toHaveText('Added notes.tex.');
+  await expect(fileLinks(page)).toHaveText(['body.tex', 'main.tex', 'notes.tex']);
+
+  // Renamed by the owner while the editor has it open: the name follows everywhere it is said.
+  const row = owner.page.getByRole('row', { name: /body\.tex/ });
+  await row.locator('summary').click();
+  await row.getByLabel('New name for body.tex').fill('sections/body.tex');
+  await row.getByRole('button', { name: 'Rename' }).click();
+  await owner.page.getByRole('button', { name: 'Rename and update that line' }).click();
+  await expect(owner.page.getByRole('status')).toContainText('Renamed to sections/body.tex');
+  await expect(fileLinks(page)).toHaveText(['main.tex', 'notes.tex', 'sections/body.tex']);
+  await expect(page.getByRole('link', { name: 'sections/body.tex' })).toHaveAttribute(
+    'aria-current',
+    'page',
+  );
+  await expect(page.getByRole('region', { name: 'Editor for sections/body.tex' })).toBeVisible();
+  await expect(page.locator('.editor-bar code')).toHaveText('sections/body.tex');
+  await expect(source(page)).toHaveAttribute('aria-label', 'LaTeX source of sections/body.tex');
+  await expect(page).toHaveTitle(/^sections\/body\.tex · /);
+  // It is the same editor: the words are there, Undo still takes back what this person typed,
+  // and typing is saved.
+  await expect(status(page)).toHaveText('All edits saved.');
+  await source(page).click();
+  await page.keyboard.press('ControlOrMeta+z');
+  await expect(source(page)).not.toContainText('% before the rename');
+  await typeAtStart(page, '% after the rename\n');
+  await expect(status(page)).toHaveText('All edits saved.');
+  await showVisual(page);
+  await expect(
+    page.getByRole('textbox', { name: 'sections/body.tex, visual editor' }),
+  ).toBeVisible();
+  await showSource(page);
+  await audit(page, 'an editor whose file was renamed');
+
+  // Deleted by the owner: a file that is not open goes from the list...
+  await owner.page.getByRole('button', { name: 'Delete notes.tex' }).click();
+  await expect(owner.page.getByRole('status')).toContainText('Deleted notes.tex.');
+  await expect(fileLinks(page)).toHaveText(['main.tex', 'sections/body.tex']);
+  // ...and the one that is open says that it was deleted, not that access may have been lost.
+  await owner.page.getByRole('button', { name: 'Delete sections/body.tex' }).click();
+  await owner.page.getByRole('button', { name: 'Delete sections/body.tex anyway' }).click();
+  await expect(owner.page.getByRole('status')).toContainText('Deleted sections/body.tex.');
+  await expect(status(page)).toHaveText(
+    'You no longer have access to this file, or it has been deleted.',
+    { timeout: 20_000 },
+  );
+  await expect(notice(page)).toContainText(
+    'This file has been deleted from the paper. The revision saved just before still has it.',
+  );
+  await expect(notice(page).getByRole('link')).toHaveCount(0);
+  await expect(fileLinks(page)).toHaveText(['main.tex']);
+  // What was typed is still there to copy.
+  await expect(source(page)).toContainText('% after the rename');
+});
+
+test('a file the restore takes out says so in its editor, and the list of files follows the restore', async ({
+  browser,
+}) => {
+  const { owner, editor, paper, restore } = await sharedPaper(browser, 'rec-out', [
+    { path: 'main.tex', text: MAIN },
+  ]);
+  await owner.page.getByLabel('Name, with folders if you like').fill('notes.tex');
+  await owner.page.getByRole('button', { name: 'Add file' }).click();
+  await expect(owner.page.getByRole('status')).toHaveText('Added notes.tex.');
+  // The owner has main.tex open in a second tab; the editor has the new file open.
+  const watch = await owner.page.context().newPage();
+  await watch.goto(paper);
+  await watch.getByRole('link', { name: 'main.tex' }).click();
+  await expect(fileLinks(watch)).toHaveText(['main.tex', 'notes.tex']);
+  const { page } = editor;
+  await page.goto(paper);
+  await page.getByRole('link', { name: 'notes.tex' }).click();
+  await showSource(page);
+  await typeAtStart(page, '% written in the new file\n');
+  await expect(status(page)).toHaveText('All edits saved.');
+
+  // Revision 1 has no notes.tex.
+  await restore();
+  await expect(status(page)).toHaveText(
+    'You no longer have access to this file, or it has been deleted.',
+    { timeout: 20_000 },
+  );
+  await expect(notice(page)).toContainText(
+    `${owner.email} restored this paper to revision 1 (Good) at `,
+  );
+  await expect(notice(page)).toContainText(
+    'This file is not in that revision, so it is no longer in the paper. The paper as it was just before, with this file, is kept as revision ',
+  );
+  await expect(notice(page)).not.toContainText('still in the text');
+  await expect(notice(page)).toBeInViewport();
+  await expect(fileLinks(page)).toHaveText(['main.tex']);
+  await audit(page, 'an editor whose file a restore took out');
+  // The words stay in the locked editor, to copy; what the restore did to the paper is one press
+  // away, in the comparison with the paper as it was.
+  await expect(source(page)).toContainText('% written in the new file');
+  const [changes] = await Promise.all([
+    page.context().waitForEvent('page'),
+    notice(page)
+      .getByRole('link', { name: /^Show what the restore changed/ })
+      .click(),
+  ]);
+  await expect(
+    changes.getByRole('heading', { level: 1, name: /^Revision \d+ to revision \d+$/ }),
+  ).toBeVisible();
+  await expect(changes.getByRole('region', { name: 'notes.tex' })).toContainText('Removed');
+  await changes.close();
+  // An editor of a file the restore kept is told of the restore as before, and loses the file
+  // from its list.
+  await expect(notice(watch)).toContainText('You restored this paper to revision 1 (Good) at ');
+  await expect(fileLinks(watch)).toHaveText(['main.tex']);
 });

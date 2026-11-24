@@ -17,6 +17,7 @@ import {
   recordGrammarOutcome,
   replaceFile,
   removeMember,
+  renameFile,
   requestBuild,
   restoreRevision,
   runCommand,
@@ -536,6 +537,32 @@ test('a restore is announced to the people who have the file open, after its edi
     by: users.owner.email,
     kept: { number: made.number - 1 },
   });
+});
+
+test('a file added, renamed or deleted is announced to the people who have the paper open, and to no one else', async () => {
+  const { project, file } = await paper();
+  const other = await paper();
+  const editor = client(users.editor, file);
+  const elsewhere = client(users.editor, other.file);
+  await saved(editor, elsewhere);
+  const told = (c: Client) => c.state.replies.filter((r) => r.files !== undefined).length;
+  expect(told(editor)).toBe(0);
+
+  const notes = await createFile(t.pool, store, users.owner.id, project, 'notes.tex');
+  await until('the editor to be told of the new file', () => told(editor) === 1);
+  await renameFile(t.pool, users.owner.id, project, notes, 'sections/notes.tex');
+  await until('the editor to be told of the new name', () => told(editor) === 2);
+  await deleteFile(t.pool, store, users.owner.id, project, notes);
+  await until('the editor to be told the file is gone', () => told(editor) === 3);
+  // Only that something changed: the list is asked of the web app, which checks who asks.
+  expect(editor.state.replies.filter((r) => r.files !== undefined)[0]).toMatchObject({
+    files: true,
+  });
+  // Typing went on through all of it, and another paper's editors heard nothing.
+  editor.text.insert(0, '% still here\n');
+  await saved(editor);
+  expect(editor.state.closed).toBe(0);
+  expect(told(elsewhere)).toBe(0);
 });
 
 test('deleting a file closes it for everyone; restoring brings back the same file without doubling text', async () => {
