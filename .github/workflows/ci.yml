@@ -23,9 +23,10 @@ jobs:
   # Tests that need Docker: the TeX image, Postgres and the object store.
   sandbox-and-browser:
     runs-on: ubuntu-latest
-    # Usually ten minutes, thirteen when the images are slow to fetch. A run that hangs is
-    # stopped here rather than after the six hours GitHub allows.
-    timeout-minutes: 40
+    # Takes about 35 minutes now, most of it the browser tests, which run one at a time.
+    # 60 leaves room for a slow runner. A run that hangs is still stopped here rather than
+    # after the six hours GitHub allows.
+    timeout-minutes: 60
     steps:
       - uses: actions/checkout@v4
       - uses: pnpm/action-setup@v4
