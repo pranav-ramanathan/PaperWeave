@@ -1368,3 +1368,216 @@ test('who may have the .bbl: those who may have the ZIP of the used files', asyn
   expect(await ask(people.viewer.id)).toBe('permission_denied');
   expect(await ask(outsider.id)).toBe('not_found');
 });
+
+test('a file deleted and made again at its path is one changed file, compared line by line', async () => {
+  const p = await paper();
+  const old = await createFile(t.pool, store, owner.id, p.id, 'chap.tex', Buffer.from('a\nb\nc\n'));
+  const a = await saveRevision(t.pool, store, owner.id, p.id, 'A');
+  await deleteFile(t.pool, store, owner.id, p.id, old);
+  await createFile(t.pool, store, owner.id, p.id, 'chap.tex', Buffer.from('a\nB\nc\n'));
+  const b = await saveRevision(t.pool, store, owner.id, p.id, 'B');
+  const diff = await diffRevisions(t.pool, store, viewer.id, p.id, a.id, b.id);
+  expect(diff.files.map((f) => [f.path, f.status])).toEqual([['chap.tex', 'changed']]);
+  expect(diff.files[0].lines!.filter((l) => l.op !== ' ')).toEqual([
+    { op: '-', text: 'b' },
+    { op: '+', text: 'B' },
+  ]);
+  expect(new Set(diff.files.map((f) => f.path)).size).toBe(diff.files.length);
+});
+
+test('a file deleted and made again with the same bytes is not a difference', async () => {
+  const p = await shared();
+  const old = await createFile(t.pool, store, owner.id, p.id, 'same.tex', Buffer.from('x\n'));
+  const a = await saveRevision(t.pool, store, owner.id, p.id, 'A');
+  await deleteFile(t.pool, store, owner.id, p.id, old);
+  await createFile(t.pool, store, owner.id, p.id, 'same.tex', Buffer.from('x\n'));
+  const b = await saveRevision(t.pool, store, owner.id, p.id, 'B');
+  expect((await diffRevisions(t.pool, store, viewer.id, p.id, a.id, b.id)).files).toEqual([]);
+});
+
+/** `paper()` with the viewer put on it directly: one person may send 30 invitations an hour. */
+async function shared() {
+  const zip = await writeZip([{ path: 'main.tex', bytes: Buffer.from(MAIN) }]);
+  const [project] = await importZip(t.pool, store, owner.id, zip, 'Shared');
+  await t.pool.query(
+    "insert into project_members (project_id, user_id, role) values ($1, $2, 'viewer')",
+    [project.id, viewer.id],
+  );
+  return { id: project.id };
+}
+
+const rows = (n: number, word: string) =>
+  Array.from({ length: n }, (_, i) => `${word} ${i}`).join('\n') + '\n';
+
+test('an added file shows every line as added and a removed one every line as removed', async () => {
+  const p = await paper();
+  const a = await saveRevision(t.pool, store, owner.id, p.id, 'A');
+  await createFile(t.pool, store, owner.id, p.id, 'notes.tex', Buffer.from('one\n\nthree\n'));
+  await createFile(t.pool, store, owner.id, p.id, 'tail.tex', Buffer.from('no newline'));
+  await createFile(t.pool, store, owner.id, p.id, 'empty.tex');
+  const b = await saveRevision(t.pool, store, owner.id, p.id, 'B');
+
+  const added = await diffRevisions(t.pool, store, viewer.id, p.id, a.id, b.id);
+  expect(added.files.map((f) => [f.path, f.status, f.more, f.tooLarge, f.held])).toEqual([
+    ['empty.tex', 'added', undefined, undefined, undefined],
+    ['notes.tex', 'added', undefined, undefined, undefined],
+    ['tail.tex', 'added', undefined, undefined, undefined],
+  ]);
+  const text = (f: { lines: { op: string; text: string }[] | null }) =>
+    f.lines!.map((l) => l.op + l.text);
+  // A last newline starts no line; a blank line in the middle is one.
+  expect(added.files[0].lines).toEqual([]);
+  expect(text(added.files[1])).toEqual(['+one', '+', '+three']);
+  expect(text(added.files[2])).toEqual(['+no newline']);
+
+  // The other way round, the same file is removed, with its lines.
+  const removed = await diffRevisions(t.pool, store, viewer.id, p.id, b.id, a.id);
+  expect(removed.files.map((f) => [f.path, f.status])).toEqual([
+    ['empty.tex', 'removed'],
+    ['notes.tex', 'removed'],
+    ['tail.tex', 'removed'],
+  ]);
+  expect(text(removed.files[1])).toEqual(['-one', '-', '-three']);
+
+  // Who may look is as it was: people on the paper, and a revision of this paper only.
+  expect(await code(diffRevisions(t.pool, store, outsider.id, p.id, a.id, b.id))).toBe('not_found');
+  const other = await shared();
+  const elsewhere = await saveRevision(t.pool, store, owner.id, other.id, 'Elsewhere');
+  expect(await code(diffRevisions(t.pool, store, owner.id, p.id, a.id, elsewhere.id))).toBe(
+    'not_found',
+  );
+  expect(await code(diffRevisions(t.pool, store, owner.id, p.id, elsewhere.id, b.id))).toBe(
+    'not_found',
+  );
+});
+
+test('the lines of a file a restore took out are in the comparison with the revision that keeps it', async () => {
+  const p = await shared();
+  const good = await saveRevision(t.pool, store, owner.id, p.id, 'Good');
+  await createFile(t.pool, store, owner.id, p.id, 'lost.tex', Buffer.from('precious\nwords\n'));
+  const restored = await restoreRevision(t.pool, store, owner.id, p.id, good.id);
+  const kept = (await restoreNote(t.pool, p.id, restored.number))!.kept!;
+  const diff = await diffRevisions(t.pool, store, viewer.id, p.id, kept.id, restored.id);
+  expect(diff.files.map((f) => [f.path, f.status])).toEqual([['lost.tex', 'removed']]);
+  expect(diff.files[0].lines).toEqual([
+    { op: '-', text: 'precious' },
+    { op: '-', text: 'words' },
+  ]);
+});
+
+test('a picture and a file that is not UTF-8 have no lines and are not too large; a 2 MB file is never fetched', async () => {
+  const p = await shared();
+  const a = await saveRevision(t.pool, store, owner.id, p.id, 'A');
+  const png = Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a, 9, 8, 7]);
+  const latin = Buffer.from([0x63, 0x61, 0x66, 0xe9, 0x0a]);
+  const big = Buffer.from('a line of text\n'.repeat(140_000));
+  expect(big.length).toBeGreaterThan(2 * 1024 * 1024);
+  await createFile(t.pool, store, owner.id, p.id, 'pic.png', png);
+  await createFile(t.pool, store, owner.id, p.id, 'latin.tex', latin);
+  await createFile(t.pool, store, owner.id, p.id, 'big.tex', big);
+  const b = await saveRevision(t.pool, store, owner.id, p.id, 'B');
+
+  const fetched: string[] = [];
+  const watched = {
+    ...store,
+    get: (digest: string) => {
+      fetched.push(digest);
+      return store.get(digest);
+    },
+  };
+  const diff = await diffRevisions(t.pool, watched, viewer.id, p.id, a.id, b.id);
+  const by = Object.fromEntries(diff.files.map((f) => [f.path, f]));
+  expect(Object.keys(by).sort()).toEqual(['big.tex', 'latin.tex', 'pic.png']);
+  expect(by['pic.png']).toMatchObject({ status: 'added', lines: null });
+  expect(by['pic.png'].tooLarge).toBeUndefined();
+  expect(by['latin.tex']).toMatchObject({ status: 'added', lines: null });
+  expect(by['latin.tex'].tooLarge).toBeUndefined();
+  expect(by['big.tex']).toMatchObject({ status: 'added', lines: null, tooLarge: true });
+  // The small ones were read; the large one was only asked about.
+  expect(fetched).toContain(sha256(png));
+  expect(fetched).toContain(sha256(latin));
+  expect(fetched).not.toContain(sha256(big));
+});
+
+test('an added file is shown to 2,000 lines, with the rest counted', async () => {
+  const p = await shared();
+  const a = await saveRevision(t.pool, store, owner.id, p.id, 'A');
+  await createFile(t.pool, store, owner.id, p.id, 'long.tex', Buffer.from(rows(2500, 'row')));
+  const b = await saveRevision(t.pool, store, owner.id, p.id, 'B');
+  const diff = await diffRevisions(t.pool, store, viewer.id, p.id, a.id, b.id);
+  expect(diff.files).toHaveLength(1);
+  expect(diff.files[0].lines).toHaveLength(2000);
+  expect(diff.files[0].more).toBe(500);
+  expect(diff.files[0].lines!.at(-1)).toEqual({ op: '+', text: 'row 1999' });
+  // The same, taken out.
+  const back = await diffRevisions(t.pool, store, viewer.id, p.id, b.id, a.id);
+  expect(back.files[0].lines).toHaveLength(2000);
+  expect(back.files[0].more).toBe(500);
+  expect(back.files[0].lines![0].op).toBe('-');
+});
+
+test('all the added and removed files together show at most 10,000 lines', async () => {
+  const p = await shared();
+  const a = await saveRevision(t.pool, store, owner.id, p.id, 'A');
+  // Six files of 1,900 lines: 11,400 in all, in the order of their paths.
+  for (let i = 0; i < 6; i++)
+    await createFile(
+      t.pool,
+      store,
+      owner.id,
+      p.id,
+      `part${i}.tex`,
+      Buffer.from(rows(1900, `p${i}`)),
+    );
+  const b = await saveRevision(t.pool, store, owner.id, p.id, 'B');
+  const diff = await diffRevisions(t.pool, store, viewer.id, p.id, a.id, b.id);
+  const shown = diff.files.map((f) => f.lines!.length);
+  expect(shown.reduce((n, k) => n + k, 0)).toBe(10_000);
+  expect(shown).toEqual([1900, 1900, 1900, 1900, 1900, 500]);
+  expect(diff.files.map((f) => f.more)).toEqual([
+    undefined,
+    undefined,
+    undefined,
+    undefined,
+    undefined,
+    1400,
+  ]);
+  // Once the total is spent, a file has no lines shown and all of them counted.
+  await createFile(t.pool, store, owner.id, p.id, 'zlast.tex', Buffer.from(rows(30, 'z')));
+  const c = await saveRevision(t.pool, store, owner.id, p.id, 'C');
+  const more = await diffRevisions(t.pool, store, viewer.id, p.id, a.id, c.id);
+  expect(more.files.at(-1)).toMatchObject({ path: 'zlast.tex', lines: [], more: 30 });
+});
+
+test('an added data file held out of downloads shows its lines, like a changed one, and is flagged', async () => {
+  const p = await shared();
+  const a = await saveRevision(t.pool, store, owner.id, p.id, 'A');
+  const data = await createFile(
+    t.pool,
+    store,
+    owner.id,
+    p.id,
+    'runs.csv',
+    Buffer.from('day,ms\n1,9\n2,38\n'),
+  );
+  await approveDataset(t.pool, store, owner.id, p.id, data, {
+    version: (await datasetProposal(t.pool, store, owner.id, p.id, data)).version,
+    columns: [
+      { name: 'day', type: 'number', unit: '' },
+      { name: 'ms', type: 'number', unit: 'ms' },
+    ],
+    missing: [],
+    exported: false,
+  });
+  await createFile(t.pool, store, owner.id, p.id, 'plain.csv', Buffer.from('a,b\n'));
+  const b = await saveRevision(t.pool, store, owner.id, p.id, 'B');
+  const diff = await diffRevisions(t.pool, store, viewer.id, p.id, a.id, b.id);
+  expect(diff.files.map((f) => [f.path, f.held])).toEqual([
+    ['plain.csv', undefined],
+    ['runs.csv', true],
+  ]);
+  expect(diff.files[1].lines!.map((l) => l.op + l.text)).toEqual(['+day,ms', '+1,9', '+2,38']);
+  // Taken out again, the same.
+  const back = await diffRevisions(t.pool, store, viewer.id, p.id, b.id, a.id);
+  expect(back.files[1]).toMatchObject({ path: 'runs.csv', status: 'removed', held: true });
+});

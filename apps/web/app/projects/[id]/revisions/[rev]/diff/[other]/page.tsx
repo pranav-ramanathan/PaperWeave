@@ -44,33 +44,78 @@ export default async function Diff({
         </Link>
       </header>
       {diff.files.length === 0 && <p>Nothing differs between these two revisions.</p>}
-      {diff.files.map((f) => (
-        <section key={f.path} aria-label={f.path}>
-          <h2>
-            <code>{f.path}</code> <span className="role">{WHAT[f.status]}</span>
-            {f.was && (
-              <span className="role">
-                {' '}
-                (was <code>{f.was}</code>)
-              </span>
-            )}
-          </h2>
-          {f.lines ? (
-            <Changes path={f.path} lines={f.lines} />
-          ) : f.tooLarge ? (
-            <p>
-              Too much of this file changed to show it line by line here. To compare them, download{' '}
-              <a href={`/projects/${id}/revisions/${other}/zip`}>the ZIP of revision {diff.from}</a>{' '}
-              and <a href={`/projects/${id}/revisions/${rev}/zip`}>the ZIP of revision {diff.to}</a>
-              .
-            </p>
-          ) : (
-            f.status === 'changed' && (
+      {diff.files.map((f) => {
+        // The one revision that holds an added or removed file, and its number.
+        const [one, number] = f.status === 'removed' ? [other, diff.from] : [rev, diff.to];
+        return (
+          <section key={f.path} aria-label={f.path}>
+            <h2>
+              <code>{f.path}</code> <span className="role">{WHAT[f.status]}</span>
+              {f.was && (
+                <span className="role">
+                  {' '}
+                  (was <code>{f.was}</code>)
+                </span>
+              )}
+            </h2>
+            {f.lines ? (
+              f.lines.length === 0 && !f.more ? (
+                <p>This file is empty.</p>
+              ) : (
+                <>
+                  {f.lines.length > 0 && <Changes path={f.path} lines={f.lines} />}
+                  {f.more ? (
+                    <p>
+                      {f.more} more line{f.more === 1 ? '' : 's'} of this file{' '}
+                      {f.more === 1 ? 'is' : 'are'} not shown here.
+                      {!f.held && (
+                        <>
+                          {' '}
+                          To read {f.more === 1 ? 'it' : 'them'}, download{' '}
+                          <a href={`/projects/${id}/revisions/${one}/zip`}>
+                            the ZIP of revision {number}
+                          </a>
+                          .
+                        </>
+                      )}
+                    </p>
+                  ) : null}
+                </>
+              )
+            ) : f.tooLarge && (f.status === 'added' || f.status === 'removed') ? (
+              <p>
+                This file is too large to show here.
+                {!f.held && (
+                  <>
+                    {' '}
+                    To read it, download{' '}
+                    <a href={`/projects/${id}/revisions/${one}/zip`}>
+                      the ZIP of revision {number}
+                    </a>
+                    .
+                  </>
+                )}
+              </p>
+            ) : f.tooLarge ? (
+              <p>
+                Too much of this file changed to show it line by line here. To compare them,
+                download{' '}
+                <a href={`/projects/${id}/revisions/${other}/zip`}>
+                  the ZIP of revision {diff.from}
+                </a>{' '}
+                and{' '}
+                <a href={`/projects/${id}/revisions/${rev}/zip`}>the ZIP of revision {diff.to}</a>.
+              </p>
+            ) : f.status === 'changed' ? (
               <p>This file changed, but it is not text that can be shown line by line.</p>
-            )
-          )}
-        </section>
-      ))}
+            ) : (
+              (f.status === 'added' || f.status === 'removed') && (
+                <p>This file is not text that can be shown here.</p>
+              )
+            )}
+          </section>
+        );
+      })}
     </main>
   );
 }

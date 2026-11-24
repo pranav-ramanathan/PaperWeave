@@ -6894,7 +6894,7 @@ of the paper's .bib files.`
 - **Not done.**
   - The paper's own page in another tab is still not told; it shows the change after a reload or on coming back to it.
   - A rename is not announced, and who renamed or deleted a file is not said.
-  - The comparison a restore's note links to lists a removed file as "Removed" without its lines. The locked editor still shows them, to copy.
+  - ~~The comparison a restore's note links to lists a removed file as "Removed" without its lines.~~ Done: see "The comparison shows the text of added and removed files".
   - A file renamed from `.tex` to something else keeps its visual view until reload; a file that stopped being text (replaced by a picture, or by a restore) closes with the either-or sentence alone.
   - The root file's folder in the build pane, the paper's macros and the people who can be mentioned are still as the page was made.
   - An invitation link opened signed out; Back/Forward with the sync service away (as before).
@@ -6969,8 +6969,9 @@ of the paper's .bib files.`
   - Measured while choosing this, not changed: typing in the visual view of one 150 KB file took
     a median of 56 ms a key (p95 80) in the real editor, against 24 ms in a 33 KB file and 16 ms in
     the source view of either. One machine, once.
-  - The paper's own page in another tab; a restore-removed file's lines in the comparison; a
-    file renamed away from `.tex` (as before).
+  - The paper's own page in another tab; ~~a restore-removed file's lines in the comparison~~
+    (done, see "The comparison shows the text of added and removed files"); a file renamed away
+    from `.tex` (as before).
 
 ## Typing in the visual view of a long file is fast again
 
@@ -7146,3 +7147,28 @@ of the paper's .bib files.`
   - The words of other refusals that say "ZIP" (a paper with no main file, more than 50 papers,
     an upload over 100 MB) are the same for a tar.
   - `.tar.bz2`, `.tar.xz`, `.7z` and `.rar` are not read.
+
+## The comparison shows the text of added and removed files
+
+- **What was wrong.** A file a co-author added, or a restore took out, was listed as "Added" or
+  "Removed" with no lines, so there was nothing to copy from the comparison a restore's note links to.
+- **Now** `diffRevisions` gives an added file's lines as `+` (from the newer revision's digest) and a
+  removed file's as `-` (from the older one's), by `wholeFile` in `textdiff.ts`, so `diffHunks` and the
+  page take them as they take a changed file's. A last newline starts no line; an empty file has none
+  and the page says "This file is empty."
+- **Reading.** `store.size` is asked first and a file over 1 MB is not fetched (`tooLarge`, "too large
+  to show here"). Text that is not editable (a picture, Latin-1) is `lines: null`, "not text that can
+  be shown here". Size and fetch are both inside `mapLimit(READS)`. Changed files are read as before.
+- **Caps.** 2,000 lines of one file (`FAR_EDITS`; `more: n` says how many are left) and 10,000 of all
+  added and removed files together, spent in the order of their paths. Past either, the page links the
+  ZIP of the one revision that holds the file, unless the file is held data (`held: true`: a ZIP leaves
+  it out). Lines of held data are shown, as they already were for a changed one.
+- **Deleted and made again at one path** (a new `file_id`) was two entries, "Removed" and "Added", with
+  the same path: a duplicate React key and two regions of one name. It is now one "Changed" file,
+  compared line by line like any; the same bytes again is no difference. Authorization is as before
+  (`project.read`, each revision tied to the paper by `load`); no new route.
+- **Held by** `textdiff.test.ts`, `revisions.sandbox.test.ts`, `batching.sandbox.test.ts` (twenty added
+  files, at most `READS` fetches at once) and the comparison test in `revisions.spec.ts`.
+- **Not done.**
+  - A file deleted and made again as text on one side only is "Changed" with no lines.
+  - A changed file's own "too much changed" sentence still links both ZIPs even for held data.

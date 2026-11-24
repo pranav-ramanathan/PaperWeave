@@ -55,6 +55,23 @@ export function diffLines(a: string, b: string, maxCells = 4_000_000): DiffLine[
   return diffSeq(a.split('\n'), b.split('\n'), maxCells);
 }
 
+/**
+ * All the lines of a file that is only on one side of a comparison, every one added (`+`) or
+ * removed (`-`), in the shape `diffLines` gives so that `diffHunks` takes them unchanged. At most
+ * `max` lines are given; `more` is how many were left out. The newline that ends the last line
+ * does not start another, and an empty text has no lines.
+ */
+export function wholeFile(
+  text: string,
+  op: '+' | '-',
+  max: number,
+): { lines: DiffLine[]; more: number } {
+  const all = text.split('\n');
+  if (all.at(-1) === '') all.pop();
+  const shown = all.slice(0, Math.max(0, max));
+  return { lines: shown.map((line) => ({ op, text: line })), more: all.length - shown.length };
+}
+
 /** The most lines `diffLinesFar` will report as removed and added together. */
 export const FAR_EDITS = 2000;
 

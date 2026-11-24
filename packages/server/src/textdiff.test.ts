@@ -1,7 +1,15 @@
 import { expect, test } from 'vitest';
 import { restoreEdits } from './revisions.ts';
 import type { DiffLine } from './textdiff.ts';
-import { carryLine, diffHunks, diffLines, diffLinesFar, diffWords, FAR_EDITS } from './textdiff.ts';
+import {
+  carryLine,
+  diffHunks,
+  diffLines,
+  diffLinesFar,
+  diffWords,
+  FAR_EDITS,
+  wholeFile,
+} from './textdiff.ts';
 
 const show = (a: string, b: string) => diffLines(a, b)!.map((l) => l.op + l.text);
 
@@ -490,4 +498,48 @@ test('random texts: nothing is lost between hunks, and rows are in order', () =>
       }
     }
   }
+});
+
+test('a whole file is every line added or removed, and a last newline starts no line', () => {
+  expect(wholeFile('a\nb\n', '+', 10)).toEqual({
+    lines: [
+      { op: '+', text: 'a' },
+      { op: '+', text: 'b' },
+    ],
+    more: 0,
+  });
+  // The same lines with no newline at the end, and removed.
+  expect(wholeFile('a\nb', '-', 10).lines).toEqual([
+    { op: '-', text: 'a' },
+    { op: '-', text: 'b' },
+  ]);
+  // Blank lines are lines; only the one newline that ends the text is not.
+  expect(wholeFile('a\n\n\n', '+', 10).lines.map((l) => l.text)).toEqual(['a', '', '']);
+  expect(wholeFile('\n', '+', 10).lines.map((l) => l.text)).toEqual(['']);
+});
+
+test('the text of an empty file has no lines', () => {
+  expect(wholeFile('', '+', 10)).toEqual({ lines: [], more: 0 });
+  expect(wholeFile('', '-', 0)).toEqual({ lines: [], more: 0 });
+});
+
+test('a whole file past the cap gives the cap and counts the rest', () => {
+  const text = Array.from({ length: 2500 }, (_, i) => `line ${i}`).join('\n') + '\n';
+  const whole = wholeFile(text, '+', FAR_EDITS);
+  expect(whole.lines).toHaveLength(FAR_EDITS);
+  expect(whole.more).toBe(500);
+  expect(whole.lines[0]).toEqual({ op: '+', text: 'line 0' });
+  expect(whole.lines.at(-1)).toEqual({ op: '+', text: 'line 1999' });
+  // Exactly the cap leaves nothing; a cap of nothing leaves everything.
+  expect(wholeFile('a\nb\n', '+', 2).more).toBe(0);
+  expect(wholeFile('a\nb\n', '+', 0)).toEqual({ lines: [], more: 2 });
+});
+
+test('the lines of a whole file go through diffHunks as one hunk of changed rows', () => {
+  const { lines } = wholeFile('a\nb\nc\n', '-', 10);
+  const { hunks, rest } = diffHunks(lines);
+  expect(rest).toBe(0);
+  expect(hunks).toHaveLength(1);
+  expect(hunks[0]).toMatchObject({ skipped: 0, line: 1 });
+  expect(hunks[0].rows.map((r) => r.op + r.text)).toEqual(['-a', '-b', '-c']);
 });
