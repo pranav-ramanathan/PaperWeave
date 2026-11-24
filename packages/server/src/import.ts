@@ -12,6 +12,8 @@ import {
   proseEnvs,
   reachesClass,
   readyMadeBbls,
+  type Spelling,
+  spellingOf,
   uncomment,
 } from '@paperweave/latex';
 import type pg from 'pg';
@@ -60,6 +62,12 @@ export type ImportReport = {
   skippedMore?: number;
   /** What was brought in of the review data the archive held, if it held any. */
   review?: ReviewImport;
+  /**
+   * The spelling the paper is checked in from the start, when the paper itself shows which: by
+   * its words, or by what its preamble asks babel or polyglossia for. Absent when it shows
+   * neither (the paper starts as every new paper does), and in reports stored before it existed.
+   */
+  spelling?: { language: Spelling; by: 'words' | 'preamble' };
 };
 export type ProjectFile = {
   id: string;
@@ -399,6 +407,23 @@ export function describeImport(
     );
   // The paper's own theorem environments are prose in the editor too: count them the same way.
   const set = new Set([...DEFAULT_TRANSPARENT, ...proseEnvs(texts, root)]);
+  // British or American: by the prose of the files the body reads, or else by the preamble (the
+  // root's, and the files it reads before \\begin{document}).
+  const start = uncomment(texts[root]);
+  const spelling = spellingOf(
+    graph.order
+      .filter((p) => /\.(tex|ltx)$/i.test(p) && !graph.preamble.includes(p))
+      .map((p) => texts[p] ?? ''),
+    [
+      start.slice(0, Math.max(0, start.indexOf('\\begin{document}'))),
+      ...graph.preamble.map((p) => uncomment(texts[p] ?? '')),
+    ].join('\n'),
+    set,
+  );
+  if (spelling)
+    notes.push(
+      `Spelling was set to ${spelling.language === 'en-US' ? 'American' : 'British'} English: ${spelling.by === 'words' ? 'that is how most of the words that differ between the two are spelt in the paper' : 'that is what the preamble asks for'}. Language, further down this page, changes it.`,
+    );
   const files = entries
     .map((e): FileReport => {
       const d = meta.get(e.path);
@@ -424,6 +449,7 @@ export function describeImport(
       cycles: graph.cycles,
       notes,
       unnamable: paths.filter((p) => texName(p)).sort(),
+      ...(spelling ? { spelling } : {}),
     },
   };
 }
@@ -465,10 +491,11 @@ export async function importZip(
         'Imported paper'
       ).slice(0, 200);
       const project = (
-        await db.query('insert into projects (name, compiler) values ($1, $2) returning id, name', [
-          name,
-          p.report.compiler,
-        ])
+        await db.query(
+          'insert into projects (name, compiler, language) values ($1, $2, $3) returning id, name',
+          // No sign of either spelling in the paper: what every new paper starts with.
+          [name, p.report.compiler, p.report.spelling?.language ?? 'en-GB'],
+        )
       ).rows[0];
       await db.query(
         "insert into project_members (project_id, user_id, role) values ($1, $2, 'owner')",

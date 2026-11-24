@@ -4,9 +4,10 @@
 // Needs the grammar checker of infra/compose.yaml.
 import { existsSync, readFileSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
-import { inProse, placed, prose, readAs } from '@paperweave/latex';
+import { inProse, placed, prose, readAs, spellingWords } from '@paperweave/latex';
 import { expect, test } from 'vitest';
 import { coined, NEVER } from './grammar.ts';
+import { describeImport } from './import.ts';
 import { TEST_ENV } from './testing.ts';
 
 const ROOT = join(import.meta.dirname, '../../..');
@@ -246,4 +247,91 @@ test('an abbreviation or a made-up name is not called misspelt, and a slip besid
     'smal',
   ]);
   expect(shown[1].first).toBe('GPU-accelerated');
+}, 60_000);
+
+const AMERICAN =
+  'color colors colored coloring behavior behaviors behavioral neighbor neighbors neighboring neighborhood ' +
+  'favor favors favored favorable favorite flavor tumor tumors labor honor endeavor harbor rumor vapor armor ' +
+  'odor humor rigor vigor unlabeled mislabeled labeled labeling modeling modeled remodeling traveling canceled ' +
+  'signaling channeled tunneling fueled dialed totaled equaled rivaled leveled center centers centered centering ' +
+  'recenter epicenter barycenter analyze analyzes analyzed analyzing analyzer reanalyze fiber fibers defense ' +
+  'offense catalog catalogs distill distills skeptic skeptical skepticism fulfill fulfills fulfillment aluminum ' +
+  'kilometer kilometers centimeter millimeters liter liters';
+const BRITISH =
+  'colour colours coloured colouring behaviour behaviours behavioural neighbour neighbours neighbouring ' +
+  'neighbourhood favour favours favoured favourable favourite flavour tumour tumours labour honour endeavour ' +
+  'harbour rumour vapour armour odour humour rigour vigour disfavoured discoloured centre centres centred ' +
+  'centring recentre epicentre barycentre analyse analysed analysing analyser reanalysed normalise normalised ' +
+  'normalising normalisation normalisations summarise summarised polarised parameterised factorised optimise ' +
+  'optimised optimiser optimisers minimising maximised organise organised organising organiser recognise ' +
+  'recognised recognisable utilise utilised stabilised generalise generalised initialised regularised ' +
+  'localisation visualisation parametrised emphasise emphasised synthesised hypothesised criticised standardised ' +
+  'quantised discretised digitised prioritised customised randomised fibre fibres defence offence licence ' +
+  'programme programmes artefact artefacts distil sceptic sceptical scepticism aluminium kilometre kilometres ' +
+  'centimetre millimetres metre metres litre litres';
+
+/** Which of the words the checker calls misspelt, each asked about on a line of its own. */
+async function misspelt(words: string[], language: string) {
+  const text = words.map((w) => `We read ${w} here.`).join('\n\n');
+  const res = await fetch(`${TEST_ENV.GRAMMAR_URL}/v2/check`, {
+    method: 'POST',
+    body: new URLSearchParams({ text, language }),
+  });
+  if (!res.ok) throw new Error(`the checker answered ${res.status}: ${await res.text()}`);
+  const { matches } = (await res.json()) as {
+    matches: { offset: number; length: number; rule: { category: { id: string } } }[];
+  };
+  const bad = new Set(
+    matches
+      .filter((m) => m.rule.category.id === 'TYPOS')
+      .map((m) => text.slice(m.offset, m.offset + m.length)),
+  );
+  return words.filter((w) => bad.has(w));
+}
+
+test('a word counted as American is misspelt in British and right in American, and the other way round', async () => {
+  const american = AMERICAN.split(' ');
+  const british = BRITISH.split(' ');
+  for (const w of american) expect([w, spellingWords(w)]).toEqual([w, { american: 1, british: 0 }]);
+  for (const w of british) expect([w, spellingWords(w)]).toEqual([w, { american: 0, british: 1 }]);
+  expect(await misspelt(american, 'en-GB')).toEqual(american);
+  expect(await misspelt(american, 'en-US')).toEqual([]);
+  expect(await misspelt(british, 'en-US')).toEqual(british);
+  expect(await misspelt(british, 'en-GB')).toEqual([]);
+  // What says nothing is right in both.
+  const both =
+    'organize normalization modelling labelled analyses arise promise premises advertise exercise improvisation laboratory honorary humorous meter program gray'.split(
+      ' ',
+    );
+  for (const w of both) expect([w, spellingWords(w)]).toEqual([w, { american: 0, british: 0 }]);
+  expect(await misspelt(both, 'en-GB')).toEqual([]);
+  expect(await misspelt(both, 'en-US')).toEqual([]);
+}, 60_000);
+
+test('an American paper checked as the importer chooses shows its mistakes and not its spelling', async () => {
+  const body = [
+    'We model the behavior of each neighbor and color the labeled nodes.',
+    'The centered plots were analyzed twice, and one recieved a new color.',
+    'Modeling the tumor data took teh longest.',
+  ].join('\n');
+  const main = `\\documentclass{article}\n${'\\begin{document}'}\n${body}\n\\end{document}\n`;
+  const { report } = describeImport([{ path: 'main.tex', bytes: Buffer.from(main) }]);
+  expect(report.spelling).toEqual({ language: 'en-US', by: 'words' });
+  const words = async (language: string) =>
+    (await findings(body, language)).shown.map((f) => f.words);
+  expect(await words(report.spelling!.language)).toEqual(['recieved', 'teh']);
+  // As every imported paper was checked before.
+  expect(await words('en-GB')).toEqual([
+    'behavior',
+    'neighbor',
+    'color',
+    'labeled',
+    'centered',
+    'analyzed',
+    'recieved',
+    'color',
+    'Modeling',
+    'tumor',
+    'teh',
+  ]);
 }, 60_000);

@@ -15,3 +15,4 @@ export * from './surrogate.ts';
 export * from './envs.ts';
 export * from './hazards.ts';
 export * from './quiet.ts';
+export * from './spelling.ts';
