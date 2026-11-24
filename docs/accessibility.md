@@ -210,6 +210,13 @@ the keyboard (`insert.spec`).
   median paper's main file, measured on the corpus. The panels are now in the order Proposed
   changes, Comments, Spelling and grammar, so the first Tab from the text is "Propose a change
   here" and the second "Comment on the selected text". `grammar.spec` holds it.
+- A word misspelt in several places of a file was a line for each, with the same name and the same
+  buttons, so a list of names told a screen-reader user nothing apart and the keyboard passed every
+  button of every repeat (2.4.1, 2.4.6): 41 % of the panel's Tab stops in the corpus. It is now one
+  line; the line says "Place 2 of 7.", "Show in the text" steps through the places and says which
+  one it showed, "Change to" changes the place the line stands at and says how many are left
+  (4.1.3), and the keyboard stays on the button while the word has places left. `findings.test.ts`
+  and `grammar.spec` hold it.
 - A reply sent with Enter on a "Mention" checkbox left the keyboard on the page body, because the
   list of people closes after a send (2.4.3). The keyboard now goes to the reply's text box.
 - On a window 320 pixels wide the chart page scrolled sideways when a column heading was long,

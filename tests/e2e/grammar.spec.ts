@@ -510,3 +510,63 @@ test('comments and proposed changes come before a long list of findings', async 
   // The list really is long: twelve findings, each with "Show in the text" and more.
   expect(where.findingStops).toBeGreaterThanOrEqual(24);
 });
+
+test('a word misspelt in three places is one line, and one press changes one place', async ({
+  browser,
+}) => {
+  test.setTimeout(120_000);
+  const owner = await person(browser, 'grammar-places');
+  // One word misspelt three times and another once, the same in British and American English.
+  const main = [
+    '\\documentclass{article}',
+    '\\begin{document}',
+    'The measurment is taken twice. A second measurment follows it.',
+    '',
+    'The last measurment was recieved late.',
+    '\\end{document}',
+    '',
+  ].join('\n');
+  const zip = join(mkdtempSync(join(tmpdir(), 'paperweave-e2e-')), `Places ${run}.zip`);
+  writeFileSync(zip, await writeZip([{ path: 'main.tex', bytes: Buffer.from(main) }]));
+  await owner.page.goto('/sign-in');
+  await signIn(owner.page, owner.email);
+  await owner.page.getByLabel('Or import a ZIP of a LaTeX project').setInputFiles(zip);
+  await owner.page.getByRole('button', { name: 'Import ZIP' }).click();
+  await expect(owner.page.getByRole('heading', { name: 'Language' })).toBeVisible();
+  await owner.page.getByRole('link', { name: 'main.tex' }).first().click();
+
+  // Two lines for four findings; every place is still underlined in the text.
+  const word = finding(owner.page, 'Spelling: “measurment”');
+  await expect(word).toBeVisible({ timeout: 30_000 });
+  await expect(panel(owner.page).getByRole('article')).toHaveCount(2);
+  await expect(word).toContainText('Place 1 of 3.');
+  await expect(finding(owner.page, 'Spelling: “recieved”')).not.toContainText('Place');
+  await expect(owner.page.locator(`${VISUAL} .finding-mark`)).toHaveCount(4);
+
+  // "Show in the text" shows the place the line is at, and the next one when pressed again.
+  await word.getByRole('button', { name: 'Show in the text' }).click();
+  await expect(panel(owner.page)).toContainText('Place 1 of 3 of “measurment”.');
+  await word.getByRole('button', { name: 'Show in the text' }).click();
+  await expect(panel(owner.page)).toContainText('Place 2 of 3 of “measurment”.');
+  await expect(word).toContainText('Place 2 of 3.');
+
+  // "Change to" changes the place shown and no other. The line stays, for the two that are left.
+  await word.getByRole('button', { name: 'Change to “measurement”' }).click();
+  await expect(panel(owner.page)).toContainText(
+    'Changed “measurment” to “measurement”. It stands in 2 more places.',
+  );
+  await expect(owner.page.locator(VISUAL)).toContainText('A second measurement follows it.');
+  await expect(owner.page.locator(VISUAL)).toContainText('The measurment is taken twice.');
+  await expect(owner.page.locator(VISUAL)).toContainText('The last measurment was');
+  await expect(word).toContainText('Place 2 of 2.');
+  await expect(owner.page.locator(`${VISUAL} .finding-mark`)).toHaveCount(3);
+
+  // Pressed again without showing: the place the line moved on to, which is the last.
+  await word.getByRole('button', { name: 'Change to “measurement”' }).click();
+  await expect(panel(owner.page)).toContainText('It stands in 1 more place.');
+  await expect(owner.page.locator(VISUAL)).toContainText('The last measurement was');
+  await expect(owner.page.locator(VISUAL)).toContainText('The measurment is taken twice.');
+  await expect(word).toBeVisible();
+  await expect(word).not.toContainText('Place');
+  await expect(panel(owner.page).getByRole('article')).toHaveCount(2);
+});
