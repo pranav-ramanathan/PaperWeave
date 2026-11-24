@@ -1,5 +1,6 @@
 // Keeps one visual document in step with one shared LaTeX text.
 import {
+  captionText,
   contained,
   containedNear,
   DEFAULT_TRANSPARENT,
@@ -607,6 +608,44 @@ export class Bridge {
       (a.from === b.from &&
         contained(base, parse(b.text, t), a.from, plain.length, body.length) &&
         contained(base, reparse(base, b.text), a.from, plain.length, body.length));
+    return ok ? { ...c, key: crypto.randomUUID(), replacement: b.filled } : 'spills';
+  }
+
+  /**
+   * `c` (from insertCommand) filled with a footnote that says `text` (words, or LaTeX that is
+   * running text): 'spills' unless `\\footnote{text}` is read as one footnote where it stands,
+   * in the paragraph or list item it was put in, with everything around it read as before;
+   * 'heading' in a heading's title, where a footnote stops the build; 'conflict' if the place is
+   * gone or the model is behind the text.
+   */
+  footnoteCommand(c: Command, text: string): Command | 'conflict' | 'spills' | 'heading' {
+    const at = Y.createAbsolutePositionFromRelativePosition(c.to, this.ytext.doc!)?.index;
+    const src = this.ytext.toString();
+    if (at == null || src !== this.model.parsed.src) return 'conflict';
+    const latex = `\\footnote{${text}}`;
+    // One group of running text: a list, a heading or a display in a footnote is for the source.
+    if (!captionText(text) || HALF.test(text) || inPair(src, at) || needs(latex) !== 'inline')
+      return 'spills';
+    // A stand-in of the same shape, to find out how a footnote is read at this place.
+    const plain = '\\footnote{x}';
+    const put = (whole: string) => {
+      const filled = this.fillCommand(c, whole).replacement;
+      return {
+        filled,
+        text: src.slice(0, at) + filled + src.slice(at),
+        from: at + filled.indexOf(whole),
+      };
+    };
+    const a = put(plain);
+    const b = put(latex);
+    const t = this.model.parsed.transparent;
+    const base = parse(a.text, t);
+    if (base.blocks.findLast((x) => x.start <= a.from)?.body.kind === 'heading') return 'heading';
+    const ok =
+      a.from === b.from &&
+      contained(base, base, a.from, plain.length, plain.length) &&
+      contained(base, parse(b.text, t), a.from, plain.length, latex.length) &&
+      contained(base, reparse(base, b.text), a.from, plain.length, latex.length);
     return ok ? { ...c, key: crypto.randomUUID(), replacement: b.filled } : 'spills';
   }
 

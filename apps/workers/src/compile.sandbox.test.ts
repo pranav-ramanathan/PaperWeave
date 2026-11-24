@@ -19,6 +19,7 @@ import { dirname, join } from 'node:path';
 import {
   encodeFile,
   findRoot,
+  footnoteBody,
   includeGraph,
   parseSyncTeX,
   texText,
@@ -144,6 +145,46 @@ test('a [ typed at the start of an item or a theorem body prints as text', async
   const text = execFileSync('pdftotext', [join(out, r.pdf!), '-'], { encoding: 'utf8' });
   expect(text).toContain('[1] x');
   expect(text).toContain('[0,1] or more.');
+});
+
+test('what the footnote window accepts builds, and what it refuses would not', async () => {
+  const paper = (body: string) =>
+    `\\documentclass{article}\n\\usepackage{hyperref}\n\\begin{document}\n\\section{S}\\label{s}\n${body}\n\\begin{thebibliography}{1}\\bibitem{k} K.\\end{thebibliography}\n\\end{document}\n`;
+  const good = [
+    'See the appendix.',
+    'Costs \\$5 and 100\\% of it, R\\&D, item \\#3, a\\_b.',
+    'See \\url{https://example.org/a_b?x=1\\&y=2\\#top}.',
+    'As in \\cite{k} and Section~\\ref{s}.',
+    'With $x^2_i$ and \\(a_1\\) and \\emph{stress}.',
+    'A line break \\\\ inside.',
+  ];
+  for (const t of good) expect(footnoteBody(t)).toEqual({ text: t });
+  const { r } = await buildSource(
+    paper(good.map((t, i) => `Word${i}\\footnote{${t}} and more.`).join('\n')),
+  );
+  expect(r.diagnostics.filter((d) => d.severity === 'error')).toEqual([]);
+  expect(r.ok).toBe(true);
+  // What the window refuses would stop the build if it were written as typed.
+  for (const t of [
+    '100% sure',
+    'R & D',
+    'a_b',
+    'Item #3',
+    'Costs $5',
+    'Code \\verb|x_y| here',
+    'See \\url{http://a.b/#x}',
+  ]) {
+    expect([t, 'problem' in footnoteBody(t)]).toEqual([t, true]);
+    expect([t, (await buildSource(paper(`Word\\footnote{${t}} and more.`))).r.ok]).toEqual([
+      t,
+      false,
+    ]);
+  }
+  // A footnote in a heading's title stops the build, which is why the tool refuses there.
+  const heading = await buildSource(
+    '\\documentclass{article}\n\\begin{document}\n\\section{Title\\footnote{A note.}}\nText.\n\\end{document}\n',
+  );
+  expect(heading.r.ok).toBe(false);
 });
 
 test('a list and a sentence pasted through the command path build and print as written', async () => {

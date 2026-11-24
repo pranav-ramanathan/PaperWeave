@@ -6200,3 +6200,56 @@ of the paper's .bib files.`
   - Carry over, unchanged: nested lists, `\item[..]` and `description` raw in the visual view;
     Enter at the start of a list item after an empty one; everything in the "Not done" of "The
     build pane hears from its own editor".
+
+## A footnote can be added in the visual view
+
+- **What was missing.** The visual view had a tool for a reference, a citation, an equation, a
+  figure, a table, a heading and a list, and none for a footnote; typed there, `\footnote{..}` went
+  in as its characters. Counted over the 31 corpus papers (29 with body text, 118 body files) with
+  the real bridge, counts only: 24 of 29 papers have at least one footnote; 164 are shown as a chip
+  (174 `\footnote{` in the source); 159 stand in a paragraph, 4 in a list item, 1 in a heading; 126
+  of the 164 hold LaTeX (a formula 47, `\url`/`\href` 34, a citation 24, a reference 18, styled text 10) and 38 are words only.
+- **Now** (`footnoteBody` in `packages/latex/src/floats.ts`, `Bridge.footnoteCommand`,
+  `footnote()` in `apps/web/lib/visual.ts`, `FootnoteBox` in `Tools.tsx`): with the caret in
+  running text, a toolbar button "Footnote", Alt+O or "Insert a footnote…" in the menu opens a
+  window with one field, "Text". Enter or "Insert" puts `\footnote{text}` at the caret and leaves
+  the caret just after it; one undo takes it back. The field takes words and LaTeX that is running
+  text (`\$ \% \& \# \_`, a formula, `\cite`, `\ref`, `\url`, `\emph`, `\textbf`, `\\`); line breaks
+  and runs of spaces become one space. What would stop the build is refused with what to write: an
+  empty text, a bare `%` or `&`, unbalanced braces or a trailing backslash, a bare `#`, `_` or `^`
+  outside a formula, a `$` that does not close, `\verb`. A list, heading, `\item`, a display
+  equation or anything that would not be read as one footnote where it stands is refused as "only
+  running text". In a heading nothing opens and the note says a footnote there stops the build; not
+  in running text says to put the caret in the text. Six new sentences, all in the window or the
+  note. Corpus result: 4,514 put in at 6,056 carets, each exactly one new chip holding the text
+  given, no file gained a frozen block, `check()` held every time, every refusal left the source
+  untouched, and all 1,476 heading carets were refused. Builds (pdfLaTeX, made-up papers): the ten
+  accepted texts build; the eleven refused texts fail the build; a footnote in a list item, in
+  `\emph{}`, and in IEEEtran, amsart, llncs, acmart, elsarticle, revtex4-2, beamer and two-column
+  article builds; a footnote in a heading's title fails in five of five classes.
+- **Held by** two tests in `floats.test.ts`, eleven in `bridge.test.ts` (the fixture guard among
+  them) and one in `compile.sandbox.test.ts`, all run on the development machine, and one in
+  `insert.spec.ts`, written but run only in CI (the local blob store refuses writes). Two existing
+  browser expectations were changed on purpose and not run locally: the toolbar in `keys.spec.ts`
+  has 16 buttons, was 15; the menu list in `insert.spec.ts` gains "Insert a footnote…" after
+  "Insert an equation…".
+- **Not done.**
+  - A caret after a space leaves the space before the note mark (`word \footnote{..}`); the tool
+    does not move the place.
+  - `\footnote[2]{..}`, `\footnotemark`/`\footnotetext` and `\thanks` are not offered; nor a
+    footnote in a table cell or a caption (they are fields, and need other LaTeX).
+  - A new footnote is running text only; a list or a display in one is made with "Edit
+    footnote…" or in the source. `\input` and definitions typed into one are not refused (as in
+    "Edit footnote…").
+  - `\url` in a footnote needs the paper to load hyperref or url; without, the build says so.
+  - No footnote at the very start of a paragraph that begins with a comment line or a `{\bf ..}`
+    group (62 of 4,320 carets tried).
+  - The words of a footnote are still not read by the grammar check.
+  - Not tried: an input method in the field; Safari and Firefox; Alt+O on a Mac keyboard layout
+    that types a letter with it (the other Alt keys are in the same position).
+  - Found while measuring, not changed: Enter at the start of a list's first item is refused (40
+    of 40 lists, 19 papers); Enter in the middle of a heading is refused (927 of 927); Backspace or
+    Delete where a heading meets a paragraph does nothing (1,814 places).
+  - Carry over, unchanged: nested lists, `\item[..]` and `description` raw in the visual view;
+    everything in the "Not done" of "A selection across a formula, a figure, a heading or a
+    list".

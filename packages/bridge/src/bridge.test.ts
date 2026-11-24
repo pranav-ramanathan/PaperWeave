@@ -656,6 +656,232 @@ test('an insertion at either end of the file, or after typing elsewhere, still a
   expect(r.src).toBe('% note\nOne.\n\nTwo! here.\n\nThree.\n');
 });
 
+describe('a footnote put in where the caret is', () => {
+  const DOC = (body: string) =>
+    `\\documentclass{article}\n\\begin{document}\n${body}\n\\end{document}\n`;
+  /** The visual position just after (or before) the first place `word` is shown. */
+  const pos = (r: Replica, word: string, side: 'after' | 'before' = 'after') => {
+    let at = -1;
+    r.state.doc.descendants((n, p) => {
+      if (at < 0 && n.isText && n.text!.includes(word))
+        at = p + n.text!.indexOf(word) + (side === 'after' ? word.length : 0);
+    });
+    if (at < 0) throw new Error('not shown: ' + word);
+    return at;
+  };
+  /** Ask for a footnote at the caret, as the editor does: the place first, then the text. */
+  const note = (r: Replica, at: number, text: string) => {
+    r.select(at);
+    const c = r.bridge.insertCommand(r.state, '');
+    if (!c) return 'no place';
+    const f = r.bridge.footnoteCommand(c, text);
+    return typeof f === 'string' ? f : r.bridge.applyCommand(f);
+  };
+  const chips = (r: Replica) => {
+    const out: string[] = [];
+    r.state.doc.descendants((n) => void (n.type.name === 'raw_inline' && out.push(n.attrs.src)));
+    return out;
+  };
+
+  test('in a paragraph: one chip, the exact bytes, nothing else changed', () => {
+    const r = replica(DOC('Some text here and more.\n\nSecond paragraph.'));
+    expect(note(r, pos(r, 'here'), 'See the appendix.')).toBe('applied');
+    expect(r.src).toBe(
+      DOC('Some text here\\footnote{See the appendix.} and more.\n\nSecond paragraph.'),
+    );
+    expect(chips(r)).toEqual(['\\footnote{See the appendix.}']);
+    r.check();
+  });
+
+  test('in a list item, inside emphasis, and at the end of a paragraph', () => {
+    const r = replica(
+      DOC(
+        '\\begin{itemize}\n\\item One here.\n\\item Two.\n\\end{itemize}\n\nSome \\emph{stressed} text.',
+      ),
+    );
+    expect(note(r, pos(r, 'One'), 'A.')).toBe('applied');
+    expect(note(r, pos(r, 'stress'), 'B.')).toBe('applied');
+    expect(note(r, pos(r, 'text.'), 'C.')).toBe('applied');
+    expect(r.src).toBe(
+      DOC(
+        '\\begin{itemize}\n\\item One\\footnote{A.} here.\n\\item Two.\n\\end{itemize}\n\nSome \\emph{stress\\footnote{B.}ed} text.\\footnote{C.}',
+      ),
+    );
+    expect(chips(r)).toEqual(['\\footnote{A.}', '\\footnote{B.}', '\\footnote{C.}']);
+    expect(r.state.doc.child(1).type.name).toBe('list');
+    expect(r.state.doc.child(1).childCount).toBe(2);
+    r.check();
+  });
+
+  test('LaTeX in the note stays one chip: a formula, a citation, an address, a line break', () => {
+    const r = replica(DOC('Some text here and more.'));
+    const text =
+      'With $x^2_i$, \\cite{k}, \\url{https://example.org/a_b\\#c} and a break \\\\ here.';
+    expect(note(r, pos(r, 'here'), text)).toBe('applied');
+    expect(r.src).toBe(DOC(`Some text here\\footnote{${text}} and more.`));
+    expect(chips(r)).toEqual([`\\footnote{${text}}`]);
+    expect(r.state.doc.childCount).toBe(
+      replica(DOC('Some text here and more.')).state.doc.childCount,
+    );
+    r.check();
+  });
+
+  test('after a command name, before a letter and after a comment it is still read as one footnote', () => {
+    const r = replica(DOC('Use \\LaTeX here.\n\nWords % a note\nand more.'));
+    const k = r.state.doc.childCount;
+    expect(note(r, pos(r, 'Use ') + 1, 'A.')).toBe('applied');
+    expect(note(r, pos(r, 'and', 'before'), 'B.')).toBe('applied');
+    expect(chips(r).filter((x) => x.startsWith('\\footnote'))).toEqual([
+      '\\footnote{A.}',
+      '\\footnote{B.}',
+    ]);
+    expect(r.state.doc.childCount).toBe(k);
+    expect(r.src).toContain('\\footnote{B.}and more.');
+    r.check();
+  });
+
+  test('refused in a heading, where it stops the build: nothing changes', () => {
+    const src = DOC('\\section{Title here}\n\nText.\n\n\\subsection{Lower}\nMore.');
+    const r = replica(src);
+    expect(note(r, pos(r, 'Title'), 'A.')).toBe('heading');
+    expect(note(r, pos(r, 'here'), 'A.')).toBe('heading');
+    expect(note(r, pos(r, 'Lower'), 'A.')).toBe('heading');
+    expect(r.src).toBe(src);
+    r.check();
+  });
+
+  test('refused when it is not running text, or would not stay one footnote: nothing changes', () => {
+    const src = DOC('Some text here and more.\n\nSecond paragraph.');
+    const r = replica(src);
+    for (const text of [
+      'A list \\begin{itemize}\\item a\\end{itemize} inside.',
+      'An \\item alone.',
+      'A heading \\section{X} inside.',
+      'An equation \\[x=1\\] inside.',
+      'Display $$x$$ maths.',
+      'A blank\n\nline.',
+      'Two\nlines.',
+      'open {brace',
+      'close } brace',
+      '100% sure',
+      'ends in \\',
+      'A.} and \\emph{words after it',
+      'A.}\\footnote{B.',
+      'half \ud83d',
+      'R & D',
+    ])
+      expect([text, note(r, pos(r, 'here'), text)]).toEqual([text, 'spills']);
+    expect(r.src).toBe(src);
+    r.check();
+  });
+
+  test('the place is fixed when it is asked for: text typed before it meanwhile does not move it', () => {
+    const r = replica(DOC('Some text here and more.'));
+    r.select(pos(r, 'here'));
+    const c = r.bridge.insertCommand(r.state, '')!;
+    r.ytext.insert(r.src.indexOf('Some'), 'Now ');
+    r.ytext.insert(r.src.indexOf(' more'), ', as said,');
+    const f = r.bridge.footnoteCommand(c, 'A.');
+    expect(typeof f).toBe('object');
+    expect(r.bridge.applyCommand(f as Command)).toBe('applied');
+    expect(r.src).toBe(DOC('Now Some text here\\footnote{A.} and, as said, more.'));
+    r.check();
+  });
+
+  test('a paragraph just opened with Enter has no place for one', () => {
+    const r = replica(DOC('Some text here.'));
+    r.select(pos(r, 'here.'));
+    expect(r.dispatch(r.state.tr.split(r.state.selection.from))).toBe(true);
+    expect(r.bridge.insertCommand(r.state, '')).toBeNull();
+  });
+
+  test('at the very start of a paragraph it goes before the first word', () => {
+    const r = replica(
+      DOC(
+        '\\section{A}\\label{s}\nText here.\n\n\\begin{abstract}\nInside words.\n\\end{abstract}\n\nPlain start.',
+      ),
+    );
+    for (const w of ['Text', 'Inside', 'Plain'])
+      expect(note(r, pos(r, w, 'before'), 'A.')).toBe('applied');
+    expect(r.src).toBe(
+      DOC(
+        '\\section{A}\\label{s}\n\\footnote{A.}Text here.\n\n\\begin{abstract}\n\\footnote{A.}Inside words.\n\\end{abstract}\n\n\\footnote{A.}Plain start.',
+      ),
+    );
+    r.check();
+  });
+
+  test('what the editor asks before it opens the window: a stand-in footnote at the caret', () => {
+    const r = replica(DOC('\\section{Title}\n\nText here.'));
+    const probe = (w: string) => {
+      r.select(pos(r, w));
+      const c = r.bridge.insertCommand(r.state, '');
+      return c && r.bridge.footnoteCommand(c, 'x');
+    };
+    expect(probe('Title')).toBe('heading');
+    expect(typeof probe('here')).toBe('object');
+    expect(r.src).toBe(DOC('\\section{Title}\n\nText here.'));
+  });
+
+  test('in every fixture a footnote goes in at any caret in running text as one chip, and nowhere in a heading', () => {
+    const seed = Number(process.env.SEED ?? 178);
+    const { int } = rng(seed);
+    const tally = { made: 0, heading: 0 };
+    for (const [path, text] of Object.entries(fixtures)) {
+      const r = replica(text);
+      const chipCount = () => {
+        let n = 0;
+        r.state.doc.descendants(
+          (x) =>
+            void (
+              x.type.name === 'raw_inline' &&
+              x.attrs.src === '\\footnote{A $x_1$ note.}' &&
+              n++
+            ),
+        );
+        return n;
+      };
+      const blocks: { start: number; size: number; heading: boolean }[] = [];
+      r.state.doc.descendants((n, p) => {
+        if (n.isTextblock)
+          blocks.push({ start: p + 1, size: n.content.size, heading: n.type.name === 'heading' });
+      });
+      for (let k = 0; k < Math.min(30, blocks.length * 2); k++) {
+        const b = blocks[int(blocks.length)];
+        const at = b.start + int(b.size + 1);
+        const before = r.src;
+        const had = chipCount();
+        const count = r.state.doc.childCount;
+        r.select(at);
+        const c = r.bridge.insertCommand(r.state, '');
+        const f = c && r.bridge.footnoteCommand(c, 'A $x_1$ note.');
+        const where = `seed ${seed}, ${path}, position ${at}`;
+        if (b.heading) expect([where, f]).toEqual([where, 'heading']);
+        else expect([where, f]).not.toEqual([where, 'heading']);
+        if (!f || typeof f === 'string') {
+          if (f === 'heading') tally.heading++;
+          expect(r.src).toBe(before);
+          continue;
+        }
+        expect([where, r.bridge.applyCommand(f)]).toEqual([where, 'applied']);
+        tally.made++;
+        expect(r.src.length).toBe(before.length + f.replacement.length);
+        expect([where, chipCount()]).toEqual([where, had + 1]);
+        expect([where, r.state.doc.childCount]).toEqual([where, count]);
+        r.check();
+        r.ytext.doc!.transact(() => {
+          r.ytext.delete(0, r.ytext.length);
+          r.ytext.insert(0, before);
+        });
+        r.bridge.sync();
+      }
+      r.bridge.destroy();
+    }
+    expect(tally.made).toBeGreaterThan(100);
+    expect(tally.heading).toBeGreaterThan(10);
+  });
+});
+
 test('editing one cell of a table changes only that cell, and two people can edit two cells', () => {
   const r = replica(fixtures['ieee-multifile/tables/ablation.tex']);
   const table = () => {

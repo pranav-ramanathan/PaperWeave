@@ -184,6 +184,7 @@ export function createVisual(opts: {
     what:
       | 'reference'
       | 'citation'
+      | 'footnote'
       | 'equation'
       | 'figure'
       | 'table'
@@ -892,8 +893,11 @@ export function createVisual(opts: {
     caretIn,
     block = false,
     formula = false,
+    footnote = false,
   }: {
     skipSpace?: boolean;
+    /** What is given is the text of a footnote: the bridge puts it in \\footnote{...}, or refuses. */
+    footnote?: boolean;
     /** The text is a formula typed by a person: refused ('spills') if it would not stand alone. */
     formula?: boolean;
     /** Where in the inserted text the caret goes, if not at its end. */
@@ -913,7 +917,11 @@ export function createVisual(opts: {
     if (floated) skipSpace = true;
     resume = { from: editor.state.selection.from, to: editor.state.selection.to, acted };
     return async (given) => {
-      const latex = floated ? given.replace(/^\n+|\n+$/g, '') : given;
+      const latex = footnote
+        ? `\\footnote{${given}}`
+        : floated
+          ? given.replace(/^\n+|\n+$/g, '')
+          : given;
       const before = moves;
       // Guarded as typed text is, against the text as the earlier commands left it.
       let sent = latex;
@@ -922,6 +930,12 @@ export function createVisual(opts: {
         if (formula) {
           const f = bridge.formulaCommand({ ...c, key }, latex);
           if (typeof f === 'string') return f;
+          sent = f.replacement;
+          return opts.run(f);
+        }
+        if (footnote) {
+          const f = bridge.footnoteCommand({ ...c, key }, given);
+          if (typeof f === 'string') return f === 'conflict' ? f : 'spills';
           sent = f.replacement;
           return opts.run(f);
         }
@@ -979,6 +993,18 @@ export function createVisual(opts: {
     const put = around && insertion({ skipSpace: true });
     if (!around || !put) return null;
     return (level, title) => put(`${around[1]}\\${level}{${title}}${around[2]}`);
+  };
+  /**
+   * Get ready to insert a footnote where the caret is. Returns the function that inserts it, given
+   * its text, by way of the server; 'heading' if the caret is in a heading, where a footnote stops
+   * the build; or null if the caret is not in running text.
+   */
+  const footnote = (): ((text: string) => Promise<CommandResult | 'spills'>) | 'heading' | null => {
+    catchUp();
+    const c = bridge.insertCommand(editor.state, '');
+    const probe = c && bridge.footnoteCommand(c, 'x');
+    if (probe === 'heading') return 'heading';
+    return probe && typeof probe !== 'string' ? insertion({ footnote: true }) : null;
   };
   /**
    * Get ready to insert an empty list of one item where the caret is, which splits its paragraph.
@@ -1285,6 +1311,8 @@ export function createVisual(opts: {
           'Alt-=': () => (opts.ask && opts.editable ? (opts.ask('equation'), true) : false),
           'Alt-r': () => (opts.ask && opts.editable ? (opts.ask('reference'), true) : false),
           'Alt-c': () => (opts.ask && opts.editable ? (opts.ask('citation'), true) : false),
+          // Alt+F is the browser's own menu in Chrome and Firefox; O as in note.
+          'Alt-o': () => (opts.ask && opts.editable ? (opts.ask('footnote'), true) : false),
           'Alt-g': () => (opts.ask && opts.editable ? (opts.ask('figure'), true) : false),
           'Alt-t': () => (opts.ask && opts.editable ? (opts.ask('table'), true) : false),
           'Alt-h': () => (opts.ask && opts.editable ? (opts.ask('heading'), true) : false),
@@ -1437,6 +1465,7 @@ export function createVisual(opts: {
     emph,
     bold,
     insertion,
+    footnote,
     heading,
     list,
     /** Put the keyboard back in the visual view, with the caret where it should be. */

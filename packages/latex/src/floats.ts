@@ -450,6 +450,28 @@ export function atomProblem(text: string, was: string): string | null {
   return kind === 'env' ? ENV_ADVICE : strayAdvice(kind);
 }
 
+/**
+ * What a new footnote will hold, from what was typed for it (words, or LaTeX as in "Edit
+ * footnote"), or what to tell the person if it would stop the build. Whether it is read as one
+ * footnote where it is put is the bridge's to say (`footnoteCommand`). Never quotes the text.
+ */
+export function footnoteBody(typed: string): { text: string } | { problem: string } {
+  // One paragraph: a line break is a space, and a blank line would end the paragraph it is in.
+  const text = typed.replace(/\s+/g, ' ').trim();
+  if (!text) return { problem: 'A footnote needs some text.' };
+  if (!captionText(text))
+    return {
+      problem:
+        'A footnote cannot hold an unescaped % or &, its braces must match, and it cannot end in a backslash. Write \\% for a percent sign and \\& for an ampersand.',
+    };
+  // In an argument a # stops the build wherever it is, an address in \url included.
+  if (/(?<!\\)(?:\\\\)*#/.test(text)) return { problem: strayAdvice('#') };
+  if (/\\(?:verb|lstinline|mintinline)(?![a-zA-Z])/.test(text))
+    return { problem: 'A footnote cannot hold \\verb. Write \\texttt{...} for text set as code.' };
+  const stops = atomProblem(`\\footnote{${text}}`, '');
+  return stops ? { problem: stops } : { text };
+}
+
 export type TableOp =
   | { kind: 'row-after' | 'row-delete'; row: number }
   | { kind: 'column-after' | 'column-delete'; column: number };

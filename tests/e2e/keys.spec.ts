@@ -475,7 +475,7 @@ test('the toolbar is one Tab stop, and the arrow keys move along it', async ({ b
   test.setTimeout(180_000);
   const page = await paper(browser, 'keys-toolbar', true);
   const bar = page.getByRole('toolbar', { name: 'Editor tools' });
-  await expect(bar.getByRole('button')).toHaveCount(15);
+  await expect(bar.getByRole('button')).toHaveCount(16);
   await expect(bar.locator('button[tabindex="0"]')).toHaveCount(1);
 
   await tabTo(page, 'Visual');

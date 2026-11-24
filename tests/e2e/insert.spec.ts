@@ -135,6 +135,7 @@ test('references and equations are inserted from the toolbar, the keyboard and t
     'Insert a reference…',
     'Insert a citation…',
     'Insert an equation…',
+    'Insert a footnote…',
     'Insert a figure…',
     'Insert a table…',
     'Insert a heading…',
@@ -530,6 +531,144 @@ test('a heading is inserted from the toolbar, the keyboard and the menu, and tak
   await edit.getByRole('button', { name: 'Heading' }).click();
   await expect(page.getByText('Put the caret in a paragraph to add a heading.')).toBeVisible();
   await expect(box).toBeHidden();
+});
+
+test('a footnote is inserted from the toolbar, the keyboard and the menu, refused in a heading and when it would stop the build, and taken back by undo', async ({
+  browser,
+}) => {
+  test.setTimeout(180_000);
+  const { page, email } = await person(browser, 'insert-footnote');
+  const other = await person(browser, 'insert-footnote-2');
+  const main =
+    '\\documentclass{article}\n\\begin{document}\n\\section{Opening}\nHello world here.\n\nSecond paragraph.\n\\end{document}\n';
+  const zip = join(mkdtempSync(join(tmpdir(), 'paperweave-e2e-')), `Footnote ${run}.zip`);
+  writeFileSync(zip, await writeZip([{ path: 'main.tex', bytes: Buffer.from(main) }]));
+  await page.goto('/sign-in');
+  await signIn(page, email);
+  await page.getByLabel('Or import a ZIP of a LaTeX project').setInputFiles(zip);
+  await page.getByRole('button', { name: 'Import ZIP' }).click();
+  await page.getByLabel('Their email address').fill(other.email);
+  await page.getByLabel('Their role').selectOption('editor');
+  await page.getByRole('button', { name: 'Send invitation' }).click();
+  await expect(page.getByRole('status')).toContainText(other.email);
+  await other.page.goto(await emailedLink(other.email, '/invitations/'));
+  await signIn(other.page, other.email);
+  await other.page.getByRole('button', { name: 'Join this paper' }).click();
+  await expect(other.page.getByText('You are an editor')).toBeVisible();
+  await page.getByRole('link', { name: 'main.tex' }).first().click();
+  const status = page.getByRole('region', { name: /^Editor for/ }).getByRole('status');
+  await expect(status).toHaveText('All edits saved.');
+  await expect(page).toHaveURL(/\/files\//);
+  await other.page.goto(page.url());
+  await expect(other.page.locator(VISUAL)).toContainText('Hello world here.');
+
+  /** The lines of the source that have something on them. */
+  const lines = async () => {
+    await showSource(page);
+    const all = (await page.locator('.editor .cm-line').allTextContents()).filter((l) => l.trim());
+    await page.getByRole('group', { name: 'View' }).getByRole('button', { name: 'Visual' }).click();
+    return all;
+  };
+  const edit = page.getByRole('group', { name: 'Edit' });
+  const box = page.getByRole('dialog', { name: 'Insert a footnote' });
+  const chip = `${VISUAL} .pw-raw_inline`;
+  const original = [
+    '\\documentclass{article}',
+    '\\begin{document}',
+    '\\section{Opening}',
+    'Hello world here.',
+    'Second paragraph.',
+    '\\end{document}',
+  ];
+  expect(await lines()).toEqual(original);
+
+  // The toolbar button: the window opens on its one field, and Enter inserts. The caret is left
+  // just after the note, so typing carries on.
+  await clickAfter(page, VISUAL, 'Hello');
+  await edit.getByRole('button', { name: 'Footnote' }).click();
+  await expect(box).toBeVisible();
+  await expect(box.getByLabel('Text')).toBeFocused();
+  await audit(page, 'the footnote window');
+  await page.keyboard.type('See the appendix.');
+  await page.keyboard.press('Enter');
+  await expect(box).toBeHidden();
+  await expect(page.locator(chip)).toHaveText('Footnote: See the appendix.');
+  await expect(other.page.locator(chip)).toHaveText('Footnote: See the appendix.');
+  await expect(page.locator(VISUAL)).toBeFocused();
+  await page.keyboard.type('!');
+  await expect(status).toHaveText('All edits saved.');
+  expect(await lines()).toEqual([
+    original[0],
+    original[1],
+    original[2],
+    'Hello\\footnote{See the appendix.}! world here.',
+    original[4],
+    original[5],
+  ]);
+
+  // Undo takes it back: the typed character first, then the footnote.
+  await page.keyboard.press('ControlOrMeta+z');
+  await page.keyboard.press('ControlOrMeta+z');
+  await expect(page.locator(chip)).toHaveCount(0);
+  await expect(status).toHaveText('All edits saved.');
+  expect(await lines()).toEqual(original);
+  await expect(other.page.locator(chip)).toHaveCount(0);
+
+  // The keyboard, and the refusals: the window stays, with the text kept, until it is right.
+  await clickAfter(page, VISUAL, 'Second');
+  await page.keyboard.press('Alt+o');
+  await expect(box).toBeVisible();
+  await box.getByLabel('Text').fill('100% sure');
+  await page.keyboard.press('Enter');
+  await expect(box.getByRole('alert')).toContainText('A footnote cannot hold an unescaped % or &');
+  await expect(box).toBeVisible();
+  await expect(box.getByLabel('Text')).toHaveValue('100% sure');
+  await audit(page, 'the footnote window with a refusal');
+  await box.getByLabel('Text').fill('Costs $5');
+  await box.getByRole('button', { name: 'Insert' }).click();
+  await expect(box.getByRole('alert')).toHaveText(
+    'A $ starts a formula, and this one does not end. Write \\$ for a dollar sign.',
+  );
+  await box.getByLabel('Text').fill('A list \\begin{itemize}\\item a\\end{itemize}');
+  await box.getByRole('button', { name: 'Insert' }).click();
+  await expect(box.getByRole('alert')).toContainText(
+    'Only running text can go in a footnote added here',
+  );
+  await box.getByLabel('Text').fill('100\\% sure, see $x_1$');
+  await page.keyboard.press('Enter');
+  await expect(box).toBeHidden();
+  await expect(page.locator(chip)).toHaveCount(1);
+  await expect(status).toHaveText('All edits saved.');
+  expect(await lines()).toEqual([
+    original[0],
+    original[1],
+    original[2],
+    original[3],
+    'Second\\footnote{100\\% sure, see $x_1$} paragraph.',
+    original[5],
+  ]);
+  await expect(other.page.locator(chip)).toHaveCount(1);
+  const placed = await lines();
+
+  // In a heading a footnote would stop the build: said so, and no window.
+  await page.locator(`${VISUAL} h2`).click();
+  await page.keyboard.press('Alt+o');
+  await expect(
+    page.getByText('A footnote in a heading stops the build. Put the caret in the text below it.'),
+  ).toBeVisible();
+  await expect(box).toBeHidden();
+  expect(await lines()).toEqual(placed);
+
+  // The menu at a place in the text, put away with Escape.
+  const word = await caretAfter(page, 'world');
+  await page.mouse.click(word.end, word.y, { button: 'right' });
+  const menu = page.getByRole('menu', { name: 'At this place' });
+  await menu.getByRole('menuitem', { name: 'Insert a footnote…' }).click();
+  await expect(box).toBeVisible();
+  await page.keyboard.press('Escape');
+  await expect(box).toBeHidden();
+  await expect(page.locator(VISUAL)).toBeFocused();
+  expect(await lines()).toEqual(placed);
 });
 
 test('a list is started from the toolbar, the keyboard and the menu, and left with Enter in an empty item', async ({
