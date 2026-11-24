@@ -6624,3 +6624,50 @@ of the paper's .bib files.`
   - Not tried: a real browser on this machine; a screen reader.
   - Carry over, unchanged: the "Not done" of "Comments and proposed changes come before the
     spelling list", except its first line, which this section answers.
+
+## What changed since a revision you choose
+
+- **What was wrong.** Every build of changed text makes a revision, about a hundred an hour of
+  writing, and "Changes since N" on a row compares with the row below. For a paper with one named
+  revision ("Sent out") and an hour of writing after it: 101 revisions, 51 rows on the page, 50
+  comparisons offered, 49 of them of a single build (about eight keys), "Sent out" to now not
+  offered, and 5,050 pairs of revisions there are. Measured by applying the page's own rule to what
+  `listRevisions` returns for a paper made in the real database, by a probe that is not kept.
+- **Now** (`apps/web/lib/compare.ts`, `compareAction`, `revisionOfNow`, the paper's page). Above
+  the table of revisions, a form: "Changes from" (a list), "Changes up to" (a list), and a button
+  "Show the changes". Both lists hold every revision the table shows, newest first, as number, name
+  (cut at 40 characters) and time. "Changes from" starts at the newest revision somebody named or
+  restored, or the oldest listed when none is; for a reviewer or viewer the newest revision of all
+  is passed over, since their comparison ends there. "Changes up to" starts at "The paper as it
+  is now" for an owner or editor: pressing the button then makes a revision of the paper as it is,
+  unless the latest one is it already (as a download and a build do), and shows the comparison. A
+  reviewer or viewer can only choose revisions and cannot make one. "Changes since N" on each row
+  and the comparison page are unchanged.
+- **Held by** `apps/web/lib/compare.test.ts` (7 tests, run on the development machine with the unit
+  suite, typecheck and lint); one test in `revisions.sandbox.test.ts` and one in
+  `tests/e2e/revisions.spec.ts`, both written but run only in CI (the local blob store refuses
+  writes). The sandbox test's body and the browser test's steps were tried on the development
+  machine against the real database with a file store kept in memory; the layout figures (three
+  rows and 181 px at 320x480, no sideways scroll) are from the app's CSS on static markup. No
+  existing expectation was changed.
+- **Not done.**
+  - A comparison gives up on a file when the stretch from its first changed line to its last is
+    over about 2,000 lines on each side, however few lines changed in between: with sixty scattered
+    changes, 2 of 101 corpus files (the largest files of 2 of 29 papers, 2,547 and 3,079 lines;
+    four papers have a file over 2,000). The page says so and links both ZIPs. Raising the limit or
+    comparing another way touches the restore, which uses the same comparison.
+  - A reviewer or viewer cannot compare with the paper as it is now, only with the newest
+    revision; text typed since the last build or save is not in it, and nothing says so.
+  - A revision made for a comparison is listed as "Unnamed ... by" the person who compared, though
+    they wrote nothing; a download and a build do the same.
+  - Only the revisions on the page can be chosen: the named ones and fifty automatic ones at a time.
+  - The comparison does not say who changed what, only who made each revision; a file that was
+    added shows "Added" and none of its text; a moved paragraph is a removal and an addition.
+  - The comparison page's title in the browser tab is "Revision ? to revision ?" for every real
+    comparison (it reads the numbers from the address, which holds ids), today as before; its
+    heading is right.
+  - Chosen the other way round (from a later revision to an earlier one), the comparison is shown
+    that way, with added and removed exchanged; the heading says which.
+  - Nothing compares two PDFs, and nothing leads from a changed line to its place in the editor.
+  - Not tried: a real browser on this machine; a screen reader.
+  - Carry over, unchanged: the "Not done" of "A misspelt word is one line of the spelling list".

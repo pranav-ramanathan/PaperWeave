@@ -23,6 +23,7 @@ import {
   restoreEdits,
   cutRevision,
   restoreRevision,
+  revisionOfNow,
   revisionPdf,
   saveRevision,
 } from './revisions.ts';
@@ -237,6 +238,35 @@ test('comparing two revisions shows changed lines, renames and nothing else', as
     { op: '+', text: 'And a third.' },
   ]);
   expect(await code(diffRevisions(t.pool, store, outsider.id, p.id, a.id, b.id))).toBe('not_found');
+});
+
+test('the paper as it is now is the latest revision, or a new one when something changed since', async () => {
+  const p = await paper();
+  const named = await saveRevision(t.pool, store, owner.id, p.id, 'Sent out');
+  // Nothing has changed: the named revision is the paper as it is now, and no other is made.
+  expect((await revisionOfNow(t.pool, store, owner.id, p.id)).id).toBe(named.id);
+
+  await replace(p.main, 'Hello.', 'Hello, world.');
+  const now = await revisionOfNow(t.pool, store, owner.id, p.id);
+  expect(now.number).toBe(named.number + 1);
+  // Asked again with nothing typed between: the same one.
+  expect((await revisionOfNow(t.pool, store, owner.id, p.id)).id).toBe(now.id);
+  expect(
+    (await listRevisions(t.pool, owner.id, p.id)).map((r) => [r.id, r.kind, r.createdBy]),
+  ).toEqual([
+    [now.id, 'auto', 'owner@example.org'],
+    [named.id, 'named', 'owner@example.org'],
+  ]);
+  // What a comparison from the named one up to now then shows, to anyone on the paper.
+  const diff = await diffRevisions(t.pool, store, viewer.id, p.id, named.id, now.id);
+  expect(diff).toMatchObject({ from: named.number, to: now.number });
+  expect(diff.files.map((f) => [f.path, f.status])).toEqual([['main.tex', 'changed']]);
+
+  // Only for those who may make revisions, and nothing is made for anyone else.
+  await replace(p.main, 'Hello, world.', 'Hello again.');
+  expect(await code(revisionOfNow(t.pool, store, viewer.id, p.id))).toBe('permission_denied');
+  expect(await code(revisionOfNow(t.pool, store, outsider.id, p.id))).toBe('not_found');
+  expect(await listRevisions(t.pool, owner.id, p.id)).toHaveLength(2);
 });
 
 test('a text file that changed too much to compare line by line is marked too large', async () => {

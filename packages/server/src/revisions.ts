@@ -246,6 +246,21 @@ export async function saveRevision(
   return cutRevision(pool, store, userId, projectId, { name: name.trim(), kind: 'named' });
 }
 
+/**
+ * The paper as it is now, as a revision, to compare an earlier one with: the latest revision if
+ * nothing has changed since it was made, otherwise a new automatic one. For those who may make
+ * revisions; others compare with the latest there is.
+ */
+export async function revisionOfNow(
+  pool: pg.Pool,
+  store: BlobStore,
+  userId: string,
+  projectId: string,
+) {
+  await authorize(pool, userId, id(projectId), 'revision.write');
+  return cutRevision(pool, store, userId, projectId);
+}
+
 /** How many automatic revisions a list shows at once. A paper being written gets one at every build. */
 export const REVISIONS_SHOWN = 50;
 

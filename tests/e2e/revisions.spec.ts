@@ -15,6 +15,7 @@ import {
   selectWord,
   showSource,
   signIn,
+  sticksOut,
   typingSaved,
 } from './helpers';
 
@@ -296,4 +297,75 @@ test('a comparison still marks the changed word when a paragraph was added after
   ).toHaveCount(1);
   expect(await page.locator('.diff').evaluate((e) => e.scrollWidth <= e.clientWidth)).toBe(true);
   await audit(page, 'a comparison with a paragraph added after a marked line');
+});
+
+test('everything changed since a revision somebody named, up to now, is one press', async ({
+  browser,
+}) => {
+  test.setTimeout(120_000);
+  const owner = await person(browser, 'since-owner');
+  const page = owner.page;
+  const main = '\\documentclass{article}\n\\begin{document}\nOne line.\n\\end{document}\n';
+  const zip = join(mkdtempSync(join(tmpdir(), 'paperweave-e2e-')), `Since ${run}.zip`);
+  writeFileSync(zip, await writeZip([{ path: 'main.tex', bytes: Buffer.from(main) }]));
+  await page.goto('/sign-in');
+  await signIn(page, owner.email);
+  await page.getByLabel('Or import a ZIP of a LaTeX project').setInputFiles(zip);
+  await page.getByRole('button', { name: 'Import ZIP' }).click();
+  const paper = page.url();
+
+  // A revision somebody named; a file added; another named revision; one more file, in no
+  // revision yet.
+  await page.getByLabel('Name for the paper as it is now').fill('Sent out');
+  await page.getByRole('button', { name: 'Save revision' }).click();
+  await expect(page.getByRole('status')).toHaveText('Saved as revision 1.');
+  await page.getByLabel('Name, with folders if you like').fill('notes.tex');
+  await page.getByRole('button', { name: 'Add file' }).click();
+  await expect(page.getByRole('status')).toHaveText('Added notes.tex.');
+  await page.getByLabel('Name for the paper as it is now').fill('Later');
+  await page.getByRole('button', { name: 'Save revision' }).click();
+  await expect(page.getByRole('status')).toHaveText('Saved as revision 2.');
+  await page.getByLabel('Name, with folders if you like').fill('more.tex');
+  await page.getByRole('button', { name: 'Add file' }).click();
+  await expect(page.getByRole('status')).toHaveText('Added more.tex.');
+
+  // The comparison starts at the newest named revision and ends at the paper as it is now.
+  const from = page.getByLabel('Changes from');
+  const to = page.getByLabel('Changes up to');
+  await expect(from.locator('option:checked')).toHaveText(
+    /^2\. Later, \d{4}-\d\d-\d\d \d\d:\d\d UTC$/,
+  );
+  await expect(to.locator('option:checked')).toHaveText('The paper as it is now');
+  await expect(from.getByRole('option')).toHaveCount(2);
+  await expect(to.getByRole('option')).toHaveCount(3);
+  await audit(page, 'a paper page that offers to compare two revisions');
+  // In a narrow window the two lists and the button are one under another, within the window.
+  await page.setViewportSize({ width: 320, height: 480 });
+  expect(await sticksOut(page)).toEqual([]);
+  await page.setViewportSize({ width: 1280, height: 720 });
+
+  // From the first one: both files, though a revision lies between and the second file was in
+  // none. A revision was made of the paper as it is.
+  const first = await from.getByRole('option', { name: /^1\. Sent out, / }).getAttribute('value');
+  await from.selectOption(first);
+  await page.getByRole('button', { name: 'Show the changes' }).click();
+  await expect(page.getByRole('heading', { name: 'Revision 1 to revision 3' })).toBeVisible();
+  await expect(page.getByRole('region', { name: 'notes.tex', exact: true })).toContainText('Added');
+  await expect(page.getByRole('region', { name: 'more.tex', exact: true })).toContainText('Added');
+  await expect(page.getByRole('region', { name: 'main.tex', exact: true })).toHaveCount(0);
+
+  // As the page offers it: since "Later", only the second file. Nothing has changed since
+  // revision 3 was made, so it is the paper as it is now and no fourth is made.
+  await page.goto(paper);
+  await expect(page.getByRole('row', { name: /3\. Unnamed/ })).toBeVisible();
+  await expect(page.getByLabel('Changes from').locator('option:checked')).toHaveText(
+    /^2\. Later, /,
+  );
+  await page.getByRole('button', { name: 'Show the changes' }).click();
+  await expect(page.getByRole('heading', { name: 'Revision 2 to revision 3' })).toBeVisible();
+  await expect(page.getByRole('region', { name: 'more.tex', exact: true })).toContainText('Added');
+  await expect(page.getByRole('region', { name: 'notes.tex', exact: true })).toHaveCount(0);
+  await page.goto(paper);
+  await expect(page.getByRole('row', { name: /3\. Unnamed/ })).toBeVisible();
+  await expect(page.getByRole('row', { name: /4\. Unnamed/ })).toHaveCount(0);
 });

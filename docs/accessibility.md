@@ -226,6 +226,12 @@ the keyboard (`insert.spec`).
   least 24 pixels tall.
 - A proposal's Accept, disabled because the proposal is out of date, now names the "Out of
   date" note as its description (4.1.2), so a screen reader says why it cannot be used.
+- What changed since a revision could be read only a link at a time, each of a few words, and
+  the keyboard paid most: a Tab stop and a page for every build (2.4.1, 2.4.6). The Revisions
+  part now has a form of two labelled lists, "Changes from" and "Changes up to", and a button
+  "Show the changes"; each choice says the revision's number, name and time in words; at 320
+  pixels the three are one under another within the window (1.4.10). `revisions.spec` holds the
+  names, the audit and the narrow window.
 
 ## Walked with the keyboard alone, from sign-in to the revision's downloads
 
