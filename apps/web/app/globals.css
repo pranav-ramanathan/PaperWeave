@@ -392,6 +392,17 @@ div.pw-raw.pw-slim {
   padding: 0.6rem 0;
   border-bottom: 1px solid var(--line);
 }
+/* A paper's name with no space in it (a ZIP is often named with underscores) breaks at the end
+   of the line where it is shown, in the list and in a page's heading, in place of making the
+   page wider than the screen. "break-word" and not "anywhere": a heading in a .bar still takes
+   the width of its longest word when that fits, so ordinary names wrap as they did. */
+.list li,
+h1 {
+  overflow-wrap: break-word;
+}
+h1 {
+  max-width: 100%;
+}
 .page table {
   border-collapse: collapse;
   width: 100%;
