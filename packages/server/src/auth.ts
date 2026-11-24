@@ -263,10 +263,25 @@ export async function signInLinkAddress(auth: Auth, token: string): Promise<stri
   const row = await context.internalAdapter.findVerificationValue(`magic-link:${stored}`);
   if (!row || row.expiresAt.getTime() < Date.now()) return null;
   try {
-    const email = String(JSON.parse(row.value).email ?? '');
-    const at = email.lastIndexOf('@');
-    return at > 0 ? `${email[0]}…${email.slice(at)}` : null;
+    return hiddenAddress(JSON.parse(row.value).email);
   } catch {
     return null;
   }
 }
+
+/**
+ * An address as a page that anyone can open shows it: the first letter and the domain. Enough
+ * for its owner to know it; not the whole address for whoever was forwarded a link.
+ */
+export const hiddenAddress = (email: unknown): string | null => {
+  const address = String(email ?? '');
+  const at = address.lastIndexOf('@');
+  return at > 0 ? `${address[0]}…${address.slice(at)}` : null;
+};
+
+/**
+ * The token in a path that is an invitation's own address and nothing more, or null. A token is
+ * 32 random bytes in base64url (`invite`); anything else is not looked up.
+ */
+export const invitationToken = (path: unknown): string | null =>
+  (typeof path === 'string' && /^\/invitations\/([A-Za-z0-9_-]{43})$/.exec(path)?.[1]) || null;

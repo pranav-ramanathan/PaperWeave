@@ -6816,3 +6816,24 @@ of the paper's .bib files.`
   - A file renamed from `.tex` to something else keeps its visual view until reload; a file that stopped being text (replaced by a picture, or by a restore) closes with the either-or sentence alone.
   - The root file's folder in the build pane, the paper's macros and the people who can be mentioned are still as the page was made.
   - An invitation link opened signed out; Back/Forward with the sync service away (as before).
+
+## An invitation opened before signing in says that it is one
+
+- **Found by** the planner in the real app: the link in an invitation email, opened by someone
+  not signed in, led to the plain sign-in page. Nothing said it was an invitation or which
+  address to use; another address ended, two emails later, at "This invitation is for someone
+  else"; a used, cancelled or expired invitation asked for a sign-in before saying so.
+- **Now** the sign-in page, when it is on the way to an invitation, says "You have been invited
+  to a paper on PaperWeave. The invitation is for r…@example.org: sign in with that address, and
+  the next page lets you join the paper." For an invitation that can no longer be used it says
+  that instead, and signing in leads to the person's papers. The same after "Sign out" on the
+  "for someone else" page and after a sign-in link that had expired.
+- **How** `invitationToken` and `hiddenAddress` (`packages/server/src/auth.ts`) and
+  `invitedAddress` (`projects.ts`): a read by the invitation's token that returns the address as
+  its first letter and domain, the rule the confirm page already had, and nothing of the paper.
+  No new route or action.
+- **Held by** `auth.test.ts`, `projects.sandbox.test.ts` and `projects.spec` (valid, used, and
+  an address that only looks like an invitation; both states audited).
+- **Not done:** the address is not filled in for the person; the paper's name, the role and who
+  invited are shown only after signing in; the person still gets a second email to sign in; the
+  invitation email's own text is unchanged.

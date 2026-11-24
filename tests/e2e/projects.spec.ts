@@ -610,3 +610,55 @@ test('a sign-in form whose request is never answered gives up, says so and can b
   });
   await expect(send).toBeEnabled();
 });
+
+test('an invitation opened before signing in says so and for which address; one no longer valid says that', async ({
+  browser,
+}) => {
+  const owner = await person(browser, 'asks-owner');
+  const guest = await person(browser, 'asks-guest');
+  const late = await person(browser, 'asks-late');
+  const name = `Asked in ${run}`;
+  await owner.page.goto('/sign-in');
+  await signIn(owner.page, owner.email);
+  await owner.page.getByLabel('Name of a new paper').fill(name);
+  await owner.page.getByRole('button', { name: 'Create paper' }).click();
+  await expect(owner.page.getByRole('heading', { name })).toBeVisible();
+  await owner.page.getByLabel('Their email address').fill(guest.email);
+  await owner.page.getByRole('button', { name: 'Send invitation' }).click();
+  await expect(owner.page.getByRole('status')).toContainText(`Invitation sent to ${guest.email}`);
+  const invitation = await emailedLink(guest.email, '/invitations/');
+
+  // Not signed in: the page that asks for an address says why it is asking, and for which one.
+  await guest.page.goto(invitation);
+  await expect(guest.page).toHaveURL(/\/sign-in\?next=%2Finvitations%2F/);
+  const main = guest.page.locator('main');
+  await expect(main).toContainText(
+    'You have been invited to a paper on PaperWeave. The invitation is for a…@example.org: sign in with that address',
+  );
+  // To someone who has not signed in: not the whole address, nor anything of the paper.
+  await expect(main).not.toContainText(guest.email);
+  await expect(main).not.toContainText(name);
+  await expect(guest.page.getByLabel('Email address')).toHaveValue('');
+  await audit(guest.page, 'the sign-in page reached from an invitation');
+  // It is still there while the link is on its way, and the link leads back to the invitation.
+  await signIn(guest.page, guest.email);
+  await expect(guest.page.getByRole('heading', { name: `Join “${name}”` })).toBeVisible();
+  await guest.page.getByRole('button', { name: 'Join this paper' }).click();
+  await expect(guest.page.getByText('You are an editor')).toBeVisible();
+
+  // The same link again, used by now, opened by someone not signed in: said before they sign in.
+  await late.page.goto(invitation);
+  await expect(late.page.locator('main')).toContainText(
+    'This invitation is not valid any more. It may have been used already or have expired.',
+  );
+  await expect(late.page.locator('main')).not.toContainText('You have been invited');
+  await audit(late.page, 'the sign-in page reached from an invitation that is no longer valid');
+  await signIn(late.page, late.email);
+  await expect(late.page.getByRole('heading', { name: 'Your papers' })).toBeVisible();
+
+  // An address that only looks like an invitation's, and the plain page, say nothing of one.
+  const plain = await person(browser, 'asks-plain');
+  await plain.page.goto('/sign-in?next=/invitations/not-a-token');
+  await expect(plain.page.getByRole('heading', { name: 'Sign in to PaperWeave' })).toBeVisible();
+  await expect(plain.page.locator('main')).not.toContainText('nvit');
+});

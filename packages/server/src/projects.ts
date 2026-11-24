@@ -2,6 +2,7 @@
 import { createHash, randomBytes } from 'node:crypto';
 import type pg from 'pg';
 import { LIMITS } from './archive.ts';
+import { hiddenAddress } from './auth.ts';
 import { authorize, type Role, ROLES } from './authz.ts';
 import { type Db, transaction } from './db.ts';
 import { AppError } from './errors.ts';
@@ -344,6 +345,21 @@ export async function findInvitation(db: Db, token: unknown, userId?: string) {
       | { projectId: string; project: string; role: Role; email: string; memberRole: Role | null }
       | undefined) ?? null
   );
+}
+
+/**
+ * For the sign-in page, which anyone can open: whom a still-valid invitation is for, partly
+ * hidden, or null if the token is not one that can be used. The token is the permission, as for
+ * `findInvitation`. Nothing of the paper is returned: its name, the role and who invited are
+ * shown once the invited person has signed in. Only reads.
+ */
+export async function invitedAddress(db: Db, token: unknown): Promise<string | null> {
+  if (typeof token !== 'string') return null;
+  const { rows } = await db.query(
+    'select email from invitations where token_hash = $1 and accepted_at is null and expires_at > now()',
+    [hash(token)],
+  );
+  return rows[0] ? hiddenAddress(rows[0].email) : null;
 }
 
 /** Join the project an invitation was for. Only the invited address may use it, and only once. */

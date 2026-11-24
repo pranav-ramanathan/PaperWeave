@@ -1,5 +1,5 @@
 import { describe, expect, test } from 'vitest';
-import { safePath } from './auth';
+import { hiddenAddress, invitationToken, safePath } from './auth';
 
 const BASE = 'https://app.example';
 
@@ -81,5 +81,36 @@ describe('safePath', () => {
       // What a browser would do to the address: drop tab, newline and return.
       expect(new URL(out.replace(/[\t\n\r]/g, ''), BASE).origin, JSON.stringify(s)).toBe(BASE);
     }
+  });
+});
+
+describe('what the sign-in page may say about an invitation', () => {
+  const token = 'A'.repeat(20) + '-_' + 'z9'.repeat(10) + 'Q';
+
+  test("only an invitation's own address is read as one", () => {
+    expect(token).toHaveLength(43);
+    expect(invitationToken(`/invitations/${token}`)).toBe(token);
+    for (const not of [
+      `/invitations/${token}/`,
+      `/invitations/${token}?x=1`,
+      `/invitations/${token}#x`,
+      `/invitations/${token}x`,
+      `/invitations/${token.slice(1)}`,
+      `/invitations/${token.slice(1)}.`,
+      `/x/invitations/${token}`,
+      `/projects`,
+      '',
+      null,
+      undefined,
+      7,
+    ])
+      expect(invitationToken(not)).toBeNull();
+  });
+
+  test('an address is shown as its first letter and its domain', () => {
+    expect(hiddenAddress('reader@example.org')).toBe('r…@example.org');
+    expect(hiddenAddress('a@b@example.org')).toBe('a…@example.org');
+    for (const not of ['@example.org', 'nobody', '', null, undefined])
+      expect(hiddenAddress(not)).toBeNull();
   });
 });
