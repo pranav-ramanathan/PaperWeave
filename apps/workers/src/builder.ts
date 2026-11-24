@@ -60,9 +60,16 @@ import { compile, type Compiler, IMAGE } from './compile.ts';
  * what and where; a cached failed build keeps "The bibliography could not be made."
  * '...-uncited': a bibliography with nothing cited is a warning; a cached build keeps it as an
  * error beside its PDF.
+ * '...-uncited-read': the files TeX opened are kept; a cached build has none, so the ZIP of
+ * only the files the paper uses could not tell which are unused.
+ * '...-uncited-read-madebbl': the .bbl a build read is kept; a cached build has none, so the ZIP
+ * of only the files the paper uses would lack the bibliography for a venue that makes none.
  */
 const TEX_TEXT =
-  'utf8-biber-eps-glyphs-strings-forcedate-unicode-nullfont-csname-bbl-ended-unclosed-group-bibentry-minted-nobib-merged-opened-bibsaid-uncited';
+  'utf8-biber-eps-glyphs-strings-forcedate-unicode-nullfont-csname-bbl-ended-unclosed-group-bibentry-minted-nobib-merged-opened-bibsaid-uncited-read-madebbl';
+
+/** The largest .bbl kept: a bibliography is far smaller, and a ZIP must not grow by a surprise. */
+const BBL_BYTES = 5_000_000;
 
 /**
  * Where each paper's last good build leaves what it made (BUILD_WARM_DIR; empty turns it off).
@@ -184,7 +191,7 @@ export function buildNext(
     // Only this paper's own builds are looked at: nothing is ever shared between papers.
     const hit = (
       await db.query(
-        `select id, status, diagnostics, pdf_digest, synctex_digest, log_digest, labels from builds
+        `select id, status, diagnostics, pdf_digest, synctex_digest, bbl_digest, log_digest, labels, read from builds
          where project_id = $1 and cache_key = $2 and status <> 'queued'
            and not coalesce(timed_out, false)
          order by created_at desc limit 1`,
@@ -199,8 +206,10 @@ export function buildNext(
         diagnostics: JSON.stringify(hit.diagnostics ?? []),
         pdf_digest: hit.pdf_digest,
         synctex_digest: hit.synctex_digest,
+        bbl_digest: hit.bbl_digest,
         log_digest: hit.log_digest,
         labels: hit.labels && JSON.stringify(hit.labels),
+        read: hit.read && JSON.stringify(hit.read),
       });
       return true;
     }
@@ -229,6 +238,15 @@ export function buildNext(
         name && existsSync(join(work, 'out', name))
           ? store.put(readFileSync(join(work, 'out', name)))
           : null;
+      // The .bbl is kept only if TeX read it in this build (not an empty stand-in, which has no
+      // bytes, nor one a warm build left that the paper no longer reads) and it is a sane size.
+      const bblName = revision.root.replace(/\.(tex|ltx)$/i, '.bbl');
+      const bblSize =
+        result.bbl && existsSync(join(work, 'out', result.bbl))
+          ? statSync(join(work, 'out', result.bbl)).size
+          : 0;
+      const keepBbl =
+        !!result.pdf && !!result.read?.includes(bblName) && bblSize > 0 && bblSize < BBL_BYTES;
       await finish({
         ...common,
         status: result.ok ? 'succeeded' : 'failed',
@@ -236,8 +254,10 @@ export function buildNext(
         timed_out: result.timedOut,
         pdf_digest: await put(result.pdf),
         synctex_digest: await put(result.synctex),
+        bbl_digest: keepBbl ? await put(result.bbl) : null,
         log_digest: await store.put(Buffer.from(result.log, 'utf8')),
         labels: result.labels && JSON.stringify(result.labels),
+        read: result.read && JSON.stringify(result.read),
       });
     } catch (err) {
       // The build machinery itself failed (no Docker, no image). Say so rather than retry forever.

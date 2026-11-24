@@ -1,6 +1,6 @@
 // Revisions: the paper frozen at a moment. Cutting, naming, comparing, restoring and exporting.
 import { createHash } from 'node:crypto';
-import { LATEXMK_RULES, decodeFile } from '@paperweave/latex';
+import { LATEXMK_RULES, bblFormat, decodeFile } from '@paperweave/latex';
 import type pg from 'pg';
 import {
   checkPath,
@@ -31,7 +31,7 @@ import {
   readLogs,
   TEXT,
 } from './sync.ts';
-import { type DiffLine, diffLines, diffLinesFar } from './textdiff.ts';
+import { type DiffLine, diffLinesFar, FAR_EDITS, wholeFile } from './textdiff.ts';
 
 export type Revision = {
   id: string;
@@ -327,6 +327,119 @@ async function load(db: Db, projectId: string, revisionId: string) {
   return { revision, files };
 }
 
+/** The types of file the ZIP of only the files the paper uses may leave out. */
+const LEFT_OUT = /\.(?:tex|ltx|pdf|png|jpe?g|eps)$/i;
+
+/**
+ * Of these files (never the held ones), those the revision's newest succeeded build never
+ * opened: not read, not the root, and of a type that can be left out. `null` if the revision has
+ * no succeeded build; none if that build did not record what it read (an older one). Also the
+ * digest of the .bbl that same build read, if it kept one.
+ */
+async function unusedPaths(
+  db: Db,
+  projectId: string,
+  revisionId: string,
+  root: string | null,
+  files: RevisionFile[],
+): Promise<{ paths: string[]; bbl: string | null } | null> {
+  const built = (
+    await db.query(
+      `select read, bbl_digest from builds
+       where revision_id = $1 and project_id = $2 and status = 'succeeded'
+       order by created_at desc limit 1`,
+      [revisionId, projectId],
+    )
+  ).rows[0];
+  if (!built) return null;
+  const bbl: string | null = built.bbl_digest ?? null;
+  if (!Array.isArray(built.read)) return { paths: [], bbl };
+  const read = new Set<string>(
+    (built.read as unknown[]).flatMap((p) => (typeof p === 'string' ? [p.normalize('NFC')] : [])),
+  );
+  return {
+    paths: files
+      .filter((f) => f.path !== root && LEFT_OUT.test(f.path) && !read.has(f.path.normalize('NFC')))
+      .map((f) => f.path),
+    bbl,
+  };
+}
+
+/**
+ * The .bbl a build made for the paper: where the ZIP of only the files the paper uses puts it
+ * (beside the root, named for it), its digest, and the digest of the revision's own file at that
+ * path, if it has one. The revision's own file is never replaced.
+ */
+export type BuiltBbl = { path: string; digest: string; own: string | null };
+
+/** The .bbl `unusedPaths` found, placed beside the root. None where the root cannot name one. */
+function placeBbl(
+  root: string | null,
+  digest: string | null,
+  files: RevisionFile[],
+): BuiltBbl | null {
+  if (!digest || !root || !/\.(tex|ltx)$/i.test(root)) return null;
+  const path = root.replace(/\.(tex|ltx)$/i, '.bbl').normalize('NFC');
+  const own = files.find((f) => f.path.normalize('NFC') === path);
+  // A folder of that name stands in the way: the archive could not hold both.
+  if (
+    !own &&
+    pathClash(
+      path,
+      files.map((f) => f.path),
+    )
+  )
+    return null;
+  return { path, digest, own: own?.digest ?? null };
+}
+
+/** The biblatex format version of a .bbl's bytes, or null for a BibTeX one (see `bblFormat`). */
+export const formatOfBbl = (bytes: Uint8Array) =>
+  bblFormat(new TextDecoder('utf-8').decode(bytes.subarray(0, 2000)));
+
+/**
+ * The .bbl of the revision's newest succeeded build, as the ZIP of only the files the paper uses
+ * holds or would add it; null if there is none.
+ */
+export async function bblInRevision(
+  db: Db,
+  userId: string,
+  projectId: string,
+  revisionId: string,
+): Promise<BuiltBbl | null> {
+  await authorize(db, userId, id(projectId), 'project.read');
+  const { revision, files } = await load(db, projectId, revisionId);
+  const found = await unusedPaths(db, projectId, revisionId, revision.root, []);
+  return found ? placeBbl(revision.root, found.bbl, files) : null;
+}
+
+/**
+ * The files of a revision, not held back from downloads, that its newest succeeded build never
+ * opened, as the ZIP of only the files the paper uses leaves them out. None when it has not
+ * been built, or the build did not record what it read.
+ */
+export async function unusedInRevision(
+  db: Db,
+  userId: string,
+  projectId: string,
+  revisionId: string,
+): Promise<string[]> {
+  await authorize(db, userId, id(projectId), 'project.read');
+  const { revision, files } = await load(db, projectId, revisionId);
+  const held = await heldFileIds(db, projectId);
+  return (
+    (
+      await unusedPaths(
+        db,
+        projectId,
+        revisionId,
+        revision.root,
+        files.filter((f) => !held.has(f.file_id)),
+      )
+    )?.paths ?? []
+  );
+}
+
 /** The files whose authors keep them out of downloads: data not marked to be included. */
 export async function heldFileIds(db: Db, projectId: string): Promise<Set<string>> {
   return new Set(
@@ -399,14 +512,18 @@ export async function exportRevision(
   manifest = false,
   /** More to put in the archive beside the paper's files. */
   extra: Entry[] = [],
+  /** Only the files the last good build opened (and those it cannot tell about). */
+  used = false,
 ): Promise<{ zip: Uint8Array; paper: string; number: number }> {
   const { shared, rest, paper, number } = await revisionEntries(
     db,
+    store,
     userId,
     projectId,
     revisionId,
     manifest,
     extra,
+    used,
   );
   // Sixteen blobs at a time, and the entries in the order of the files.
   const bytes = await mapLimit(shared, READS, (f) => blob(store, f.digest));
@@ -423,14 +540,17 @@ export async function exportRevisionStream(
   revisionId: string,
   manifest = false,
   extra: Entry[] = [],
+  used = false,
 ): Promise<{ zip: ReadableStream<Uint8Array>; paper: string; number: number }> {
   const { shared, rest, paper, number } = await revisionEntries(
     db,
+    store,
     userId,
     projectId,
     revisionId,
     manifest,
     extra,
+    used,
   );
   // Each file is added as its blob arrives, in the order of the files, with sixteen being read
   // ahead of the one being added.
@@ -447,20 +567,43 @@ export async function exportRevisionStream(
 /** What goes into a revision's archive: the files, whose bytes are still to be read, and the rest. */
 async function revisionEntries(
   db: Db,
+  store: BlobStore,
   userId: string,
   projectId: string,
   revisionId: string,
   manifest = false,
   /** More to put in the archive beside the paper's files. */
   extra: Entry[] = [],
-): Promise<{ shared: RevisionFile[]; rest: Entry[]; paper: string; number: number }> {
+  /**
+   * Leave out the files the revision's last good build never opened (see `unusedPaths`), and
+   * add the .bbl that build read, if the revision has no file of that name.
+   */
+  used = false,
+): Promise<{
+  shared: { path: string; digest: string }[];
+  rest: Entry[];
+  paper: string;
+  number: number;
+}> {
   await authorize(db, userId, id(projectId), 'project.export');
   const { revision, files } = await load(db, projectId, revisionId);
   // Data goes into a download only if its author has said so. A CSV file nobody has described
   // as data is a file like any other. The hold is by file, whichever revision is downloaded.
   const held = await heldFileIds(db, projectId);
-  const shared = files.filter((f) => !held.has(f.file_id));
+  let shared = files.filter((f) => !held.has(f.file_id));
   const kept = files.filter((f) => held.has(f.file_id));
+  let unused: string[] = [];
+  // The .bbl the build made, when the archive gets it (the revision has no file of that name).
+  let added: BuiltBbl | null = null;
+  if (used) {
+    const found = await unusedPaths(db, projectId, revisionId, revision.root, shared);
+    if (!found) throw new AppError('not_found', 'This revision has not been built.');
+    unused = found.paths;
+    const gone = new Set(unused);
+    shared = shared.filter((f) => !gone.has(f.path));
+    const bbl = placeBbl(revision.root, found.bbl, files);
+    if (bbl && !bbl.own) added = bbl;
+  }
   const rest: Entry[] = [];
   if (manifest) {
     const built = (
@@ -528,6 +671,19 @@ async function revisionEntries(
         charts,
         // Data files left out of this archive on purpose: their authors keep them back.
         held: kept.map((f) => f.path),
+        // Files this archive leaves out because the build never opened them (`?used` only).
+        ...(used ? { unused } : {}),
+        // The .bbl this archive adds, for a venue that runs neither BibTeX nor Biber. `format`
+        // is the biblatex version a Biber .bbl is for, and null for a BibTeX one.
+        ...(added
+          ? {
+              bbl: {
+                path: added.path,
+                sha256: `sha256:${added.digest}`,
+                format: formatOfBbl(await blob(store, added.digest)),
+              },
+            }
+          : {}),
       },
       null,
       2,
@@ -536,7 +692,7 @@ async function revisionEntries(
   }
   await recordDownload(db, projectId, 'zip');
   return {
-    shared,
+    shared: added ? [...shared, { path: added.path, digest: added.digest }] : shared,
     rest: [...rest, ...extra],
     paper: revision.paper,
     number: revision.number,
@@ -577,10 +733,35 @@ export type FileDiff = {
   /** The earlier path, if the file was renamed. */
   was?: string;
   status: 'added' | 'removed' | 'changed' | 'renamed';
-  /** Line by line, for text that changed. Null for other files and for text too large to compare. */
+  /**
+   * Line by line: for text that changed, and for an added or removed file every line, as `+` or
+   * `-`. Null for other files and for text too large to compare or to show.
+   */
   lines: DiffLine[] | null;
-  /** The file is text on both sides, but too much of it changed to compare line by line here. */
+  /**
+   * The file is text, but too much of it changed to compare line by line here, or (added or
+   * removed) it is too large to be read for this.
+   */
   tooLarge?: true;
+  /** An added or removed file has this many more lines than are shown. */
+  more?: number;
+  /** The file is data its authors keep out of downloads, so no ZIP holds it. */
+  held?: true;
+};
+
+/** An added or removed file larger than this many bytes is not read for the comparison. */
+export const WHOLE_FILE_BYTES = 1024 * 1024;
+/** The most lines the comparison shows of all its added and removed files together. */
+export const WHOLE_FILES_LINES = 10_000;
+
+/** What was read of one blob for the comparison: its text, or why there is none. */
+type Seen = {
+  /** The text, if it is editable text and the comparison compares it. */
+  text: string | null;
+  /** Too large to read here: nothing was fetched. */
+  big?: true;
+  /** For a file that is on one side only: its lines, up to the most one file shows. */
+  whole?: ReturnType<typeof wholeFile>;
 };
 
 /** What changed between two revisions of a paper. Files that did not change are left out. */
@@ -595,39 +776,113 @@ export async function diffRevisions(
   await authorize(db, userId, id(projectId), 'project.read');
   const a = await load(db, projectId, fromId);
   const b = await load(db, projectId, toId);
-  // Both sides of every file that changed are read first, sixteen at a time.
-  const wanted = new Set<string>();
-  for (const f of b.files) {
-    const old = a.files.find((o) => o.file_id === f.file_id);
-    if (old && old.digest !== f.digest) wanted.add(old.digest).add(f.digest);
-  }
-  const read = new Map<string, string | null>();
-  await mapLimit([...wanted], READS, async (digest) => {
-    const d = decodeFile(await blob(store, digest));
-    read.set(digest, d.editable ? d.text : null);
+  const before = new Map(a.files.map((o) => [o.file_id, o]));
+  const after = new Set(b.files.map((f) => f.file_id));
+  const gone = a.files.filter((o) => !after.has(o.file_id));
+  const fresh = b.files.filter((f) => !before.has(f.file_id));
+  // A file deleted and made again at its path is another file (a new ID), though to anyone
+  // reading the comparison it is the one file, changed. Its two sides are compared like any.
+  const goneAt = new Map(gone.map((o) => [o.path, o]));
+  const swapped = fresh.flatMap((f) => {
+    const o = goneAt.get(f.path);
+    return o ? [{ old: o, now: f }] : [];
   });
-  const text = (digest: string) => read.get(digest) ?? null;
+  const swappedIds = new Set(swapped.flatMap((s) => [s.old.file_id, s.now.file_id]));
+  const only = [
+    ...fresh.filter((f) => !swappedIds.has(f.file_id)).map((file) => ({ file, op: '+' as const })),
+    ...gone.filter((o) => !swappedIds.has(o.file_id)).map((file) => ({ file, op: '-' as const })),
+  ].sort((p, q) => p.file.path.localeCompare(q.file.path));
+  const held = only.length || swapped.length ? await heldFileIds(db, projectId) : new Set<string>();
+
+  // Everything to be read is read first, sixteen at a time. The text of a file that changed;
+  // for a file on one side only (or deleted and made again), the store is asked its size first,
+  // and a file over a megabyte is not fetched at all.
+  const wanted = new Map<string, { digest: string; mode: '+' | '-' | 'g' | 'c' }>();
+  const want = (digest: string, mode: '+' | '-' | 'g' | 'c') =>
+    wanted.set(mode + digest, { digest, mode });
+  for (const f of b.files) {
+    const old = before.get(f.file_id);
+    if (old && old.digest !== f.digest) {
+      want(old.digest, 'c');
+      want(f.digest, 'c');
+    }
+  }
+  for (const s of swapped)
+    if (s.old.digest !== s.now.digest) {
+      want(s.old.digest, 'g');
+      want(s.now.digest, 'g');
+    }
+  for (const { file, op } of only) want(file.digest, op);
+  const read = new Map<string, Seen>();
+  await mapLimit([...wanted], READS, async ([key, { digest, mode }]) => {
+    if (mode !== 'c') {
+      const size = await store.size(digest);
+      if (size !== null && size > WHOLE_FILE_BYTES) {
+        read.set(key, { text: null, big: true });
+        return;
+      }
+    }
+    const d = decodeFile(await blob(store, digest));
+    if (!d.editable) read.set(key, { text: null });
+    else if (mode === '+' || mode === '-')
+      read.set(key, { text: null, whole: wholeFile(d.text, mode, FAR_EDITS) });
+    else read.set(key, { text: d.text });
+  });
+  const seen = (digest: string, mode: '+' | '-' | 'g' | 'c') =>
+    read.get(mode + digest) ?? { text: null };
+  const compare = (
+    path: string,
+    x: Seen,
+    y: Seen,
+    was?: string,
+  ): FileDiff & { status: 'changed' } => {
+    const lines = x.text != null && y.text != null ? diffLinesFar(x.text, y.text) : null;
+    const big = x.big || y.big;
+    return {
+      path,
+      was,
+      status: 'changed',
+      lines,
+      ...(big || (x.text != null && y.text != null && !lines) ? { tooLarge: true as const } : {}),
+    };
+  };
+
   const files: FileDiff[] = [];
   for (const f of b.files) {
-    const old = a.files.find((o) => o.file_id === f.file_id);
-    if (!old) files.push({ path: f.path, status: 'added', lines: null });
-    else if (old.digest !== f.digest) {
-      const [x, y] = [text(old.digest), text(f.digest)];
+    const old = before.get(f.file_id);
+    if (old && old.digest !== f.digest) {
       const was = old.path !== f.path ? old.path : undefined;
-      const lines = x != null && y != null ? diffLinesFar(x, y) : null;
-      files.push({
-        path: f.path,
-        was,
-        status: 'changed',
-        lines,
-        ...(x != null && y != null && !lines ? { tooLarge: true as const } : {}),
-      });
-    } else if (old.path !== f.path)
+      files.push(compare(f.path, seen(old.digest, 'c'), seen(f.digest, 'c'), was));
+    } else if (old && old.path !== f.path)
       files.push({ path: f.path, was: old.path, status: 'renamed', lines: null });
   }
-  for (const o of a.files)
-    if (!b.files.some((f) => f.file_id === o.file_id))
-      files.push({ path: o.path, status: 'removed', lines: null });
+  for (const s of swapped) {
+    // The same bytes under the same name: nothing differs, whatever the file's ID.
+    if (s.old.digest === s.now.digest) continue;
+    const both = compare(s.now.path, seen(s.old.digest, 'g'), seen(s.now.digest, 'g'));
+    if (held.has(s.old.file_id) || held.has(s.now.file_id)) both.held = true;
+    files.push(both);
+  }
+  // At most so many lines in all, shown in the order of the files' paths.
+  let left = WHOLE_FILES_LINES;
+  for (const { file, op } of only) {
+    const entry: FileDiff = {
+      path: file.path,
+      status: op === '+' ? 'added' : 'removed',
+      lines: null,
+    };
+    if (held.has(file.file_id)) entry.held = true;
+    const r = seen(file.digest, op);
+    if (r.big) entry.tooLarge = true;
+    else if (r.whole) {
+      const shown = Math.min(r.whole.lines.length, left);
+      left -= shown;
+      entry.lines = r.whole.lines.slice(0, shown);
+      const more = r.whole.more + r.whole.lines.length - shown;
+      if (more) entry.more = more;
+    }
+    files.push(entry);
+  }
   files.sort((p, q) => p.path.localeCompare(q.path));
   return { from: a.revision.number, to: b.revision.number, files };
 }
@@ -694,9 +949,9 @@ export function restoreEdits(
   have: string,
   want: string,
 ): { at: number; del: number; ins: string }[] {
-  const diff = diffLines(have, want);
+  const diff = diffLinesFar(have, want);
   if (!diff) {
-    // Too large to compare line by line: one span, as whole lines.
+    // Too many changed lines, or too large to compare: one span, as whole lines.
     let p = 0;
     while (p < have.length && p < want.length && have[p] === want[p]) p++;
     let s = 0;

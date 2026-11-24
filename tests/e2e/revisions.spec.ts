@@ -353,6 +353,10 @@ test('everything changed since a revision somebody named, up to now, is one pres
   await expect(page.getByRole('region', { name: 'notes.tex', exact: true })).toContainText('Added');
   await expect(page.getByRole('region', { name: 'more.tex', exact: true })).toContainText('Added');
   await expect(page.getByRole('region', { name: 'main.tex', exact: true })).toHaveCount(0);
+  // Both were added empty, so there are no lines to show.
+  await expect(page.getByRole('region', { name: 'notes.tex', exact: true })).toContainText(
+    'This file is empty.',
+  );
 
   // As the page offers it: since "Later", only the second file. Nothing has changed since
   // revision 3 was made, so it is the paper as it is now and no fourth is made.

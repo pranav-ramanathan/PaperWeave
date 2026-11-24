@@ -1,8 +1,13 @@
 // Needs the services in infra/compose.yaml. Run: pnpm test:sandbox
 import { afterAll, beforeAll, expect, test } from 'vitest';
-import { requestBuild } from './builds.ts';
+import { writeZip } from './archive.ts';
+import { blobStore } from './blobs.ts';
+import { lineMap, requestBuild } from './builds.ts';
+import { importZip, listFiles } from './import.ts';
 import { createProject } from './projects.ts';
-import { testDb } from './testing.ts';
+import { saveRevision } from './revisions.ts';
+import { editFile } from './sync.ts';
+import { TEST_ENV, testDb } from './testing.ts';
 
 let t: Awaited<ReturnType<typeof testDb>>;
 beforeAll(async () => {
@@ -158,4 +163,34 @@ test('automatic builds are spaced 30 seconds apart once half the hour is used', 
     [h.id],
   );
   expect(await requestBuild(t.pool, h.id, p, opts)).toEqual(expect.any(String));
+});
+
+test('the line map from a saved revision to now is exact for a line between far-apart changes', async () => {
+  const store = blobStore(TEST_ENV);
+  const u = await t.signIn('linemap@example.org');
+  const long =
+    Array.from({ length: 2600 }, (_, i) => `Row ${i} keeps its words.`).join('\n') + '\n';
+  const zip = await writeZip([
+    {
+      path: 'main.tex',
+      bytes: Buffer.from('\\documentclass{article}\n\\begin{document}\nHi.\n\\end{document}\n'),
+    },
+    { path: 'long.tex', bytes: Buffer.from(long) },
+  ]);
+  const [project] = await importZip(t.pool, store, u.id, zip, 'Lines');
+  const fileId = (await listFiles(t.pool, u.id, project.id)).find((f) => f.path === 'long.tex')!.id;
+  const rev = await saveRevision(t.pool, store, u.id, project.id, 'Built');
+  // A line added near the top and one reworded near the bottom, over 2,000 lines apart.
+  await editFile(t.pool, store, fileId, u.id, (tx) => {
+    const top = tx.toString().indexOf('Row 5 keeps');
+    tx.insert(top, 'Added above row 5.\n');
+    const bottom = tx.toString().indexOf('Row 2595 keeps');
+    tx.delete(bottom, 'Row 2595 keeps'.length);
+    tx.insert(bottom, 'Row 2595 lost');
+  });
+  const map = await lineMap(t.pool, store, project.id, rev.id, fileId);
+  if (map === 'gone') throw new Error('the file is gone');
+  // Row 1300 is line 1301, and one line was added above it.
+  expect(map.toNow(1301)).toEqual({ line: 1302, moved: false });
+  expect(map.toBuilt(1302)).toEqual({ line: 1301, moved: false });
 });

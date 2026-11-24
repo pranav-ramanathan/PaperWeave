@@ -1,6 +1,15 @@
 import { expect, test } from 'vitest';
+import { restoreEdits } from './revisions.ts';
 import type { DiffLine } from './textdiff.ts';
-import { carryLine, diffHunks, diffLines, diffLinesFar, diffWords, FAR_EDITS } from './textdiff.ts';
+import {
+  carryLine,
+  diffHunks,
+  diffLines,
+  diffLinesFar,
+  diffWords,
+  FAR_EDITS,
+  wholeFile,
+} from './textdiff.ts';
 
 const show = (a: string, b: string) => diffLines(a, b)!.map((l) => l.op + l.text);
 
@@ -171,6 +180,71 @@ test('with no diff, because the texts were too large to compare, the line stays 
   expect(diffLines(lines(3000), lines(3000, 2), 100)).toBeNull();
   expect(carryLine(null, 17, 'toNow')).toEqual({ line: 17, moved: true });
   expect(carryLine(null, 17, 'toBuilt')).toEqual({ line: 17, moved: true });
+});
+
+test('a line is carried exactly across changes too far apart for the table', () => {
+  const a = plain(5000);
+  const b = a.slice();
+  b.splice(9, 0, 'added near the top');
+  b[4990] = 'changed near the bottom';
+  expect(diffLines(a.join('\n'), b.join('\n'))).toBeNull();
+  const far = diffLinesFar(a.join('\n'), b.join('\n'));
+  expect(carryLine(far, 2500, 'toNow')).toEqual({ line: 2501, moved: false });
+  expect(carryLine(far, 2501, 'toBuilt')).toEqual({ line: 2500, moved: false });
+});
+
+/** The text with `edits` applied in the order given, as the restore applies them. */
+function applyEdits(have: string, edits: { at: number; del: number; ins: string }[]) {
+  let text = have;
+  for (const e of edits) text = text.slice(0, e.at) + e.ins + text.slice(e.at + e.del);
+  return text;
+}
+
+test('a restore across two distant changes replaces only those two places', () => {
+  const have = plain(5000);
+  const want = have.slice();
+  want[6] = 'line 6 edited';
+  want[4989] = 'line 4989 edited';
+  expect(diffLines(have.join('\n'), want.join('\n'))).toBeNull();
+  const edits = restoreEdits(have.join('\n'), want.join('\n'));
+  expect(edits).toHaveLength(2);
+  expect(applyEdits(have.join('\n'), edits)).toBe(want.join('\n'));
+  expect(edits.reduce((n, e) => n + e.del, 0)).toBeLessThan(20);
+});
+
+test('a restore of scattered changes in a long file deletes little of it', () => {
+  for (const seed of [11, 12, 13]) {
+    const rand = dice(seed);
+    const have = Array.from(
+      { length: 3000 },
+      (_, i) => `Sentence ${i} of the paper has some words.`,
+    );
+    const want = have.slice();
+    // 60 distinct lines of the original, each reworded, one removed or one added beside it.
+    const at = new Set<number>();
+    while (at.size < 60) at.add(Math.floor(rand() * 3000));
+    for (const i of [...at].sort((x, y) => y - x)) {
+      const kind = rand();
+      if (kind < 0.7) want[i] = `Sentence ${i} of the paper has other words ${seed}.`;
+      else if (kind < 0.85) want.splice(i, 1);
+      else want.splice(i, 0, `A new line before ${i}.`);
+    }
+    const [a, b] = [have.join('\n'), want.join('\n')];
+    const edits = restoreEdits(a, b);
+    const why = `seed ${seed}`;
+    expect(applyEdits(a, edits), why).toBe(b);
+    const deleted = edits.reduce((n, e) => n + e.del, 0);
+    expect(deleted, why).toBeLessThan(a.length * 0.05);
+  }
+});
+
+test('a restore of a short file edits the changed words, and of an unchanged one does nothing', () => {
+  const have = 'one\ntwo words here\nthree\nfour\n';
+  const want = 'one\ntwo other here\nthree\n';
+  const edits = restoreEdits(have, want);
+  expect(edits).toContainEqual({ at: 8, del: 5, ins: 'other' });
+  expect(applyEdits(have, edits)).toBe(want);
+  expect(restoreEdits(have, have)).toEqual([]);
 });
 
 const changed = (pieces: { changed: boolean; text: string }[]) =>
@@ -424,4 +498,48 @@ test('random texts: nothing is lost between hunks, and rows are in order', () =>
       }
     }
   }
+});
+
+test('a whole file is every line added or removed, and a last newline starts no line', () => {
+  expect(wholeFile('a\nb\n', '+', 10)).toEqual({
+    lines: [
+      { op: '+', text: 'a' },
+      { op: '+', text: 'b' },
+    ],
+    more: 0,
+  });
+  // The same lines with no newline at the end, and removed.
+  expect(wholeFile('a\nb', '-', 10).lines).toEqual([
+    { op: '-', text: 'a' },
+    { op: '-', text: 'b' },
+  ]);
+  // Blank lines are lines; only the one newline that ends the text is not.
+  expect(wholeFile('a\n\n\n', '+', 10).lines.map((l) => l.text)).toEqual(['a', '', '']);
+  expect(wholeFile('\n', '+', 10).lines.map((l) => l.text)).toEqual(['']);
+});
+
+test('the text of an empty file has no lines', () => {
+  expect(wholeFile('', '+', 10)).toEqual({ lines: [], more: 0 });
+  expect(wholeFile('', '-', 0)).toEqual({ lines: [], more: 0 });
+});
+
+test('a whole file past the cap gives the cap and counts the rest', () => {
+  const text = Array.from({ length: 2500 }, (_, i) => `line ${i}`).join('\n') + '\n';
+  const whole = wholeFile(text, '+', FAR_EDITS);
+  expect(whole.lines).toHaveLength(FAR_EDITS);
+  expect(whole.more).toBe(500);
+  expect(whole.lines[0]).toEqual({ op: '+', text: 'line 0' });
+  expect(whole.lines.at(-1)).toEqual({ op: '+', text: 'line 1999' });
+  // Exactly the cap leaves nothing; a cap of nothing leaves everything.
+  expect(wholeFile('a\nb\n', '+', 2).more).toBe(0);
+  expect(wholeFile('a\nb\n', '+', 0)).toEqual({ lines: [], more: 2 });
+});
+
+test('the lines of a whole file go through diffHunks as one hunk of changed rows', () => {
+  const { lines } = wholeFile('a\nb\nc\n', '-', 10);
+  const { hunks, rest } = diffHunks(lines);
+  expect(rest).toBe(0);
+  expect(hunks).toHaveLength(1);
+  expect(hunks[0]).toMatchObject({ skipped: 0, line: 1 });
+  expect(hunks[0].rows.map((r) => r.op + r.text)).toEqual(['-a', '-b', '-c']);
 });

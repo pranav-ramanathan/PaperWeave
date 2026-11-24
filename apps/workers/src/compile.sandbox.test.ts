@@ -1538,3 +1538,101 @@ test(
   },
   WARM_TIME,
 );
+
+test(
+  'the files a build read are its own TeX run: a warm build does not keep the last one in the .fls',
+  async () => {
+    const project = wpaper({
+      'main.tex': doc('Start. \\input{extra}'),
+      'extra.tex': 'Extratext.\n',
+      'other.tex': 'Unread.\n',
+    });
+    const warm = wtmp();
+    const first = await built(project, 1, warm);
+    expect(first.read).toEqual(expect.arrayContaining(['main.tex', 'extra.tex']));
+    expect(first.read).not.toContain('other.tex');
+    // The .fls is among what is kept for the next build.
+    expect(existsSync(join(warm, 'made', 'main.fls'))).toBe(true);
+    writeFileSync(join(project, 'main.tex'), doc('Start.'));
+    const second = await built(project, 2, warm);
+    expect(second.warmed).toBe(true);
+    expect(second.passes).toBeGreaterThan(0);
+    expect(second.read).toContain('main.tex');
+    expect(second.read).not.toContain('extra.tex');
+    expect(second.read).toEqual((await built(project, 2)).read);
+  },
+  WARM_TIME,
+);
+
+// The .bbl a build ends with, for a venue that runs neither BibTeX nor Biber.
+const REFS =
+  '@article{k,\n  author = {Author, Ann},\n  title = {Weaving},\n  journal = {J},\n  year = {2001}\n}\n';
+const bblOf = (r: Awaited<ReturnType<typeof compile>>, out: string) =>
+  r.bbl === undefined ? undefined : readFileSync(join(out, r.bbl), 'utf8');
+
+test('a BibTeX paper gives its .bbl, with the \\bibitem of what it cites', async () => {
+  const project = wpaper({
+    'main.tex': doc('Cite \\cite{k}.\n\\bibliographystyle{plain}\n\\bibliography{refs}'),
+    'refs.bib': REFS,
+  });
+  const out = wtmp();
+  const r = await compile(project, 'main.tex', out, 120);
+  expect(r.ok).toBe(true);
+  expect(bblOf(r, out)).toMatch(/\\bibitem\{k\}/);
+  expect(r.read).toContain('main.bbl');
+}, 180_000);
+
+test('a Biber paper gives its .bbl, with the biblatex format header', async () => {
+  const project = wpaper({
+    'main.tex': doc(
+      'Cite \\cite{k}.\n\\printbibliography',
+      '\\usepackage[backend=biber]{biblatex}\n\\addbibresource{refs.bib}\n',
+    ),
+    'refs.bib': REFS,
+  });
+  const out = wtmp();
+  const r = await compile(project, 'main.tex', out, 120);
+  expect(r.ok).toBe(true);
+  expect(bblOf(r, out)).toMatch(/^% \$ biblatex bbl format version \d+\.\d+ \$$/m);
+  expect(bblOf(r, out)).toContain('\\entry{k}{article}');
+  expect(r.read).toContain('main.bbl');
+}, 180_000);
+
+test('a paper with no bibliography has no .bbl', async () => {
+  const out = wtmp();
+  const r = await compile(wpaper({ 'main.tex': doc('Plain.') }), 'main.tex', out, 120);
+  expect(r.ok).toBe(true);
+  expect(r.bbl).toBeUndefined();
+}, 180_000);
+
+test('a .bib that is named and absent, with no .bbl, has no .bbl', async () => {
+  const project = wpaper({
+    'main.tex': doc('Cite \\cite{k}.\n\\bibliographystyle{plain}\n\\bibliography{refs}'),
+  });
+  const out = wtmp();
+  const r = await compile(project, 'main.tex', out, 120);
+  expect(r.ok).toBe(true);
+  // The empty file the build puts in place of the missing one is not a .bbl to hand on.
+  expect(r.bbl).toBeUndefined();
+}, 180_000);
+
+test('a ready-made project .bbl with no .bib comes out as the project wrote it', async () => {
+  const bbl =
+    '\\begin{thebibliography}{1}\n\\bibitem{k} Ann Author. Weaving. J, 2001.\n\\end{thebibliography}\n';
+  const project = wpaper({
+    'main.tex': doc('Cite \\cite{k}.\n\\bibliographystyle{plain}\n\\bibliography{refs}'),
+    'main.bbl': bbl,
+  });
+  const out = wtmp();
+  const r = await compile(project, 'main.tex', out, 120);
+  expect(r.ok).toBe(true);
+  expect(r.read).toContain('main.bbl');
+  expect(bblOf(r, out)).toBe(bbl);
+}, 180_000);
+
+test('a build with no PDF reads nothing', async () => {
+  const project = wpaper({ 'main.tex': doc('\\nosuchmacro') });
+  const r = await built(project, 1);
+  expect(r.ok).toBe(false);
+  expect(r.read).toBeUndefined();
+});

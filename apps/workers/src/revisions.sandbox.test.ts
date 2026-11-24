@@ -6,6 +6,7 @@ import {
   readdirSync,
   readFileSync,
   statSync,
+  unlinkSync,
   writeFileSync,
 } from 'node:fs';
 import { tmpdir } from 'node:os';
@@ -22,6 +23,7 @@ import {
   revisionPdf,
   saveRevision,
   sha256,
+  unusedInRevision,
   writeZip,
 } from '@paperweave/server';
 import { afterAll, beforeAll, expect, test } from 'vitest';
@@ -289,3 +291,219 @@ test('building the live paper cuts a revision, and the build says when it is beh
     [1, true],
   ]);
 });
+
+/** A paper of its own files: the fixture's, if one is named, and these. */
+async function paperOf(files: Record<string, string>, fixture?: string) {
+  const entries: { path: string; bytes: Buffer }[] = [];
+  if (fixture) {
+    const root = join(FIXTURES, fixture);
+    const walk = (dir: string) => {
+      for (const f of readdirSync(dir).sort()) {
+        const p = join(dir, f);
+        if (statSync(p).isDirectory()) walk(p);
+        else entries.push({ path: relative(root, p), bytes: readFileSync(p) });
+      }
+    };
+    walk(root);
+  }
+  for (const [path, text] of Object.entries(files))
+    entries.push({ path, bytes: Buffer.from(text) });
+  const [project] = await importZip(t.pool, store, owner.id, await writeZip(entries), 'Used');
+  return project.id;
+}
+
+/** Build a revision of the paper, and the app's PDF of it. */
+async function builtRevision(projectId: string) {
+  const revision = await saveRevision(t.pool, store, owner.id, projectId, 'Submission');
+  await requestBuild(t.pool, owner.id, projectId, { revisionId: revision.id });
+  expect(await buildNext(t.pool, store, image)).toBe(true);
+  return { revision, pdf: await revisionPdf(t.pool, store, owner.id, projectId, revision.id) };
+}
+
+/** The ZIP of only the files the paper uses, unpacked in a folder of its own. */
+async function usedZip(projectId: string, revisionId: string, label: string) {
+  const dir = mkdtempSync(join(tmpdir(), `paperweave-${label}-`));
+  const all = await exportRevision(t.pool, store, owner.id, projectId, revisionId);
+  const used = await exportRevision(t.pool, store, owner.id, projectId, revisionId, true, [], true);
+  writeFileSync(join(dir, 'used.zip'), used.zip);
+  writeFileSync(join(dir, 'all.zip'), all.zip);
+  execFileSync('unzip', ['-q', join(dir, 'used.zip'), '-d', join(dir, 'src')]);
+  // (The system unzip: our own reader leaves out the manifest.)
+  const names = (zip: string) =>
+    execFileSync('unzip', ['-Z1', join(dir, zip)], { encoding: 'utf8' })
+      .split('\n')
+      .filter(Boolean)
+      .sort();
+  const manifest = JSON.parse(readFileSync(join(dir, 'src/paperweave-toolchain.json'), 'utf8'));
+  return { dir, all: names('all.zip'), used: names('used.zip'), manifest };
+}
+
+const rebuild = (
+  dir: string,
+  manifest: { root: string; compiler: string; sourceDateEpoch: number },
+) =>
+  compile(
+    join(dir, 'src'),
+    manifest.root,
+    join(dir, 'out'),
+    60,
+    manifest.compiler as Compiler,
+    manifest.sourceDateEpoch,
+  );
+
+test('the ZIP of only the files the paper uses leaves out a cover letter and an old draft, and rebuilds to a PDF', async () => {
+  const projectId = await paperOf(
+    {
+      'cover-letter.tex': '\\documentclass{letter}\\begin{document}Dear editor.\\end{document}\n',
+      'old/draft.pdf': '%PDF-1.4\nnot a real draft\n',
+    },
+    'article-basic',
+  );
+  const { revision, pdf } = await builtRevision(projectId);
+  const z = await usedZip(projectId, revision.id, 'used');
+  expect(z.all).toEqual(['cover-letter.tex', 'main.tex', 'old/draft.pdf', 'refs.bib']);
+  // Exactly the two, and nothing else, is gone. The manifest names them.
+  expect(z.all.filter((p) => !z.used.includes(p))).toEqual(['cover-letter.tex', 'old/draft.pdf']);
+  expect(z.used).toEqual(['main.bbl', 'main.tex', 'paperweave-toolchain.json', 'refs.bib']);
+  expect(z.manifest.unused).toEqual(['cover-letter.tex', 'old/draft.pdf']);
+  expect(Object.keys(z.manifest.files).sort()).toEqual(['main.tex', 'refs.bib']);
+  expect(await unusedInRevision(t.pool, owner.id, projectId, revision.id)).toEqual([
+    'cover-letter.tex',
+    'old/draft.pdf',
+  ]);
+
+  const rebuilt = await rebuild(z.dir, z.manifest);
+  expect(rebuilt.ok).toBe(true);
+  // The same bytes as the app's PDF, as for the whole paper, and the same words.
+  const again = readFileSync(join(z.dir, 'out', rebuilt.pdf!));
+  expect(sha256(again)).toBe(sha256(pdf));
+  const text = execFileSync('pdftotext', [join(z.dir, 'out', rebuilt.pdf!), '-'], {
+    encoding: 'utf8',
+  });
+  expect(text).toContain('A Small Study of Merge Latency');
+});
+
+test('a build that hits the cache offers the same list of unused files', async () => {
+  const projectId = await paperOf(
+    { 'cover-letter.tex': '\\documentclass{letter}\\begin{document}Dear.\\end{document}\n' },
+    'article-basic',
+  );
+  const first = await builtRevision(projectId);
+  const second = await builtRevision(projectId);
+  const cached = await t.pool.query(
+    'select cached_from, read from builds where revision_id = $1 order by created_at desc limit 1',
+    [second.revision.id],
+  );
+  expect(cached.rows[0].cached_from).not.toBeNull();
+  expect(cached.rows[0].read).toContain('main.tex');
+  expect(await unusedInRevision(t.pool, owner.id, projectId, second.revision.id)).toEqual(
+    await unusedInRevision(t.pool, owner.id, projectId, first.revision.id),
+  );
+  expect(await unusedInRevision(t.pool, owner.id, projectId, second.revision.id)).toEqual([
+    'cover-letter.tex',
+  ]);
+  expect(second.pdf.length).toBeGreaterThan(0);
+});
+
+test('a paper with \\includeonly, an EPS picture and \\graphicspath rebuilds from the trimmed ZIP', async () => {
+  const EPS = '%!PS-Adobe-3.0 EPSF-3.0\n%%BoundingBox: 0 0 100 50\n0 0 100 50 rectfill\nshowpage\n';
+  const projectId = await paperOf({
+    'main.tex':
+      '\\documentclass{article}\n\\usepackage{graphicx}\n\\graphicspath{{figs/}}\n\\includeonly{ch1}\n' +
+      '\\begin{document}\nRootonlytext\n\\include{ch1}\n\\include{ch2}\n\\includegraphics{a.eps}\n\\end{document}\n',
+    'ch1.tex': 'Firstchaptertext\n',
+    'ch2.tex': 'Secondchaptertext\n',
+    'ch3.tex': 'Neverincluded\n',
+    'figs/a.eps': EPS,
+    'figs/spare.eps': EPS,
+  });
+  const { revision, pdf } = await builtRevision(projectId);
+  const z = await usedZip(projectId, revision.id, 'only');
+  // The chapter \includeonly leaves out is still opened, by \include's test that the file is
+  // there, so it stays: \include would stop without it. The picture found through \graphicspath
+  // is read; the chapter and the picture nothing names are not.
+  expect(z.manifest.unused).toEqual(['ch3.tex', 'figs/spare.eps']);
+  expect(z.used).toEqual([
+    'ch1.tex',
+    'ch2.tex',
+    'figs/a.eps',
+    'main.tex',
+    'paperweave-toolchain.json',
+  ]);
+
+  const rebuilt = await rebuild(z.dir, z.manifest);
+  expect(rebuilt.ok).toBe(true);
+  expect(sha256(readFileSync(join(z.dir, 'out', rebuilt.pdf!)))).toBe(sha256(pdf));
+  const text = execFileSync('pdftotext', [join(z.dir, 'out', rebuilt.pdf!), '-'], {
+    encoding: 'utf8',
+  });
+  expect(text).toContain('Rootonlytext');
+  expect(text).toContain('Firstchaptertext');
+  expect(text).not.toContain('Secondchaptertext');
+});
+
+test('the ZIP of only the files the paper uses holds the .bbl the build made, and builds without the .bib', async () => {
+  const projectId = await paperOf({}, 'article-basic');
+  const { revision, pdf } = await builtRevision(projectId);
+  const kept = (
+    await t.pool.query('select bbl_digest from builds where revision_id = $1', [revision.id])
+  ).rows[0].bbl_digest;
+  expect(kept).toMatch(/^[0-9a-f]{64}$/);
+  const z = await usedZip(projectId, revision.id, 'bbl');
+  // The plain ZIP has none; the other has it beside the root, and says what it is.
+  expect(z.all).not.toContain('main.bbl');
+  expect(z.used).toContain('main.bbl');
+  expect(sha256(readFileSync(join(z.dir, 'src/main.bbl')))).toBe(kept);
+  expect(z.manifest.bbl).toEqual({ path: 'main.bbl', sha256: `sha256:${kept}`, format: null });
+
+  // A venue that does not run BibTeX: no .bib, only the .bbl.
+  unlinkSync(join(z.dir, 'src/refs.bib'));
+  const rebuilt = await rebuild(z.dir, z.manifest);
+  expect(rebuilt.ok).toBe(true);
+  const text = execFileSync('pdftotext', [join(z.dir, 'out', rebuilt.pdf!), '-'], {
+    encoding: 'utf8',
+  });
+  expect(text).toContain('Conflict-free replicated data types');
+  expect(text).not.toContain('[?]');
+  expect(pdf.length).toBeGreaterThan(0);
+}, 300_000);
+
+test('a Biber paper has its .bbl in the ZIP, and the manifest says its biblatex format', async () => {
+  const projectId = await paperOf({
+    'main.tex':
+      '\\documentclass{article}\n\\usepackage[backend=biber]{biblatex}\n\\addbibresource{refs.bib}\n' +
+      '\\begin{document}\nCite \\cite{k}.\n\\printbibliography\n\\end{document}\n',
+    'refs.bib':
+      '@article{k,\n  author = {Author, Ann},\n  title = {Weaving},\n  journal = {J},\n  year = {2001}\n}\n',
+  });
+  const { revision } = await builtRevision(projectId);
+  const z = await usedZip(projectId, revision.id, 'biber');
+  expect(z.used).toContain('main.bbl');
+  expect(z.manifest.bbl.path).toBe('main.bbl');
+  expect(z.manifest.bbl.format).toMatch(/^\d+\.\d+$/);
+  expect(readFileSync(join(z.dir, 'src/main.bbl'), 'utf8')).toContain(
+    `biblatex bbl format version ${z.manifest.bbl.format}`,
+  );
+}, 300_000);
+
+test('a second revision with the same text hits the cache and has the same .bbl', async () => {
+  const projectId = await paperOf({}, 'article-basic');
+  // The first build is of the live paper, which cuts revision 1; then a revision of its text.
+  await requestBuild(t.pool, owner.id, projectId);
+  expect(await buildNext(t.pool, store, image)).toBe(true);
+  const second = await saveRevision(t.pool, store, owner.id, projectId, 'Same text');
+  expect(second.number).toBe(2);
+  await requestBuild(t.pool, owner.id, projectId, { revisionId: second.id });
+  expect(await buildNext(t.pool, store, image)).toBe(true);
+  const rows = (
+    await t.pool.query(
+      'select r.number, b.cached_from, b.bbl_digest from builds b join revisions r on r.id = b.revision_id where b.project_id = $1 order by r.number',
+      [projectId],
+    )
+  ).rows;
+  expect(rows.map((r) => r.number)).toEqual([1, 2]);
+  expect(rows[0].cached_from).toBeNull();
+  expect(rows[1].cached_from).not.toBeNull();
+  expect(rows[0].bbl_digest).toMatch(/^[0-9a-f]{64}$/);
+  expect(rows[1].bbl_digest).toBe(rows[0].bbl_digest);
+}, 300_000);

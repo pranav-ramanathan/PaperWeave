@@ -1414,7 +1414,9 @@ test('a file the restore takes out says so in its editor, and the list of files 
   await expect(
     changes.getByRole('heading', { level: 1, name: /^Revision \d+ to revision \d+$/ }),
   ).toBeVisible();
-  await expect(changes.getByRole('region', { name: 'notes.tex' })).toContainText('Removed');
+  await expect(changes.getByRole('region', { name: 'notes.tex', exact: true })).toContainText(
+    'Removed',
+  );
   await changes.close();
   // An editor of a file the restore kept is told of the restore as before, and loses the file
   // from its list.

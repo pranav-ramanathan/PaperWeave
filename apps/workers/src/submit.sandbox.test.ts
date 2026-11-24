@@ -24,6 +24,7 @@ import {
   saveChart,
   saveRevision,
   submissionChecks,
+  unusedMessage,
   writeZip,
 } from '@paperweave/server';
 import { afterAll, beforeAll, expect, test } from 'vitest';
@@ -902,3 +903,20 @@ test('a file named in the wrong letter case is pointed out, and a missing one is
     ['The paper has no file "figures/absent".', 5],
   ]);
 });
+
+test('files the last build never opened are worth a look, and the paper stays ready', async () => {
+  const v = await verdict('Unused', {
+    'main.tex': doc('', 'Hi.'),
+    'cover-letter.tex': doc('', 'Dear editor.', 'letter'),
+    'old/draft.pdf': '%PDF-1.4\nan old draft\n',
+  });
+  expect(v.text).toEqual([]);
+  expect(v.ready).toBe(true);
+  expect(v.findings.filter((f) => f.kind === 'file')).toEqual([
+    {
+      level: 'warning',
+      kind: 'file',
+      message: unusedMessage(['cover-letter.tex', 'old/draft.pdf']),
+    },
+  ]);
+}, 240_000);

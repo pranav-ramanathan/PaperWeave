@@ -7,14 +7,18 @@ import { afterAll, beforeAll, expect, test } from 'vitest';
 import * as Y from 'yjs';
 import { LATEXMK_RULES } from '@paperweave/latex';
 import { readZip, writeZip } from './archive.ts';
-import { blobStore } from './blobs.ts';
+import { blobStore, sha256 } from './blobs.ts';
 import { createFile, deleteFile, replaceFile } from './files.ts';
+import { approveDataset, datasetProposal } from './data.ts';
 import { exportZip, importZip, listFiles } from './import.ts';
 import { acceptInvitation, getProject, invite } from './projects.ts';
 import { acceptProposal, listProposals, propose, undoAccept } from './proposals.ts';
 import {
+  bblInRevision,
   diffRevisions,
   exportRevision,
+  exportRevisionStream,
+  unusedInRevision,
   listRevisions,
   olderAutoRevisions,
   REVISIONS_SHOWN,
@@ -706,6 +710,60 @@ test("a second person's typing in an untouched paragraph survives a restore whol
   expect(await textOf(p.main)).toBe(PMAIN.replace('howl loudly', 'howl abcdefghloudly'));
 });
 
+// A long file, changed near both ends: the lines between are too far apart for the line table.
+const LONG_ROWS = 2600;
+const LONG =
+  Array.from({ length: LONG_ROWS }, (_, i) =>
+    i === 1300 ? PARAS[2] : `Row ${i} keeps its words.`,
+  ).join('\n') + '\n';
+async function longPaperWithAnchors() {
+  const p = await lines({ 'main.tex': PMAIN, 'long.tex': LONG });
+  const long = p.ids['long.tex'];
+  await startThread(t.pool, store, owner.id, p.id, long, {
+    ...(await ends(long, 'gamma wolves')),
+    body: 'Which wolves?',
+  });
+  const prop = await propose(t.pool, store, owner.id, p.id, long, {
+    ...(await ends(long, 'howl loudly')),
+    replacement: 'howl softly',
+  });
+  return { ...p, long, prop };
+}
+const editEnds = async (file: string) => {
+  await replace(file, 'Row 5 keeps', 'Row 5 lost');
+  await replace(file, 'Row 2595 keeps', 'Row 2595 lost');
+};
+
+test('a restore of a long file changed near both ends keeps what is anchored between', async () => {
+  const p = await longPaperWithAnchors();
+  const a = await saveRevision(t.pool, store, owner.id, p.id, 'A');
+  await editEnds(p.long);
+  expect(await textOf(p.long)).not.toBe(LONG);
+  // The changes are too far apart for the line table.
+  expect(diffLines(await textOf(p.long), LONG)).toBeNull();
+  await restoreRevision(t.pool, store, owner.id, p.id, a.id);
+  expect(await textOf(p.long)).toBe(LONG);
+  const after = await states(p.id);
+  expect(after.threads).toEqual(['attached']);
+  expect(after.proposals).toMatchObject([{ stale: false, now: 'howl loudly' }]);
+  await acceptProposal(t.pool, store, owner.id, p.id, p.prop);
+  expect(await textOf(p.long)).toBe(LONG.replace('howl loudly', 'howl softly'));
+});
+
+test("a second person's typing in the middle of a long file survives a restore whole", async () => {
+  const p = await longPaperWithAnchors();
+  const a = await saveRevision(t.pool, store, owner.id, p.id, 'A');
+  await editEnds(p.long);
+  const { doc: theirs, text: theirText } = await docOf(p.long);
+  await restoreRevision(t.pool, store, owner.id, p.id, a.id);
+  const at = theirText.toString().indexOf('howl ') + 5;
+  const sent: Uint8Array[] = [];
+  theirs.on('update', (u: Uint8Array) => sent.push(u));
+  for (const [i, letter] of [...'abcdefgh'].entries()) theirText.insert(at + i, letter);
+  for (const u of sent) await appendUpdate(t.pool, p.long, owner.id, u);
+  expect(await textOf(p.long)).toBe(LONG.replace('howl loudly', 'howl abcdefghloudly'));
+});
+
 // A restore holds every file of the paper only while it writes. The store here is as far away as
 // the database may be from a web app on Vercel, and the tests below watch what is done while the
 // files are held.
@@ -941,4 +999,585 @@ test('a read-only file that was once text takes a UTF-8 replacement into its log
   await replaceFile(t.pool, store, owner.id, p.id, 'refs.bib', v);
   expect(await textOf(p.bib)).toBe(v.toString());
   expect((await exported(p.id)).equals(v)).toBe(true);
+});
+
+/**
+ * A paper with a cover letter, an old draft and held data, whose revision "was built" with what
+ * TeX opened as given (no build when `read` is undefined). No TeX here: the worker's own tests
+ * run it.
+ */
+async function usedPaper(read?: string[] | null) {
+  const zip = await writeZip([
+    { path: 'main.tex', bytes: Buffer.from(MAIN) },
+    { path: 'body.tex', bytes: Buffer.from(BODY) },
+    { path: 'refs.bib', bytes: Buffer.from('@book{k, title={T}, year=2001}\n') },
+    { path: 'cover-letter.tex', bytes: Buffer.from('Dear editor.\n') },
+    { path: 'old/draft.pdf', bytes: Buffer.from('%PDF-1.4\n') },
+    { path: 'fig.png', bytes: Buffer.from([0x89, 0x50, 0x4e, 0x47, 1, 2, 3]) },
+    { path: 'data.csv', bytes: Buffer.from('day,ms\n1,9\n2,38\n') },
+  ]);
+  const [project] = await importZip(t.pool, store, owner.id, zip, 'Used');
+  const ids = Object.fromEntries(
+    (await listFiles(t.pool, owner.id, project.id)).map((f) => [f.path, f.id]),
+  );
+  // The CSV is data kept out of downloads.
+  await approveDataset(t.pool, store, owner.id, project.id, ids['data.csv'], {
+    version: (await datasetProposal(t.pool, store, owner.id, project.id, ids['data.csv'])).version,
+    columns: [
+      { name: 'day', type: 'number', unit: '' },
+      { name: 'ms', type: 'number', unit: 'ms' },
+    ],
+    missing: [],
+    exported: false,
+  });
+  const revision = await saveRevision(t.pool, store, owner.id, project.id, 'Cut');
+  const built = (at: string, status: string, what: unknown) =>
+    t.pool.query(
+      `insert into builds (project_id, status, pdf_digest, revision_id, finished_at, created_at, read)
+       values ($1, $2, repeat('a', 64), $3, now(), $4, $5)`,
+      [project.id, status, revision.id, at, what === undefined ? null : JSON.stringify(what)],
+    );
+  if (read !== undefined) await built('2030-01-01', 'succeeded', read);
+  return { id: project.id, revision, built };
+}
+const listing = (zip: Uint8Array) => {
+  const file = join(mkdtempSync(join(tmpdir(), 'paperweave-test-')), 'revision.zip');
+  writeFileSync(file, zip);
+  return execFileSync('unzip', ['-Z1', file], { encoding: 'utf8' })
+    .split('\n')
+    .filter(Boolean)
+    .sort();
+};
+const READ = ['main.tex', 'body.tex', 'refs.bib', 'fig.png', 'data.csv'];
+
+test('the ZIP of only the files the paper uses leaves out what the build never opened, and says so', async () => {
+  const p = await usedPaper(READ);
+  const used = await exportRevision(t.pool, store, owner.id, p.id, p.revision.id, true, [], true);
+  // Held data stays out of every ZIP, and is not named as unused; nothing else is gone but the two.
+  expect(listing(used.zip)).toEqual([
+    'body.tex',
+    'fig.png',
+    'main.tex',
+    'paperweave-toolchain.json',
+    'refs.bib',
+  ]);
+  const manifest = manifestOf(used.zip);
+  expect(Object.keys(manifest.files).sort()).toEqual([
+    'body.tex',
+    'fig.png',
+    'main.tex',
+    'refs.bib',
+  ]);
+  expect(manifest.unused).toEqual(['cover-letter.tex', 'old/draft.pdf']);
+  expect(manifest.held).toEqual(['data.csv']);
+  expect(await unusedInRevision(t.pool, owner.id, p.id, p.revision.id)).toEqual([
+    'cover-letter.tex',
+    'old/draft.pdf',
+  ]);
+  // The streamed archive is the same.
+  const streamed = await exportRevisionStream(
+    t.pool,
+    store,
+    owner.id,
+    p.id,
+    p.revision.id,
+    false,
+    [],
+    true,
+  );
+  const chunks: Uint8Array[] = [];
+  for await (const c of streamed.zip) chunks.push(c);
+  expect(listing(Buffer.concat(chunks))).toEqual(['body.tex', 'fig.png', 'main.tex', 'refs.bib']);
+});
+
+test('the plain ZIP and the manifest ZIP are as they were, whether or not the revision was built', async () => {
+  const p = await usedPaper();
+  const before = await exportRevision(t.pool, store, owner.id, p.id, p.revision.id);
+  const beforeManifest = manifestOf(
+    (await exportRevision(t.pool, store, owner.id, p.id, p.revision.id, true)).zip,
+  );
+  expect(listing(before.zip)).toEqual([
+    'body.tex',
+    'cover-letter.tex',
+    'fig.png',
+    'main.tex',
+    'old/draft.pdf',
+    'refs.bib',
+  ]);
+  await p.built('2030-01-01', 'succeeded', READ);
+  const after = await exportRevision(t.pool, store, owner.id, p.id, p.revision.id);
+  expect(Buffer.from(after.zip).equals(Buffer.from(before.zip))).toBe(true);
+  const afterManifest = manifestOf(
+    (await exportRevision(t.pool, store, owner.id, p.id, p.revision.id, true)).zip,
+  );
+  // Nothing about unused files in it, and nothing else different.
+  expect('unused' in afterManifest).toBe(false);
+  expect(afterManifest).toEqual(beforeManifest);
+});
+
+test('a revision that has not been built has no ZIP of only the files used', async () => {
+  const p = await usedPaper();
+  expect(
+    await code(exportRevision(t.pool, store, owner.id, p.id, p.revision.id, false, [], true)),
+  ).toBe('not_found');
+  expect(
+    await code(exportRevision(t.pool, store, owner.id, p.id, p.revision.id, true, [], true)),
+  ).toBe('not_found');
+  expect(
+    await code(exportRevisionStream(t.pool, store, owner.id, p.id, p.revision.id, false, [], true)),
+  ).toBe('not_found');
+  expect(await unusedInRevision(t.pool, owner.id, p.id, p.revision.id)).toEqual([]);
+  // A build that failed made nothing to go by.
+  await p.built('2030-01-01', 'failed', undefined);
+  expect(
+    await code(exportRevision(t.pool, store, owner.id, p.id, p.revision.id, false, [], true)),
+  ).toBe('not_found');
+});
+
+test('a build that did not say what it read leaves nothing out, and the newest good build decides', async () => {
+  const p = await usedPaper(null);
+  const all = await exportRevision(t.pool, store, owner.id, p.id, p.revision.id, false, [], true);
+  expect(listing(all.zip)).toHaveLength(6);
+  expect(await unusedInRevision(t.pool, owner.id, p.id, p.revision.id)).toEqual([]);
+  // An older build that read less, and a newer failed one, do not decide.
+  await p.built('2029-01-01', 'succeeded', ['main.tex']);
+  await p.built('2031-01-01', 'failed', ['main.tex']);
+  expect(await unusedInRevision(t.pool, owner.id, p.id, p.revision.id)).toEqual([]);
+  await p.built('2032-01-01', 'succeeded', [...READ, 'cover-letter.tex']);
+  expect(await unusedInRevision(t.pool, owner.id, p.id, p.revision.id)).toEqual(['old/draft.pdf']);
+});
+
+test('only a type TeX reads as a figure or a source can be left out, and the root never', async () => {
+  // Only the root is read: a .bib, a .png and the others of the types the ZIP may drop.
+  const p = await usedPaper(['main.tex']);
+  expect(await unusedInRevision(t.pool, owner.id, p.id, p.revision.id)).toEqual([
+    'body.tex',
+    'cover-letter.tex',
+    'fig.png',
+    'old/draft.pdf',
+  ]);
+  const none = await usedPaper([]);
+  expect(await unusedInRevision(t.pool, owner.id, none.id, none.revision.id)).not.toContain(
+    'main.tex',
+  );
+  expect(await unusedInRevision(t.pool, owner.id, none.id, none.revision.id)).not.toContain(
+    'refs.bib',
+  );
+});
+
+test('who may have the ZIP of only the files used: those who may have any ZIP', async () => {
+  const p = await usedPaper(READ);
+  const people: Record<string, { id: string }> = { owner };
+  for (const role of ['editor', 'reviewer', 'viewer'] as const) {
+    const who = await t.signIn(`${role}-used@example.org`);
+    const { token } = await invite(t.pool, owner.id, p.id, `${role}-used@example.org`, role);
+    await acceptInvitation(t.pool, who.id, token);
+    people[role] = who;
+  }
+  const ask = (id: string, project = p.id, revision = p.revision.id) =>
+    code(exportRevision(t.pool, store, id, project, revision, false, [], true));
+  expect(await ask(people.owner.id)).toBe('ok');
+  expect(await ask(people.editor.id)).toBe('ok');
+  expect(await ask(people.reviewer.id)).toBe('permission_denied');
+  expect(await ask(people.viewer.id)).toBe('permission_denied');
+  expect(await ask(outsider.id)).toBe('not_found');
+  // Whoever may read the paper may be told which files are unused; nobody else.
+  expect(await unusedInRevision(t.pool, people.viewer.id, p.id, p.revision.id)).toHaveLength(2);
+  expect(await code(unusedInRevision(t.pool, outsider.id, p.id, p.revision.id))).toBe('not_found');
+
+  // A revision of another paper cannot be reached through this one.
+  const other = await usedPaper(READ);
+  expect(await ask(owner.id, p.id, other.revision.id)).toBe('not_found');
+  expect(await code(unusedInRevision(t.pool, owner.id, p.id, other.revision.id))).toBe('not_found');
+});
+
+const BIBTEX_BBL = Buffer.from(
+  '\\begin{thebibliography}{1}\n\\bibitem{k} A. Author. Weaving. 2001.\n\\end{thebibliography}\n',
+);
+const BIBER_BBL = Buffer.from(
+  '% $ biblatex auxiliary file $\n% $ biblatex bbl format version 3.2 $\n% Do not modify the above lines!\n\\refsection{0}\n\\endrefsection\n',
+);
+
+/**
+ * A paper whose revision "was built" with a .bbl kept (no TeX here). `files` are the paper's own;
+ * `bbl` is what the build kept, or none.
+ */
+async function bblPaper(files: Record<string, string | Buffer>, bbl?: Buffer) {
+  const zip = await writeZip(
+    Object.entries(files).map(([path, bytes]) => ({ path, bytes: Buffer.from(bytes) })),
+  );
+  const [project] = await importZip(t.pool, store, owner.id, zip, 'Bbl');
+  const revision = await saveRevision(t.pool, store, owner.id, project.id, 'Cut');
+  const root: string = (
+    await t.pool.query('select root from revisions where id = $1', [revision.id])
+  ).rows[0].root;
+  const digest = bbl ? await store.put(bbl) : null;
+  const built = (
+    at: string,
+    kept: string | null,
+    project_id = project.id,
+    revision_id = revision.id,
+  ) =>
+    t.pool.query(
+      `insert into builds (project_id, status, pdf_digest, revision_id, finished_at, created_at, read, bbl_digest)
+       values ($1, 'succeeded', repeat('a', 64), $2, now(), $3, $4, $5)`,
+      [project_id, revision_id, at, JSON.stringify(Object.keys(files)), kept],
+    );
+  if (digest) await built('2030-01-01', digest);
+  return { id: project.id, revision, root, digest, built };
+}
+// (The system unzip: our own reader sets a .bbl aside when the archive has a .bib.)
+const bytesIn = async (zip: Uint8Array, path: string) => {
+  const file = join(mkdtempSync(join(tmpdir(), 'paperweave-test-')), 'revision.zip');
+  writeFileSync(file, zip);
+  return execFileSync('unzip', ['-p', file, path]);
+};
+
+test('only the ZIP of the used files holds the .bbl; the plain ZIP and its manifest stay as they were', async () => {
+  const p = await bblPaper({ 'main.tex': MAIN, 'refs.bib': '@book{k, title={T}, year=2001}\n' });
+  const plain = await exportRevision(t.pool, store, owner.id, p.id, p.revision.id);
+  const manifest = manifestOf(
+    (await exportRevision(t.pool, store, owner.id, p.id, p.revision.id, true)).zip,
+  );
+  await p.built('2030-01-01', await store.put(BIBTEX_BBL));
+  const after = await exportRevision(t.pool, store, owner.id, p.id, p.revision.id);
+  expect(Buffer.from(after.zip).equals(Buffer.from(plain.zip))).toBe(true);
+  expect(listing(after.zip)).toEqual(['main.tex', 'refs.bib']);
+  const afterManifest = manifestOf(
+    (await exportRevision(t.pool, store, owner.id, p.id, p.revision.id, true)).zip,
+  );
+  expect(afterManifest).toEqual(manifest);
+  expect('bbl' in afterManifest).toBe(false);
+
+  const used = await exportRevision(t.pool, store, owner.id, p.id, p.revision.id, true, [], true);
+  expect(listing(used.zip)).toEqual([
+    'main.bbl',
+    'main.tex',
+    'paperweave-toolchain.json',
+    'refs.bib',
+  ]);
+  expect(Buffer.from((await bytesIn(used.zip, 'main.bbl'))!).equals(BIBTEX_BBL)).toBe(true);
+  // A BibTeX file has no biblatex format.
+  expect(manifestOf(used.zip).bbl).toEqual({
+    path: 'main.bbl',
+    sha256: `sha256:${sha256(BIBTEX_BBL)}`,
+    format: null,
+  });
+  // The stream is the same archive.
+  const streamed = await exportRevisionStream(
+    t.pool,
+    store,
+    owner.id,
+    p.id,
+    p.revision.id,
+    false,
+    [],
+    true,
+  );
+  const chunks: Uint8Array[] = [];
+  for await (const c of streamed.zip) chunks.push(c);
+  expect(listing(Buffer.concat(chunks))).toEqual(['main.bbl', 'main.tex', 'refs.bib']);
+});
+
+test('a Biber .bbl is named in the manifest with its biblatex format', async () => {
+  const p = await bblPaper({ 'main.tex': MAIN }, BIBER_BBL);
+  const used = await exportRevision(t.pool, store, owner.id, p.id, p.revision.id, true, [], true);
+  expect(manifestOf(used.zip).bbl).toEqual({
+    path: 'main.bbl',
+    sha256: `sha256:${sha256(BIBER_BBL)}`,
+    format: '3.2',
+  });
+});
+
+test('a root in a folder gets the .bbl in that folder', async () => {
+  const p = await bblPaper(
+    // A file outside the folder, or the import would take the folder off every path.
+    { 'paper/main.tex': MAIN, 'paper/refs.bib': '@book{k, title={T}}\n', 'notes.txt': 'Notes.\n' },
+    BIBTEX_BBL,
+  );
+  expect(p.root).toBe('paper/main.tex');
+  const used = await exportRevision(t.pool, store, owner.id, p.id, p.revision.id, true, [], true);
+  expect(listing(used.zip)).toEqual([
+    'notes.txt',
+    'paper/main.bbl',
+    'paper/main.tex',
+    'paper/refs.bib',
+    'paperweave-toolchain.json',
+  ]);
+  expect(manifestOf(used.zip).bbl.path).toBe('paper/main.bbl');
+});
+
+test("a .bbl the revision already has is kept, as one entry with the revision's bytes", async () => {
+  const own = Buffer.from(
+    "\\begin{thebibliography}{1}\n\\bibitem{k} The paper's own.\n\\end{thebibliography}\n",
+  );
+  const p = await bblPaper({ 'main.tex': MAIN, 'main.bbl': own }, BIBTEX_BBL);
+  const used = await exportRevision(t.pool, store, owner.id, p.id, p.revision.id, true, [], true);
+  expect(listing(used.zip).filter((n) => n === 'main.bbl')).toHaveLength(1);
+  expect(Buffer.from((await bytesIn(used.zip, 'main.bbl'))!).equals(own)).toBe(true);
+  // Nothing was added, so the manifest has nothing to say of one.
+  expect('bbl' in manifestOf(used.zip)).toBe(false);
+  // The build read another file than the paper's own: the paper's own is only the same file when
+  // its digest is the build's.
+  const found = await bblInRevision(t.pool, owner.id, p.id, p.revision.id);
+  expect(found).toEqual({ path: 'main.bbl', digest: p.digest, own: sha256(own) });
+  const same = await bblPaper({ 'main.tex': MAIN, 'main.bbl': BIBTEX_BBL }, BIBTEX_BBL);
+  const alike = await bblInRevision(t.pool, owner.id, same.id, same.revision.id);
+  expect(alike!.own).toBe(alike!.digest);
+});
+
+test("a build of another revision or another paper, or an older one, is never the revision's .bbl", async () => {
+  const p = await bblPaper({ 'main.tex': MAIN });
+  const other = await bblPaper({ 'main.tex': MAIN }, BIBTEX_BBL);
+  const ask = () => exportRevision(t.pool, store, owner.id, p.id, p.revision.id, false, [], true);
+  // Not built with a .bbl by any build of its own.
+  await p.built('2030-01-01', null);
+  expect(listing((await ask()).zip)).toEqual(['main.tex']);
+  // Another paper's build, of that paper's revision, is not asked.
+  expect(await bblInRevision(t.pool, owner.id, p.id, p.revision.id)).toBeNull();
+  // Another paper's build row naming this revision is not asked either: the build is of this paper.
+  await p.built('2031-01-01', other.digest, other.id);
+  expect(listing((await ask()).zip)).toEqual(['main.tex']);
+  // Another revision of the same paper.
+  await createFile(t.pool, store, owner.id, p.id, 'extra.tex', Buffer.from('% more\n'));
+  const next = await saveRevision(t.pool, store, owner.id, p.id, 'Next');
+  expect(next.id).not.toBe(p.revision.id);
+  await p.built('2032-01-01', other.digest, p.id, next.id);
+  expect(listing((await ask()).zip)).toEqual(['main.tex']);
+  // Its own newest good build decides: one with a .bbl gives it, a newer one without takes it away.
+  await p.built('2033-01-01', other.digest);
+  expect(listing((await ask()).zip)).toEqual(['main.bbl', 'main.tex']);
+  await p.built('2034-01-01', null);
+  expect(listing((await ask()).zip)).toEqual(['main.tex']);
+});
+
+test('who may have the .bbl: those who may have the ZIP of the used files', async () => {
+  const p = await bblPaper({ 'main.tex': MAIN }, BIBTEX_BBL);
+  const people: Record<string, { id: string }> = { owner };
+  for (const role of ['editor', 'reviewer', 'viewer'] as const) {
+    const who = await t.signIn(`${role}-bbl@example.org`);
+    const { token } = await invite(t.pool, owner.id, p.id, `${role}-bbl@example.org`, role);
+    await acceptInvitation(t.pool, who.id, token);
+    people[role] = who;
+  }
+  const ask = (id: string) =>
+    code(exportRevision(t.pool, store, id, p.id, p.revision.id, false, [], true));
+  expect(await ask(people.owner.id)).toBe('ok');
+  expect(await ask(people.editor.id)).toBe('ok');
+  expect(await ask(people.reviewer.id)).toBe('permission_denied');
+  expect(await ask(people.viewer.id)).toBe('permission_denied');
+  expect(await ask(outsider.id)).toBe('not_found');
+});
+
+test('a file deleted and made again at its path is one changed file, compared line by line', async () => {
+  const p = await paper();
+  const old = await createFile(t.pool, store, owner.id, p.id, 'chap.tex', Buffer.from('a\nb\nc\n'));
+  const a = await saveRevision(t.pool, store, owner.id, p.id, 'A');
+  await deleteFile(t.pool, store, owner.id, p.id, old);
+  await createFile(t.pool, store, owner.id, p.id, 'chap.tex', Buffer.from('a\nB\nc\n'));
+  const b = await saveRevision(t.pool, store, owner.id, p.id, 'B');
+  const diff = await diffRevisions(t.pool, store, viewer.id, p.id, a.id, b.id);
+  expect(diff.files.map((f) => [f.path, f.status])).toEqual([['chap.tex', 'changed']]);
+  expect(diff.files[0].lines!.filter((l) => l.op !== ' ')).toEqual([
+    { op: '-', text: 'b' },
+    { op: '+', text: 'B' },
+  ]);
+  expect(new Set(diff.files.map((f) => f.path)).size).toBe(diff.files.length);
+});
+
+test('a file deleted and made again with the same bytes is not a difference', async () => {
+  const p = await shared();
+  const old = await createFile(t.pool, store, owner.id, p.id, 'same.tex', Buffer.from('x\n'));
+  const a = await saveRevision(t.pool, store, owner.id, p.id, 'A');
+  await deleteFile(t.pool, store, owner.id, p.id, old);
+  await createFile(t.pool, store, owner.id, p.id, 'same.tex', Buffer.from('x\n'));
+  const b = await saveRevision(t.pool, store, owner.id, p.id, 'B');
+  expect((await diffRevisions(t.pool, store, viewer.id, p.id, a.id, b.id)).files).toEqual([]);
+});
+
+/** `paper()` with the viewer put on it directly: one person may send 30 invitations an hour. */
+async function shared() {
+  const zip = await writeZip([{ path: 'main.tex', bytes: Buffer.from(MAIN) }]);
+  const [project] = await importZip(t.pool, store, owner.id, zip, 'Shared');
+  await t.pool.query(
+    "insert into project_members (project_id, user_id, role) values ($1, $2, 'viewer')",
+    [project.id, viewer.id],
+  );
+  return { id: project.id };
+}
+
+const rows = (n: number, word: string) =>
+  Array.from({ length: n }, (_, i) => `${word} ${i}`).join('\n') + '\n';
+
+test('an added file shows every line as added and a removed one every line as removed', async () => {
+  const p = await paper();
+  const a = await saveRevision(t.pool, store, owner.id, p.id, 'A');
+  await createFile(t.pool, store, owner.id, p.id, 'notes.tex', Buffer.from('one\n\nthree\n'));
+  await createFile(t.pool, store, owner.id, p.id, 'tail.tex', Buffer.from('no newline'));
+  await createFile(t.pool, store, owner.id, p.id, 'empty.tex');
+  const b = await saveRevision(t.pool, store, owner.id, p.id, 'B');
+
+  const added = await diffRevisions(t.pool, store, viewer.id, p.id, a.id, b.id);
+  expect(added.files.map((f) => [f.path, f.status, f.more, f.tooLarge, f.held])).toEqual([
+    ['empty.tex', 'added', undefined, undefined, undefined],
+    ['notes.tex', 'added', undefined, undefined, undefined],
+    ['tail.tex', 'added', undefined, undefined, undefined],
+  ]);
+  const text = (f: { lines: { op: string; text: string }[] | null }) =>
+    f.lines!.map((l) => l.op + l.text);
+  // A last newline starts no line; a blank line in the middle is one.
+  expect(added.files[0].lines).toEqual([]);
+  expect(text(added.files[1])).toEqual(['+one', '+', '+three']);
+  expect(text(added.files[2])).toEqual(['+no newline']);
+
+  // The other way round, the same file is removed, with its lines.
+  const removed = await diffRevisions(t.pool, store, viewer.id, p.id, b.id, a.id);
+  expect(removed.files.map((f) => [f.path, f.status])).toEqual([
+    ['empty.tex', 'removed'],
+    ['notes.tex', 'removed'],
+    ['tail.tex', 'removed'],
+  ]);
+  expect(text(removed.files[1])).toEqual(['-one', '-', '-three']);
+
+  // Who may look is as it was: people on the paper, and a revision of this paper only.
+  expect(await code(diffRevisions(t.pool, store, outsider.id, p.id, a.id, b.id))).toBe('not_found');
+  const other = await shared();
+  const elsewhere = await saveRevision(t.pool, store, owner.id, other.id, 'Elsewhere');
+  expect(await code(diffRevisions(t.pool, store, owner.id, p.id, a.id, elsewhere.id))).toBe(
+    'not_found',
+  );
+  expect(await code(diffRevisions(t.pool, store, owner.id, p.id, elsewhere.id, b.id))).toBe(
+    'not_found',
+  );
+});
+
+test('the lines of a file a restore took out are in the comparison with the revision that keeps it', async () => {
+  const p = await shared();
+  const good = await saveRevision(t.pool, store, owner.id, p.id, 'Good');
+  await createFile(t.pool, store, owner.id, p.id, 'lost.tex', Buffer.from('precious\nwords\n'));
+  const restored = await restoreRevision(t.pool, store, owner.id, p.id, good.id);
+  const kept = (await restoreNote(t.pool, p.id, restored.number))!.kept!;
+  const diff = await diffRevisions(t.pool, store, viewer.id, p.id, kept.id, restored.id);
+  expect(diff.files.map((f) => [f.path, f.status])).toEqual([['lost.tex', 'removed']]);
+  expect(diff.files[0].lines).toEqual([
+    { op: '-', text: 'precious' },
+    { op: '-', text: 'words' },
+  ]);
+});
+
+test('a picture and a file that is not UTF-8 have no lines and are not too large; a 2 MB file is never fetched', async () => {
+  const p = await shared();
+  const a = await saveRevision(t.pool, store, owner.id, p.id, 'A');
+  const png = Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a, 9, 8, 7]);
+  const latin = Buffer.from([0x63, 0x61, 0x66, 0xe9, 0x0a]);
+  const big = Buffer.from('a line of text\n'.repeat(140_000));
+  expect(big.length).toBeGreaterThan(2 * 1024 * 1024);
+  await createFile(t.pool, store, owner.id, p.id, 'pic.png', png);
+  await createFile(t.pool, store, owner.id, p.id, 'latin.tex', latin);
+  await createFile(t.pool, store, owner.id, p.id, 'big.tex', big);
+  const b = await saveRevision(t.pool, store, owner.id, p.id, 'B');
+
+  const fetched: string[] = [];
+  const watched = {
+    ...store,
+    get: (digest: string) => {
+      fetched.push(digest);
+      return store.get(digest);
+    },
+  };
+  const diff = await diffRevisions(t.pool, watched, viewer.id, p.id, a.id, b.id);
+  const by = Object.fromEntries(diff.files.map((f) => [f.path, f]));
+  expect(Object.keys(by).sort()).toEqual(['big.tex', 'latin.tex', 'pic.png']);
+  expect(by['pic.png']).toMatchObject({ status: 'added', lines: null });
+  expect(by['pic.png'].tooLarge).toBeUndefined();
+  expect(by['latin.tex']).toMatchObject({ status: 'added', lines: null });
+  expect(by['latin.tex'].tooLarge).toBeUndefined();
+  expect(by['big.tex']).toMatchObject({ status: 'added', lines: null, tooLarge: true });
+  // The small ones were read; the large one was only asked about.
+  expect(fetched).toContain(sha256(png));
+  expect(fetched).toContain(sha256(latin));
+  expect(fetched).not.toContain(sha256(big));
+});
+
+test('an added file is shown to 2,000 lines, with the rest counted', async () => {
+  const p = await shared();
+  const a = await saveRevision(t.pool, store, owner.id, p.id, 'A');
+  await createFile(t.pool, store, owner.id, p.id, 'long.tex', Buffer.from(rows(2500, 'row')));
+  const b = await saveRevision(t.pool, store, owner.id, p.id, 'B');
+  const diff = await diffRevisions(t.pool, store, viewer.id, p.id, a.id, b.id);
+  expect(diff.files).toHaveLength(1);
+  expect(diff.files[0].lines).toHaveLength(2000);
+  expect(diff.files[0].more).toBe(500);
+  expect(diff.files[0].lines!.at(-1)).toEqual({ op: '+', text: 'row 1999' });
+  // The same, taken out.
+  const back = await diffRevisions(t.pool, store, viewer.id, p.id, b.id, a.id);
+  expect(back.files[0].lines).toHaveLength(2000);
+  expect(back.files[0].more).toBe(500);
+  expect(back.files[0].lines![0].op).toBe('-');
+});
+
+test('all the added and removed files together show at most 10,000 lines', async () => {
+  const p = await shared();
+  const a = await saveRevision(t.pool, store, owner.id, p.id, 'A');
+  // Six files of 1,900 lines: 11,400 in all, in the order of their paths.
+  for (let i = 0; i < 6; i++)
+    await createFile(
+      t.pool,
+      store,
+      owner.id,
+      p.id,
+      `part${i}.tex`,
+      Buffer.from(rows(1900, `p${i}`)),
+    );
+  const b = await saveRevision(t.pool, store, owner.id, p.id, 'B');
+  const diff = await diffRevisions(t.pool, store, viewer.id, p.id, a.id, b.id);
+  const shown = diff.files.map((f) => f.lines!.length);
+  expect(shown.reduce((n, k) => n + k, 0)).toBe(10_000);
+  expect(shown).toEqual([1900, 1900, 1900, 1900, 1900, 500]);
+  expect(diff.files.map((f) => f.more)).toEqual([
+    undefined,
+    undefined,
+    undefined,
+    undefined,
+    undefined,
+    1400,
+  ]);
+  // Once the total is spent, a file has no lines shown and all of them counted.
+  await createFile(t.pool, store, owner.id, p.id, 'zlast.tex', Buffer.from(rows(30, 'z')));
+  const c = await saveRevision(t.pool, store, owner.id, p.id, 'C');
+  const more = await diffRevisions(t.pool, store, viewer.id, p.id, a.id, c.id);
+  expect(more.files.at(-1)).toMatchObject({ path: 'zlast.tex', lines: [], more: 30 });
+});
+
+test('an added data file held out of downloads shows its lines, like a changed one, and is flagged', async () => {
+  const p = await shared();
+  const a = await saveRevision(t.pool, store, owner.id, p.id, 'A');
+  const data = await createFile(
+    t.pool,
+    store,
+    owner.id,
+    p.id,
+    'runs.csv',
+    Buffer.from('day,ms\n1,9\n2,38\n'),
+  );
+  await approveDataset(t.pool, store, owner.id, p.id, data, {
+    version: (await datasetProposal(t.pool, store, owner.id, p.id, data)).version,
+    columns: [
+      { name: 'day', type: 'number', unit: '' },
+      { name: 'ms', type: 'number', unit: 'ms' },
+    ],
+    missing: [],
+    exported: false,
+  });
+  await createFile(t.pool, store, owner.id, p.id, 'plain.csv', Buffer.from('a,b\n'));
+  const b = await saveRevision(t.pool, store, owner.id, p.id, 'B');
+  const diff = await diffRevisions(t.pool, store, viewer.id, p.id, a.id, b.id);
+  expect(diff.files.map((f) => [f.path, f.held])).toEqual([
+    ['plain.csv', undefined],
+    ['runs.csv', true],
+  ]);
+  expect(diff.files[1].lines!.map((l) => l.op + l.text)).toEqual(['+day,ms', '+1,9', '+2,38']);
+  // Taken out again, the same.
+  const back = await diffRevisions(t.pool, store, viewer.id, p.id, b.id, a.id);
+  expect(back.files[1]).toMatchObject({ path: 'runs.csv', status: 'removed', held: true });
 });

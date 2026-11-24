@@ -4,7 +4,9 @@
 import { createHash } from 'node:crypto';
 import { afterAll, beforeAll, expect, test } from 'vitest';
 import { readZip, writeZip } from './archive.ts';
+import { READS } from './batch.ts';
 import { type BlobStore, blobStore } from './blobs.ts';
+import { createFile } from './files.ts';
 import { exportZipStream, importZip, listFiles } from './import.ts';
 import { diffRevisions, exportRevision, exportRevisionStream, saveRevision } from './revisions.ts';
 import { editFile } from './sync.ts';
@@ -172,5 +174,21 @@ test('a diff of two revisions reads the files that changed together', async () =
   // One after another: 22 reads of 30 ms or more.
   expect(ms).toBeLessThan(500);
   expect(slow.seen.peak.get).toBeLessThanOrEqual(16);
+  expect(slow.seen.peak.get).toBeGreaterThan(1);
+});
+
+test('a diff that adds twenty files reads them sixteen at a time', async () => {
+  const before = (await saveRevision(t.pool, direct, owner.id, paper, 'Before the twenty')).id;
+  for (let i = 0; i < 20; i++)
+    await createFile(t.pool, direct, owner.id, paper, `added/a${i}.tex`, Buffer.from(`new ${i}\n`));
+  const after = (await saveRevision(t.pool, direct, owner.id, paper, 'After the twenty')).id;
+  const slow = far();
+  const { result } = await timed(() =>
+    diffRevisions(t.pool, slow.store, owner.id, paper, before, after),
+  );
+  expect(result.files).toHaveLength(20);
+  expect(result.files.every((f) => f.status === 'added' && f.lines?.length === 1)).toBe(true);
+  expect(slow.seen.calls.get).toBe(20);
+  expect(slow.seen.peak.get).toBeLessThanOrEqual(READS);
   expect(slow.seen.peak.get).toBeGreaterThan(1);
 });

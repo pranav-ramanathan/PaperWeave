@@ -2,6 +2,7 @@ import { expect, test } from 'vitest';
 import {
   bareIn,
   bblEntries,
+  bblFormat,
   bibEntries,
   bibItems,
   cleanDoi,
@@ -200,6 +201,25 @@ test('a biblatex .bbl gives each key once, with its title', () => {
 test('a .bbl with no entries gives none', () => {
   expect(bblEntries('')).toEqual([]);
   expect(bblEntries('Just prose, \\cite{k}.')).toEqual([]);
+});
+
+test('bblFormat reads the biblatex version from the header Biber writes', () => {
+  const biber = [
+    '% $ biblatex auxiliary file $',
+    '% $ biblatex bbl format version 3.2 $',
+    '% Do not modify the above lines!',
+    '\\refsection{0}',
+  ].join('\n');
+  expect(bblFormat(biber)).toBe('3.2');
+  expect(bblFormat(biber.replace('3.2', '3.10'))).toBe('3.10');
+});
+
+test('bblFormat is null for a BibTeX .bbl and for text with no header', () => {
+  const bibtex = '\\begin{thebibliography}{1}\n\\bibitem{k}\nA. Author.\n\\end{thebibliography}\n';
+  expect(bblFormat(bibtex)).toBeNull();
+  expect(bblFormat('')).toBeNull();
+  // The words in a body are not a header.
+  expect(bblFormat('Text.\n% biblatex bbl format version 9 is mentioned\n')).toBeNull();
 });
 
 test('logos and text commands read as what they print', () => {

@@ -95,6 +95,12 @@ test('a figure shows its picture, and is given a description in place', async ({
   await expect(source(other)).toContainText(
     '\\includegraphics[width=2cm,alt={A black square}]{figures/dot}',
   );
+  // The other page has the new text before this one has drawn it. This page draws the figure
+  // again: it goes, and the text below it moves up, until the picture is back and fetched. The
+  // click below is made where the text is, so wait until the figure is as it will stay.
+  await expect(picture).toHaveAttribute('alt', 'A black square');
+  await expect.poll(() => picture.evaluate((img: HTMLImageElement) => img.naturalWidth)).toBe(8);
+  await expect(described).toHaveText('A black square');
 
   // A new figure, from the toolbar: choose one of the paper's pictures, describe it, caption it.
   await clickAfter(page, VISUAL, 'after');

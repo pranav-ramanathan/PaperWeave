@@ -2768,10 +2768,58 @@ update` held the paper's file rows for **189.6 s** (until the proxy was cut; it 
 - **Not changed:**
   - Data kept back never leaves, in any download, of any revision, and stays unticked by default:
     a backup ZIP is then not the whole paper, and says so.
-  - Every file of the paper goes in, used or not.
+  - Every file of the paper goes in, used or not, in the plain ZIP and the review ZIP, which are
+    byte for byte as before.
   - `unzip` (Info-ZIP 6.00) on a system whose locale is not UTF-8 shows the accented and Chinese
     names wrongly, though the ZIP marks them UTF-8.
   - A finding about held data names the file that reads it, not the line.
+- **The ZIP of only the files the paper uses** (`/revisions/<id>/zip?used`, a third link on
+  "Check before submitting", shown when the paper is ready and something is unused). Each build
+  that makes a PDF records the project paths TeX opened (`builds.read`, from latexmk's `.fls`;
+  `readFiles` in `compile.ts`). The ZIP leaves out a file only when the revision's newest
+  succeeded build has `read`, the file is not in it and is not the root, and it is a `.tex`,
+  `.ltx`, `.pdf`, `.png`, `.jpg`, `.jpeg` or `.eps` file. `.bib`, `.bst`, `.cls`, `.sty`, fonts
+  and data always stay; held data stays out, as in every ZIP, and is not named as unused. With
+  `?manifest`, `files` lists only what is in the archive and `unused` lists what was left out.
+  "Check before submitting" gives a warning that names the first ten unused files and how many
+  more; the paper stays ready. Same permissions as every ZIP (`project.export`).
+  - **Limits.** A revision with no succeeded build answers `not_found`; one whose build did not
+    record `read` (built before this, or a build that ran no TeX) leaves nothing out. `read` is
+    taken only from a TeX run of that build: a warm build starts with the `.fls` the last one
+    left, so it is ignored unless latexmk ran TeX (`passes` above zero). A cache hit copies
+    `read`; builds cached before this are not reused (the cache tag changed). It is what TeX
+    opened in that build, so a file read only under another condition (a changed
+    `\includeonly`, another compiler, a date) may be missing from the ZIP. A file named by a
+    macro and opened by a program other than TeX (a shell-escape tool) is not seen.
+- **The build's `.bbl` in that ZIP.** A venue such as arXiv runs neither BibTeX nor Biber, so
+  the ZIP of only the files the paper uses (`?used`, and only it: the plain ZIP, the review ZIP
+  and their manifests are byte for byte as before) also holds the `.bbl` the build read.
+  Migration 0035 adds `builds.bbl_digest`. The worker stores the blob only when a PDF was made,
+  `<root minus .tex>.bbl` is in `read`, and the file is not empty and under 5 MB; so the empty
+  stand-in `pw_bbl` writes for a missing `.bbl` (`compile()` does not return it) and a `.bbl` a
+  warm build kept that TeX no longer reads are never stored. A cache hit copies `bbl_digest`
+  (the cache tag is now `...-madebbl`, so older builds are rebuilt). It is the revision's newest
+  `succeeded` build, the row that decides `unused`, that is asked, for that revision and that
+  paper; any other build is ignored. Reading the `.bbl` is as for the ZIP: `project.export`.
+  - **Name and place.** Beside the root: `paper/main.tex` gives `paper/main.bbl`. When the
+    revision already has a file of that name, that file is kept and nothing is added (one entry,
+    its bytes); the same when a folder of that name stands in the way. With `?used&manifest` the
+    manifest gains `bbl: {path, sha256, format}` when the archive adds one. `format` is the
+    biblatex `.bbl` version read from its header (`bblFormat` in `bib.ts`), null for a BibTeX
+    `thebibliography`. Biber's header, seen in a sandbox build (biber from the image), is
+    `% $ biblatex bbl format version 3.2 $` under `% $ biblatex auxiliary file $`.
+  - **Check before submitting** gives two more warnings. For a Biber `.bbl` it says a venue with
+    another biblatex version will refuse the file. If the revision's own `.bbl` differs from the
+    one the build read (BibTeX had made a new one from the `.bib` files), it says the PDF was
+    built from another bibliography; the ZIP keeps the paper's own file. The link to the ZIP is
+    shown when the paper is ready and a file is unused or the build has a `.bbl`.
+  - **Measured.** A BibTeX paper gives `\bibitem`; a Biber paper the header above; a paper with
+    no bibliography, or one that names a `.bib` it lacks, none; a ready-made project `.bbl` with
+    no `.bib` comes out as the project's bytes. A paper built from that ZIP with its `.bib`
+    deleted shows its references and no `[?]`. `checkBlobs` counts `bbl_digest` as referenced.
+  - **Limits.** A ZIP that holds a `.bib` and this `.bbl` is read by our own import with the
+    `.bbl` set aside (it is build output there), as for any paper with a `.bib`. A `.bbl`
+    that only some other condition makes TeX read (another date) may differ from the venue's.
 - **How it was made.** Planned by one agent, probed and written by others, checked here.
 
 ## The emails
@@ -6728,16 +6776,15 @@ of the paper's .bib files.`
   blob store refuses writes). No browser test: the page is unchanged. No existing expectation was
   changed.
 - **Not done.**
-  - **The restore still uses the table alone.** In the same long files, a restore across changes
-    that lie far apart deletes the whole stretch between the first and last changed line and types
-    it again as one piece (a median 84% of the file in the two corpus papers above). The text is
-    restored exactly, but comments and proposals anchored in that stretch lose their place.
-    `restoreEdits` could call `diffLinesFar`; it was left alone because the restore's store-backed
-    tests cannot be run on the development machine.
-  - The PDF's line map (`builds.ts`) also uses the table alone: between a build and now, in such a
-    file, a jump from the PDF lands on the old line number.
+  - Done since: the restore (`restoreEdits`, so also a file replace) and the PDF's line map
+    (`lineMap` in `builds.ts`) now call `diffLinesFar`. In a long file, a restore across changes
+    that lie far apart replaces each changed run on its own (it used to delete and retype the whole
+    stretch between them, a median 84% of the file in the two corpus papers above), so comments and
+    proposals between the changes keep their place, and a jump from the PDF lands on the exact line.
+    Where the table answers, the result is as before.
   - More than 2,000 lines removed and added, in a stretch too long for the table, is still "too much
-    changed".
+    changed": the restore then replaces one span from the first to the last changed line, and the
+    PDF's line map keeps the line number as it is, marked moved.
   - A file that was added still shows "Added" and none of its text; a moved paragraph is a removal
     and an addition.
   - Not tried: a real browser on this machine.
@@ -6847,7 +6894,7 @@ of the paper's .bib files.`
 - **Not done.**
   - The paper's own page in another tab is still not told; it shows the change after a reload or on coming back to it.
   - A rename is not announced, and who renamed or deleted a file is not said.
-  - The comparison a restore's note links to lists a removed file as "Removed" without its lines. The locked editor still shows them, to copy.
+  - ~~The comparison a restore's note links to lists a removed file as "Removed" without its lines.~~ Done: see "The comparison shows the text of added and removed files".
   - A file renamed from `.tex` to something else keeps its visual view until reload; a file that stopped being text (replaced by a picture, or by a restore) closes with the either-or sentence alone.
   - The root file's folder in the build pane, the paper's macros and the people who can be mentioned are still as the page was made.
   - An invitation link opened signed out; Back/Forward with the sync service away (as before).
@@ -6922,8 +6969,9 @@ of the paper's .bib files.`
   - Measured while choosing this, not changed: typing in the visual view of one 150 KB file took
     a median of 56 ms a key (p95 80) in the real editor, against 24 ms in a 33 KB file and 16 ms in
     the source view of either. One machine, once.
-  - The paper's own page in another tab; a restore-removed file's lines in the comparison; a
-    file renamed away from `.tex` (as before).
+  - The paper's own page in another tab; ~~a restore-removed file's lines in the comparison~~
+    (done, see "The comparison shows the text of added and removed files"); a file renamed away
+    from `.tex` (as before).
 
 ## Typing in the visual view of a long file is fast again
 
@@ -7099,3 +7147,28 @@ of the paper's .bib files.`
   - The words of other refusals that say "ZIP" (a paper with no main file, more than 50 papers,
     an upload over 100 MB) are the same for a tar.
   - `.tar.bz2`, `.tar.xz`, `.7z` and `.rar` are not read.
+
+## The comparison shows the text of added and removed files
+
+- **What was wrong.** A file a co-author added, or a restore took out, was listed as "Added" or
+  "Removed" with no lines, so there was nothing to copy from the comparison a restore's note links to.
+- **Now** `diffRevisions` gives an added file's lines as `+` (from the newer revision's digest) and a
+  removed file's as `-` (from the older one's), by `wholeFile` in `textdiff.ts`, so `diffHunks` and the
+  page take them as they take a changed file's. A last newline starts no line; an empty file has none
+  and the page says "This file is empty."
+- **Reading.** `store.size` is asked first and a file over 1 MB is not fetched (`tooLarge`, "too large
+  to show here"). Text that is not editable (a picture, Latin-1) is `lines: null`, "not text that can
+  be shown here". Size and fetch are both inside `mapLimit(READS)`. Changed files are read as before.
+- **Caps.** 2,000 lines of one file (`FAR_EDITS`; `more: n` says how many are left) and 10,000 of all
+  added and removed files together, spent in the order of their paths. Past either, the page links the
+  ZIP of the one revision that holds the file, unless the file is held data (`held: true`: a ZIP leaves
+  it out). Lines of held data are shown, as they already were for a changed one.
+- **Deleted and made again at one path** (a new `file_id`) was two entries, "Removed" and "Added", with
+  the same path: a duplicate React key and two regions of one name. It is now one "Changed" file,
+  compared line by line like any; the same bytes again is no difference. Authorization is as before
+  (`project.read`, each revision tied to the paper by `load`); no new route.
+- **Held by** `textdiff.test.ts`, `revisions.sandbox.test.ts`, `batching.sandbox.test.ts` (twenty added
+  files, at most `READS` fetches at once) and the comparison test in `revisions.spec.ts`.
+- **Not done.**
+  - A file deleted and made again as text on one side only is "Changed" with no lines.
+  - A changed file's own "too much changed" sentence still links both ZIPs even for held data.

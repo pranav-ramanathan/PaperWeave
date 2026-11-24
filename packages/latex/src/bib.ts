@@ -307,6 +307,18 @@ export function bblEntries(text: string): BibItem[] {
 }
 
 /**
+ * The biblatex format version a .bbl says it was made for ("3.2"), from the header Biber writes
+ * at the top ("% $ biblatex bbl format version 3.2 $"). A biblatex that reads a .bbl of
+ * another version refuses it. Null for a BibTeX .bbl (a `thebibliography`) and any other text.
+ */
+export function bblFormat(text: string): string | null {
+  const head = text.slice(0, 2000);
+  return (
+    /^%\s*\$\s*biblatex bbl format version\s+(\d+(?:\.\d+)*)\s*\$\s*$/m.exec(head)?.[1] ?? null
+  );
+}
+
+/**
  * The DOI an entry gives, as the bare `10.xxxx/...` a registry is asked for: TeX escapes and
  * braces taken away, a `doi:`, `DOI ` or doi.org address taken off the front, and trailing
  * punctuation off the end. With no `doi` field, a `url` on doi.org is used. Empty if none.
