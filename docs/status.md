@@ -7370,3 +7370,18 @@ restores of a large paper got round it (`docs/security-review.md`, Open 1).
 - **Held by** `archive.test.ts` (64 x 1 MiB entries, nothing read, 500 ms: at most 14 pulled, 64
   before; same bytes as `writeZip`; cancel; a failing source) and `batch.test.ts` (weights,
   over-budget item). Authorization in `revisionEntries` is unchanged.
+
+### A CSV of one line of commas built an array of every comma
+
+- **A fault found.** `parseCsv` (`csv.ts`) checked `MAX_COLUMNS` (500) only after the whole text
+  was parsed, so a 50 MB `.csv` that is one line of commas built a 50-million-element array:
+  1782 ms and rss 58 MB to 1036 MB. A later row longer than the header was likewise built whole
+  and then refused as "row N has X fields".
+- **Now.** `endField` refuses as soon as a record has more than `MAX_COLUMNS` fields, with the
+  same message ("it has more than 500 columns"). The same file: 332 ms (most of it the scan of
+  the first line for its delimiter), rss 58 MB to 112 MB. A later row over the limit now says
+  that instead of "row N has X fields"; both refuse. Valid files parse as before.
+- **Rows.** `MAX_ROWS` was already checked as each record ends, not after, so it needed no change.
+- **Held by** a case in `csv.test.ts` (a line of `MAX_COLUMNS * 100` commas, as the first line
+  and as a later one, under 250 ms; 500 columns is still allowed). On the old code the later-row
+  half failed; the first-line half passed there too at that size, which is only 50 KB.
