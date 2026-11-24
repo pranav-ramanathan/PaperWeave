@@ -32,6 +32,7 @@ import {
   setRole,
   setCompiler,
   setRootFile,
+  transferOwnership,
   withdrawInvitation,
 } from '@paperweave/server';
 import { comparison, NOW } from '../../lib/compare';
@@ -249,6 +250,16 @@ export async function deletePaperAction(projectId: string, form: FormData) {
   await act(back, async () => {
     const { name } = await deleteProject(db(), user.id, projectId, text(form, 'name'));
     return `/projects?deleted=${encodeURIComponent(name)}`;
+  });
+}
+
+/** Hand the paper to another member. Only from the page that says what that means. */
+export async function transferOwnerAction(projectId: string, form: FormData) {
+  const back = `/projects/${projectId}/owner`;
+  const user = await requireUser(back);
+  await act(back, async () => {
+    const { email } = await transferOwnership(db(), user.id, projectId, text(form, 'member'));
+    return `/projects/${projectId}?owner=${encodeURIComponent(email)}`;
   });
 }
 

@@ -513,6 +513,48 @@ export async function setRole(
   await db.query("select pg_notify('acl', $1)", [projectId]);
 }
 
+/**
+ * The owner hands the paper to someone already on it, of any role. The owner becomes an editor
+ * and may then leave. Invitations not yet taken up are not touched. Said back is the new
+ * owner's address, as the database has it.
+ *
+ * One transaction. A unique index allows one owner per paper, so the old owner is lowered
+ * first, and only if they are still the owner: of two handovers at once, the second finds
+ * nobody to lower and is refused. If the person is no longer on the paper when it is their
+ * turn, everything is taken back and the owner stays.
+ */
+export async function transferOwnership(
+  pool: pg.Pool,
+  userId: string,
+  projectId: string,
+  memberId: string,
+): Promise<{ email: string }> {
+  await authorize(pool, userId, id(projectId), 'members.manage');
+  if (typeof memberId !== 'string' || !UUID.test(memberId))
+    throw new AppError('invalid_input', 'Choose someone who is on this paper.');
+  if (memberId === userId)
+    throw new AppError('invalid_input', 'You are the owner already. Choose someone else.');
+  const email = await transaction(pool, async (db) => {
+    const lowered = await db.query(
+      "update project_members set role = 'editor' where project_id = $1 and user_id = $2 and role = 'owner'",
+      [projectId, userId],
+    );
+    if (!lowered.rowCount)
+      throw new AppError('permission_denied', 'Only the owner can hand the paper to someone.');
+    const raised = await db.query(
+      "update project_members set role = 'owner' where project_id = $1 and user_id = $2 and role <> 'owner'",
+      [projectId, memberId],
+    );
+    if (!raised.rowCount)
+      throw new AppError('invalid_input', 'That person is not on this paper. Nothing was changed.');
+    // Open editors are looked at again when this commits.
+    await db.query("select pg_notify('acl', $1)", [projectId]);
+    const { rows } = await db.query('select email from "user" where id = $1', [memberId]);
+    return rows[0].email as string;
+  });
+  return { email };
+}
+
 /** The owner may remove anyone else; anyone else may remove themselves. The owner cannot leave. */
 export async function removeMember(db: Db, userId: string, projectId: string, memberId: string) {
   const role = await authorize(db, userId, id(projectId), 'project.read');

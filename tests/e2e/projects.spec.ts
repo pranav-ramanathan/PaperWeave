@@ -754,3 +754,46 @@ test('the owner deletes a paper after being shown what goes; an editor with a fi
   await expect(guest.page.getByRole('heading', { name: 'Your papers' })).toBeVisible();
   await expect(guest.page.getByRole('link', { name })).toHaveCount(0);
 });
+
+test('the owner hands the paper to an editor', async ({ browser }) => {
+  const owner = await person(browser, 'handover-owner');
+  const guest = await person(browser, 'handover-guest');
+  await owner.page.goto('/sign-in');
+  await signIn(owner.page, owner.email);
+  await owner.page.getByLabel('Name of a new paper').fill(`Handover ${run}`);
+  await owner.page.getByRole('button', { name: 'Create paper' }).click();
+  await expect(owner.page.getByRole('heading', { name: `Handover ${run}` })).toBeVisible();
+  const paper = new URL(owner.page.url()).pathname;
+  await owner.page.getByLabel('Their email address').fill(guest.email);
+  await owner.page.getByRole('button', { name: 'Send invitation' }).click();
+  await expect(owner.page.getByRole('status')).toContainText('Invitation sent');
+  await guest.page.goto('/sign-in');
+  await signIn(guest.page, guest.email);
+  await guest.page.goto(await emailedLink(guest.email, '/invitations/'));
+  await guest.page.getByRole('button', { name: 'Join this paper' }).click();
+  await expect(guest.page.getByText('You are an editor')).toBeVisible();
+
+  // Only the owner is offered the page, and it has no button for anyone else.
+  await guest.page.goto(`${paper}/owner`);
+  await expect(guest.page.getByRole('main').getByRole('alert')).toHaveText(
+    'Only the owner of a paper can hand it to someone else.',
+  );
+  await expect(guest.page.getByRole('button')).toHaveCount(0);
+
+  await owner.page.getByRole('link', { name: 'Hand this paper to someone else…' }).click();
+  await expect(owner.page.getByRole('main')).toContainText('You cannot take it back');
+  await audit(owner.page, 'the page that asks before a paper is handed over');
+  await owner.page.getByLabel('The new owner').selectOption({ label: `${guest.email}, editor` });
+  await owner.page.getByRole('button', { name: 'Hand over this paper' }).click();
+  await expect(owner.page.getByRole('status')).toContainText(
+    `${guest.email} is now the owner of this paper`,
+  );
+  await expect(owner.page.getByText('You are an editor', { exact: true })).toBeVisible();
+  await expect(owner.page.getByLabel('Their email address')).toHaveCount(0);
+  await expect(owner.page.getByRole('link', { name: 'Delete this paper…' })).toHaveCount(0);
+
+  await guest.page.goto(paper);
+  await expect(guest.page.getByText('You are the owner')).toBeVisible();
+  await expect(guest.page.getByLabel('Their email address')).toBeVisible();
+  await expect(guest.page.getByRole('link', { name: 'Delete this paper…' })).toBeVisible();
+});

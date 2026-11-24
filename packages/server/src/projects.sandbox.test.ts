@@ -20,6 +20,7 @@ import {
   renameProject,
   setCompiler,
   setRole,
+  transferOwnership,
   withdrawInvitation,
 } from './projects.ts';
 import { blobStore } from './blobs.ts';
@@ -668,4 +669,105 @@ test('every column that points at a paper, a file, a revision or a build has an 
                          and i.indpred is null)`,
   );
   expect(rows.map((r) => r.col)).toEqual([]);
+});
+
+/** A paper with the owner, an editor, a reviewer and a viewer on it. */
+const paperWithEveryone = async (name: string) => {
+  const { id: p } = await createProject(t.pool, users.owner.id, name);
+  // Put on directly: an address may be invited only so often, and this is not what is tested.
+  for (const role of ['editor', 'reviewer', 'viewer'] as const)
+    await t.pool.query(
+      'insert into project_members (project_id, user_id, role) values ($1, $2, $3)',
+      [p, users[role].id, role],
+    );
+  return p;
+};
+const memberRows = async (p: string) =>
+  (
+    await t.pool.query(
+      'select user_id, role from project_members where project_id = $1 order by user_id',
+      [p],
+    )
+  ).rows;
+
+test('only the owner hands a paper over, and only to someone on it', async () => {
+  const p = await paperWithEveryone('Handover refused');
+  const before = await memberRows(p);
+  for (const role of ['editor', 'reviewer', 'viewer'] as const)
+    expect(await code(transferOwnership(t.pool, users[role].id, p, users[role].id))).toBe(
+      'permission_denied',
+    );
+  expect(await code(transferOwnership(t.pool, users.editor.id, p, users.viewer.id))).toBe(
+    'permission_denied',
+  );
+  expect(await code(transferOwnership(t.pool, users.outsider.id, p, users.editor.id))).toBe(
+    'not_found',
+  );
+  expect(await code(transferOwnership(t.pool, users.owner.id, 'not-an-id', users.editor.id))).toBe(
+    'not_found',
+  );
+  // Self, someone not on the paper, and something that is not an id.
+  for (const to of [users.owner.id, users.outsider.id, 'not-an-id', ''])
+    expect(await code(transferOwnership(t.pool, users.owner.id, p, to))).toBe('invalid_input');
+  // An invitation does not make someone a member.
+  const invitee = await t.signIn('handover-invitee@example.org');
+  await invite(t.pool, users.owner.id, p, invitee.email, 'editor');
+  expect(await code(transferOwnership(t.pool, users.owner.id, p, invitee.id))).toBe(
+    'invalid_input',
+  );
+  expect(await memberRows(p)).toEqual(before);
+});
+
+test('after a handover there is one owner, and the old one is an editor who can leave', async () => {
+  const p = await paperWithEveryone('Handover done');
+  await invite(t.pool, users.owner.id, p, 'later@example.org', 'viewer');
+  expect(await transferOwnership(t.pool, users.owner.id, p, users.viewer.id)).toEqual({
+    email: users.viewer.email,
+  });
+  const { rows } = await t.pool.query(
+    "select user_id from project_members where project_id = $1 and role = 'owner'",
+    [p],
+  );
+  expect(rows.map((r) => r.user_id)).toEqual([users.viewer.id]);
+  expect((await getProject(t.pool, users.owner.id, p)).role).toBe('editor');
+  // The new owner can invite and delete; the old one can do neither.
+  await invite(t.pool, users.viewer.id, p, 'another@example.org', 'viewer');
+  expect(await code(invite(t.pool, users.owner.id, p, 'third@example.org', 'viewer'))).toBe(
+    'permission_denied',
+  );
+  expect(await code(deleteProject(t.pool, users.owner.id, p, 'Handover done'))).toBe(
+    'permission_denied',
+  );
+  // Invitations made before stay.
+  const listed = await listInvitations(t.pool, users.viewer.id, p);
+  expect(listed.map((i) => i.email)).toContain('later@example.org');
+  // The old owner leaves, as any editor may.
+  await removeMember(t.pool, users.owner.id, p, users.owner.id);
+  expect(await code(getProject(t.pool, users.owner.id, p))).toBe('not_found');
+  expect(await code(deleteProject(t.pool, users.viewer.id, p, 'Handover done'))).toBe('ok');
+});
+
+test('two handovers at once leave one owner; a target who leaves meanwhile leaves the owner in place', async () => {
+  const p = await paperWithEveryone('Handover race');
+  const both = await Promise.all([
+    code(transferOwnership(t.pool, users.owner.id, p, users.editor.id)),
+    code(transferOwnership(t.pool, users.owner.id, p, users.reviewer.id)),
+  ]);
+  expect(both.sort()).toEqual(['ok', 'permission_denied']);
+  const owners = await t.pool.query(
+    "select count(*)::int as n from project_members where project_id = $1 and role = 'owner'",
+    [p],
+  );
+  expect(owners.rows[0].n).toBe(1);
+  expect((await memberRows(p)).length).toBe(4);
+
+  // The person chosen is no longer on the paper: nothing changes.
+  const q = await paperWithEveryone('Handover to someone gone');
+  await removeMember(t.pool, users.owner.id, q, users.reviewer.id);
+  const before = await memberRows(q);
+  expect(await code(transferOwnership(t.pool, users.owner.id, q, users.reviewer.id))).toBe(
+    'invalid_input',
+  );
+  expect(await memberRows(q)).toEqual(before);
+  expect((await getProject(t.pool, users.owner.id, q)).role).toBe('owner');
 });

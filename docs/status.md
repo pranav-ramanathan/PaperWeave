@@ -2327,9 +2327,36 @@ update` held the paper's file rows for **189.6 s** (until the proxy was cut; it 
   was right (invited again after removal; a spare invitation not raising a lowered role); and
   browser tests of the list and its cancelling, and of the invitation's page for a member and
   for another account.
-- **Not changed:** an invitation lasts fourteen days. A paper cannot change owner. Everyone on
-  a paper sees the others' addresses.
+- **Not changed:** an invitation lasts fourteen days. Everyone on a paper sees the others'
+  addresses.
 - **How it was made.** Planned by one agent, probed and written by others, checked here.
+
+### The owner hands the paper to another member
+
+- **Before:** a paper could not change owner. Its importer was the sole owner for ever, and
+  `removeMember` refuses to let the owner leave.
+- **Now** (`transferOwnership` in `packages/server/src/projects.ts`; the page at
+  `/projects/<id>/owner`, linked from the owner's paper after People): the owner may hand the
+  paper to anyone else on it, of any role, and becomes an editor. Only the owner may
+  (`members.manage`, which only the owner holds). Others on the paper get `permission_denied`,
+  non-members `not_found`; handing it to oneself, to someone not on the paper, to a malformed
+  id, or to someone who only has an invitation gives `invalid_input`. It is one transaction:
+  the old owner is lowered first (the one-owner index allows no other order, and a second
+  handover at once finds nobody to lower and is refused), then the person is raised; if they
+  have left in between, all of it is taken back. Open editors are told through `acl`.
+- **The old owner** can then leave like any editor. Invitations not yet taken up stay.
+  The page says the person handing over cannot take it back, and that the new owner may remove
+  them or delete the paper.
+- **Open editors:** an editor open under the old role is told "You are now an editor on this
+  paper" and is not locked, as write access stays. The lock is only for losing it.
+- **Papers per hour:** `mayStartPapers` counts papers by who owns them now, not by who made
+  them. A handover moves a paper started in the last hour from the old owner's count to the new
+  owner's, so the limit on starting papers can be passed by giving papers away, and a new owner
+  can be held back by papers they were given. Accepted: the limit bounds what one account can
+  hold, and it is the owner who holds it.
+- **Held by** service tests (`projects.sandbox.test`: who may hand over and to whom, with the
+  rows unchanged; one owner after a handover, the old owner an editor who can leave and cannot
+  invite or delete; two at once, and a person who has left) and a browser test.
 
 ## What "ready to send" is worth
 
