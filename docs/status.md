@@ -136,6 +136,11 @@ Read this first. Update it in every pull request.
     sync library's own count reaches zero too early after a reconnect, because edits queued
     while offline are confirmed after the count was reset. The status line, the warning on
     closing the tab, and the hold after a restore all use the exact answer.
+  - "Is it saved?" no longer scales with the size of the question. `holds` scanned every held
+    delete range for each range in the client's snapshot, and a snapshot can repeat one range as
+    often as a frame allows (a 533 KB message held the server for about 9 s). It now looks each
+    range up by binary search; the answers are unchanged. `packages/server/src/saved.test.ts`
+    covers it, including a comparison with the old scan on seeded random documents.
   - Restores replace whole lines. An edit made offline before a restore is merged in at an edge
     of the replaced part, and used to be able to land in the middle of a line. (Since changed:
     each changed stretch is replaced on its own, and a line changed in place word by word; an

@@ -318,15 +318,26 @@ export function holds(doc: Y.Doc, snapshot: Uint8Array): boolean {
   const want = Y.decodeSnapshot(snapshot);
   for (const [client, clock] of want.sv) if (Y.getState(doc.store, client) < clock) return false;
   // Ranges of deleted text per author, adjoining ones merged, so one wanted range lies in one.
+  // createDeleteSetFromStructStore walks each author's structs in clock order and joins runs of
+  // deleted ones, so its ranges come out sorted by clock, disjoint and never touching (a live
+  // struct lies between any two). The snapshot's own ranges can be in any order and repeated, so
+  // each is looked up by binary search instead of scanned for: the work stays near W log H.
   const have = Y.createDeleteSetFromStructStore(doc.store);
-  for (const [client, ranges] of want.ds.clients)
-    for (const w of ranges)
-      if (
-        !(have.clients.get(client) ?? []).some(
-          (h) => h.clock <= w.clock && w.clock + w.len <= h.clock + h.len,
-        )
-      )
-        return false;
+  for (const [client, ranges] of want.ds.clients) {
+    const mine = have.clients.get(client) ?? [];
+    for (const w of ranges) {
+      // The last held range starting at or before w; no other one can contain it.
+      let lo = 0;
+      let hi = mine.length;
+      while (lo < hi) {
+        const mid = (lo + hi) >>> 1;
+        if (mine[mid].clock <= w.clock) lo = mid + 1;
+        else hi = mid;
+      }
+      const h = mine[lo - 1];
+      if (!h || w.clock + w.len > h.clock + h.len) return false;
+    }
+  }
   return true;
 }
 
