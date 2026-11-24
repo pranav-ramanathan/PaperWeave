@@ -164,3 +164,54 @@ test('the latexmkrc note is kept when the list is cut', () => {
   );
   expect(report.notes.join(' ')).toMatch(/latexmkrc/); // guard
 });
+
+const report = (files: Record<string, string>) =>
+  describeImport(Object.entries(files).map(([path, t]) => ({ path, bytes: Buffer.from(t) })))
+    .report;
+const said = (files: Record<string, string>) =>
+  report(files).notes.filter((n) => n.startsWith('Spelling was set'));
+
+test('a paper spelt the American way is checked as American English from the start', () => {
+  const files = {
+    'main.tex': doc('', 'We model the behavior of each neighbor.\n\\input{sections/method}'),
+    'sections/method.tex': 'The colors are centered. One colour is not.\n',
+  };
+  expect(report(files).spelling).toEqual({ language: 'en-US', by: 'words' });
+  expect(said(files)).toEqual([
+    'Spelling was set to American English: that is how most of the words that differ between the two are spelt in the paper. Language, further down this page, changes it.',
+  ]);
+});
+
+test('a paper spelt the British way, or one whose preamble asks for it, is checked as British English', () => {
+  const words = { 'main.tex': doc('\\usepackage[american]{babel}', 'We analyse the colour.') };
+  expect(report(words).spelling).toEqual({ language: 'en-GB', by: 'words' });
+  expect(said(words)[0]).toMatch(/^Spelling was set to British English: that is how most/);
+  const asked = {
+    'main.tex': doc('\\input{preamble}', 'A short paper.'),
+    'preamble.tex': '\\usepackage[british]{babel}\n',
+  };
+  expect(report(asked).spelling).toEqual({ language: 'en-GB', by: 'preamble' });
+  expect(said(asked)).toEqual([
+    'Spelling was set to British English: that is what the preamble asks for. Language, further down this page, changes it.',
+  ]);
+  expect(
+    report({ 'main.tex': doc('\\usepackage[USenglish]{babel}', 'A short paper.') }).spelling,
+  ).toEqual({ language: 'en-US', by: 'preamble' });
+});
+
+test('a paper that shows neither spelling says nothing about it', () => {
+  const none = { 'main.tex': doc('\\usepackage[english]{babel}', 'A short paper.') };
+  expect(report(none).spelling).toBeUndefined();
+  expect(said(none)).toEqual([]);
+  // A commented-out option, a file the paper does not read, a command and a label are no evidence.
+  const quiet = {
+    'main.tex': doc(
+      '% \\usepackage[american]{babel}\n\\usepackage{xcolor}',
+      '\\begin{center}\\color{red} Text.\\label{sec:behavior}\\end{center}',
+    ),
+    'old/draft.tex': 'The color of the center of the neighbor.\n',
+  };
+  expect(report(quiet).spelling).toBeUndefined();
+  // As many words one way as the other, and no preamble to ask.
+  expect(report({ 'main.tex': doc('', 'The colour of the center.') }).spelling).toBeUndefined();
+});

@@ -6437,3 +6437,65 @@ of the paper's .bib files.`
   - Not tried: a real browser on this machine (nothing in the browser changes).
   - Carry over, unchanged: everything in the "Not done" of "Captions and footnotes in the grammar
     check".
+
+## An imported paper starts in the spelling it is written in
+
+- **What was wrong.** Every imported paper was checked as British English until someone changed it
+  under Language on the paper's page. Of the 29 corpus papers that have a root file and a checker
+  answer, 19 are written the American way and showed 279 spelling findings that are not mistakes
+  (24 % of theirs; median 8 a paper, at most 52). 6 are written the British way and would show 251
+  more under a default of American.
+- **Now** (`spellingOf` in `packages/latex/src/spelling.ts`, called by `describeImport`;
+  `importZip` stores the result in `projects.language`, as it does the compiler).
+
+  | The paper that is imported                                                                                 | Before  | Now                                          |
+  | ---------------------------------------------------------------------------------------------------------- | ------- | -------------------------------------------- |
+  | More words spelt the American way than the British (`color`, `behavior`, `modeling`, `center`, `analyze`)  | British | American English; the report says so and why |
+  | More words spelt the British way (`colour`, `centre`, `analyse`, `normalisation`)                          | British | British; the report says so and why          |
+  | As many each way, or none, and the preamble names a variant (`[american]{babel}`, `[UKenglish]`, `main=…`) | British | what the preamble names; the report says so  |
+  | As many each way, or none, and no such option (plain `[english]` is none)                                  | British | British, as before; the report says nothing  |
+  | Any paper, after someone chooses under Language on its page                                                | choice  | their choice: nothing reads the paper again  |
+  | A paper started empty or from a template; a paper imported before this change                              | British | British, unchanged                           |
+
+  Only the prose of the files the root reads in its body is read (a command, a formula, a comment
+  and a label count for nothing; a caption and a footnote count). Only words of four or more small
+  ASCII letters count, so names and sentence openers say nothing. The words decide, then the
+  preamble, else nothing is known. The choice is made once at import and stored; nothing reads
+  the paper again. Counted: `-or`/`-our` words, `center/centre`, `analyze/analyse`, `labeled`,
+  `modeling`-type words with `mis`/`re`, `-isation`, `-ise` verbs, `fiber/fibre`, `defense/defence`
+  and the like. Not counted: `-ize` (Oxford spelling), `-lled`/`-lling`, `grey`, `gray`, `math`,
+  `program`, `license`, `practice`. The corpus result: 2,147 spelling findings, was 2,426; none of
+  the 25 choices was the worse one; 4 papers of 29 got none. The dictionary check: the American
+  pattern takes 229 of the checker's words and the British one 4,096, and the live checker calls
+  every one misspelt in the other spelling and right in its own.
+
+- **Held by** four tests in `packages/latex/src/spelling.test.ts`, three in
+  `packages/server/src/compiler.test.ts` and two against the real checker in
+  `packages/server/src/grammar-benchmark.sandbox.test.ts`, all run on the development machine; one
+  in `packages/server/src/grammar.sandbox.test.ts` and one in `tests/e2e/grammar.spec.ts`, written
+  but not run on the development machine (the local blob store refuses writes, and no browser was
+  tried), so run only in CI. No existing expectation was changed.
+- **Not done.**
+  - A paper started empty or from a template, and every paper imported before this change, is
+    British until someone chooses. Nothing reads a paper again after import: a paper whose text is
+    replaced or written later keeps what it has.
+  - With no evidence, and with as many words each way, a paper is British. The owner has not chosen
+    a default; this change does not choose one.
+  - A paper that mixes both spellings (3 of 29) is checked in the one it uses more and shows the
+    others as findings. No "the paper mixes spellings" note.
+  - Words spelt with ae/oe (`anaemia`, `haemoglobin`, `oestrogen`), `theatre`, `mould`, `plough`,
+    `practise` and the like are not counted; nor are `-ize` and `-lled`, which the checker accepts
+    in both. A medical paper is still decided by its `tumour`, `colour`, `centre`, `analyse`.
+  - Only the root's preamble and the files it reads there are asked about babel; a class or style
+    of the paper that loads `[british]{babel}` is not. `\babelprovide`, `\selectlanguage` and
+    Canadian English are not read. A paper whose main language is not English is still checked as
+    English.
+  - The root an archive's review data names (`carriedRoot`) can differ from the importer's; the
+    spelling is the importer's root's.
+  - A paper exported and imported again is read again: a choice made on the first does not travel
+    (language settings never did).
+  - The report keeps "Spelling was set to …" after the person changes the setting; it is a record
+    of the import.
+  - Not tried: a real browser on this machine.
+  - Carry over, unchanged: the "Not done" of "Abbreviations and made-up names are not misspelt
+    words", but for its line on British English, which this section replaces.

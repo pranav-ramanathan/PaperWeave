@@ -419,3 +419,37 @@ test('a mistake in a caption and in a footnote is found and put right', async ({
   await expect(finding(owner.page, /“the the”/)).toHaveCount(0);
   await expect(src.locator('.finding-mark')).toHaveText(['sentense']);
 });
+
+test('a paper written in American English is checked as American from the start', async ({
+  browser,
+}) => {
+  test.setTimeout(120_000);
+  const owner = await person(browser, 'grammar-american');
+  const main = [
+    '\\documentclass{article}',
+    '\\begin{document}',
+    'We model the behavior of each neighbor and color the labeled nodes.',
+    'The centered plots were analyzed twice, and one recieved a new color.',
+    'Modeling the tumor data took teh longest.',
+    '\\end{document}',
+    '',
+  ].join('\n');
+  const zip = join(mkdtempSync(join(tmpdir(), 'paperweave-e2e-')), `American ${run}.zip`);
+  writeFileSync(zip, await writeZip([{ path: 'main.tex', bytes: Buffer.from(main) }]));
+  await owner.page.goto('/sign-in');
+  await signIn(owner.page, owner.email);
+  await owner.page.getByLabel('Or import a ZIP of a LaTeX project').setInputFiles(zip);
+  await owner.page.getByRole('button', { name: 'Import ZIP' }).click();
+  await expect(owner.page.getByRole('heading', { name: 'Language' })).toBeVisible();
+
+  // The report says what was chosen, and the Spelling setting shows it.
+  await expect(owner.page.locator('.report:not(.first-steps)')).toContainText(
+    'Spelling was set to American English',
+  );
+  await expect(owner.page.getByRole('combobox', { name: 'Spelling', exact: true })).toHaveValue(
+    'en-US',
+  );
+  await owner.page.getByRole('link', { name: 'main.tex' }).first().click();
+  await expect(finding(owner.page, 'Spelling: “recieved”')).toBeVisible({ timeout: 30_000 });
+  await expect(finding(owner.page, 'Spelling: “color”')).toHaveCount(0);
+});

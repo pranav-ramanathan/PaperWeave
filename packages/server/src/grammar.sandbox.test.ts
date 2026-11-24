@@ -10,7 +10,7 @@ import {
   languageSettings,
   setLanguageSettings,
 } from './grammar.ts';
-import { importZip, listFiles } from './import.ts';
+import { importReport, importZip, listFiles } from './import.ts';
 import { recordGrammarOutcome } from './metrics.ts';
 import { acceptInvitation, invite } from './projects.ts';
 import { editFile, loadUpdates, TEXT } from './sync.ts';
@@ -505,6 +505,52 @@ test('an abbreviation or a made-up name is not listed as misspelt', async () => 
   // The paper's own list still works beside the rule.
   await setLanguageSettings(t.pool, users.owner.id, p.id, { glossary: ['Frobnet'] });
   expect(await spelt()).toEqual(['THe', 'GPU-acelerated', 'recieved', 'teh', 'DBN-based', 'smal']);
+});
+
+test('an imported paper is checked in the spelling it is written in, until someone chooses another', async () => {
+  const src = [
+    '\\documentclass{article}',
+    '\\begin{document}',
+    'We model the behavior of each neighbor and color the labeled nodes.',
+    'The centered plots were analyzed twice, and one recieved a new color.',
+    'Modeling the tumor data took teh longest.',
+    '\\end{document}',
+    '',
+  ].join('\n');
+  const p = await paper(src, false);
+  const language = async (id: string) =>
+    (await languageSettings(t.pool, users.owner.id, id)).language;
+  const spelt = async () =>
+    (await check(p, 'owner')).filter((f) => f.kind === 'spelling').map((f) => f.words);
+  expect(await language(p.id)).toBe('en-US');
+  expect((await importReport(t.pool, users.owner.id, p.id))!.spelling).toEqual({
+    language: 'en-US',
+    by: 'words',
+  });
+  expect(await spelt()).toEqual(['recieved', 'teh']);
+  // The person's choice stands: nothing reads the paper again.
+  await setLanguageSettings(t.pool, users.owner.id, p.id, { language: 'en-GB' });
+  expect(await language(p.id)).toBe('en-GB');
+  expect(await spelt()).toEqual([
+    'behavior',
+    'neighbor',
+    'color',
+    'labeled',
+    'centered',
+    'analyzed',
+    'recieved',
+    'color',
+    'Modeling',
+    'tumor',
+    'teh',
+  ]);
+  // A paper that shows neither spelling starts as every paper does.
+  const plain = await paper(
+    '\\documentclass{article}\n\\begin{document}\nA short paper.\n\\end{document}\n',
+    false,
+  );
+  expect(await language(plain.id)).toBe('en-GB');
+  expect((await importReport(t.pool, users.owner.id, plain.id))!.spelling).toBeUndefined();
 });
 
 test("a paper's own text macros are read as the words they print, from the package that defines them", async () => {
