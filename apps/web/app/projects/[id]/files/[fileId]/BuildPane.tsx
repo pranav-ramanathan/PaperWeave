@@ -1,27 +1,16 @@
 'use client';
 
 import { nearFile } from '@paperweave/latex';
-import type { Build } from '@paperweave/server';
 import { useCallback, useEffect, useRef, useState } from 'react';
+import { autobuild, type Builds } from '../../../../../lib/autobuild';
 import { setMarks } from '../../../../../lib/builds';
 import { type Numbers, setNumbers } from '../../../../../lib/numbers';
 import { onShow, showInEditor } from '../../../../../lib/pdfsync';
-import { notTheirs, STOP, whileShown } from '../../../../../lib/shown';
+import { onTyping } from '../../../../../lib/typing';
 import PdfView, { type Mark } from './PdfView';
-
-type Builds = { latest: Build | null; lastGood: Build | null; edits: string; review: string };
-
-/** How often to ask how the builds stand while one is waiting or about to be asked for. */
-const BUSY_EVERY_MS = 2000;
-/** And when nothing is happening: a change to the paper is then seen a little later. */
-const QUIET_EVERY_MS = 5000;
 
 /** A build takes a minute at most once it starts. Waiting twice that, it has not started. */
 const STUCK_AFTER_MS = 120_000;
-// Said when the builds have twice in a row not been answered, or answered with a server error.
-/** Asked again this often while the text is ahead of the PDF and automatic builds are paused. */
-const RETRY_PAUSED_MS = 30_000;
-const NO_ANSWER = 'The server is not answering. What is shown here may be out of date.';
 
 /** Said after a place that is the nearest one, because the PDF is of text since edited. */
 const NEAREST = ' The PDF is from before your latest edits, so this is the nearest place.';
@@ -63,98 +52,31 @@ export default function BuildPane({
   const [problem, setProblem] = useState('');
   // Why the server last refused an automatic build, said in the status until one is made.
   const [paused, setPaused] = useState('');
-  // When it did: the pane asks again after RETRY_PAUSED_MS.
-  const pausedAt = useRef(0);
   const url = `/projects/${projectId}/builds`;
-  // The paper's mark at the last poll, to see that it has been still since.
-  const seen = useRef<string | null>(null);
-  // The paper's mark, and the revision of the newest build, when this pane last asked for a
-  // build by itself.
-  const asked = useRef<string | null>(null);
-  // Whether something is under way, as of the last poll: it decides how soon to ask again.
-  const busy = useRef(true);
-
-  // Asks now, whatever the clock says: set by the poll below.
-  const askNow = useRef(() => {});
-  // Set at once by a press: state would be seen only after the next draw.
-  const posting = useRef(false);
-  const compile = useCallback(
-    async (automatic = false): Promise<boolean> => {
-      // One post at a time: a second press before the first is answered does nothing.
-      if (posting.current) return false;
-      posting.current = true;
-      const res = await fetch(url, {
-        method: 'POST',
-        headers: automatic ? { 'x-auto-build': '1' } : {},
-        signal: AbortSignal.timeout(15_000),
-      })
-        .catch(() => null)
-        .finally(() => {
-          posting.current = false;
-        });
-      const body: { id?: string | null; paused?: string; error?: string } =
-        (await res?.json().catch(() => ({}))) ?? {};
-      setProblem(res?.ok ? '' : (body.error ?? 'The build could not be started.'));
-      // Refused for now, not an error: say why, and ask again later.
-      const wait = !!res?.ok && !body.id && !!body.paused;
-      setPaused(wait ? body.paused! : '');
-      if (wait) pausedAt.current = Date.now();
-      // See the build that was asked for, and ask about it quickly from here on.
-      busy.current = true;
-      askNow.current();
-      return wait;
-    },
-    [url],
-  );
-
+  // The asking, by the clock and by itself: lib/autobuild.ts.
+  const pane = useRef<ReturnType<typeof autobuild> | null>(null);
   useEffect(() => {
-    let stop = false;
-    // Polls in a row that got no answer at all.
-    let silent = 0;
-    const poll = async () => {
-      const res = await fetch(url, { signal: AbortSignal.timeout(15_000) }).catch(() => null);
-      if (notTheirs(res)) return STOP;
-      if (stop) return;
-      // A 5xx counts as no answer: it is what the server says when the database did not answer.
-      silent = res && res.status < 500 ? 0 : silent + 1;
-      if (silent >= 2) setProblem(NO_ANSWER);
-      if (!res?.ok) return;
-      setProblem((p) => (p === NO_ANSWER ? '' : p));
-      const next: Builds = await res.json();
-      setBuilds(next);
-      setMarks({ edits: next.edits, review: next.review });
-      // Build by itself once the paper has been still for one poll and differs from what was built.
-      const idle = seen.current === next.edits;
-      seen.current = next.edits;
-      const behind = !next.latest || (next.latest.status !== 'queued' && next.latest.stale);
-      // Once for each state of the paper and revision the newest build is of. A build that
-      // comes back behind, of the same revision, is not asked for again until something
-      // changes: asked for every two seconds, a paper would use up its builds for the hour.
-      // The revision is part of it because someone may build an older revision, which then
-      // is the newest build: the paper has not changed, and still wants building.
-      const state = `${next.edits} ${next.latest?.revisionId}`;
-      // Quick while a build is waiting or running, or while the PDF is behind the text and this
-      // pane has yet to ask for a build of it. Otherwise nothing is waited for.
-      const waiting = Date.now() - pausedAt.current < RETRY_PAUSED_MS;
-      const toAsk = auto && canBuild && behind && asked.current !== state && !waiting;
-      busy.current = next.latest?.status === 'queued' || toAsk;
-      if (!behind) setPaused('');
-      if (toAsk && idle) {
-        asked.current = state;
-        // A refusal for now is not an ask: the same state is asked about again once it is time.
-        void compile(true).then((wait) => {
-          if (wait && asked.current === state) asked.current = null;
-        });
-      }
-    };
-    askNow.current = () => void poll();
-    const off = whileShown(poll, () => (busy.current ? BUSY_EVERY_MS : QUIET_EVERY_MS));
+    const made = autobuild({
+      url,
+      canBuild,
+      heard: (next) => {
+        setBuilds(next);
+        setMarks({ edits: next.edits, review: next.review });
+      },
+      problem: setProblem,
+      paused: setPaused,
+    });
+    pane.current = made;
+    const off = onTyping(made.typed);
     return () => {
-      stop = true;
-      askNow.current = () => {};
       off();
+      made.stop();
+      pane.current = null;
     };
-  }, [url, auto, canBuild, compile]);
+  }, [url, canBuild]);
+  // After the one above, so also for a pane just made.
+  useEffect(() => pane.current?.setAuto(auto), [auto, url, canBuild]);
+  const compile = () => void pane.current?.compile();
 
   const { latest, lastGood } = builds ?? { latest: null, lastGood: null };
   // The visual editor shows, beside each reference, the number its label has in this PDF.
@@ -314,7 +236,7 @@ export default function BuildPane({
                 // aria-disabled, not disabled: a disabled button drops the keyboard to the
                 // page. While a build is under way a press does nothing (builds are
                 // rate-limited).
-                if (!building) void compile();
+                if (!building) compile();
               }}
               aria-disabled={building || undefined}
             >

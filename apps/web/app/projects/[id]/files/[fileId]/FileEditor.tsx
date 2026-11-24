@@ -35,6 +35,7 @@ import { pageNonce } from '../../../../../lib/nonce';
 import { atRisk, LEAVE, leavesPage } from '../../../../../lib/leaving';
 import { carry, onShow, showInPdf, taken } from '../../../../../lib/pdfsync';
 import { wordAt } from '../../../../../lib/pdfword';
+import { setTyping } from '../../../../../lib/typing';
 import { createVisual, type Visual } from '../../../../../lib/visual';
 import type { LanguageFinding, Proposal, Thread } from '@paperweave/server';
 import Language from './Language';
@@ -480,6 +481,8 @@ export default function FileEditor(props: {
       say: (unsaved) => {
         if (unsaved) lastChange = Date.now();
         update({ unsaved });
+        // The build pane builds soon after this editor's edits are saved and it has gone quiet.
+        setTyping(unsaved);
       },
     });
     /** The paper's newest restore when this tab last connected, and one found since, if held. */

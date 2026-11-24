@@ -467,6 +467,47 @@ test('the PDF is behind only when the paper has changed, and is built once for e
   await expect(build(page)).toContainText('before the latest edits');
 });
 
+// The pane is told by its own editor when the server holds what was typed, and asks for the build
+// 1.7 s after that: about two seconds after the last key. Before, a build from a quiet paper came
+// 2 to 7 s after the key, by luck of the poll's phase, so three in a row under 4 s happened about
+// one run in fifteen. Not run on the development machine (no blob store there): CI runs it.
+test('an edit by this editor is asked for about two seconds after the last key, three times running', async ({
+  browser,
+}) => {
+  test.setTimeout(180_000);
+  const { page, email } = await person(browser, 'build-keyed');
+  await page.goto('/sign-in');
+  await signIn(page, email);
+  await page
+    .getByLabel('Or import a ZIP of a LaTeX project')
+    .setInputFiles(await fixtureZip('Keyed'));
+  await page.getByRole('button', { name: 'Import ZIP' }).click();
+  await page.getByRole('link', { name: 'main.tex' }).first().click();
+  await expect(buildStatus(page)).toHaveText('The PDF is up to date.', { timeout: 60_000 });
+
+  const asked: number[] = [];
+  page.on('request', (r) => {
+    if (r.method() === 'POST' && r.url().endsWith('/builds')) asked.push(Date.now());
+  });
+  await showSource(page);
+  await source(page).click();
+  await page.keyboard.press('ControlOrMeta+End');
+  const gaps: number[] = [];
+  for (let i = 1; i <= 3; i++) {
+    await page.waitForTimeout(6000); // quiet: the pane is on its five-second turn
+    await page.keyboard.type('% a');
+    const key = Date.now();
+    await expect.poll(() => asked.length, { timeout: 30_000 }).toBe(i);
+    gaps.push(asked[i - 1] - key);
+    await expect(buildStatus(page)).toHaveText('The PDF is up to date.', { timeout: 30_000 });
+  }
+  for (const gap of gaps) {
+    expect(gap).toBeGreaterThanOrEqual(1500);
+    expect(gap).toBeLessThanOrEqual(4000);
+  }
+  expect(asked.length).toBe(3);
+});
+
 test('an editor nobody is looking at asks the server for nothing', async ({ browser }) => {
   const { page, email } = await person(browser, 'build-hidden');
   await page.goto('/sign-in');

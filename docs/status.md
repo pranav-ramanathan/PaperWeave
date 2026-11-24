@@ -6070,3 +6070,64 @@ of the paper's .bib files.`
     `\item[]` and `description` raw in the visual editor (6 of 20 corpus papers with lists; five
     overlapping causes); Enter at the start of a list item after an empty one; whether to build
     on past a BibTeX error.
+
+## The build pane hears from its own editor
+
+- **What was slow.** After a pause in typing the pane waited for a poll to notice the edit (every
+  5 s when quiet), one more poll to find the paper still (2 s), and after the build another poll
+  to see it (2 s). With a 1.5 s build: 4.1 to 9.1 s from the last key, median 6.6 s from a quiet
+  paper and 5.0 s at the end of typing. "Compile now" on a quiet pane could go unseen for up to
+  five seconds. (Measured by running the pane's poll against a made-up server with the clock
+  moved by hand, fifty phases; not in a browser.)
+- **Now** (`apps/web/lib/autobuild.ts`, `lib/typing.ts`, `whileShown().now` in `lib/shown.ts`):
+  the editor tells the pane when the server has what was typed; the pane asks for the build 1.7 s
+  later if nothing more was typed, two seconds after the last key at every phase. A build that is
+  new is asked about every 500 ms for its first ten seconds. A press of "Compile now" counts the
+  wait from the press. From the last key to the pane knowing of a PDF of that text (simulated,
+  not browser-measured):
+
+  | Case                                                                       | Before (min / median / max) | Now (every phase) |
+  | -------------------------------------------------------------------------- | --------------------------- | ----------------- |
+  | One edit to a quiet paper, build 1.5 s                                     | 4.1 / 6.6 / 9.1 s           | 3.7 s             |
+  | The end of eight seconds of typing, build 1.5 s                            | 4.1 / 5.0 / 6.1 s           | 3.7 s             |
+  | One edit, build 2.5 s                                                      | 6.2 / 8.7 / 11.1 s          | 4.8 s             |
+  | End of typing, build 2.5 s                                                 | 6.2 / 7.1 / 8.1 s           | 4.8 s             |
+  | One edit, build 5 s                                                        | 8.2 / 10.7 / 13.2 s         | 7.4 s             |
+  | "Compile now" pressed (automatic off), build 1.5 s / 2.5 s, from the press | 2.1 s / 4.2 s               | 1.6 s / 2.7 s     |
+  | Someone else's edit, build 1.5 s                                           | 4.1 / 6.6 / 9.1 s           | 3.8 / 6.3 / 8.7 s |
+
+  Not changed: someone else's edit still waits for a poll that finds the paper still; a quiet
+  paper is still asked about every five seconds, a hidden page not at all; a build is asked for
+  once for each state of the paper; the 30-second retry after a refusal; every sentence shown;
+  every limit.
+
+- **Why two seconds and not less.** A paper gets 120 builds an hour, 100 of them automatic, and
+  automatic builds are 30 s apart once 60 are used. A shorter wait builds at more pauses. A
+  made-up typist (an hour, three seeds, build 1.5 s, pauses of four seconds or more, 603 of
+  them) with the limits: today 248 pauses caught up, none within 4 s, median wait 5.7 s; 3 s
+  wait: 257, 5, 4.7 s; **2 s: 240, 191, 3.7 s**; 1 s: 209, 144, 2.7 s, and the first refusal
+  comes sooner (11 to 12.5 min against 13.5 to 14.3). At today's limits two seconds is the
+  fastest wait that does not lose pauses to the limit. The typist is invented: read the table as
+  the shape of the trade, not as a forecast.
+- **Held by** `autobuild.test.ts` and `shown.test.ts` (run on the development machine, clock
+  moved by hand) and one test in `building.spec.ts` (written, run only in CI: the local blob
+  store refuses writes).
+- **Not done.**
+  - Not measured in a browser: the time to fetch and draw the new PDF comes on top and is
+    unchanged.
+  - An edit that does not come from this page's editor is noticed by the poll as before (up to
+    5 s, then 2 s): another person's typing, a proposal accepted, a file uploaded, renamed or
+    deleted, a chart drawn again.
+  - A build under way is not stopped when more is typed: the next one waits for it. With a 5 s
+    build a sentence typed after a pause is in the PDF 7.4 s after its last key.
+  - While a build is new the pane asks twice a second: about half as many requests again over
+    half an hour of typing (664 to 1027 in the model). Each is the two statements
+    `docs/benchmarks.md` times at 6 ms (62 ms for a paper of 2,000 files).
+  - **The hourly limits now decide the wait, and are the owner's.** `BUILDS_PER_PAPER_HOUR` and
+    `BUILDS_PER_USER_HOUR` were set when a build cost about three TeX runs; an ordinary edit now
+    costs one. The made-up typist uses the 60 unspaced automatic builds in about a quarter of an
+    hour of steady typing, today as well as now, and is then built every 30 s. At 280 an hour
+    the model typist never meets a refusal in an hour, and a wait of one second (`STILL_MS =
+700`) would give 2.7 s from the last key for about a fifth more builds.
+  - Carry over, unchanged: everything in the "Not done" of "A build starts from what the paper's
+    last good build made" except its item on the wait around the build.
