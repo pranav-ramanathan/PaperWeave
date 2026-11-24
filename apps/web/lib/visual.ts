@@ -884,6 +884,81 @@ export function createVisual(opts: {
   };
   /** Stretches of the source to mark in the text: those with a thread of comments. */
   let marked: { from: number; to: number; kind: 'thread' | 'proposal' | 'finding' }[] = [];
+  /** The marked stretches as they stand in the document now. */
+  const drawMarks = (doc: PMNode) => {
+    if (!bridge || !marked.length) return DecorationSet.empty;
+    const size = doc.content.size;
+    const at = (off: number) => Math.min(size, fromSrc(bridge.model, doc, off));
+    return DecorationSet.create(
+      doc,
+      marked.flatMap((m) => {
+        const [from, to] = [at(m.from), at(m.to)];
+        return to > from ? [Decoration.inline(from, to, { class: `${m.kind}-mark` })] : [];
+      }),
+    );
+  };
+  /**
+   * The marks are kept, and move with the text as it is typed: a key then draws only its own
+   * letter. They are placed afresh when they are set again (setMarks, after every change to the
+   * text) and when the document is drawn from the source; when that moves none, nothing is
+   * drawn. Placing them at every key instead drew the paragraph twice and wrote the selection
+   * to the screen again, which in a long file takes longer than the key.
+   */
+  const marks: Plugin<DecorationSet> = new Plugin<DecorationSet>({
+    state: {
+      init: () => DecorationSet.empty,
+      apply: (tr, set) =>
+        tr.getMeta('marks') || tr.getMeta('projection')
+          ? drawMarks(tr.doc)
+          : tr.docChanged
+            ? set.map(tr.mapping, tr.doc)
+            : set,
+    },
+    props: { decorations: (state) => marks.getState(state) },
+  });
+  /**
+   * The blocks of the document (a paragraph, a list, a formula) that the selection has been in
+   * lately, the last few, are marked `caret-block`, which the stylesheet leaves out of
+   * content-visibility. A block that is new, or has just been scrolled to, is skipped (no layout)
+   * until the next frame; the browser places the caret in text it typed there by that layout, and
+   * a key typed in that frame left the caret before the letter ("fterA"). A block that the
+   * selection leaves keeps the mark for a while: a block that is given the rule again is skipped
+   * for a frame too, and the ones below it jump.
+   */
+  const RECENT_BLOCKS = 8;
+  const caretBlocks: Plugin<{ at: number[]; set: DecorationSet }> = new Plugin({
+    state: {
+      init: () => ({ at: [] as number[], set: DecorationSet.empty }),
+      apply: (tr, prev, _before, state) => {
+        if (!tr.docChanged && !tr.selectionSet) return prev;
+        const { selection, doc } = state;
+        const top = selection.$head.depth ? selection.$head : selection.$from;
+        const now = top.depth
+          ? top.before(1)
+          : selection instanceof NodeSelection
+            ? selection.from
+            : -1;
+        // Where the earlier ones are now; one that is no longer a block of its own is dropped.
+        const kept = prev.at
+          .map((p) => tr.mapping.map(p, 1))
+          .filter((p) => p !== now && p <= doc.content.size && doc.resolve(p).nodeAfter)
+          .filter((p, i, all) => all.indexOf(p) === i && !doc.resolve(p).depth);
+        const at = now < 0 ? kept : [now, ...kept].slice(0, RECENT_BLOCKS);
+        if (!tr.docChanged && at.length === prev.at.length && at.every((p, i) => p === prev.at[i]))
+          return prev;
+        return {
+          at,
+          set: DecorationSet.create(
+            doc,
+            at.map((p) =>
+              Decoration.node(p, p + doc.resolve(p).nodeAfter!.nodeSize, { class: 'caret-block' }),
+            ),
+          ),
+        };
+      },
+    },
+    props: { decorations: (state) => caretBlocks.getState(state)?.set },
+  });
   /**
    * Get ready to insert LaTeX where the caret is now. Returns the function that inserts it, by
    * way of the server, or null if the caret is not in running text.
@@ -1181,25 +1256,8 @@ export function createVisual(opts: {
               return bridge.filter(tr, state);
             },
           }),
-          // The stretches of text that have a thread of comments, marked where they stand now.
-          new Plugin({
-            props: {
-              decorations: (state) => {
-                if (!bridge || !marked.length) return null;
-                const size = state.doc.content.size;
-                const at = (off: number) => Math.min(size, fromSrc(bridge.model, state.doc, off));
-                return DecorationSet.create(
-                  state.doc,
-                  marked.flatMap((m) => {
-                    const [from, to] = [at(m.from), at(m.to)];
-                    return to > from
-                      ? [Decoration.inline(from, to, { class: `${m.kind}-mark` })]
-                      : [];
-                  }),
-                );
-              },
-            },
-          }),
+          marks,
+          caretBlocks,
           // Where the other people are: a caret with their name, and their selection.
           new Plugin({
             props: {

@@ -35,6 +35,14 @@ source text within 40 ms and the screen within 150 ms at the 95th percentile, an
 person's edit is on screen within 250 ms. Those are that test's limits; it prints what it
 measured on each run.
 
+Typing in the visual view, in a browser, measured by hand on a generated paper, 48 keys 70 ms
+apart in the middle of the file (median / 95th percentile of a key's time, one machine, headless
+Chromium; the event timing floor is 16 ms): a 33 KB file went from 16–24 / 24–40 ms to 16 / 16–32,
+and a 150 KB file from 48–80 / 72–112 ms, with up to 21 of 48 keys a long task, to 16–24 / 24–32
+with none. Before, each key paid for every block of the file; now blocks out of sight are not
+laid out (`content-visibility: auto`) and the marks of comments and findings are moved with the
+text instead of being placed again at each key.
+
 A paper whose .bib file holds 8,000 entries and which cites one of them, in a browser,
 measured once by hand: the paper's page is 254 KB and loads in 0.4 s. Before the table of
 references was limited to what the paper cites, and each entry's line was found by reading

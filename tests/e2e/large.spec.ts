@@ -10,7 +10,7 @@ import { join } from 'node:path';
 import { readZip, writeZip } from '../../packages/server/src/archive';
 import { blobStore } from '../../packages/server/src/blobs';
 import { connect } from '../../packages/server/src/db';
-import { person, run, signIn } from './helpers';
+import { clickAfter, person, run, showVisual, signIn } from './helpers';
 
 const FUNCTION_LIMIT = 4_500_000;
 const STORE = process.env.S3_ENDPOINT ?? 'http://localhost:8333';
@@ -287,4 +287,73 @@ test('large uploads go to the store, and large downloads come from it or are str
   expect(
     Buffer.from(revBack.entries.find((e) => e.path === 'figs/noise.png')!.bytes).equals(noise),
   ).toBe(true);
+});
+
+// A long file in the visual view: blocks out of sight are not laid out until they come near (which
+// keeps a key fast), without cutting off what is wider than the pane, and typing in a paragraph
+// that has a marked finding after the caret leaves the mark on its own word. No timing is asserted
+// (it would flake in CI); the speed is measured in docs/benchmarks.md.
+test('typing in the visual view of a long file keeps its marks and its wide blocks', async ({
+  browser,
+}) => {
+  test.setTimeout(150_000);
+  const owner = await person(browser, 'large-visual');
+  const page = owner.page;
+  const terms = Array.from({ length: 40 }, (_, i) => `x_{${i}}^{2}`).join(' + ');
+  // Sentences that start alike one after the other are a finding of their own: vary them.
+  const OPENERS = ['The', 'Our', 'Each', 'This', 'Every', 'That', 'Its', 'Both', 'Some'];
+  const main = [
+    '\\documentclass{article}',
+    '\\usepackage{amsmath}',
+    '\\begin{document}',
+    'The first paragraph is short.',
+    '',
+    '\\begin{equation}',
+    `  ${terms}`,
+    '\\end{equation}',
+    '',
+  ];
+  for (let i = 1; i <= 300; i++) {
+    main.push(
+      i === 150
+        ? 'We saw a zebra near the river and counted it. The sentense is short.'
+        : `${OPENERS[i % OPENERS.length]} flux over the whole run was consistent with the model of the earlier run, which is what the calibration allows for this kind of detector.`,
+      '',
+    );
+  }
+  main.push('\\end{document}', '');
+  const zip = join(mkdtempSync(join(tmpdir(), 'paperweave-e2e-')), `Long ${run}.zip`);
+  writeFileSync(zip, await writeZip([{ path: 'main.tex', bytes: Buffer.from(main.join('\n')) }]));
+  await page.goto('/sign-in');
+  await signIn(page, owner.email);
+  await page.getByLabel('Or import a ZIP of a LaTeX project').setInputFiles(zip);
+  await page.getByRole('button', { name: 'Import ZIP' }).click();
+  await expect(page.getByRole('heading', { name: `Long ${run}` })).toBeVisible();
+  await page.getByRole('link', { name: 'main.tex', exact: true }).first().click();
+  await showVisual(page);
+  const visual = '.editor .visual .ProseMirror';
+  const status = page.getByRole('region', { name: /^Editor for/ }).getByRole('status');
+  await expect(status).toHaveText('All edits saved.', { timeout: 60_000 });
+
+  // Blocks of the document are drawn only when they come near.
+  await expect(page.locator(`${visual} > p`).nth(250)).toHaveCSS('content-visibility', 'auto');
+  // A formula wider than the pane scrolls in its own block; the pane itself does not.
+  const formula = page.locator(`${visual} > div.pw-math`).first();
+  await expect(formula.locator('.katex').first()).toBeVisible({ timeout: 30_000 });
+  await expect(formula).toHaveCSS('overflow-x', 'auto');
+  expect(await formula.evaluate((el) => el.scrollWidth > el.clientWidth)).toBe(true);
+  const pane = page.locator('.editor .visual');
+  expect(await pane.evaluate((el) => el.scrollWidth <= el.clientWidth)).toBe(true);
+
+  // The finding after the caret is marked; a word typed before it leaves the mark on its word.
+  await expect(page.locator(`${visual} .finding-mark`)).toHaveText(['sentense'], {
+    timeout: 30_000,
+  });
+  await clickAfter(page, visual, 'zebra');
+  await page.keyboard.type(' big');
+  await expect(page.locator(`${visual} > p`, { hasText: 'sentense' })).toContainText(
+    'a zebra big near the river',
+  );
+  await expect(status).toHaveText('All edits saved.', { timeout: 30_000 });
+  await expect(page.locator(`${visual} .finding-mark`)).toHaveText(['sentense']);
 });
