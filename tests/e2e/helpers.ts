@@ -258,6 +258,35 @@ export async function clickAfter(page: Page, within: string, word: string) {
         const r = range.getBoundingClientRect();
         return { x: r.right - 1, y: r.y + r.height / 2 };
       }
+      // No single text node holds the word: decorations (a spelling mark on a made-up word, say)
+      // split a paragraph's text into several. Look in the joined text of one block.
+      const host = document.querySelector(sel)!;
+      for (const block of host.querySelectorAll('p, h1, h2, h3, h4, h5, h6, li, figcaption, td')) {
+        const nodes: Text[] = [];
+        const parts = document.createTreeWalker(block, NodeFilter.SHOW_TEXT);
+        for (let n = parts.nextNode(); n; n = parts.nextNode()) nodes.push(n as Text);
+        const joined = nodes.map((n) => n.data).join('');
+        const i = joined.indexOf(w);
+        if (i < 0) continue;
+        const place = (offset: number, atEnd: boolean) => {
+          let seen = 0;
+          for (const n of nodes) {
+            const end = seen + n.data.length;
+            if (atEnd ? offset <= end : offset < end) return { node: n, offset: offset - seen };
+            seen = end;
+          }
+          return null;
+        };
+        const a = place(i, false);
+        const b = place(i + w.length, true);
+        if (!a || !b) continue;
+        block.scrollIntoView({ block: 'center' });
+        const range = document.createRange();
+        range.setStart(a.node, a.offset);
+        range.setEnd(b.node, b.offset);
+        const r = range.getBoundingClientRect();
+        return { x: r.right - 1, y: r.y + r.height / 2 };
+      }
       return null;
     },
     [within, word] as const,
