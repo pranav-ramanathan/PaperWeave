@@ -5,11 +5,12 @@ import { writeZip } from './archive.ts';
 import { blobStore } from './blobs.ts';
 import type { Db } from './db.ts';
 import { importZip, listFiles } from './import.ts';
-import { acceptInvitation, invite } from './projects.ts';
+import { createFile, deleteFile } from './files.ts';
+import { acceptInvitation, invite, listProjects } from './projects.ts';
 import { editFile, loadUpdates, TEXT } from './sync.ts';
 import { TEST_ENV, testDb } from './testing.ts';
 import { mayWrite } from './limits.ts';
-import { propose } from './proposals.ts';
+import { closeProposal, propose } from './proposals.ts';
 import { submissionChecks } from './submit.ts';
 import {
   deleteComment,
@@ -711,4 +712,75 @@ test('one person cannot write more than sixty comments in ten minutes on a paper
       }),
     ),
   ).toBe('ok');
+});
+
+test('the list of papers counts the review waiting in each as the checks before submitting do', async () => {
+  const p = await paper();
+  const quiet = await paper();
+  const listed = async (who: keyof typeof users, paperId = p.id) => {
+    const found = (await listProjects(t.pool, users[who].id)).find((x) => x.id === paperId);
+    return found && { threads: found.threads, proposals: found.proposals };
+  };
+  const checked = async () =>
+    (await submissionChecks(t.pool, store, users.owner.id, p.id)).findings
+      .filter((f) => f.kind === 'review')
+      .map((f) => f.message);
+  expect(await listed('owner')).toEqual({ threads: 0, proposals: 0 });
+
+  const first = await startThread(t.pool, store, users.reviewer.id, p.id, p.file, {
+    ...(await ends(p.file, 'below 40 ms')),
+    body: 'Median or tail?',
+  });
+  const second = await startThread(t.pool, store, users.reviewer.id, p.id, p.file, {
+    ...(await ends(p.file, 'Nothing else')),
+    body: 'Is that so?',
+  });
+  const proposal = await propose(t.pool, store, users.reviewer.id, p.id, p.file, {
+    ...(await ends(p.file, 'most edits')),
+    replacement: 'nearly all edits',
+  });
+  // A file of its own with a thread in it, to be deleted further down.
+  const notes = await createFile(
+    t.pool,
+    store,
+    users.owner.id,
+    p.id,
+    'notes.tex',
+    Buffer.from('A note to throw away.\n'),
+  );
+  await startThread(t.pool, store, users.reviewer.id, p.id, notes, {
+    ...(await ends(notes, 'throw away')),
+    body: 'Why keep this?',
+  });
+  await propose(t.pool, store, users.reviewer.id, p.id, notes, {
+    ...(await ends(notes, 'A note')),
+    replacement: 'One note',
+  });
+  // Everyone on the paper is told the same, whatever their role; nobody else is told anything.
+  for (const who of ['owner', 'reviewer', 'viewer'] as const)
+    expect(await listed(who), who).toEqual({ threads: 3, proposals: 2 });
+  expect(await listed('outsider')).toBeUndefined();
+  // What waits in one paper is not counted in another.
+  expect(await listed('owner', quiet.id)).toEqual({ threads: 0, proposals: 0 });
+  expect(await checked()).toEqual([
+    '2 proposed changes have not been decided.',
+    '3 threads are still open.',
+  ]);
+
+  // A deleted file's review waits for nobody.
+  await deleteFile(t.pool, store, users.owner.id, p.id, notes);
+  expect(await listed('owner')).toEqual({ threads: 2, proposals: 1 });
+  // A resolved thread, a thread with no comment left and a decided proposal do not wait either.
+  await setThreadStatus(t.pool, users.owner.id, p.id, first.id, 'resolved');
+  expect(await listed('viewer')).toEqual({ threads: 1, proposals: 1 });
+  const mine = (await threads(p)).find((x) => x.id === second.id)!;
+  await deleteComment(t.pool, users.reviewer.id, p.id, second.id, mine.comments[0].id);
+  expect(await listed('reviewer')).toEqual({ threads: 0, proposals: 1 });
+  expect(await checked()).toEqual(['1 proposed change has not been decided.']);
+  await closeProposal(t.pool, users.owner.id, p.id, proposal, 'rejected');
+  expect(await listed('owner')).toEqual({ threads: 0, proposals: 0 });
+  expect(await checked()).toEqual([]);
+  // Opened again, it waits again.
+  await setThreadStatus(t.pool, users.owner.id, p.id, first.id, 'open');
+  expect(await listed('owner')).toEqual({ threads: 1, proposals: 0 });
 });

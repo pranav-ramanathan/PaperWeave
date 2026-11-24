@@ -18,6 +18,8 @@ const hash = (token: string) => createHash('sha256').update(token).digest('hex')
 const INVITE_DAYS = 14;
 
 export type Project = { id: string; name: string; role: Role };
+/** A paper as the list of papers shows it: with how much review is waiting in it. */
+export type ListedProject = Project & { threads: number; proposals: number };
 export type ProjectDetail = Project & { compiler: string; root: string | null };
 export type Member = { userId: string; email: string; name: string; role: Role };
 
@@ -85,9 +87,26 @@ export async function createProject(
   });
 }
 
-export async function listProjects(db: Db, userId: string): Promise<Project[]> {
+/**
+ * Review that is waiting in a paper, counted one way wherever it is said (the list of papers,
+ * the checks before submitting): threads still open that have a comment left in them, and
+ * proposed changes nobody has decided, in files that have not been deleted. `paper` is SQL for
+ * the paper's id (a parameter or a column), never anything a person typed.
+ */
+export const openThreadsSql = (paper: string) =>
+  `(select count(*)::int from threads rt join files rf on rf.id = rt.file_id
+     where rt.project_id = ${paper} and rt.status = 'open'
+       and exists (select 1 from thread_comments rc
+                   where rc.thread_id = rt.id and rc.deleted_at is null))`;
+export const openProposalsSql = (paper: string) =>
+  `(select count(*)::int from proposals rp join files rf on rf.id = rp.file_id
+     where rp.project_id = ${paper} and rp.status = 'open')`;
+
+export async function listProjects(db: Db, userId: string): Promise<ListedProject[]> {
   const { rows } = await db.query(
-    `select p.id, p.name, m.role from projects p join project_members m on m.project_id = p.id
+    `select p.id, p.name, m.role, ${openThreadsSql('p.id')} as threads,
+            ${openProposalsSql('p.id')} as proposals
+     from projects p join project_members m on m.project_id = p.id
      where m.user_id = $1 order by p.created_at desc`,
     [userId],
   );

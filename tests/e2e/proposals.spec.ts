@@ -85,6 +85,15 @@ test('a reviewer proposes a change; the owner accepts it, undoes that, and rejec
   await expect(paperPage.getByRole('listitem').filter({ hasText: 'proposes' })).toContainText(
     `main.tex: ${reviewer.email} proposes changing forty to thirty.`,
   );
+  // So does the list of papers, in a link that leads there.
+  await paperPage.goto('/projects');
+  await paperPage
+    .getByRole('listitem')
+    .filter({ hasText: `Proposals ${run}` })
+    .getByRole('link', { name: '1 proposed change waiting' })
+    .click();
+  await expect(paperPage).toHaveURL(/#review$/);
+  await expect(paperPage.getByRole('heading', { name: 'Review', exact: true })).toBeInViewport();
   await paperPage.close();
 
   // The owner sees it beside the text, which still says what it said, and accepts it.

@@ -8,7 +8,7 @@ import { latestBuilds } from './builds.ts';
 import { chartPath, listCharts } from './charts.ts';
 import { citationReport } from './citations.ts';
 import { graphicsFolders, labelReport, texFiles } from './labels.ts';
-import { id } from './projects.ts';
+import { id, openProposalsSql, openThreadsSql } from './projects.ts';
 import { inScope } from './scope.ts';
 
 export type Finding = {
@@ -303,12 +303,7 @@ async function checksOf(
   // Review that is not finished does not stop a paper being sent, but its author should know.
   const waiting = (
     await pool.query(
-      `select (select count(*)::int from threads t join files f on f.id = t.file_id
-                where t.project_id = $1 and t.status = 'open'
-                  and exists (select 1 from thread_comments c
-                              where c.thread_id = t.id and c.deleted_at is null)) as threads,
-              (select count(*)::int from proposals p join files f on f.id = p.file_id
-                where p.project_id = $1 and p.status = 'open') as proposals`,
+      `select ${openThreadsSql('$1')} as threads, ${openProposalsSql('$1')} as proposals`,
       [projectId],
     )
   ).rows[0];

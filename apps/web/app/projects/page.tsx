@@ -1,5 +1,6 @@
 import { listProjects, TEMPLATES } from '@paperweave/server';
 import Link from '../Go';
+import { reviewWaiting } from '../../lib/review';
 import { db, requireUser } from '../../lib/server';
 import DirectUpload from '../DirectUpload';
 import Once from '../Once';
@@ -36,6 +37,14 @@ export default async function Projects({
                 {p.name}
               </Link>{' '}
               <span className="role">{p.role}</span>
+              {reviewWaiting(p) && (
+                <>
+                  {' '}
+                  <Link prefetch={false} href={`/projects/${p.id}#review`}>
+                    {reviewWaiting(p)}
+                  </Link>
+                </>
+              )}
             </li>
           ))}
         </ul>

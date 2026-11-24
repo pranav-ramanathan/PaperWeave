@@ -311,3 +311,39 @@ test('the main pages can be read in a narrow window without scrolling sideways',
   await look('editor, source view');
   expect(found).toEqual([]);
 });
+
+test("a paper's name with no space in it does not make its pages wider than a narrow window", async ({
+  browser,
+}) => {
+  // A ZIP is often named with underscores, and the paper takes the ZIP's name.
+  const name = `Camera_ready_submission_for_the_workshop_on_latency_${run}`;
+  const { page, email } = await person(browser, 'a11y-unbroken');
+  await page.setViewportSize({ width: 320, height: 480 });
+  const found: string[] = [];
+  const look = async (what: string) =>
+    void found.push(...(await sticksOut(page)).map((s) => `${what}: ${s}`));
+
+  await page.goto('/sign-in');
+  await signIn(page, email);
+  const zip = join(mkdtempSync(join(tmpdir(), 'paperweave-e2e-')), `${name}.zip`);
+  writeFileSync(zip, await writeZip([{ path: 'main.tex', bytes: Buffer.from(MAIN) }]));
+  await page.getByLabel('Or import a ZIP of a LaTeX project').setInputFiles(zip);
+  await page.getByRole('button', { name: 'Import ZIP' }).click();
+  // The whole name is there, on as many lines as it takes.
+  await expect(page.getByRole('heading', { level: 1 })).toHaveText(name);
+  const paper = page.url();
+  await look('paper');
+  await page.goto('/projects');
+  await expect(page.getByRole('link', { name })).toBeVisible();
+  await look('papers');
+  await page.goto(`${paper}/submit`);
+  await expect(page.getByRole('heading', { name: /before submitting/ })).toBeVisible();
+  await look('checks before submitting');
+  await page.goto(paper);
+  await page.getByRole('link', { name: 'main.tex' }).first().click();
+  await expect(page.getByRole('region', { name: /^Editor for/ }).getByRole('status')).toHaveText(
+    'All edits saved.',
+  );
+  await look('editor');
+  expect(found).toEqual([]);
+});

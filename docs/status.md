@@ -6707,3 +6707,37 @@ of the paper's .bib files.`
     and an addition.
   - Not tried: a real browser on this machine.
   - Carry over, unchanged: the rest of the "Not done" of "What changed since a revision you choose".
+
+## The list of papers says what waits, and a name without spaces fits the screen
+
+- **Found by** walking the first-run flow in the real app at 320×480 and 1280×800 (sign in, import,
+  edit, build, invite, comment, propose, revision, checks, downloads). The flow itself held: no
+  page scrolled sideways and every step worked. Two things at its edges did not.
+- **What was wrong.** (1) The list of papers gave a name and a role. A proposal or a comment that
+  mentions nobody sends no email, so with several papers the only way to find one was to open each
+  paper. (2) A paper takes its ZIP's name, and a name with underscores has no place to break: at
+  320 px the paper's page was 818 px wide for a 68-character name, the editor 646, the list 528; at
+  768 px the paper's page and the checks were still 818. About 23 characters is enough at 320 px.
+- **Now.** `listProjects` returns `threads` and `proposals` for each paper, from `openThreadsSql`
+  and `openProposalsSql` in `projects.ts`, which `submissionChecks` uses too: open threads with a
+  comment left and undecided proposals, in files not deleted. The list shows them as one link to
+  the paper's "Review" section, worded by `reviewWaiting` (`apps/web/lib/review.ts`); nothing is
+  shown when nothing waits. Everyone on the paper sees the same numbers. In `globals.css`,
+  `.list li` and every `h1` have `overflow-wrap: break-word`, and `h1` has `max-width: 100%`. Not
+  `anywhere`: a heading in a `.bar` would be squeezed to the space its neighbours leave, and
+  ordinary names would break mid-word where today the row wraps.
+- **Held by** `review.test.ts`, one test in `threads.sandbox.test.ts`, a step in `proposals.spec`
+  and a test in `a11y.spec`. Ordinary names were measured to lie exactly where they lay (seven
+  pages, three widths).
+- **Running store-backed tests where the blob store is broken.** `S3_ENDPOINT` pointed at a server
+  that keeps files in memory lets the sandbox tests and Playwright run on the development machine.
+  This is how they were run here; CI ran them against the real store.
+- **Not done.**
+  - The list does not say what is new since the person last looked, who is waiting for whom, or
+    when a paper last changed; it is not sorted by what waits.
+  - No email for a reply or a proposal (the owner's decision).
+  - A file's name with no place to break was not looked at here (the files table scrolls within
+    itself; the editor's file list already wraps).
+  - An invitation link opened signed out shows the plain sign-in page, with nothing about the
+    invitation.
+  - Back/Forward with the sync service away can still drop edits that were never confirmed.
