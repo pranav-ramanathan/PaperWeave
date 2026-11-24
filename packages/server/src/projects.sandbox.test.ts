@@ -10,6 +10,7 @@ import {
   findInvitation,
   getProject,
   invite,
+  invitedAddress,
   listInvitations,
   listMembers,
   listProjects,
@@ -534,4 +535,31 @@ test('only the owner renames a paper, and everything named after it follows', as
   expect((await renameProject(t.pool, owner, p, longest)).name).toBe(longest);
   await renameProject(t.pool, owner, p, longest);
   expect((await getProject(t.pool, owner, p)).name).toBe(longest);
+});
+
+test('the sign-in page is told whom a valid invitation is for, partly hidden, and nothing else', async () => {
+  const owner = await t.signIn('asks-owner@example.org');
+  const paper = await createProject(t.pool, owner.id, 'A name that is not for strangers');
+  const made = await invite(t.pool, owner.id, paper.id, 'Newcomer@Example.org', 'reviewer');
+  // Just the address, as a string: no name of the paper, no role, no inviter.
+  expect(await invitedAddress(t.pool, made.token)).toBe('n…@example.org');
+  expect(await invitedAddress(t.pool, made.token + 'x')).toBeNull();
+  expect(await invitedAddress(t.pool, undefined)).toBeNull();
+  expect(await invitedAddress(t.pool, { token: made.token })).toBeNull();
+  // Reading it used nothing up.
+  const guest = await t.signIn('newcomer@example.org');
+  expect((await acceptInvitation(t.pool, guest.id, made.token)).role).toBe('reviewer');
+  // Used, cancelled and expired invitations are all the same to a stranger: not valid.
+  expect(await invitedAddress(t.pool, made.token)).toBeNull();
+  const cancelled = await invite(t.pool, owner.id, paper.id, 'other@example.org', 'viewer');
+  const [pending] = await listInvitations(t.pool, owner.id, paper.id);
+  await cancelInvitation(t.pool, owner.id, paper.id, pending.id);
+  expect(await invitedAddress(t.pool, cancelled.token)).toBeNull();
+  const late = await invite(t.pool, owner.id, paper.id, 'late-one@example.org', 'viewer');
+  expect(await invitedAddress(t.pool, late.token)).toBe('l…@example.org');
+  await t.pool.query(
+    "update invitations set expires_at = now() - interval '1 minute' where project_id = $1",
+    [paper.id],
+  );
+  expect(await invitedAddress(t.pool, late.token)).toBeNull();
 });

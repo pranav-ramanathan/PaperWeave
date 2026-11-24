@@ -1,5 +1,6 @@
+import { invitationToken, invitedAddress } from '@paperweave/server';
 import { redirect } from 'next/navigation';
-import { currentUser, safePath } from '../../lib/server';
+import { currentUser, db, safePath } from '../../lib/server';
 import SignInForm from './SignInForm';
 
 export const dynamic = 'force-dynamic';
@@ -16,14 +17,33 @@ export default async function SignIn({
   // code is not shown, nor left in the address: it is swapped for a plain flag.
   if (error) redirect(`/sign-in?link=used&next=${encodeURIComponent(to)}`);
   if (await currentUser()) redirect(to);
+  // Someone following an invitation before signing in is told that this is where it led, and
+  // which address to use: any other address ends, two emails later, at "for someone else".
+  // Undefined: not an invitation, or it could not be read, and the page is as for anyone.
+  const token = invitationToken(to);
+  const invited = token ? await invitedAddress(db(), token).catch(() => undefined) : undefined;
   return (
     <main className="page narrow">
       <h1>Sign in to PaperWeave</h1>
       {link === 'used' && (
         <p role="alert">That sign-in link has been used or has expired. Ask for a new one below.</p>
       )}
+      {invited && (
+        <p>
+          You have been invited to a paper on PaperWeave. The invitation is for{' '}
+          <strong>{invited}</strong>: sign in with that address, and the next page lets you join the
+          paper.
+        </p>
+      )}
+      {invited === null && (
+        <p>
+          This invitation is not valid any more. It may have been used already or have expired. If
+          you have already joined the paper, sign in to open it; if not, ask the paper&rsquo;s owner
+          for a new invitation.
+        </p>
+      )}
       <p>Enter your email address and we will send you a link. There is no password.</p>
-      <SignInForm next={to} />
+      <SignInForm next={invited === null ? '/projects' : to} />
     </main>
   );
 }
