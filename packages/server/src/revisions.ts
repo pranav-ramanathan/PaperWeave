@@ -31,7 +31,7 @@ import {
   readLogs,
   TEXT,
 } from './sync.ts';
-import { type DiffLine, diffLines, diffLinesFar } from './textdiff.ts';
+import { type DiffLine, diffLinesFar } from './textdiff.ts';
 
 export type Revision = {
   id: string;
@@ -850,9 +850,9 @@ export function restoreEdits(
   have: string,
   want: string,
 ): { at: number; del: number; ins: string }[] {
-  const diff = diffLines(have, want);
+  const diff = diffLinesFar(have, want);
   if (!diff) {
-    // Too large to compare line by line: one span, as whole lines.
+    // Too many changed lines, or too large to compare: one span, as whole lines.
     let p = 0;
     while (p < have.length && p < want.length && have[p] === want[p]) p++;
     let s = 0;

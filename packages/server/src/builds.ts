@@ -7,7 +7,7 @@ import type { Db } from './db.ts';
 import { AppError } from './errors.ts';
 import { id } from './projects.ts';
 import { currentBytes } from './sync.ts';
-import { carryLine, diffLines } from './textdiff.ts';
+import { carryLine, diffLinesFar } from './textdiff.ts';
 import { gunzipSync } from 'node:zlib';
 import {
   decodeFile,
@@ -467,7 +467,7 @@ export async function lineMap(
   ]);
   if (!a || !a.editable || !b.editable) return kept(true);
   if (a.text === b.text) return same;
-  const diff = diffLines(a.text, b.text);
+  const diff = diffLinesFar(a.text, b.text);
   return {
     toNow: (line) => carryLine(diff, line, 'toNow'),
     toBuilt: (line) => carryLine(diff, line, 'toBuilt'),

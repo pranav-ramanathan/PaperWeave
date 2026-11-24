@@ -6776,16 +6776,15 @@ of the paper's .bib files.`
   blob store refuses writes). No browser test: the page is unchanged. No existing expectation was
   changed.
 - **Not done.**
-  - **The restore still uses the table alone.** In the same long files, a restore across changes
-    that lie far apart deletes the whole stretch between the first and last changed line and types
-    it again as one piece (a median 84% of the file in the two corpus papers above). The text is
-    restored exactly, but comments and proposals anchored in that stretch lose their place.
-    `restoreEdits` could call `diffLinesFar`; it was left alone because the restore's store-backed
-    tests cannot be run on the development machine.
-  - The PDF's line map (`builds.ts`) also uses the table alone: between a build and now, in such a
-    file, a jump from the PDF lands on the old line number.
+  - Done since: the restore (`restoreEdits`, so also a file replace) and the PDF's line map
+    (`lineMap` in `builds.ts`) now call `diffLinesFar`. In a long file, a restore across changes
+    that lie far apart replaces each changed run on its own (it used to delete and retype the whole
+    stretch between them, a median 84% of the file in the two corpus papers above), so comments and
+    proposals between the changes keep their place, and a jump from the PDF lands on the exact line.
+    Where the table answers, the result is as before.
   - More than 2,000 lines removed and added, in a stretch too long for the table, is still "too much
-    changed".
+    changed": the restore then replaces one span from the first to the last changed line, and the
+    PDF's line map keeps the line number as it is, marked moved.
   - A file that was added still shows "Added" and none of its text; a moved paragraph is a removal
     and an addition.
   - Not tried: a real browser on this machine.

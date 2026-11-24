@@ -27,6 +27,7 @@ import * as Y from 'yjs';
 import { saveChart, listCharts } from './charts.ts';
 import { approveDataset, datasetProposal, listDatasets } from './data.ts';
 import { currentBytes, editFile, loadUpdates, openFile, TEXT } from './sync.ts';
+import { listThreads, startThread } from './threads.ts';
 import { exportRevision } from './revisions.ts';
 import { TEST_ENV, testDb } from './testing.ts';
 
@@ -1015,6 +1016,40 @@ test('a file can be replaced by a newer copy, keeping its ID, its dataset and it
     await readZip((await exportRevision(t.pool, store, owner.id, p.id, revs[0].id)).zip)
   ).entries.find((e) => e.path === 'results.csv')!;
   expect(Buffer.from(before.bytes).toString()).toBe('x,y\n1,2\n3,4\n');
+});
+
+test('replacing a long text file with a copy changed at both ends keeps a thread between', async () => {
+  const p = await paper();
+  const copy =
+    Array.from({ length: 2600 }, (_, i) =>
+      i === 1300 ? 'Which wolves howl loudly at night?' : `Row ${i} keeps its words.`,
+    ).join('\n') + '\n';
+  const file = await createFile(t.pool, store, owner.id, p.id, 'long.tex', text(copy));
+  // Typed in at both ends, so the file has edits and the replace goes through its log.
+  await editFile(t.pool, store, file, owner.id, (tx) => {
+    for (const [from, to] of [
+      ['Row 5 keeps', 'Row 5 lost'],
+      ['Row 2595 keeps', 'Row 2595 lost'],
+    ]) {
+      const at = tx.toString().indexOf(from);
+      tx.delete(at, from.length);
+      tx.insert(at, to);
+    }
+  });
+  const doc = new Y.Doc();
+  for (const u of await loadUpdates(t.pool, store, file)) Y.applyUpdate(doc, u);
+  const live = doc.getText(TEXT);
+  const at = live.toString().indexOf('wolves howl');
+  await startThread(t.pool, store, owner.id, p.id, file, {
+    from: Y.encodeRelativePosition(Y.createRelativePositionFromTypeIndex(live, at, 0)),
+    to: Y.encodeRelativePosition(Y.createRelativePositionFromTypeIndex(live, at + 11, -1)),
+    body: 'Which wolves?',
+  });
+  expect(await replaceFile(t.pool, store, owner.id, p.id, 'long.tex', text(copy))).toBe(file);
+  expect((await content(p.id))['long.tex']).toBe(copy);
+  expect((await listThreads(t.pool, store, owner.id, p.id)).map((x) => x.state)).toEqual([
+    'attached',
+  ]);
 });
 
 test('a picture is replaced under the same ID and the old one stays in a revision', async () => {

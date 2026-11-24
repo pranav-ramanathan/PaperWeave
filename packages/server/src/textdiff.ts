@@ -66,7 +66,7 @@ const FAR_STEPS = 20_000_000;
  * same answer found another way (Myers' shortest edit script), whose cost grows with the number
  * of changed lines and not with the distance between them. Still null when more than `maxEdits`
  * lines were removed and added together, or the work passes `maxSteps`.
- * Not used by the restore or by the PDF's line map, which keep `diffLines` as it is.
+ * Used by the restore (`restoreEdits`), the PDF's line map (`lineMap`) and the revision diff.
  */
 export function diffLinesFar(
   a: string,

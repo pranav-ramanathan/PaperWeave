@@ -1,4 +1,5 @@
 import { expect, test } from 'vitest';
+import { restoreEdits } from './revisions.ts';
 import type { DiffLine } from './textdiff.ts';
 import { carryLine, diffHunks, diffLines, diffLinesFar, diffWords, FAR_EDITS } from './textdiff.ts';
 
@@ -171,6 +172,71 @@ test('with no diff, because the texts were too large to compare, the line stays 
   expect(diffLines(lines(3000), lines(3000, 2), 100)).toBeNull();
   expect(carryLine(null, 17, 'toNow')).toEqual({ line: 17, moved: true });
   expect(carryLine(null, 17, 'toBuilt')).toEqual({ line: 17, moved: true });
+});
+
+test('a line is carried exactly across changes too far apart for the table', () => {
+  const a = plain(5000);
+  const b = a.slice();
+  b.splice(9, 0, 'added near the top');
+  b[4990] = 'changed near the bottom';
+  expect(diffLines(a.join('\n'), b.join('\n'))).toBeNull();
+  const far = diffLinesFar(a.join('\n'), b.join('\n'));
+  expect(carryLine(far, 2500, 'toNow')).toEqual({ line: 2501, moved: false });
+  expect(carryLine(far, 2501, 'toBuilt')).toEqual({ line: 2500, moved: false });
+});
+
+/** The text with `edits` applied in the order given, as the restore applies them. */
+function applyEdits(have: string, edits: { at: number; del: number; ins: string }[]) {
+  let text = have;
+  for (const e of edits) text = text.slice(0, e.at) + e.ins + text.slice(e.at + e.del);
+  return text;
+}
+
+test('a restore across two distant changes replaces only those two places', () => {
+  const have = plain(5000);
+  const want = have.slice();
+  want[6] = 'line 6 edited';
+  want[4989] = 'line 4989 edited';
+  expect(diffLines(have.join('\n'), want.join('\n'))).toBeNull();
+  const edits = restoreEdits(have.join('\n'), want.join('\n'));
+  expect(edits).toHaveLength(2);
+  expect(applyEdits(have.join('\n'), edits)).toBe(want.join('\n'));
+  expect(edits.reduce((n, e) => n + e.del, 0)).toBeLessThan(20);
+});
+
+test('a restore of scattered changes in a long file deletes little of it', () => {
+  for (const seed of [11, 12, 13]) {
+    const rand = dice(seed);
+    const have = Array.from(
+      { length: 3000 },
+      (_, i) => `Sentence ${i} of the paper has some words.`,
+    );
+    const want = have.slice();
+    // 60 distinct lines of the original, each reworded, one removed or one added beside it.
+    const at = new Set<number>();
+    while (at.size < 60) at.add(Math.floor(rand() * 3000));
+    for (const i of [...at].sort((x, y) => y - x)) {
+      const kind = rand();
+      if (kind < 0.7) want[i] = `Sentence ${i} of the paper has other words ${seed}.`;
+      else if (kind < 0.85) want.splice(i, 1);
+      else want.splice(i, 0, `A new line before ${i}.`);
+    }
+    const [a, b] = [have.join('\n'), want.join('\n')];
+    const edits = restoreEdits(a, b);
+    const why = `seed ${seed}`;
+    expect(applyEdits(a, edits), why).toBe(b);
+    const deleted = edits.reduce((n, e) => n + e.del, 0);
+    expect(deleted, why).toBeLessThan(a.length * 0.05);
+  }
+});
+
+test('a restore of a short file edits the changed words, and of an unchanged one does nothing', () => {
+  const have = 'one\ntwo words here\nthree\nfour\n';
+  const want = 'one\ntwo other here\nthree\n';
+  const edits = restoreEdits(have, want);
+  expect(edits).toContainEqual({ at: 8, del: 5, ins: 'other' });
+  expect(applyEdits(have, edits)).toBe(want);
+  expect(restoreEdits(have, have)).toEqual([]);
 });
 
 const changed = (pieces: { changed: boolean; text: string }[]) =>

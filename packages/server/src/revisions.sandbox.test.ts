@@ -710,6 +710,60 @@ test("a second person's typing in an untouched paragraph survives a restore whol
   expect(await textOf(p.main)).toBe(PMAIN.replace('howl loudly', 'howl abcdefghloudly'));
 });
 
+// A long file, changed near both ends: the lines between are too far apart for the line table.
+const LONG_ROWS = 2600;
+const LONG =
+  Array.from({ length: LONG_ROWS }, (_, i) =>
+    i === 1300 ? PARAS[2] : `Row ${i} keeps its words.`,
+  ).join('\n') + '\n';
+async function longPaperWithAnchors() {
+  const p = await lines({ 'main.tex': PMAIN, 'long.tex': LONG });
+  const long = p.ids['long.tex'];
+  await startThread(t.pool, store, owner.id, p.id, long, {
+    ...(await ends(long, 'gamma wolves')),
+    body: 'Which wolves?',
+  });
+  const prop = await propose(t.pool, store, owner.id, p.id, long, {
+    ...(await ends(long, 'howl loudly')),
+    replacement: 'howl softly',
+  });
+  return { ...p, long, prop };
+}
+const editEnds = async (file: string) => {
+  await replace(file, 'Row 5 keeps', 'Row 5 lost');
+  await replace(file, 'Row 2595 keeps', 'Row 2595 lost');
+};
+
+test('a restore of a long file changed near both ends keeps what is anchored between', async () => {
+  const p = await longPaperWithAnchors();
+  const a = await saveRevision(t.pool, store, owner.id, p.id, 'A');
+  await editEnds(p.long);
+  expect(await textOf(p.long)).not.toBe(LONG);
+  // The changes are too far apart for the line table.
+  expect(diffLines(await textOf(p.long), LONG)).toBeNull();
+  await restoreRevision(t.pool, store, owner.id, p.id, a.id);
+  expect(await textOf(p.long)).toBe(LONG);
+  const after = await states(p.id);
+  expect(after.threads).toEqual(['attached']);
+  expect(after.proposals).toMatchObject([{ stale: false, now: 'howl loudly' }]);
+  await acceptProposal(t.pool, store, owner.id, p.id, p.prop);
+  expect(await textOf(p.long)).toBe(LONG.replace('howl loudly', 'howl softly'));
+});
+
+test("a second person's typing in the middle of a long file survives a restore whole", async () => {
+  const p = await longPaperWithAnchors();
+  const a = await saveRevision(t.pool, store, owner.id, p.id, 'A');
+  await editEnds(p.long);
+  const { doc: theirs, text: theirText } = await docOf(p.long);
+  await restoreRevision(t.pool, store, owner.id, p.id, a.id);
+  const at = theirText.toString().indexOf('howl ') + 5;
+  const sent: Uint8Array[] = [];
+  theirs.on('update', (u: Uint8Array) => sent.push(u));
+  for (const [i, letter] of [...'abcdefgh'].entries()) theirText.insert(at + i, letter);
+  for (const u of sent) await appendUpdate(t.pool, p.long, owner.id, u);
+  expect(await textOf(p.long)).toBe(LONG.replace('howl loudly', 'howl abcdefghloudly'));
+});
+
 // A restore holds every file of the paper only while it writes. The store here is as far away as
 // the database may be from a web app on Vercel, and the tests below watch what is done while the
 // files are held.
