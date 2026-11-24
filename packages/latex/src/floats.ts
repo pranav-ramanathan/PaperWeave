@@ -1,6 +1,7 @@
 // The parts of a figure or table that people edit without thinking of them as LaTeX: the
 // caption, the picture and its description, the cells of a simple table. Each part comes with
 // where it is in the source, so that changing one changes those characters and no others.
+import { commandMatches, finder, groupEnds } from './scan.ts';
 
 /** A stretch of the source: what it says and where it is. */
 export type Span = { text: string; at: number; end: number };
@@ -39,16 +40,21 @@ export type Float = {
   table: Table | null;
 };
 
-/** The offset just past the group that opens at `at`, or -1 if it never closes. */
-function closeOf(src: string, at: number, open = '{', close = '}') {
-  let depth = 0;
-  for (let i = at; i < src.length; i++) {
-    if (src[i] === '\\') i++;
-    else if (src[i] === '%') while (i < src.length && src[i] !== '\n') i++;
-    else if (src[i] === open) depth++;
-    else if (src[i] === close && --depth === 0) return i + 1;
-  }
-  return -1;
+/**
+ * For a text: the function that gives the offset just past the group that opens at `at` (which is
+ * an `open`), or -1 if it never closes. A group that never closes is paid for once, however many
+ * open one: see `groupEnds` for why the memo is exact.
+ */
+function closer(src: string) {
+  const kinds = new Map<string, (at: number) => number>();
+  return (at: number, open = '{', close = '}') => {
+    let ends = kinds.get(open);
+    if (!ends) {
+      ends = groupEnds(src, { escapes: true, comments: true, open, close });
+      kinds.set(open, ends);
+    }
+    return ends(at);
+  };
 }
 /** `src` with comments blanked, so that offsets still hold and commented-out text is not found. */
 const live = (src: string) =>
@@ -71,6 +77,7 @@ function trimmed(src: string, at: number, end: number, by = src): Span {
 const RULE = /^\\(hline|toprule|midrule|bottomrule|addlinespace|cline|cmidrule|noalign)\b/;
 
 function tableOf(src: string, text: string): Table | null {
+  const closeOf = closer(text);
   const begin = /\\begin\{(tabular\*?|tabularx)\}/.exec(text);
   if (!begin) return null;
   // The column specification, after a width for the kinds that take one.
@@ -78,9 +85,9 @@ function tableOf(src: string, text: string): Table | null {
   let spec = span(src, at, at);
   for (let groups = begin[1] === 'tabular' ? 1 : 2; groups > 0; groups--) {
     while (/\s/.test(text[at] ?? '')) at++;
-    if (text[at] === '[') at = closeOf(text, at, '[', ']');
+    if (text[at] === '[') at = closeOf(at, '[', ']');
     const open = at;
-    at = text[at] === '{' ? closeOf(text, at) : -1;
+    at = text[at] === '{' ? closeOf(at) : -1;
     if (at < 0) return null;
     spec = span(src, open + 1, at - 1);
   }
@@ -134,9 +141,9 @@ function tableOf(src: string, text: string): Table | null {
         i += rule[0].length;
         for (;;) {
           while (text[i] === ' ') i++;
-          if (text[i] === '{') i = closeOf(text, i);
-          else if (text[i] === '(') i = closeOf(text, i, '(', ')');
-          else if (text[i] === '[') i = closeOf(text, i, '[', ']');
+          if (text[i] === '{') i = closeOf(i);
+          else if (text[i] === '(') i = closeOf(i, '(', ')');
+          else if (text[i] === '[') i = closeOf(i, '[', ']');
           else break;
           if (i < 0) return null;
         }
@@ -147,7 +154,7 @@ function tableOf(src: string, text: string): Table | null {
     }
     const c = text[i];
     if (c === '{') {
-      const close = closeOf(text, i);
+      const close = closeOf(i);
       if (close < 0) return null;
       i = close - 1;
     } else if (c === '\\' && text[i + 1] === '\\') {
@@ -155,7 +162,7 @@ function tableOf(src: string, text: string): Table | null {
       i += 2;
       // \\* and \\[2pt] are still just the end of a row.
       if (text[i] === '*') i++;
-      if (text[i] === '[') i = closeOf(text, i, '[', ']');
+      if (text[i] === '[') i = closeOf(i, '[', ']');
       if (i < 0) return null;
       // A comment on the row's own line goes with the row.
       let j = i;
@@ -185,14 +192,15 @@ function tableOf(src: string, text: string): Table | null {
  */
 export function argumentsOf(src: string, command: RegExp): Span[] {
   const text = live(src);
+  const closeOf = closer(text);
   const out: Span[] = [];
   for (const m of text.matchAll(command)) {
     let at = m.index + m[0].length;
     if (out.length && m.index < out[out.length - 1].end) continue;
     while (text[at] === ' ' || text[at] === '\n') at++;
-    if (text[at] === '[') at = closeOf(text, at, '[', ']');
+    if (text[at] === '[') at = closeOf(at, '[', ']');
     while (text[at] === ' ' || text[at] === '\n') at++;
-    const close = at >= 0 && text[at] === '{' ? closeOf(text, at) : -1;
+    const close = at >= 0 && text[at] === '{' ? closeOf(at) : -1;
     if (close > 0) out.push(span(src, at + 1, close - 1));
   }
   return out;
@@ -206,11 +214,14 @@ export function floatParts(src: string): Float | null {
   const kind = /^\\begin\{(figure|table)\*?\}/.exec(src)?.[1] as Float['kind'] | undefined;
   if (!kind) return null;
   const text = live(src);
+  const closeOf = closer(text);
   let caption: Span | null = null;
-  const cap = /\\caption\*?\s*(\[[^\]]*\])?\s*\{/.exec(text);
+  // The first `\caption*[short]{`: read by `commandMatches`, as the regex with `\[[^\]]*\]` in it
+  // ran to the end of the text for every `[` that is not closed.
+  const cap = commandMatches(text, /\\caption\*?/g, [' ', '[', ' ', '{!'], finder(text))[0];
   if (cap) {
     const open = cap.index + cap[0].length - 1;
-    const close = closeOf(text, open);
+    const close = closeOf(open);
     if (close > 0) caption = span(src, open + 1, close - 1);
   }
   const graphics: Graphic[] = [];
@@ -221,7 +232,7 @@ export function floatParts(src: string): Float | null {
     let alt: Span | null = null;
     let altBare = false;
     if (text[at] === '[') {
-      const close = closeOf(text, at, '[', ']');
+      const close = closeOf(at, '[', ']');
       if (close < 0) continue;
       optionsEnd = close - 1;
       // alt={...}, or alt=... up to the next comma.
@@ -229,7 +240,7 @@ export function floatParts(src: string): Float | null {
       if (key) {
         const value = at + 1 + key.index + key[0].length;
         if (text[value] === '{') {
-          const end = closeOf(text, value);
+          const end = closeOf(value);
           if (end > 0 && end <= optionsEnd) alt = span(src, value + 1, end - 1);
         } else {
           const comma = text.indexOf(',', value);
@@ -240,7 +251,7 @@ export function floatParts(src: string): Float | null {
       at = close;
     }
     if (text[at] !== '{') continue;
-    const close = closeOf(text, at);
+    const close = closeOf(at);
     if (close < 0) continue;
     graphics.push({
       target: trimmed(src, at + 1, close - 1),
@@ -338,6 +349,7 @@ export function stray(text: string): '_' | '^' | '#' | '$' | null {
 }
 function marks(text: string, amp: boolean): '_' | '^' | '#' | '$' | '&' | null {
   if (/\\(?:verb|lstinline|mintinline|path)(?![a-zA-Z])/.test(text)) return null;
+  const closeOf = closer(text);
   // One entry per open group: whether maths was on when it opened.
   const groups: { maths: boolean; text: boolean }[] = [];
   let maths = false;
@@ -361,7 +373,7 @@ function marks(text: string, amp: boolean): '_' | '^' | '#' | '$' | '&' | null {
         if (j >= text.length) return i;
         i = j + 1;
       } else if (text[i] === '{') {
-        const close = closeOf(text, i);
+        const close = closeOf(i);
         if (close < 0) return text.length;
         i = close;
       } else return i;
@@ -499,19 +511,20 @@ export type TableOp =
 function columnsOf(spec: Span): { at: number; end: number }[] | null {
   const out: { at: number; end: number }[] = [];
   const t = spec.text;
+  const closeOf = closer(t);
   for (let i = 0; i < t.length;) {
     const c = t[i];
     if (/\s|\|/.test(c)) i++;
     else if ('@!><'.includes(c)) {
       // A decoration with one argument: not a column.
-      const close = t[i + 1] === '{' ? closeOf(t, i + 1) : -1;
+      const close = t[i + 1] === '{' ? closeOf(i + 1) : -1;
       if (close < 0) return null;
       i = close;
     } else if ('lcrX'.includes(c)) {
       out.push({ at: spec.at + i, end: spec.at + i + 1 });
       i++;
     } else if ('pmb'.includes(c)) {
-      const close = t[i + 1] === '{' ? closeOf(t, i + 1) : -1;
+      const close = t[i + 1] === '{' ? closeOf(i + 1) : -1;
       if (close < 0) return null;
       out.push({ at: spec.at + i, end: spec.at + close });
       i = close;

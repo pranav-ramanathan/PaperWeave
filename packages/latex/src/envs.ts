@@ -2,6 +2,7 @@
 // so that their bodies can be edited as prose like those of `lemma` and `theorem`.
 import { includes, includeGraph, resolveInclude, rootDir, uncomment } from './graph.ts';
 import { MATH_ENV, VERBATIM } from './parse.ts';
+import { commandMatches, finder } from './scan.ts';
 
 /** The most names one paper may add. */
 export const MAX_PROSE_ENVS = 64;
@@ -25,13 +26,23 @@ export function validEnv(name: unknown): name is string {
 }
 
 const DECLARE = /\\(?:newtheorem|spnewtheorem)\*?\s*\{([^{}]*)\}/g;
-const DECLARE_LIST = /\\declaretheorem\s*(?:\[[^\]]*\])?\s*\{([^{}]*)\}/g;
-const MD = /\\newmdtheoremenv\s*(?:\[[^\]]*\])?\s*\{([^{}]*)\}/g;
+// `\declaretheorem[opts]{name}` and `\newmdtheoremenv[opts]{name}{...}`: the option is read by
+// `commandMatches` (scan.ts), as a regex with `(?:\[[^\]]*\])?` runs to the end of the text for
+// every `[` that is not closed. What follows the name is a `\s*` and then `[` or `{`, so a head
+// that is longer on the page (`\declaretheoremx`) matches neither way.
+const DECLARE_LIST = /\\declaretheorem/g;
+const MD = /\\newmdtheoremenv/g;
+const OPTION_THEN_NAME = [' ', '[', ' ', '{'];
 
 function declared(src: string, into: Set<string>) {
   const live = uncomment(src);
-  for (const re of [DECLARE, MD, DECLARE_LIST])
-    for (const m of live.matchAll(re))
+  const find = finder(live);
+  for (const matches of [
+    live.matchAll(DECLARE),
+    commandMatches(live, MD, OPTION_THEN_NAME, find),
+    commandMatches(live, DECLARE_LIST, OPTION_THEN_NAME, find),
+  ])
+    for (const m of matches)
       for (const n of m[1].split(',')) if (validEnv(n.trim())) into.add(n.trim());
 }
 

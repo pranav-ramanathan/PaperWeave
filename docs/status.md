@@ -7432,7 +7432,51 @@ restores of a large paper got round it (`docs/security-review.md`, Open 1).
   existing parser, bridge and fuzz tests pass unchanged.
 - **Not done:** the parser still recurses: `\emph{` or `\lstinline[` nested about 5000 deep is a
   `RangeError` (the callers that matter, `containedNear`, refuse it). The indexes in the same
-  package have the same pattern and are not fixed: `labelIndex`'s `keyList` (`labels.ts`) builds
-  the key list to the end of the text for every `\label{` that never closes (140 KB of `\label{`:
-  14 s, on every paper page load), and `includeGraph`, `proseEnvs` and `mathMacros` were not
-  measured. Each wants the same memo, its own differential test and a perf test.
+  package had the same pattern; they are fixed in the next section.
+
+### The label, include, macro and bibliography indexes were quadratic too
+
+- **A fault found.** The same pattern as the parser's, in the functions that read a paper's
+  commands: each scanned to the end of the text for an opener that never closes (`{`, `[`, a
+  `\begin{verbatim}` with no `\end`) and began again at the next one. `labelIndex` runs on every
+  paper page load (`apps/web/app/projects/[id]/page.tsx`, via `labelReport`): 140 KB of `\label{`
+  took 14 s, and 20 KB 253 ms. `includes` (so `includeGraph`, `proseEnvs`, `mathMacros`,
+  `textMacros`, `reachesClass`, `projectGraphicsPaths`) did it in its regexes
+  (`\[[^\]]*\]` for every `\includegraphics[`, and `[\s\S]*?` for every `\begin{verbatim}` in
+  `uncomment`); `definitions` in its `group`. Found by grepping the package for the same
+  pattern: `citeIndex` (the same `keyUses`), `bibItems`, `bblEntries`, `declaredSpelling` and the
+  caption, picture and table reading in `floats.ts` had it too, and are fixed.
+- **Now.** `scan.ts` holds the memos, each with its argument for being exact in a comment:
+  `finder` (the last `indexOf` answer for each needle, valid for every start up to the answer and
+  every start after a -1), `groupEnds` (a stack memo for a brace, bracket or parenthesis group:
+  every group a walk passes is recorded as it closes, a later walk jumps over a known one or
+  fails with it, at the end of the text every open one fails) and `commandMatches` (a command and
+  what follows it, read step by step, with `finder` for the `]` of an option: the regexes it
+  replaces are deterministic at each place, so it finds the same matches). `keyListEnds` in
+  `labels.ts` is a path memo (the `}` that ends a key list, recorded at every position a long
+  walk stood on). Output is the same: the old functions are kept in `indexes.reference.ts`.
+- **Timings** (the old code at 20 KB, times 225 for 300 KB, as it is quadratic; the new at
+  300 KB): `labelIndex` on `\label{` 253 ms, about 57 s, now 59 ms; on `\url{` about 47 s, 31 ms;
+  on `\lstinputlisting[` about 17 s, 11 ms; `citeIndex` on `\cite{` about 58 s, 55 ms;
+  `includeGraph` on `\includegraphics[` about 7.9 s, 22 ms; `proseEnvs` on the same about 12 s,
+  20 ms; `mathMacros` on `\newcommand{\a}{` about 12 s, 24 ms; `bibItems` about 2.3 s, 2 ms;
+  `bblEntries` about 3.2 s, 11 ms; `declaredSpelling` about 9 s, 8 ms; `argumentsOf` on
+  `\caption{` about 22 s, 23 ms; `floatParts` on `\includegraphics[` about 17 s, 11 ms.
+- **Also.** An unclosed `\cites{` (or any multicite command with a brace group that never
+  closes) made `keyUses` loop for ever: the second round asked the same of the same place. It
+  ends now when a round makes no progress; every text that ended before gives the same answer.
+  The reference copy has the same two lines, or it could not be run on such text.
+- **Held by** `indexes.differential.test.ts` (every fixture, and 3000 seeded random texts for
+  each of `labelIndex`, `citeIndex`, `includes`, `bibItems`, `bblEntries`, `declaredSpelling`,
+  `floatParts`, `argumentsOf`, and 3000 random projects for each of `includeGraph`, `proseEnvs`,
+  `mathMacros`, `textMacros`, compared with deep equality against `indexes.reference.ts`; the seed
+  is in the failure message; the memos of `scan.ts` are also asked in random order against the
+  plain scans) and `indexes.perf.test.ts` (a hostile text of 300 KB for each function, under
+  500 ms).
+- **Not done:** `listingLabel` (a `\lstinputlisting[` or `\begin{lstlisting}[` whose options have
+  an unbalanced brace before a `]` that is far off) still scans to that `]` for each such opener;
+  an option with no `]` at all is answered at once. `floatParts` still reads the options of each
+  `\includegraphics[` for `alt=` as text of their own, so `\includegraphics[` repeated N times
+  and closed N times, nested, is quadratic. `marks` and `skip` in `floats.ts` (what a typed cell
+  may hold) take text a person types and were left. The same regexes in other packages
+  (`packages/server`) were not looked at.
