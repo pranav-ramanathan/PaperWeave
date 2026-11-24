@@ -1,5 +1,6 @@
 import { expect, test } from 'vitest';
-import { carryLine, diffHunks, diffLines, diffWords } from './textdiff.ts';
+import type { DiffLine } from './textdiff.ts';
+import { carryLine, diffHunks, diffLines, diffLinesFar, diffWords, FAR_EDITS } from './textdiff.ts';
 
 const show = (a: string, b: string) => diffLines(a, b)!.map((l) => l.op + l.text);
 
@@ -32,6 +33,109 @@ test('applying a diff to the old text gives the new text', () => {
 test('files too large to compare line by line are declined, not guessed at', () => {
   const big = (c: string) => Array.from({ length: 300 }, (_, i) => c + i).join('\n');
   expect(diffLines(big('a'), big('b'), 1000)).toBeNull();
+});
+
+// A seeded generator, so that a failure can be run again.
+const dice = (seed: number) => () =>
+  (seed = (Math.imul(seed, 1664525) + 1013904223) >>> 0) / 2 ** 32;
+const plain = (n: number) => Array.from({ length: n }, (_, i) => `line ${i}`);
+const side = (lines: DiffLine[], drop: '+' | '-') =>
+  lines
+    .filter((l) => l.op !== drop)
+    .map((l) => l.text)
+    .join('\n');
+
+test('two changes far apart in a long file are compared, where the table alone declines', () => {
+  const a = plain(5000);
+  const b = a.slice();
+  b[9] = 'changed near the top';
+  b.splice(4990, 1);
+  b.splice(2500, 0, 'added in the middle');
+  expect(diffLines(a.join('\n'), b.join('\n'))).toBeNull();
+  const lines = diffLinesFar(a.join('\n'), b.join('\n'))!;
+  expect(lines.filter((l) => l.op !== ' ').map((l) => l.op + l.text)).toEqual([
+    '-line 9',
+    '+changed near the top',
+    '+added in the middle',
+    '-line 4990',
+  ]);
+  expect(side(lines, '+')).toBe(a.join('\n'));
+  expect(side(lines, '-')).toBe(b.join('\n'));
+  const { hunks, rest } = diffHunks(lines);
+  expect(hunks.map((h) => [h.skipped, h.line, h.rows.length])).toEqual([
+    [6, 7, 8],
+    [2484, 2498, 7],
+    [2484, 4989, 7],
+  ]);
+  expect(rest).toBe(6);
+});
+
+test("where the table answers, the far comparison gives the table's answer unchanged", () => {
+  const [a, b] = ['a\nb\nc\nd', 'a\nX\nc\nY\nd'];
+  expect(diffLinesFar(a, b)).toEqual(diffLines(a, b));
+  expect(diffLinesFar('', 'x')).toEqual(diffLines('', 'x'));
+});
+
+test("the far comparison is as short as the table's, rebuilds both texts and puts removals first", () => {
+  const rand = dice(202);
+  for (let round = 0; round < 300; round++) {
+    // Few distinct lines, so that the same line turns up in many places.
+    const text = (n: number) =>
+      Array.from({ length: n }, () => 'abcde'[Math.floor(rand() * 5)]).join('\n');
+    const a = text(Math.floor(rand() * 40));
+    let b = text(Math.floor(rand() * 40));
+    if (round % 3 === 0) {
+      // Or an edited copy: a few lines changed, removed and added.
+      const l = a.split('\n');
+      for (let e = 0; e < 4; e++) {
+        const at = Math.floor(rand() * (l.length + 1));
+        if (rand() < 0.5) l.splice(at, 1);
+        else l.splice(at, 0, 'x');
+      }
+      b = l.join('\n');
+    }
+    const table = diffLines(a, b)!;
+    const far = diffLinesFar(a, b, 0)!;
+    const where = JSON.stringify([a, b]);
+    expect(side(far, '+'), where).toBe(a);
+    expect(side(far, '-'), where).toBe(b);
+    expect(far.filter((l) => l.op !== ' ').length, where).toBe(
+      table.filter((l) => l.op !== ' ').length,
+    );
+    // No added line directly before a removed one.
+    expect(
+      far.some((l, i) => l.op === '+' && far[i + 1]?.op === '-'),
+      where,
+    ).toBe(false);
+  }
+});
+
+test('more changed lines than the far comparison shows are declined, not guessed at', () => {
+  const block = (word: string, n: number) =>
+    Array.from({ length: n }, (_, i) => `${word} ${i}`).join('\n');
+  // 2,100 lines replaced by 2,100 others: 4,200 changed lines, over both limits.
+  expect(diffLinesFar(block('old', 2100), block('new', 2100))).toBeNull();
+  // Exactly at the limit, and one over (forced past the table).
+  const a = plain(3000);
+  const drop = (k: number) => a.filter((_, i) => i % 3 !== 0 || i >= 3 * k).join('\n');
+  const at = diffLinesFar(
+    a.join('\n'),
+    drop(FAR_EDITS / 2) + '\n' + block('new', FAR_EDITS / 2),
+    0,
+  )!;
+  expect(at.filter((l) => l.op !== ' ')).toHaveLength(FAR_EDITS);
+  expect(
+    diffLinesFar(a.join('\n'), drop(FAR_EDITS / 2) + '\n' + block('new', FAR_EDITS / 2 + 1), 0),
+  ).toBeNull();
+});
+
+test('a long file of one repeated line is declined in bounded time when its changes are many', () => {
+  const blank = (n: number) => '\n'.repeat(n);
+  const a = blank(400_000) + plain(1500).join('\n') + blank(400_000);
+  const b = blank(400_500) + plain(1500).reverse().join('\n') + blank(399_000);
+  const t0 = performance.now();
+  expect(diffLinesFar(a, b)).toBeNull();
+  expect(performance.now() - t0).toBeLessThan(5000);
 });
 
 const carry = (a: string, b: string, line: number, way: 'toNow' | 'toBuilt') =>

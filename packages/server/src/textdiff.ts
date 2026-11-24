@@ -55,6 +55,119 @@ export function diffLines(a: string, b: string, maxCells = 4_000_000): DiffLine[
   return diffSeq(a.split('\n'), b.split('\n'), maxCells);
 }
 
+/** The most lines `diffLinesFar` will report as removed and added together. */
+export const FAR_EDITS = 2000;
+
+/** How many comparisons of two lines `diffLinesFar` may make before it declines. */
+const FAR_STEPS = 20_000_000;
+
+/**
+ * `diffLines`, and where that declines because the changes lie too far apart for its table, the
+ * same answer found another way (Myers' shortest edit script), whose cost grows with the number
+ * of changed lines and not with the distance between them. Still null when more than `maxEdits`
+ * lines were removed and added together, or the work passes `maxSteps`.
+ * Not used by the restore or by the PDF's line map, which keep `diffLines` as it is.
+ */
+export function diffLinesFar(
+  a: string,
+  b: string,
+  maxCells = 4_000_000,
+  maxEdits = FAR_EDITS,
+  maxSteps = FAR_STEPS,
+): DiffLine[] | null {
+  const near = diffLines(a, b, maxCells);
+  if (near) return near;
+  const x = a.split('\n');
+  const y = b.split('\n');
+  let start = 0;
+  while (start < x.length && start < y.length && x[start] === y[start]) start++;
+  let endX = x.length;
+  let endY = y.length;
+  while (endX > start && endY > start && x[endX - 1] === y[endY - 1]) {
+    endX--;
+    endY--;
+  }
+  // Each distinct line as a number, so that a comparison is of two integers.
+  const ids = new Map<string, number>();
+  const id = (line: string) => {
+    let n = ids.get(line);
+    if (n === undefined) ids.set(line, (n = ids.size));
+    return n;
+  };
+  const p = Int32Array.from(x.slice(start, endX), id);
+  const q = Int32Array.from(y.slice(start, endY), id);
+  const n = p.length;
+  const m = q.length;
+  const most = Math.min(maxEdits, n + m);
+  // far[k + most]: how far along p the path on diagonal k (lines of p less lines of q) has got.
+  const far = new Int32Array(2 * most + 2);
+  // seen[d]: `far` for diagonals -d..d as it was before the round of d edits.
+  const seen: Int32Array[] = [];
+  let steps = 0;
+  let edits = -1;
+  for (let d = 0; d <= most && edits < 0; d++) {
+    seen.push(far.slice(most - d, most + d + 1));
+    for (let k = -d; k <= d; k += 2) {
+      const down = k === -d || (k !== d && far[most + k - 1] < far[most + k + 1]);
+      let i = down ? far[most + k + 1] : far[most + k - 1] + 1;
+      let j = i - k;
+      while (i < n && j < m && p[i] === q[j]) {
+        i++;
+        j++;
+        steps++;
+      }
+      far[most + k] = i;
+      if (i >= n && j >= m) {
+        edits = d;
+        break;
+      }
+    }
+    steps += d + 1;
+    if (edits < 0 && steps > maxSteps) return null;
+  }
+  if (edits < 0) return null;
+  // Back from the end: which edit each round made, last first.
+  const back: DiffLine[] = [];
+  let i = n;
+  let j = m;
+  for (let d = edits; d > 0; d--) {
+    const v = seen[d];
+    const at = (k: number) => v[k + d];
+    const k = i - j;
+    const down = k === -d || (k !== d && at(k - 1) < at(k + 1));
+    const fromI = down ? at(k + 1) : at(k - 1);
+    const fromJ = fromI - (down ? k + 1 : k - 1);
+    while (i > fromI + (down ? 0 : 1) && j > fromJ + (down ? 1 : 0)) {
+      back.push({ op: ' ', text: x[start + --i] });
+      j--;
+    }
+    if (down) back.push({ op: '+', text: y[start + --j] });
+    else back.push({ op: '-', text: x[start + --i] });
+  }
+  while (i > 0) {
+    back.push({ op: ' ', text: x[start + --i] });
+    j--;
+  }
+  const out: DiffLine[] = x.slice(0, start).map((text) => ({ op: ' ', text }));
+  // Within a run of changed lines the removals come first, as `diffLines` gives them.
+  let added: DiffLine[] = [];
+  for (let r = back.length - 1; r >= 0; r--) {
+    const line = back[r];
+    if (line.op === '+') {
+      added.push(line);
+      continue;
+    }
+    if (line.op === ' ' && added.length) {
+      out.push(...added);
+      added = [];
+    }
+    out.push(line);
+  }
+  out.push(...added);
+  for (const text of x.slice(endX)) out.push({ op: ' ', text });
+  return out;
+}
+
 export type WordPiece = { changed: boolean; text: string };
 
 const WORDS = /\\?[\p{L}\p{N}]+(?:[.'’-][\p{L}\p{N}]+)*|\s+|[^]/gu;
