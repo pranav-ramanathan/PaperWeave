@@ -7044,9 +7044,15 @@ of the paper's .bib files.`
     gzip cut short is the same);
   - a symbolic or hard link, or a device or pipe, whose name is of a type a paper keeps (one with
     a name that is left out is only listed or passed over);
-  - an absolute name, or one with `..` in it (any entry, whatever its type), and a name that is
-    not UTF-8;
+  - an absolute name, one that starts with a drive letter (`C:`), or one with `..` in it (any
+    entry, whatever its type), and a name that is not UTF-8; a pax `path` that is empty or has a
+    NUL in it; a pax record whose length is not plain decimal digits (`0x10` is refused);
+  - a GNU long name or pax header over `META_BYTES` (4 KB: a path of 255 characters is about 1 KB
+    in UTF-8, and the records around it are short; it was 1 MB, enough for 598 headers to cost
+    37 s of CPU);
   - the same file twice, and anything over `LIMITS` (files, entries, a file, the total, a path).
+    Every header counts toward `entries`, the metadata ones (`L`, `x`, `g`, `K`) too. The reader
+    gives way to the event loop every 256 headers, so a plain tar in one chunk cannot starve it.
 - **A new limit, `LIMITS.inflatedBytes` (600 MB).** A ZIP passes over an entry it leaves out
   without reading it; a tar.gz has to inflate everything to get past it, so `totalBytes` (which
   holds only kept files) cannot stop a gzip bomb. The cap is twice `totalBytes`: room for the

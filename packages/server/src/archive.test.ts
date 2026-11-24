@@ -402,6 +402,73 @@ test('a long name or pax path applies to the next entry only, and a pax size is 
   ]);
 });
 
+test('metadata headers count towards the number of entries', async () => {
+  const few = { ...small, entries: 5 };
+  const meta = [
+    paxHeader({ path: 'a.tex' }),
+    tarBlock('g', '', { type: 'g' }),
+    gnuLongName('b.tex'),
+    tarBlock('k', '', { type: 'K' }),
+  ];
+  // Two files and four headers about them: six headers, over the limit of five.
+  expect(await refusal(tarOf([...meta, tarOne('x'), tarOne('y')]), few)).toBe(
+    'This archive cannot be imported: it has too many files.',
+  );
+  // The same under the limit is read.
+  expect((await readZip(tarOf([...meta, tarOne('x')]), few)).entries).toHaveLength(1);
+  // Nothing but empty global headers is refused too.
+  const globals = Array.from({ length: 6 }, () => tarBlock('g', '', { type: 'g' }));
+  expect(await refusal(tarOf(globals), few)).toBe(
+    'This archive cannot be imported: it has too many files.',
+  );
+});
+
+test('a pax header or long name over the size read is refused', async () => {
+  const wide = { ...small, pathLength: 10_000 };
+  const long = 'a'.repeat(5000);
+  expect(await refusal(tarOf([paxHeader({ path: long }), tarOne('x')]), wide)).toBe(
+    'This archive cannot be imported: a header in it is too long.',
+  );
+  expect(await refusal(tarOf([gnuLongName(long), tarOne('x')]), wide)).toBe(
+    'This archive cannot be imported: a header in it is too long.',
+  );
+  // A path of the ordinary limit, in all four-byte characters, still fits.
+  const path = '\u{1F600}'.repeat(60) + '.tex';
+  expect((await readZip(tarOf([paxHeader({ path }), tarOne('x')]), small)).entries).toHaveLength(1);
+});
+
+test('a name that starts with a drive letter refuses the archive, as in a ZIP', async () => {
+  for (const name of ['C:/b.tex', 'c:b.tex', 'Z:\\b.tex'])
+    expect(await refusal(tarOf([tarOne(name)])), name).toMatch(
+      /^This archive cannot be imported: a file name in it is absolute or has \.\. in it/,
+    );
+  // A colon after more than one letter, or further in, is only a colon.
+  expect((await readZip(tarOf([tarOne('ab:c.tex')]), small)).entries).toHaveLength(1);
+  expect((await readZip(tarOf([tarOne('d/a:b.tex')]), small)).entries).toHaveLength(1);
+});
+
+test('a pax path that is empty or has a NUL in it refuses the archive', async () => {
+  for (const path of ['', 'a.tex\0b', '\0'])
+    expect(await refusal(tarOf([paxHeader({ path }), tarOne('x.tex')])), JSON.stringify(path)).toBe(
+      'This archive cannot be imported: a file name in it is empty or has a NUL in it.',
+    );
+});
+
+test('a pax record length must be plain decimal digits', async () => {
+  const raw = (text: string) => tarBlock('PaxHeader/x', Buffer.from(text), { type: 'x' });
+  const damaged = 'This archive cannot be imported: it is damaged or not what it claims to be.';
+  for (const text of [
+    '0x10 path=a.tex\n',
+    '16e0 path=aa.tex\n',
+    '+16 path=aa.tex\n',
+    ' 16 path=aa.tex\n',
+  ])
+    expect(await refusal(tarOf([raw(text), tarOne('x.tex')])), text).toBe(damaged);
+  // The same record with an honest length is read.
+  const ok = await readZip(tarOf([raw('14 path=a.tex\n'), tarOne('x.tex')]), small);
+  expect(ok.entries.map((e) => e.path)).toEqual(['a.tex']);
+});
+
 test('a bad checksum refuses the archive', async () => {
   const tar = Buffer.from(tarOf([tarOne('main.tex')]));
   tar[3] ^= 1; // a letter of the name, after the checksum was written

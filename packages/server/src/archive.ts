@@ -352,8 +352,17 @@ function readZipFile(zip: Uint8Array, limits: Limits): Promise<Unpacked> {
 // ---- tar
 
 const BLOCK = 512;
-/** The longest GNU long name or pax header read: far more than a path of `pathLength` needs. */
-const META_BYTES = 1_000_000;
+/**
+ * The most a GNU long name or a pax header may hold. A path of `pathLength` (255) characters is at
+ * most 4 bytes each in UTF-8, about 1 KB, and a pax record adds a length and `path=`; the other
+ * records a writer adds (mtime, uid, size) are short. 4 KB leaves room for those and no more, so
+ * a header cannot be made into a megabyte of records for the reader to walk.
+ */
+const META_BYTES = 4096;
+/** Headers read between turns of the event loop, so that a plain tar in one chunk cannot starve it. */
+const YIELD_EVERY = 256;
+const ABSOLUTE =
+  'a file name in it is absolute or has .. in it, so it would not stay inside the paper';
 const TRUNCATED = 'it is cut short: it ends before its last file does';
 const DAMAGED = 'it is damaged or not what it claims to be';
 
@@ -489,10 +498,8 @@ function tarName(raw: Buffer): string {
   } catch {
     throw new Refusal('a file name in it is not valid UTF-8');
   }
-  if (name.startsWith('/') || name.split('/').includes('..'))
-    throw new Refusal(
-      'a file name in it is absolute or has .. in it, so it would not stay inside the paper',
-    );
+  if (name.startsWith('/') || /^[A-Za-z]:/.test(name) || name.split('/').includes('..'))
+    throw new Refusal(ABSOLUTE);
   return tidy(name.normalize('NFC'));
 }
 
@@ -502,9 +509,10 @@ function paxFields(data: Buffer): { path?: Buffer; size?: number } {
   let at = 0;
   while (at < data.length) {
     const space = data.indexOf(0x20, at);
-    const length = space < 0 ? NaN : Number(data.toString('latin1', at, space));
-    if (!Number.isInteger(length) || length <= space - at + 1 || at + length > data.length)
-      throw new Refusal(DAMAGED);
+    const digits = space < 0 ? '' : data.toString('latin1', at, space);
+    if (!/^[1-9]\d{0,6}$/.test(digits)) throw new Refusal(DAMAGED);
+    const length = Number(digits);
+    if (length <= space - at + 1 || at + length > data.length) throw new Refusal(DAMAGED);
     const record = data.subarray(space + 1, at + length - 1);
     if (data[at + length - 1] !== 0x0a) throw new Refusal(DAMAGED);
     const eq = record.indexOf(0x3d);
@@ -512,7 +520,11 @@ function paxFields(data: Buffer): { path?: Buffer; size?: number } {
     const key = record.toString('utf8', 0, eq);
     const value = record.subarray(eq + 1);
     if (key.startsWith('GNU.sparse')) throw new Refusal(SPARSE);
-    if (key === 'path') out.path = Buffer.from(value);
+    if (key === 'path') {
+      if (!value.length || value.includes(0))
+        throw new Refusal('a file name in it is empty or has a NUL in it');
+      out.path = Buffer.from(value);
+    }
     if (key === 'size') {
       if (!/^\d{1,15}$/.test(value.toString('latin1'))) throw new Refusal(DAMAGED);
       out.size = Number(value.toString('latin1'));
@@ -563,6 +575,9 @@ export async function readTar(tar: Uint8Array, limits: Limits = LIMITS): Promise
     for (;;) {
       const head = await reader.take(BLOCK);
       if (isZeroBlock(head)) break;
+      // Every header counts, metadata ones too, and the loop gives way now and then.
+      if (++count > limits.entries) throw new Refusal('it has too many files');
+      if (count % YIELD_EVERY === 0) await new Promise((resolve) => setImmediate(resolve));
       if (!checksumOk(head, octal(head, 148, 8)))
         throw new Refusal('a header in it has a bad checksum');
       if (head.toString('latin1', 257, 262) !== 'ustar') throw new Refusal(V7);
@@ -596,7 +611,6 @@ export async function readTar(tar: Uint8Array, limits: Limits = LIMITS): Promise
       pax = {};
       longName = undefined;
 
-      if (++count > limits.entries) throw new Refusal('it has too many files');
       let path = tarName(rawName);
       if (type === '5' && !path.endsWith('/')) path += '/';
       const verdict = intake.sort(path);
