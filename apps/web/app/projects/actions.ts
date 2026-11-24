@@ -21,6 +21,7 @@ import {
   renameProject,
   requestBuild,
   restoreRevision,
+  revisionOfNow,
   saveChart,
   saveRevision,
   changeLanguageSettings,
@@ -32,6 +33,7 @@ import {
   setRootFile,
   withdrawInvitation,
 } from '@paperweave/server';
+import { comparison, NOW } from '../../lib/compare';
 import { act, baseUrl, blobs, db, requireUser, sendEmail } from '../../lib/server';
 
 // A browser sends a line break in a form as two characters and counts it as one in the field.
@@ -120,6 +122,20 @@ export async function saveRevisionAction(projectId: string, form: FormData) {
   await act(back, async () => {
     const { number } = await saveRevision(db(), blobs(), user.id, projectId, text(form, 'name'));
     return `${back}?revision=${number}#revisions`;
+  });
+}
+
+/**
+ * Show what changed from one revision to another, or to the paper as it is now: a revision is
+ * made of that first, unless the latest one is it already.
+ */
+export async function compareAction(projectId: string, form: FormData) {
+  const back = `/projects/${projectId}`;
+  const user = await requireUser(back);
+  await act(back, async () => {
+    const [from, to] = [text(form, 'from'), text(form, 'to')];
+    const end = to === NOW ? (await revisionOfNow(db(), blobs(), user.id, projectId)).id : to;
+    return comparison(projectId, from, end);
   });
 }
 

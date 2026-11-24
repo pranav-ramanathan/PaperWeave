@@ -33,9 +33,11 @@ import {
 import Link from '../../Go';
 import Result from '../../Result';
 import { notFound } from 'next/navigation';
+import { called, NOW, since } from '../../../lib/compare';
 import { blobs, db, forTitle, paperOf, requireUser } from '../../../lib/server';
 import {
   buildRevisionAction,
+  compareAction,
   cancelInvitationAction,
   deleteFileAction,
   lookUpDoiAction,
@@ -1035,6 +1037,32 @@ async function Project({
             <input name="name" required maxLength={200} placeholder="Submitted to the workshop" />
           </label>
           <Once type="submit">Save revision</Once>
+        </form>
+      )}
+      {revisions.length > 0 && (
+        <form action={compareAction.bind(null, id)}>
+          <label>
+            Changes from
+            <select name="from" defaultValue={since(revisions, writer)}>
+              {revisions.map((r) => (
+                <option key={r.id} value={r.id}>
+                  {called(r)}
+                </option>
+              ))}
+            </select>
+          </label>
+          <label>
+            Changes up to
+            <select name="to" defaultValue={writer ? NOW : revisions[0].id}>
+              {writer && <option value={NOW}>The paper as it is now</option>}
+              {revisions.map((r) => (
+                <option key={r.id} value={r.id}>
+                  {called(r)}
+                </option>
+              ))}
+            </select>
+          </label>
+          <Once type="submit">Show the changes</Once>
         </form>
       )}
       {revisions.length > 0 && (
