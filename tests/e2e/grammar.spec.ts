@@ -366,3 +366,56 @@ test("a paper's own word macro is read as the word it prints, so the panel finds
   await expect(panel(owner.page)).not.toContainText('\\');
   await expect(finding(owner.page, /“it”/)).toHaveCount(0);
 });
+
+test('a mistake in a caption and in a footnote is found and put right', async ({ browser }) => {
+  test.setTimeout(120_000);
+  const owner = await person(browser, 'grammar-asides');
+  const main = [
+    '\\documentclass{article}',
+    '\\begin{document}',
+    'The sentense is short.\\footnote{See the the appendix.} It ends here.',
+    '',
+    '\\begin{figure}',
+    '  \\caption{Merge latency by number of concurent writers.}',
+    '\\end{figure}',
+    '\\end{document}',
+    '',
+  ].join('\n');
+  const zip = join(mkdtempSync(join(tmpdir(), 'paperweave-e2e-')), `Asides ${run}.zip`);
+  writeFileSync(zip, await writeZip([{ path: 'main.tex', bytes: Buffer.from(main) }]));
+  await owner.page.goto('/sign-in');
+  await signIn(owner.page, owner.email);
+  await owner.page.getByLabel('Or import a ZIP of a LaTeX project').setInputFiles(zip);
+  await owner.page.getByRole('button', { name: 'Import ZIP' }).click();
+  await expect(owner.page.getByRole('heading', { name: 'Language' })).toBeVisible();
+  await owner.page.getByRole('link', { name: 'main.tex' }).first().click();
+
+  // The caption and the footnote are listed like the text; clicks only, no key is pressed.
+  await expect(finding(owner.page, 'Spelling: “concurent”')).toBeVisible({ timeout: 30_000 });
+  await expect(finding(owner.page, /“the the”/)).toBeVisible({ timeout: 30_000 });
+  await expect(finding(owner.page, 'Spelling: “sentense”')).toBeVisible({ timeout: 30_000 });
+  await expect(panel(owner.page).getByRole('article')).toHaveCount(3);
+  // The visual view marks the one in the text and draws nothing in the figure or the chip.
+  await expect(owner.page.locator(`${VISUAL} .finding-mark`)).toHaveText(['sentense']);
+
+  await finding(owner.page, 'Spelling: “concurent”')
+    .getByRole('button', { name: 'Change to “concurrent”' })
+    .click();
+  await expect(panel(owner.page)).toContainText('Changed “concurent” to “concurrent”.');
+  await expect(owner.page.locator(VISUAL)).toContainText(
+    'Merge latency by number of concurrent writers.',
+  );
+  await expect(finding(owner.page, 'Spelling: “concurent”')).toHaveCount(0);
+
+  // In the source view the footnote's words are underlined where they are written.
+  await showSource(owner.page);
+  const src = owner.page.locator('.editor .cm-content');
+  await expect(src.locator('.finding-mark')).toHaveText(['sentense', 'the the']);
+  await finding(owner.page, /“the the”/)
+    .getByRole('button', { name: 'Change to “the”' })
+    .click();
+  await expect(src).toContainText('\\footnote{See the appendix.}');
+  await expect(src).toContainText('\\caption{Merge latency by number of concurrent writers.}');
+  await expect(finding(owner.page, /“the the”/)).toHaveCount(0);
+  await expect(src.locator('.finding-mark')).toHaveText(['sentense']);
+});

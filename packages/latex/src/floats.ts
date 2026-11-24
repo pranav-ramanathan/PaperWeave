@@ -180,6 +180,25 @@ function tableOf(src: string, text: string): Table | null {
 }
 
 /**
+ * The braced argument of each `command` in `src`, after an option if it has one: the `long` of
+ * `\\caption[short]{long}`. Commented-out ones are not found. Each span is the text inside the braces.
+ */
+export function argumentsOf(src: string, command: RegExp): Span[] {
+  const text = live(src);
+  const out: Span[] = [];
+  for (const m of text.matchAll(command)) {
+    let at = m.index + m[0].length;
+    if (out.length && m.index < out[out.length - 1].end) continue;
+    while (text[at] === ' ' || text[at] === '\n') at++;
+    if (text[at] === '[') at = closeOf(text, at, '[', ']');
+    while (text[at] === ' ' || text[at] === '\n') at++;
+    const close = at >= 0 && text[at] === '{' ? closeOf(text, at) : -1;
+    if (close > 0) out.push(span(src, at + 1, close - 1));
+  }
+  return out;
+}
+
+/**
  * Read a figure or table environment: `src` is the whole of it, from `\begin` to `\end`.
  * Returns null for anything else.
  */

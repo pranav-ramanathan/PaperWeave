@@ -6306,3 +6306,66 @@ of the paper's .bib files.`
   - Carry over, unchanged: nested lists, `\item[..]` and `description` raw in the visual view;
     LaTeX's own "Empty `thebibliography' environment" line still shows beside "Bibliography
     empty"; everything in the "Not done" of "A footnote can be added in the visual view".
+
+## Captions and footnotes in the grammar check
+
+- **What was wrong.** The check read paragraphs, headings and list items. A float was one hard
+  stretch and a footnote one stand-in word, so a mistake in a caption or a footnote was never
+  listed, and a file with no other finding said "Nothing found in this file." Over the corpus
+  (31 papers, 118 body files; counts only): 15,448 words in 513 captions and 3,597 words in 164
+  footnotes were never read, against 223,110 read: 7.9 % of the corpus's prose, in 27 of the 28
+  papers with body text. Two smaller faults were found with it: a footnote's mark and a `\label`
+  read as "Dummy", glued to the word before. That hid a misspelling in the word before a footnote
+  or at the end of a caption, and put a stand-in at the head of the next sentence.
+- **Now** (`prose` and `placed` in `packages/latex/src/prose.ts`, `argumentsOf` in
+  `packages/latex/src/floats.ts`, a few lines of `checkGrammar`). A mistake in a caption or in a
+  footnote is listed like any other, with the same buttons; "Change to ..." changes those
+  characters and nothing else, and the source view underlines it where it is written.
+
+  |                                                                                                                                                                                                                | Before                                                          | Now                                                        |
+  | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | --------------------------------------------------------------- | ---------------------------------------------------------- |
+  | A caption (`\caption{..}`, `\caption*{..}`, `\subcaption{..}`, the long form of `\caption[short]{long}`) in a `figure`, `table`, `algorithm`, `wrapfigure`, `longtable`, `subfigure` ...                       | never read                                                      | read, as a paragraph of its own                            |
+  | A footnote (`\footnote{..}`, `\footnote[2]{..}`) in a paragraph, a heading, a list item, a raw list, a caption, another footnote                                                                               | never read; its mark reads as "Dummy", glued to the word before | read, as a paragraph of its own; the mark reads as nothing |
+  | The sentence a footnote hangs on                                                                                                                                                                               | read with "Dummy" where the mark is                             | read whole, as if the footnote were not there              |
+  | `\label{..}` in running text or at the end of a caption                                                                                                                                                        | reads as "Dummy"                                                | reads as nothing                                           |
+  | A formula, citation, reference, command, file name, label or code inside a caption or footnote                                                                                                                 | -                                                               | never to be changed, as everywhere else                    |
+  | The short form `[short]`, a commented-out caption, `\captionof`, `\captionsetup`, `\footnotetext`, `\footnotemark`, a `\caption` in a listing, verbatim or a formula, a footnote inside `\texttt`, table cells | not read                                                        | not read                                                   |
+
+  How it works: a footnote's words cannot be read where they are written without breaking the
+  sentence around them, so where a caption or footnote stands its body is sent as markup that
+  reads as nothing. After the whole source each body is sent again, opened by a paragraph break,
+  and read from inside by the same walk as everything else. An offset past the source's length
+  is mapped back to where the words are written with a small table (`asides`), and a finding
+  that is not inside one stretch of the source is dropped. The segments are filled in for each
+  body when it is read and sorted, so they still tile the source and `inProse` and `readAs` work
+  unchanged.
+
+  Against the real checker over the corpus: 4,533 findings before, all kept at the same places;
+  483 more, 421 in captions and 58 in footnotes, in 26 papers, 4 of them beside a footnote that
+  the stand-in had hidden; 431 spelling, 46 grammar, 6 style; no rule fires on captions as such.
+  The checker took 3 % longer on 5.9 % more characters.
+
+- **Held by** six new tests in `prose.test.ts` and one against the real checker in
+  `grammar-benchmark.sandbox.test.ts`, both run on the development machine; one in
+  `grammar.sandbox.test.ts` and one in `tests/e2e/grammar.spec.ts`, written but not run on the
+  development machine (the local blob store refuses writes), so run only in CI. One existing
+  expectation was changed on purpose, in "every character of every fixture is in the annotation,
+  in order": what is sent is now the source, then each caption and footnote again (it was the
+  source alone), and more than five are read over the fixtures.
+- **Not done.**
+  - In the visual view a finding in a caption or a footnote has no underline, and "Show in the
+    text" puts the caret beside the figure or the chip (as for a raw list). The source view
+    underlines and selects it.
+  - Table cells, `\thanks`, `\footnotetext`, `\captionof`, the short form of a caption and a
+    `\caption` written outside a float environment are not read. A footnote inside `\texttt` is
+    not read.
+  - A caption or footnote is checked as a paragraph of its own: a rule that needs the sentence it
+    hangs on (agreement with the word before a footnote's mark) does not see it.
+  - No more than 2,000 captions and footnotes are read in one file (the most in one corpus file
+    is 48).
+  - Not tried: a real browser on this machine; languages other than English (none is offered).
+  - Carry over, unchanged: Enter in the middle of a heading is refused (927 of 927); Backspace or
+    Delete where a heading meets a paragraph does nothing (1,814 places); nested lists,
+    `\item[..]` and `description` raw in the visual view; LaTeX's own "Empty `thebibliography'
+    environment" line still shows beside "Bibliography empty"; everything in the "Not done" of
+    "Enter at the start of a list item always opens an item above it".

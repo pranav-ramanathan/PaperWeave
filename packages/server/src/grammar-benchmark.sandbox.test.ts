@@ -4,7 +4,7 @@
 // Needs the grammar checker of infra/compose.yaml.
 import { existsSync, readFileSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
-import { inProse, prose } from '@paperweave/latex';
+import { inProse, placed, prose } from '@paperweave/latex';
 import { expect, test } from 'vitest';
 import { NEVER } from './grammar.ts';
 import { TEST_ENV } from './testing.ts';
@@ -132,3 +132,54 @@ test('the checker on the labelled sentences', async () => {
   expect(hits / total).toBeGreaterThanOrEqual(0.8);
   expect(flagged.size / corpus.clean.length).toBeLessThanOrEqual(0.15);
 }, 120_000);
+
+test('mistakes in a caption and in a footnote are found where they are written, and the sentence around a footnote is left alone', async () => {
+  const src = [
+    '\\documentclass{article}',
+    '\\usepackage{graphicx}',
+    '\\begin{document}',
+    '\\section{Results}',
+    'The method\\footnote{See the the appendix for a longer acount.} works well on every run.',
+    'It is fast.\\footnote{Measured on one machine.} We report the mean.',
+    '',
+    '\\begin{figure}',
+    '  \\centering',
+    '  \\includegraphics[width=\\linewidth]{teh-plot}',
+    '  \\caption[Latency]{Merge latency by number of concurent writters\\label{fig:teh}}',
+    '\\end{figure}',
+    '',
+    '\\begin{table}',
+    '  \\caption{An summary of the runs.}',
+    '  \\begin{tabular}{ll} recieve & 1 \\\\ \\end{tabular}',
+    '\\end{table}',
+    'The end is short.',
+    '\\end{document}',
+    '',
+  ].join('\n');
+  const { annotation, segments, asides } = prose(src);
+  const res = await fetch(`${TEST_ENV.GRAMMAR_URL}/v2/check`, {
+    method: 'POST',
+    body: new URLSearchParams({
+      data: JSON.stringify({ annotation }),
+      language: 'en-GB',
+      disabledRules: NEVER.join(','),
+    }),
+  });
+  if (!res.ok) throw new Error(`the checker answered ${res.status}: ${await res.text()}`);
+  const { matches } = (await res.json()) as {
+    matches: { offset: number; length: number; replacements: { value: string }[] }[];
+  };
+  const shown = matches.flatMap((m) => {
+    const at = placed(src, asides, m.offset, m.length);
+    return at && inProse(segments, at[0], at[1])
+      ? [{ from: at[0], words: src.slice(at[0], at[1]), first: m.replacements[0]?.value }]
+      : [];
+  });
+  // Each where it is written, in the order they are read: the footnotes, then the captions.
+  expect(shown.map((f) => f.words)).toEqual(['the the', 'acount', 'concurent', 'writters', 'An']);
+  for (const f of shown) expect(f.from).toBe(src.indexOf(f.words));
+  expect(shown[0].first).toBe('the');
+  expect(shown[2].first).toBe('concurrent');
+  expect(shown[4].first).toBe('A');
+  // Nothing in the sentences the footnotes hang on, the file name, the label or the table's cell.
+});

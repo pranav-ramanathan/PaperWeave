@@ -6,9 +6,14 @@
 // A list the parser keeps raw (a description, an item with an option or a nested list in it) is
 // read from inside: its items read as bullets, and the term of a description item is not prose.
 // A checker that is told "this is markup, read it as that" answers in source positions.
+// Captions and footnotes are printed away from where they are written, and a footnote's words
+// cannot be read in place without cutting the sentence it hangs on. So they are read after the
+// text, each as a paragraph of its own: the checker is sent the source, then each body again, and
+// `placed` maps what it finds there back to where the words are written.
 import { logoOf } from './bib.ts';
+import { argumentsOf } from './floats.ts';
 import { textMacroOf } from './macros.ts';
-import { DEFAULT_TRANSPARENT, parse, textblocks } from './parse.ts';
+import { DEFAULT_TRANSPARENT, MATH_ENV, parse, textblocks, VERBATIM } from './parse.ts';
 import { quietOf } from './quiet.ts';
 
 /** One stretch of the source, as LanguageTool's annotated text has it. */
@@ -30,6 +35,21 @@ export type Segment = {
 const NOUN = 'Dummy';
 /** The same after "an", which wants a vowel. */
 const VOWEL_NOUN = 'Item';
+
+/**
+ * Words printed away from where they are written: a caption's, a footnote's. They are read after
+ * the text, each a paragraph of its own, so that the sentence a footnote hangs on reads as it
+ * did. `at` is where the stretch starts in what the checker is sent, `from` where it is in the
+ * source.
+ */
+export type Aside = { at: number; from: number; length: number };
+const CAPTION = /\\(?:sub)?caption\*?(?![a-zA-Z])/g;
+const FOOTNOTE = /^\\footnote(?![a-zA-Z])/g;
+const FLOAT = /^\\begin\{([a-zA-Z]+\*?)\}/;
+/** A label prints nothing. Most are written at the end of a caption. */
+const LABEL = /^\\label\{[^{}]*\}$/;
+/** No more than this many are read in one file. */
+const ASIDES = 2000;
 
 const LIST = /^\\begin\{(itemize|enumerate|description)\}(?:\[[^\]\n]*\])?/;
 const ITEM = /^\\item(?![a-zA-Z])/;
@@ -58,6 +78,25 @@ export function prose(
     annotation.push(kind === 'text' ? { text: part } : { markup: part, interpretAs: as ?? '' });
     segments.push(kind === 'soft' ? { from, to, kind, as: as ?? '' } : { from, to, kind });
     read = (read + (kind === 'text' ? part : (as ?? ''))).slice(-8);
+  };
+  /** Stretches to read after the text: [from, to) in the source. */
+  const later: [number, number][] = [];
+  /**
+   * From `at` to `end`, which is not prose and reads as `as`, but for the stretches of `inside`
+   * (offsets from `base`): those are left for later.
+   */
+  const around = (end: number, as: string, base: number, inside: { at: number; end: number }[]) => {
+    let said = false;
+    for (const part of later.length + inside.length > ASIDES ? [] : inside) {
+      if (part.end <= part.at) continue;
+      add(at, base + part.at, 'hard', said ? '' : as);
+      said = true;
+      annotation.push({ markup: src.slice(base + part.at, base + part.end), interpretAs: '' });
+      later.push([base + part.at, base + part.end]);
+      at = base + part.end;
+    }
+    add(at, end, 'hard', said ? '' : as);
+    at = end;
   };
   /** What a command of the paper's words prints. TeX has eaten the space after it, so a body's own is not said twice. */
   const reading = (from: number, to: number) => {
@@ -103,12 +142,20 @@ export function prose(
             : body.kind === 'ws' && !/\n[ \t]*\n/.test(body.text)
               ? ' '
               : '\n\n';
-        add(at, end, 'hard', as);
-        at = end;
+        const float = body.kind === 'raw' ? FLOAT.exec(body.text)?.[1] : undefined;
+        around(
+          end,
+          as,
+          start,
+          float && !VERBATIM.has(float) && !MATH_ENV.has(float)
+            ? argumentsOf(body.text, CAPTION)
+            : [],
+        );
         continue;
       }
       for (const pieces of blocks) {
         let commented = false;
+        let note: { at: number; end: number }[];
         for (const p of pieces) {
           const [from, to] = [start + p.s, start + p.e];
           // What lies between pieces (there should be nothing) is not prose.
@@ -129,7 +176,16 @@ export function prose(
           else if (p.k === 'esc') add(from, to, code ? 'hard' : 'soft', p.ch ?? '');
           else if (p.k === 'atom' && p.type === 'raw' && quietOf(src.slice(from, to))?.inWord)
             add(from, to, code ? 'hard' : 'soft', '');
-          else if (p.k === 'atom' && inList && ITEM.test(src.slice(from, to))) {
+          else if (
+            p.k === 'atom' &&
+            p.type === 'raw' &&
+            !code &&
+            (note = argumentsOf(src.slice(from, to), FOOTNOTE)).length
+          ) {
+            // The mark a footnote leaves is a raised number: nothing to read. Its words come later.
+            at = from;
+            around(to, '', from, note);
+          } else if (p.k === 'atom' && inList && ITEM.test(src.slice(from, to))) {
             add(from, to, 'hard', bullet(src.slice(from, to)));
             read = '';
           } else if (p.k === 'atom')
@@ -142,7 +198,8 @@ export function prose(
                 : p.type === 'ref'
                   ? '1'
                   : p.type === 'raw'
-                    ? (quietOf(src.slice(from, to))?.reads ??
+                    ? ((LABEL.test(src.slice(from, to)) ? '' : null) ??
+                      quietOf(src.slice(from, to))?.reads ??
                       logoOf(src.slice(from, to)) ??
                       reading(from, to) ??
                       noun())
@@ -164,10 +221,39 @@ export function prose(
   };
   walk(0, src.length, false, 0);
   add(at, src.length, 'hard', '');
+  const asides: Aside[] = [];
+  let sent = src.length;
+  for (let i = 0; i < later.length; i++) {
+    const [from, to] = later[i];
+    annotation.push({ markup: '', interpretAs: '\n\n' });
+    read = '';
+    at = from;
+    walk(from, to, false, 1);
+    add(at, to, 'hard', '');
+    asides.push({ at: sent, from, length: to - from });
+    sent += to - from;
+  }
   return {
     annotation: annotation.filter((a) => 'text' in a || a.markup || a.interpretAs),
-    segments,
+    // In the order of the source, whenever each was read: they tile it.
+    segments: asides.length ? segments.sort((a, b) => a.from - b.from) : segments,
+    asides,
   };
+}
+
+/**
+ * Where in the source the checker's stretch of `length` at `offset` is: [from, to), or null if it
+ * is not one stretch of the source (it runs from one caption or footnote into the next).
+ */
+export function placed(
+  src: string,
+  asides: Aside[],
+  offset: number,
+  length: number,
+): [number, number] | null {
+  if (offset + length <= src.length) return [offset, offset + length];
+  const a = asides.find((x) => x.at <= offset && offset + length <= x.at + x.length);
+  return a ? [a.from + offset - a.at, a.from + offset - a.at + length] : null;
 }
 
 /**
