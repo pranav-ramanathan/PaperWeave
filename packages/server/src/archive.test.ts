@@ -1,6 +1,7 @@
+import { randomBytes } from 'node:crypto';
 import { crc32, gzipSync } from 'node:zlib';
 import { expect, test } from 'vitest';
-import { checkPath, type Entry, LIMITS, readTar, readZip, writeZip } from './archive.ts';
+import { checkPath, type Entry, LIMITS, readTar, readZip, writeZip, zipStream } from './archive.ts';
 import { gnuLongName, paxHeader, tarBlock, tarFiles, tarOf } from './tarbuild.ts';
 
 const small = { ...LIMITS, files: 3, fileBytes: 1000, totalBytes: 1500, entries: 40 };
@@ -566,4 +567,93 @@ test('.git entries count only towards the number of entries, in a tar too', asyn
   expect(
     (await readZip(tarOf([tarOne('main.tex'), tarOne('.git/a\u0001b')]), small)).entries,
   ).toHaveLength(1);
+});
+
+const MIB = 1 << 20;
+const pause = (ms: number) => new Promise((r) => setTimeout(r, ms));
+
+/** Entries of random bytes (they do not compress), counting how many have been asked for. */
+function counting(n: number, size = MIB) {
+  const seen = { pulled: 0, closed: false };
+  async function* entries(): AsyncGenerator<Entry> {
+    try {
+      for (let i = 0; i < n; i++) {
+        seen.pulled++;
+        yield { path: `f${i}.bin`, bytes: randomBytes(size) };
+      }
+    } finally {
+      seen.closed = true;
+    }
+  }
+  return { seen, entries: entries() };
+}
+
+async function readAll(stream: ReadableStream<Uint8Array>): Promise<Buffer> {
+  const parts: Uint8Array[] = [];
+  const reader = stream.getReader();
+  for (let r = await reader.read(); !r.done; r = await reader.read()) parts.push(r.value);
+  return Buffer.concat(parts);
+}
+
+test('zipStream asks for no more entries than a reader that reads nothing could hold', async () => {
+  const { seen, entries } = counting(64);
+  const stream = zipStream(entries);
+  await pause(500);
+  // The unread output may hold 8 MiB, which is 8 of these entries; one more is added on the way
+  // under the bound, one is on its way out of the source, and one chunk waits in the web stream.
+  // 14 leaves room for those. Without a bound all 64 are asked for.
+  expect(seen.pulled).toBeLessThanOrEqual(14);
+  await stream.cancel();
+  await pause(50);
+  expect(seen.closed).toBe(true);
+});
+
+test('zipStream gives the bytes writeZip gives, whichever way the entries come', async () => {
+  const files: Entry[] = [
+    { path: 'main.tex', bytes: Buffer.from('\\documentclass{article}\n'.repeat(500)) },
+    { path: 'empty.txt', bytes: new Uint8Array(0) },
+    { path: 'img/a.bin', bytes: randomBytes(3 * MIB + 17) },
+    { path: 'refs.bib', bytes: Buffer.from('@book{a,}\n') },
+    { path: 'img/b.bin', bytes: randomBytes(5 * MIB) },
+    ...Array.from({ length: 30 }, (_, i) => ({ path: `n${i}.txt`, bytes: randomBytes(100 + i) })),
+  ];
+  async function* later() {
+    for (const e of files) {
+      await pause(1);
+      yield e;
+    }
+  }
+  const expected = Buffer.from(await writeZip(files));
+  expect((await readAll(zipStream(later()))).equals(expected)).toBe(true);
+  expect((await readAll(zipStream(files))).equals(expected)).toBe(true);
+});
+
+test('zipStream, cancelled part way, closes its source and asks for nothing more', async () => {
+  const { seen, entries } = counting(64);
+  const stream = zipStream(entries);
+  const reader = stream.getReader();
+  await reader.read();
+  await pause(100);
+  await reader.cancel();
+  await pause(100);
+  const stopped = seen.pulled;
+  expect(seen.closed).toBe(true);
+  await pause(200);
+  expect(seen.pulled).toBe(stopped);
+  expect(stopped).toBeLessThan(64);
+});
+
+test('zipStream fails when its source fails, and closes it', async () => {
+  let closed = false;
+  async function* broken(): AsyncGenerator<Entry> {
+    try {
+      yield { path: 'a.txt', bytes: Buffer.from('a') };
+      yield { path: 'b.txt', bytes: Buffer.from('b') };
+      throw new Error('the store has gone');
+    } finally {
+      closed = true;
+    }
+  }
+  await expect(readAll(zipStream(broken()))).rejects.toThrow('the store has gone');
+  expect(closed).toBe(true);
 });

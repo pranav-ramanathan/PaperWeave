@@ -12,7 +12,7 @@ import {
   writeZip,
   zipStream,
 } from './archive.ts';
-import { mapLimit, READS, readAhead } from './batch.ts';
+import { mapLimit, READ_BYTES, READS, readAhead } from './batch.ts';
 import { authorize } from './authz.ts';
 import type { BlobStore } from './blobs.ts';
 import { type Db, transaction } from './db.ts';
@@ -553,13 +553,18 @@ export async function exportRevisionStream(
     extra,
     used,
   );
-  // Each file is added as its blob arrives, in the order of the files, with sixteen being read
-  // ahead of the one being added.
+  // Each file is added as its blob arrives, in the order of the files, with up to sixteen being
+  // read ahead of the one being added, and no more than READ_BYTES of them. A revision does not
+  // keep its files' sizes, so the store is asked (nothing is read) before the first blob is.
   async function* entries(): AsyncGenerator<Entry> {
-    yield* readAhead(shared, READS, async (f) => ({
-      path: f.path,
-      bytes: await blob(store, f.digest),
-    }));
+    const sizes = await mapLimit(shared, READS, (f) => store.size(f.digest));
+    const sized = shared.map((f, i) => ({ ...f, size: sizes[i] ?? 0 }));
+    yield* readAhead(
+      sized,
+      READS,
+      async (f) => ({ path: f.path, bytes: await blob(store, f.digest) }),
+      { weight: (f) => f.size, budget: READ_BYTES },
+    );
     yield* rest;
   }
   return { zip: zipStream(entries()), paper, number };

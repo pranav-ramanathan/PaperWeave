@@ -7348,3 +7348,25 @@ restores of a large paper got round it (`docs/security-review.md`, Open 1).
   a root that is a link. Ordinary files and folders are handled as before.
 - **Held by** four cases in `compile.test.ts` with `symlinkSync` in a temp directory (a
   recording chown, and with the real one when run as root, where the target keeps its owner).
+
+### A streamed ZIP download held the whole paper in memory
+
+- **A fault found.** `zipStream` (`archive.ts`) added every entry the moment the source gave it.
+  yazl ignores the answer of `write`, so the sixteen read ahead in `exportRevisionStream` bounded
+  nothing: a client that read nothing still had all 200 synthetic 1 MB entries pulled, rss 81 MB
+  to 474 MB. `readAhead` also counted files, not bytes.
+- **Now.** An entry is added only after the one before it has been written (yazl has no event
+  for that; its `outputStreamCursor`, read and never set, moves when an entry is written) and
+  while the unread output (`writableLength + readableLength` of yazl's PassThrough) is under
+  `UNREAD_BYTES`, 8 MiB. The wait ends on `drain`, `close` or `error`, and on a timer for what
+  no event says; a cancelled or failed stream leaves the loop, so the source's `finally` runs.
+  The same script now pulls 9 of 200, rss 81 MB to 112 MB. The archive bytes are the same.
+- **Read ahead by bytes.** `readAhead` takes `{ weight, budget }`; without them it behaves as
+  before, and an item over the budget goes on its own. `exportRevisionStream` passes
+  `READ_BYTES`, 16 MiB, and the blob sizes. `revision_files` has no size column and
+  `files.size` may not be the size of the revision's blob, so the sizes come from `store.size`
+  (a HEAD, nothing read), sixteen at a time, when the stream is first read. Costs one request
+  per file before the first byte; the alternative, four files ahead, is not bounded by size.
+- **Held by** `archive.test.ts` (64 x 1 MiB entries, nothing read, 500 ms: at most 14 pulled, 64
+  before; same bytes as `writeZip`; cancel; a failing source) and `batch.test.ts` (weights,
+  over-budget item). Authorization in `revisionEntries` is unchanged.

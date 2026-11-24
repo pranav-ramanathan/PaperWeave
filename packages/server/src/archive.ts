@@ -1,7 +1,7 @@
 // Reading and writing project archives (ZIP, and tar or tar.gz for reading). An uploaded archive
 // is untrusted: nothing in it is believed until checked, and nothing is written anywhere by its
 // own say-so.
-import { Readable } from 'node:stream';
+import { type Duplex, Readable } from 'node:stream';
 import { createGunzip } from 'node:zlib';
 import yauzl from 'yauzl';
 import yazl from 'yazl';
@@ -679,15 +679,49 @@ export function writeZip(entries: Entry[]): Promise<Uint8Array> {
 export function zipStream(entries: Entry[] | AsyncIterable<Entry>): ReadableStream<Uint8Array> {
   if (Array.isArray(entries)) return Readable.toWeb(zipOf(entries)) as ReadableStream<Uint8Array>;
   // Entries that are still on their way are added as they arrive, in the order they come. If one
-  // fails, the stream fails with it, and nothing more is asked for.
+  // fails, the stream fails with it, and nothing more is asked for. yazl ignores the answer of
+  // `write`, so the pace is kept here: an entry is added only when the one before it has been
+  // written, and while more than UNREAD_BYTES wait unread.
   const zip = new yazl.ZipFile();
-  const out = zip.outputStream as unknown as Readable;
+  const out = zip.outputStream as unknown as Duplex;
+  // yazl has no event for "written"; its cursor moves when an entry is, all at once.
+  const cursor = () => (zip as unknown as { outputStreamCursor: number }).outputStreamCursor;
   (async () => {
+    let written: Promise<void> = Promise.resolve();
     for await (const e of entries) {
+      await written;
+      await settle(out, () => out.writableLength + out.readableLength < UNREAD_BYTES, 20);
       if (out.destroyed) return;
+      const before = cursor();
       zip.addBuffer(Buffer.from(e.bytes), e.path, { mtime: new Date(0) });
+      // The next entry is asked for meanwhile, while this one is compressed.
+      written = settle(out, () => cursor() !== before, 1);
     }
-    zip.end();
+    await written;
+    if (!out.destroyed) zip.end();
   })().catch((err) => out.destroy(err));
   return Readable.toWeb(out) as ReadableStream<Uint8Array>;
+}
+
+/** How much output may wait unread before `zipStream` takes no more entries. */
+export const UNREAD_BYTES = 8 * 1024 * 1024;
+
+/**
+ * Resolves when `ready()`, or when the stream has closed or failed, whichever is first. `drain`
+ * says soonest; the timer is for what no event says (a reader that took some, a cursor that moved).
+ */
+function settle(out: Duplex, ready: () => boolean, everyMs: number): Promise<void> {
+  const done = () => out.destroyed || ready();
+  if (done()) return Promise.resolve();
+  return new Promise((resolve) => {
+    const events = ['drain', 'close', 'error'] as const;
+    const check = () => {
+      if (!done()) return;
+      clearInterval(timer);
+      for (const ev of events) out.off(ev, check);
+      resolve();
+    };
+    const timer = setInterval(check, everyMs);
+    for (const ev of events) out.on(ev, check);
+  });
 }
