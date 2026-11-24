@@ -7285,3 +7285,66 @@ restores of a large paper got round it (`docs/security-review.md`, Open 1).
 - **Still not counted.** Imports (ZIP and the like), creating or uploading a file that does not
   replace one, deleting, saving a revision, comments and proposals (limited separately by
   `mayWrite`). The budget is kept per person over all their papers.
+
+### Build outputs are read without following links or past a size cap
+
+- **A fault found.** The worker read what a build left in its directory (log, PDF, SyncTeX,
+  .bbl, .fls, every .aux; a chart's PDF and PNG) by plain path, which follows links, and some
+  with no size cap. The directory holds the paper's own files.
+- **Now.** `readOwn(root, path, maxBytes)` in `compile.ts` is the one way: the path is inside
+  `root`, each folder on the way is a real folder, the file is a regular file, it is opened with
+  `O_NOFOLLOW`, and it is read up to `maxBytes`. A link, an oversized file or an error gives
+  `undefined`, and the output is absent: no log means latexmk's output is used, no PDF means the
+  build fails with the usual diagnostics. `keep()` reads and writes instead of `cpSync`. Used in
+  `compile.ts` (log, PDF, SyncTeX, .bbl, .fls once, .aux, and the paper-file reader, which was
+  already `lstat`-checked but not for folders), `builder.ts` (the stored outputs and the .bbl
+  size, which was `statSync`) and `charts.ts`.
+- **Caps** (constants, generous): log 32 MiB, PDF 256 MiB, SyncTeX 128 MiB, .bbl 5 MB (the
+  limit `builder.ts` already had, now `BBL_BYTES` in `compile.ts`), one .aux 16 MiB, .fls
+  32 MiB, a chart file 64 MiB.
+- **Held by** seven cases in `compile.test.ts` that make links with `symlinkSync` in a temp
+  directory and call `readOwn` directly. `keep()` is inside `compile()`, which needs the
+  container, so a linked `.pdf` is covered through `readOwn`. The compile, builds and charts
+  sandbox suites pass unchanged. `TEX_TEXT` is not bumped: an ordinary build's log and outputs
+  are byte for byte what they were.
+
+### Diagnostics are de-duplicated in one pass, and capped
+
+- **A fault found.** `diagnostics()` removed repeats of the TeX errors with `findIndex` and
+  `JSON.stringify` for each pair: quadratic. A log of 20,000 different error lines took 127 s on
+  the old code (20,000 identical ones took 84 ms, as the first match is found at once).
+- **Now.** `dedupeDiagnostics` keeps the first of the same entries, in order, with a `Set` of
+  their serialized form: 130 ms for the same 20,000 different lines. `capDiagnostics` keeps at
+  most `MAX_DIAGNOSTICS` (1,000; none existed) and adds one entry, "N more messages left out. The
+  build log has them all." Errors are kept before warnings where something has to go, and the
+  entry is an error if an error went, so a failed build still shows one.
+- **Held by** new cases in `compile.test.ts`: logs built line by line (no TeX) of 20,000
+  identical and 20,000 different errors, and the two functions on 20,000 entries each, each with
+  an elapsed-time assertion (limits 2 to 5 s).
+- **The other sites, now done.** The remaining `out.some` checks with `JSON.stringify` in
+  `diagnostics()` (log warnings, "Characters not shown", stray characters, "Never closed", the
+  BibTeX and Biber messages, the abbreviation list) and in `bibliography()` are lookups in a
+  `Set` (a count map in `bibliography()`, where entries are replaced). Each site keeps its own
+  notion of "same": the whole entry, or, for the missing-file and EPS messages, the message.
+  The set is filled lazily and rebuilt after the code that replaces entries. 20,000 different
+  warnings, each written twice, took 203 s on the old code and 0.18 s now. `TEX_TEXT` is not
+  bumped: output is the same entry for entry.
+- **Held by** four more cases in `compile.test.ts` through `diagnostics()` (warnings, BibTeX
+  `---line` errors, biber errors, missing-.bib messages, 20,000 each, limit 5 s) and one for
+  first-seen order.
+
+### The container user's `chown` does not follow links
+
+- **A fault found.** `sandbox()` (as root) walked the copy of the project and called `chownSync`,
+  which follows links: a link in it would have handed its target, possibly outside the build
+  folder, to the container user.
+- **When it runs.** Before every container run in `compile()`, on the whole work folder: the
+  files the worker copied there (the project, and the kept files put back for a warm build),
+  never on what TeX wrote in the same run. The kept files are regular files only (`eachFile`),
+  so a link TeX made does not come back through the warm folder; the project copy keeps links as
+  they are (`cpSync`), so that was the way in. A defence, not a known hole: the builder writes
+  regular files.
+- **Now.** `ownTree()` uses `lchownSync`, does not enter a link to a folder, and does nothing for
+  a root that is a link. Ordinary files and folders are handled as before.
+- **Held by** four cases in `compile.test.ts` with `symlinkSync` in a temp directory (a
+  recording chown, and with the real one when run as root, where the target keeps its owner).

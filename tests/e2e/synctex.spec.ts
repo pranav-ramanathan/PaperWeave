@@ -594,9 +594,13 @@ test('a double-click on a word of the PDF selects that word, and a place in a li
   const larger = build(page).getByRole('button', { name: 'Larger' });
   for (let i = 0; i < 3; i++) await larger.click();
   await expect(build(page).getByRole('group', { name: 'Size of the pages' })).toContainText('200%');
+  // The band of the first press stays until the answer to this one replaces it: wait for the
+  // new band, not for one that is about to be swapped out.
+  await mark.evaluate((el) => (el.dataset.replaced = 'yes'));
   await page.getByRole('button', { name: 'Show in PDF' }).click();
-  await expect(mark).toHaveAttribute('data-page', String(end.n));
-  await expect(mark).toBeInViewport();
+  const shown = build(page).locator('.pdf-mark:not([data-replaced])');
+  await expect(shown).toHaveAttribute('data-page', String(end.n));
+  await expect(shown).toBeInViewport();
   await expect.poll(async () => (await placed()).inPane).toBe(true);
   await build(page).getByRole('button', { name: 'Fit the width' }).click();
 

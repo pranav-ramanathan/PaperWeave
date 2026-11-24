@@ -4,20 +4,25 @@
 // CLI: node apps/workers/src/cli.ts <project dir> <root .tex> <output dir>
 import { execFile } from 'node:child_process';
 import {
-  chownSync,
+  closeSync,
+  constants,
   cpSync,
   existsSync,
+  fstatSync,
+  lchownSync,
   lstatSync,
   mkdirSync,
   mkdtempSync,
+  openSync,
   readdirSync,
   readFileSync,
+  readSync,
   renameSync,
   rmSync,
   writeFileSync,
 } from 'node:fs';
 import { tmpdir } from 'node:os';
-import { dirname, join } from 'node:path';
+import { dirname, isAbsolute, join, relative, resolve, sep } from 'node:path';
 import {
   LATEXMK_RULES,
   auxLabels,
@@ -67,6 +72,24 @@ export type CompileResult = {
   passes?: number;
 };
 
+/**
+ * Give `path` and everything under it to `uid`, without following a link: a link is itself given
+ * over (lchown), never what it points to, and a link to a folder is not entered. `chown` is a
+ * parameter for tests.
+ */
+export function ownTree(
+  path: string,
+  uid: number,
+  chown: (p: string, uid: number, gid: number) => void = lchownSync,
+): void {
+  // A root that is a link is no folder of ours to walk.
+  if (lstatSync(path).isSymbolicLink()) return;
+  chown(path, uid, uid);
+  for (const e of readdirSync(path, { withFileTypes: true }))
+    if (e.isDirectory()) ownTree(join(path, e.name), uid, chown);
+    else chown(join(path, e.name), uid, uid);
+}
+
 /** Run a command in the sandbox with `work` mounted read-write at /work. */
 export function sandbox(
   work: string,
@@ -80,13 +103,7 @@ export function sandbox(
   // otherwise run as ourselves.
   let user = `${process.getuid!()}:${process.getgid!()}`;
   if (process.getuid!() === 0) {
-    const own = (p: string) => {
-      chownSync(p, TEX_UID, TEX_UID);
-      for (const e of readdirSync(p, { withFileTypes: true }))
-        if (e.isDirectory()) own(join(p, e.name));
-        else chownSync(join(p, e.name), TEX_UID, TEX_UID);
-    };
-    own(work);
+    ownTree(work, TEX_UID);
     user = `${TEX_UID}:${TEX_UID}`;
   }
   const args = [
@@ -335,6 +352,9 @@ function bibliography(
   const bbl = name === undefined ? undefined : read(name);
   if (!bbl || !/\\entry\{/.test(bbl)) return;
   const keys = [...new Set([...bbl.matchAll(/\\entry\{([^{}]+)\}\{/g)].map((m) => m[1].trim()))];
+  // How many of each entry `out` holds, kept up to date as entries are replaced.
+  const held = new Map<string, number>();
+  for (const d of out) held.set(JSON.stringify(d), (held.get(JSON.stringify(d)) ?? 0) + 1);
   for (let i = 0; i < out.length; i++) {
     const d = out[i];
     const chars = BARE_CHARS.find(([re]) => re.test(d.message))?.[1];
@@ -355,10 +375,53 @@ function bibliography(
     }
     if (!hits.length) continue;
     // The same error comes again for each pass; its replacement is made once.
-    const have = (e: Diagnostic) => out.some((o) => JSON.stringify(o) === JSON.stringify(e));
-    out.splice(i, 1, ...hits.slice(0, 5).filter((h) => !have(h)));
+    const fresh = hits.slice(0, 5).filter((h) => !(held.get(JSON.stringify(h)) ?? 0));
+    const gone = JSON.stringify(out[i]);
+    held.set(gone, (held.get(gone) ?? 1) - 1);
+    for (const h of fresh) held.set(JSON.stringify(h), (held.get(JSON.stringify(h)) ?? 0) + 1);
+    out.splice(i, 1, ...fresh);
     i--;
   }
+}
+
+/**
+ * Each entry once, the first of the same ones where it was: TeX says the same thing again when it
+ * comes to the same \end a second time. One pass, whatever the number of entries.
+ */
+export function dedupeDiagnostics(list: Diagnostic[]): Diagnostic[] {
+  const seen = new Set<string>();
+  return list.filter((d) => {
+    const key = JSON.stringify(d);
+    if (seen.has(key)) return false;
+    seen.add(key);
+    return true;
+  });
+}
+
+/** More diagnostics than this are not kept: the build log has them all. */
+export const MAX_DIAGNOSTICS = 1000;
+
+/**
+ * At most `max` entries, in their order, errors before warnings where something has to go, and
+ * one more that says how many were left out. That one is an error if an error was left out, so
+ * that a failed build still has one to show.
+ */
+export function capDiagnostics(list: Diagnostic[], max = MAX_DIAGNOSTICS): Diagnostic[] {
+  if (list.length <= max) return list;
+  const room = list.map((_, i) => i).filter((i) => list[i].severity === 'error');
+  room.length = Math.min(room.length, max);
+  for (let i = 0; i < list.length && room.length < max; i++)
+    if (list[i].severity !== 'error') room.push(i);
+  const kept = new Set(room);
+  const left = list.filter((_, i) => !kept.has(i));
+  const severity = left.some((d) => d.severity === 'error') ? 'error' : 'warning';
+  return [
+    ...list.filter((_, i) => kept.has(i)),
+    {
+      severity,
+      message: `${left.length} more ${left.length === 1 ? 'message' : 'messages'} left out. The build log has them all.`,
+    },
+  ];
 }
 
 /**
@@ -404,12 +467,14 @@ export function diagnostics(
     found.push({ at: m.index, d });
   }
   const reading = readingAt(log, dir);
-  const out = found
-    .filter(({ d }) => !STOP.test(d.message))
-    .sort((x, y) => x.at - y.at)
-    .map(({ at, d }) => unclosed(runaway(log, at, d, reading.ended), reading.opened(at), read, dir))
-    // TeX says the same thing again when it comes to the same \end a second time.
-    .filter((d, i, all) => all.findIndex((e) => JSON.stringify(e) === JSON.stringify(d)) === i);
+  const out = dedupeDiagnostics(
+    found
+      .filter(({ d }) => !STOP.test(d.message))
+      .sort((x, y) => x.at - y.at)
+      .map(({ at, d }) =>
+        unclosed(runaway(log, at, d, reading.ended), reading.opened(at), read, dir),
+      ),
+  );
   // minted cannot run without shell escape: one error that says so, not the five it causes.
   minted(out, read);
   // The paper ends before \end{document}: TeX's own words for it are about its input.
@@ -419,6 +484,33 @@ export function diagnostics(
     !out.some((d) => d.severity === 'error' && d.message.startsWith('File ended while scanning'))
   )
     out.push({ severity: 'error', message: 'The paper ends without \\end{document}.' });
+  // What `out` holds, as whole entries and as messages, so that "is it there already" is a lookup
+  // and not a scan. Entries are picked up lazily, where they were pushed; `resync` starts over
+  // after code that replaces or removes entries.
+  const keys = new Set<string>();
+  const messages = new Set<string>();
+  let synced = 0;
+  const sync = () => {
+    for (; synced < out.length; synced++) {
+      keys.add(JSON.stringify(out[synced]));
+      messages.add(out[synced].message);
+    }
+  };
+  const resync = () => {
+    keys.clear();
+    messages.clear();
+    synced = 0;
+  };
+  const has = (d: Diagnostic) => (sync(), keys.has(JSON.stringify(d)));
+  /** Push `d` unless an entry the same in every field is there. */
+  const add = (d: Diagnostic) => {
+    if (!has(d)) out.push(d);
+  };
+  /** Push `d` unless an entry with its message is there. */
+  const addByMessage = (d: Diagnostic) => {
+    sync();
+    if (!messages.has(d.message)) out.push(d);
+  };
   // BibTeX says where in its own way: "I was expecting a `,' or a `}'---line 9 of file refs.bib".
   // That is in latexmk's output and in main.blg, never in the TeX log.
   const beforeBibtex = out.length;
@@ -429,16 +521,14 @@ export function diagnostics(
       line: Number(m[2]),
       message: `BibTeX: ${m[1]}.`,
     };
-    if (!out.some((e) => JSON.stringify(e) === JSON.stringify(d))) out.push(d);
+    add(d);
   }
   // The rest of BibTeX's errors name no line of a .bib; the build still fails on each. Three shapes:
   // one found while the style runs ("Name 2 in "..." has a comma at the end for entry b", then
   // "while executing---line 1049 of file plain.bst") names the reference, which is looked up in
   // the .bib files; one in the .aux ("White space in argument---line 3 of file main.aux") is about
   // a command of the paper's; one in a style file is placed there if the style is the paper's.
-  const said = (d: Diagnostic) => {
-    if (!out.some((e) => JSON.stringify(e) === JSON.stringify(d))) out.push(d);
-  };
+  const said = add;
   // The line of a field of a reference (else the reference's own), in the .bib that has it.
   const inBib = (key: string, field: (fields: Record<string, string>) => string | undefined) => {
     for (const file of read ? bibFiles(output) : []) {
@@ -486,7 +576,7 @@ export function diagnostics(
           ? 'ends with a comma. Put only "and" between names, with no comma before it.'
           : 'has too many commas. Write each name as "First Last" or "Last, First", with "and" between names.'),
     };
-    if (out.some((e) => JSON.stringify(e) === JSON.stringify(d))) continue;
+    if (has(d)) continue;
     if (++nameErrors <= 10) out.push(d);
   }
   for (const m of output.matchAll(
@@ -553,13 +643,17 @@ export function diagnostics(
   // Collected here and added after the check below, which counts only what failed. The other
   // warnings ("empty journal in he16", "entry type ... isn't style-file defined") are noise.
   const abbreviations: Diagnostic[] = [];
+  const abbreviated = new Set<string>();
   const abbreviation = (name: string, file: string | undefined, line: number) => {
     const d: Diagnostic = {
       severity: 'warning',
       ...(file ? { file, line } : {}),
       message: `Abbreviation not defined: "${name}" is used in ${file ?? 'a .bib file'} but no @string defines it; the reference is printed without that field.`,
     };
-    if (!abbreviations.some((e) => JSON.stringify(e) === JSON.stringify(d))) abbreviations.push(d);
+    const key = JSON.stringify(d);
+    if (abbreviated.has(key)) return;
+    abbreviated.add(key);
+    abbreviations.push(d);
   };
   for (const m of output.matchAll(
     /^Warning--string name "(.+?)" is undefined\r?\n--line (\d+) of file (?:\.\/)?(.+?\.bib)\r?$/gm,
@@ -569,7 +663,7 @@ export function diagnostics(
   const bibtex = (re: RegExp, say: (found: string) => string) => {
     for (const m of output.matchAll(re)) {
       const d: Diagnostic = { severity: 'error', message: say(m[1]) };
-      if (!out.some((e) => e.message === d.message)) out.push(d);
+      addByMessage(d);
     }
   };
   bibtex(
@@ -610,9 +704,7 @@ export function diagnostics(
   // BibTeX data source 'refs.bib'", and an error in that file comes after. The line is the .bib's
   // own (biber's copy of it, which the message names, has the same lines), counted from 1.
   let source: string | undefined;
-  const biber = (d: Diagnostic) => {
-    if (!out.some((e) => JSON.stringify(e) === JSON.stringify(d))) out.push(d);
-  };
+  const biber = add;
   for (const m of output.matchAll(
     /^(?:INFO - Found BibTeX data source '(.+)'|ERROR - (.+?)|WARN - (.+?))\r?$/gm,
   )) {
@@ -713,7 +805,7 @@ export function diagnostics(
       ...(path ? { file: m[1] } : {}),
       message: `${path ?? m[1]} is an EPS file, which XeLaTeX cannot convert here. Convert it to PDF.`,
     };
-    if (!out.some((e) => e.message === d.message)) out.push(d);
+    addByMessage(d);
   }
   // A bare _, & or # in a .bib entry: which reference, and where it is in the .bib.
   if (read) bibliography(out, log, output, read);
@@ -735,6 +827,8 @@ export function diagnostics(
     else if (/\.(aux|toc|out|lof|lot|nav|snm)$/.test(file))
       own(`In what the last pass left for this one (${base}): ${message}`);
   }
+  // Entries were replaced above, and bibliography() may have replaced some: look again.
+  resync();
   // A warning gives a line but not the file the line is in. That is whichever of the paper's
   // files TeX was reading when it wrote the warning.
   // A font that lacks a size is one warning for the paper, not one for each shape it is asked
@@ -771,7 +865,7 @@ export function diagnostics(
       line,
     };
     // The same warning is written once for each pass over the paper.
-    if (!out.some((d) => JSON.stringify(d) === JSON.stringify(warning))) out.push(warning);
+    add(warning);
   }
   if (sizes.length > 0) {
     const shown = sizes
@@ -829,7 +923,7 @@ export function diagnostics(
       message: `Characters not shown: ${list} ${chars.length === 1 ? 'is' : 'are'} not in the font (${fonts[0]}${fonts.length > 1 ? ' and others' : ''}); the PDF leaves ${chars.length === 1 ? 'it' : 'them'} out.`,
       ...(file ? { file } : {}),
     };
-    if (!out.some((d) => JSON.stringify(d) === JSON.stringify(warning))) out.push(warning);
+    add(warning);
   }
   // Text outside a node in a TikZ picture is set in nullfont and thrown away. Its own warning:
   // the paper is fine, so it must not start with "Characters not shown: " (that refuses a submit).
@@ -842,7 +936,7 @@ export function diagnostics(
       message: `Stray character${one ? '' : 's'} in a picture: ${list} ${one ? 'is' : 'are'} typed where TikZ draws no text (outside a node), so the PDF does not show ${one ? 'it' : 'them'}. Delete ${one ? 'it' : 'them'}, or put ${one ? 'it' : 'them'} in a node.`,
       ...(file ? { file } : {}),
     };
-    if (!out.some((d) => JSON.stringify(d) === JSON.stringify(warning))) out.push(warning);
+    add(warning);
   }
   // Groups and conditionals still open at \end{document}: the build works, and the rest of the
   // paper is in a font, or skipped. Not after an error: that leaves groups open as a knock-on.
@@ -905,10 +999,10 @@ export function diagnostics(
         message: `Never closed: ${what}`,
         ...(file ? { file, line } : {}),
       };
-      if (!out.some((d) => JSON.stringify(d) === JSON.stringify(warning))) out.push(warning);
+      add(warning);
     }
   }
-  return out;
+  return capDiagnostics(out);
 }
 
 /** A font as the log names it: "[lmroman12-regular]:mapping=tex-text;" or "cmr10" or "Name/OT:..." */
@@ -1115,6 +1209,62 @@ function readingAt(
 const WARM_BYTES = 64 << 20;
 const WARM_FILES = 5000;
 
+/**
+ * The most each output of a build is read for, in bytes. The build directory is the paper's: a
+ * file there that is bigger is treated as if it were not there. Generous, so that no real paper
+ * comes near them.
+ */
+export const LOG_BYTES = 32 << 20;
+export const PDF_BYTES = 256 << 20;
+export const SYNCTEX_BYTES = 128 << 20;
+/** The largest .bbl kept: a bibliography is far smaller, and a ZIP must not grow by a surprise. */
+export const BBL_BYTES = 5_000_000;
+/** One .aux file, and the .fls (the paths TeX opened). */
+const AUX_BYTES = 16 << 20;
+const FLS_BYTES = 32 << 20;
+
+/**
+ * The bytes of the file at `path`, which must be inside `root`, or undefined. For what a build
+ * leaves in its directory, which the paper's own files can fill with anything: it is read only
+ * if it is a regular file (never a link), every folder between `root` and it is a real folder
+ * (never a link), and it is no bigger than `maxBytes`. Anything else, or any error, is undefined:
+ * the output is treated as absent.
+ */
+export function readOwn(root: string, path: string, maxBytes: number): Buffer | undefined {
+  let fd: number | undefined;
+  try {
+    const from = resolve(root);
+    const parts = relative(from, resolve(path)).split(sep);
+    if (isAbsolute(parts[0]) || parts[0] === '' || parts[0] === '..') return undefined;
+    let at = from;
+    for (const part of parts.slice(0, -1)) {
+      at = join(at, part);
+      if (!lstatSync(at).isDirectory()) return undefined;
+    }
+    const file = join(at, parts.at(-1)!);
+    const seen = lstatSync(file);
+    if (!seen.isFile() || seen.size > maxBytes) return undefined;
+    // O_NOFOLLOW: a link put in place of the file since the check is refused by the open itself.
+    fd = openSync(file, constants.O_RDONLY | (constants.O_NOFOLLOW ?? 0));
+    const opened = fstatSync(fd);
+    if (!opened.isFile() || opened.size > maxBytes) return undefined;
+    const buf = Buffer.alloc(opened.size);
+    let n = 0;
+    while (n < buf.length) {
+      const got = readSync(fd, buf, n, buf.length - n, null);
+      if (got === 0) break;
+      n += got;
+    }
+    // A file that grew since fstat is refused rather than cut short.
+    if (readSync(fd, Buffer.alloc(1), 0, 1, null) > 0) return undefined;
+    return n === buf.length ? buf : Buffer.from(buf.subarray(0, n));
+  } catch {
+    return undefined;
+  } finally {
+    if (fd !== undefined) closeSync(fd);
+  }
+}
+
 /** Each regular file under `from`, by its `/`-joined path: nothing else is followed or listed. */
 function eachFile(from: string, each: (rel: string, size: number) => void, rel = ''): void {
   for (const e of readdirSync(join(from, rel), { withFileTypes: true })) {
@@ -1236,7 +1386,9 @@ export async function compile(
     }
     const base = root.replace(/\.(tex|ltx)$/i, '');
     const logPath = join(work, base + '.log');
-    const log = existsSync(logPath) ? texText(readFileSync(logPath)) : run.output;
+    // A log that is a link, or bigger than any TeX writes, is no log: latexmk's output stands in.
+    const logBytes = readOwn(work, logPath, LOG_BYTES);
+    const log = logBytes ? texText(logBytes) : run.output;
     // A warm build that does not run BibTeX has none of its words on its output. While the .bbl
     // it made is still read, they are repeated.
     let output = run.output;
@@ -1250,21 +1402,25 @@ export async function compile(
     )
       output += '\n' + readFileSync(saidAt, 'utf8');
     mkdirSync(out, { recursive: true });
-    const keep = (ext: string) => {
-      if (!existsSync(join(work, base + ext))) return undefined;
-      cpSync(join(work, base + ext), join(out, 'output' + ext));
+    // Read, then written: a copy would follow a link. A link, or a file over `max`, is absent.
+    const keep = (ext: string, max: number, notEmpty = false) => {
+      const bytes = readOwn(work, join(work, base + ext), max);
+      if (!bytes || (notEmpty && bytes.length === 0)) return undefined;
+      writeFileSync(join(out, 'output' + ext), bytes);
       return 'output' + ext;
     };
-    const pdf = run.code === 0 ? keep('.pdf') : undefined;
+    const pdf = run.code === 0 ? keep('.pdf', PDF_BYTES) : undefined;
     // Every .aux file of the build: \include writes one per file.
     let aux = '';
     // After a warm start a file the paper no longer \include's has left its .aux behind: only
     // those the last TeX run wrote or read count (latexmk's .fls names them).
-    const flsAt = join(work, base + '.fls');
+    // Undefined when it is absent, a link or too big.
+    const flsBytes = readOwn(work, join(work, base + '.fls'), FLS_BYTES);
+    const flsText = flsBytes && texText(flsBytes);
     const live =
-      warmed && existsSync(flsAt)
+      warmed && flsText !== undefined
         ? new Set(
-            texText(readFileSync(flsAt))
+            flsText
               .split(/\r?\n/)
               .map((l) => /^(?:INPUT|OUTPUT) (.+)$/.exec(l)?.[1])
               .filter((f): f is string => f !== undefined)
@@ -1278,8 +1434,10 @@ export async function compile(
           e.name.endsWith('.aux') &&
           aux.length < 4_000_000 &&
           (!live || live.has(join(dir, e.name).slice(work.length + 1)))
-        )
-          aux += texText(readFileSync(join(dir, e.name))) + '\n';
+        ) {
+          const bytes = readOwn(work, join(dir, e.name), AUX_BYTES);
+          if (bytes) aux += texText(bytes) + '\n';
+        }
     };
     if (pdf) gather(work);
     // The paper's own text, read only to see which file an unclosed environment is in; nothing
@@ -1291,10 +1449,8 @@ export async function compile(
         try {
           const placed = place(rootDir(root), name);
           const path = placed && join(work, placed);
-          if (path) {
-            const st = lstatSync(path);
-            if (st.isFile() && st.size <= 2_000_000) text = texText(readFileSync(path));
-          }
+          const bytes = path ? readOwn(work, path, 2_000_000) : undefined;
+          if (bytes) text = texText(bytes);
         } catch {
           text = undefined;
         }
@@ -1306,9 +1462,8 @@ export async function compile(
     // pdfTeX and LuaTeX place EPS through epstopdf, which needs shell escape; without it the
     // picture is silently drawn as a box with its name, and the log says nothing. XeLaTeX
     // fails instead, and diagnostics() has said so.
-    const fls = join(work, base + '.fls');
-    if (pdf && compiler !== 'xelatex' && existsSync(fls))
-      for (const f of epsPictures(texText(readFileSync(fls)), rootDir(root)))
+    if (pdf && compiler !== 'xelatex' && flsText !== undefined)
+      for (const f of epsPictures(flsText, rootDir(root)))
         found.push({
           severity: 'warning',
           file: f,
@@ -1352,9 +1507,7 @@ export async function compile(
     // What TeX opened. Only from a run of TeX in this build: a warm build is started with the
     // .fls the last one left, and if latexmk ran no TeX that file is not this build's.
     const opened =
-      pdf && passes > 0 && existsSync(fls)
-        ? readFiles(texText(readFileSync(fls)), rootDir(root))
-        : undefined;
+      pdf && passes > 0 && flsText !== undefined ? readFiles(flsText, rootDir(root)) : undefined;
     return {
       warmed,
       passes,
@@ -1365,12 +1518,9 @@ export async function compile(
       diagnostics: found,
       log,
       pdf,
-      synctex: pdf && keep('.synctex.gz'),
+      synctex: pdf && keep('.synctex.gz', SYNCTEX_BYTES),
       // Not the empty file LATEXMK_RULES' pw_bbl puts where a paper's .bbl is missing.
-      bbl:
-        pdf && lstatSync(join(work, base + '.bbl'), { throwIfNoEntry: false })?.size
-          ? keep('.bbl')
-          : undefined,
+      bbl: pdf ? keep('.bbl', BBL_BYTES, true) : undefined,
       labels: pdf ? auxLabels(aux) : undefined,
     };
   } finally {
