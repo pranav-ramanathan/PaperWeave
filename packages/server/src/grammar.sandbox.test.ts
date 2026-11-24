@@ -480,6 +480,33 @@ test('mistakes in a caption and in a footnote are found', async () => {
   );
 });
 
+test('an abbreviation or a made-up name is not listed as misspelt', async () => {
+  const src = [
+    '\\documentclass{article}',
+    '\\begin{document}',
+    'We train a ResNet and an EfficientNet with RMSProp, and report mAP on QNLI and on MSCOCO.',
+    'THe GPU-acelerated run recieved two SVHNs, a BiT-L model and word2vek features.',
+    'Our Frobnet baseline uses teh same DBN-based setup.\\footnote{As in SpanBERT, with a smal change.}',
+    '\\end{document}',
+    '',
+  ].join('\n');
+  const p = await paper(src, false);
+  const spelt = async () =>
+    (await check(p, 'owner')).filter((f) => f.kind === 'spelling').map((f) => f.words);
+  expect(await spelt()).toEqual([
+    'THe',
+    'GPU-acelerated',
+    'recieved',
+    'Frobnet',
+    'teh',
+    'DBN-based',
+    'smal',
+  ]);
+  // The paper's own list still works beside the rule.
+  await setLanguageSettings(t.pool, users.owner.id, p.id, { glossary: ['Frobnet'] });
+  expect(await spelt()).toEqual(['THe', 'GPU-acelerated', 'recieved', 'teh', 'DBN-based', 'smal']);
+});
+
 test("a paper's own text macros are read as the words they print, from the package that defines them", async () => {
   const p = await paper(
     [

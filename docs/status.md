@@ -6369,3 +6369,71 @@ of the paper's .bib files.`
     `\item[..]` and `description` raw in the visual view; LaTeX's own "Empty `thebibliography'
     environment" line still shows beside "Bibliography empty"; everything in the "Not done" of
     "Enter at the start of a list item always opens an item above it".
+
+## Abbreviations and made-up names are not misspelt words
+
+- **What was wrong.** The checker knows no model, data set, laboratory or funder by name, and
+  every one it met was listed under "Spelling" with its nearest dictionary word to change it to
+  (`ResNet`: "Reset"). Over the corpus (31 papers, 118 body files; counts only), checked as
+  British English as an imported paper is: 4,329 of 5,071 findings were spelling; 1,903 of those
+  (44 %), in 28 of 28 papers, were on a word written as an abbreviation or a made-up name, 1,521
+  of them a word the paper uses three times or more. A median paper showed 121 spelling findings.
+- **Now** (`coined` in `packages/server/src/grammar.ts`, one line of `checkGrammar`). A word the
+  checker does not know is not listed under "Spelling" when it is written as an abbreviation or
+  a made-up name. Everything else is as before: the same findings, at the same places, with the
+  same buttons.
+
+  | The word                                                                                           | Before                       | Now                                                             |
+  | -------------------------------------------------------------------------------------------------- | ---------------------------- | --------------------------------------------------------------- |
+  | All capitals, two or more: `QNLI`, `MSCOCO`, `QA`; with a plural or possessive `s`: `NNs`, `GPU's` | Spelling: "ONLY"? "MSC OCO"? | not listed                                                      |
+  | A capital after a small letter: `ResNet`, `mAP`, `arXiv`, `GoogLeNet`, `SpanBERT`                  | Spelling: "Reset"? "map"?    | not listed                                                      |
+  | Three capitals or more: `RMSProp`, `MBConv`, `XLNet`                                               | Spelling                     | not listed                                                      |
+  | A digit in it: `word2vec`, `x86`, `CO2`                                                            | Spelling (when not known)    | not listed                                                      |
+  | Such names joined by a hyphen, or with a single character: `CLIP-ResNet`, `BiT-L`                  | Spelling                     | not listed                                                      |
+  | An ordinary word, however misspelt: `teh`, `recieved`, `pre-trianed`                               | Spelling                     | Spelling, unchanged                                             |
+  | A slip of the Shift key: `THe`, `ANd`, `WHen`, `THis`                                              | Spelling                     | Spelling, unchanged                                             |
+  | A name with one capital: `Lamport`, `Frobnet`, `Kovač`                                             | Spelling                     | Spelling, unchanged ("It is a word of this paper" is for these) |
+  | A name joined to an ordinary word: `GPU-acelerated`, `DBN-based`, `ResNet-like`                    | Spelling                     | Spelling, unchanged: the ordinary part may be the mistake       |
+  | A grammar or style finding on any of these words (`an ResNet`, a repeated `QA QA`)                 | Grammar                      | Grammar, unchanged: the rule is for spelling only               |
+  | A word of the paper's own list ("It is a word of this paper")                                      | not listed                   | not listed                                                      |
+
+  The checker is asked and answers as before; the rule is applied to each answer after the
+  paper's own list. It reads the stretch as the checker read it (`\'e` already `é`), splits it at
+  hyphens, dashes, slashes and spaces, sets parts of one character aside, and says yes when every
+  part left has a digit, a capital directly after a small letter, three capitals, or two capitals
+  and no small letter. There is no dictionary, no list of names and nothing stored.
+
+  Corpus result: 1,903 spelling findings go and 2,426 stay; a median paper shows 52 spelling
+  findings (was 121) and 75 findings in all (was 140); the 742 grammar and style findings are
+  untouched. Of the 222 different words dropped that a paper uses once, none is an ordinary word;
+  about five are a name misspelt, for none of which the checker had offered the name.
+
+- **Held by** two tests in `grammar.test.ts` and one against the real checker in
+  `grammar-benchmark.sandbox.test.ts`, run on the development machine (the benchmark document came
+  out unchanged); one in `grammar.sandbox.test.ts`, written but not run on the development machine
+  (the local blob store refuses writes), so run only in CI. No existing expectation was changed
+  and no browser test was added.
+- **Not done.**
+  - A made-up name misspelt (a letter missing in a model's name) is no longer listed. The checker
+    never offered the right name for one.
+  - A slip that puts a capital after a small letter in an ordinary word (`tHe`) is no longer
+    listed; `THe` and `ANd` still are.
+  - A name joined to an ordinary word (`DBN-based`, `ResNet-like`) is still listed: 163 findings in
+    the corpus, none a mistake in the sample read. Telling a right ordinary part from a wrong one
+    needs a second question to the checker.
+  - A name with one capital (an author, a town, an institute) is still listed until it is made a
+    word of the paper: 770 findings, 403 of them in two papers. 139 of the 770 are a word of the
+    paper's own reference list.
+  - A word the paper uses many times is listed each time; "It is a word of this paper" takes all
+    of them at once. After this change a median paper's 52 spelling findings are 26 different
+    words.
+  - Every imported paper is checked as British English until someone changes it on the paper's
+    page. 20 of the 28 corpus papers are written in American English and show 291 more spelling
+    findings for it (median 9 a paper, at most 52); the 7 British ones would show 252 more if the
+    default were American. Choosing the spelling at import from the paper's own words is the
+    natural next step.
+  - The panel, the paper's page and the benchmark document do not say that such names are not
+    checked.
+  - Not tried: a real browser on this machine (nothing in the browser changes).
+  - Carry over, unchanged: everything in the "Not done" of "Captions and footnotes in the grammar
+    check".

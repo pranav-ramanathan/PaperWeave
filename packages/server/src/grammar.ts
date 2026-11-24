@@ -49,6 +49,31 @@ export const NEVER = [
   ...['EN_QUOTES', 'EN_UNPAIRED_QUOTES', 'WHITESPACE_RULE', 'CONSECUTIVE_SPACES'],
   'OXFORD_SPELLING_Z_NOT_S',
 ];
+/**
+ * Whether a word the checker does not know is written as an abbreviation or a made-up name, not
+ * as an ordinary word: `QNLI`, `ResNet`, `mAP`, `RMSProp`, `word2vec`, `GPUs`. The checker
+ * knows no such name and answers with a guess (`ResNet`: "Reset"); half of what it calls
+ * misspelt in a paper is one. Each part between hyphens or spaces must be written so (a single
+ * character aside), so an ordinary word joined to a name is still checked: `GPU-acelerated`.
+ * `THe` and `ANd` are ordinary words typed with a slip, and are not names.
+ */
+export function coined(word: string): boolean {
+  const parts = word.split(/[\s\-–—/]+/).filter((part) => [...part].length > 1);
+  return (
+    parts.length > 0 &&
+    parts.every((part) => {
+      const capitals = part.match(/\p{Lu}/gu)?.length ?? 0;
+      return (
+        /\p{N}/u.test(part) ||
+        // A capital after a small letter: ResNet, mAP, arXiv.
+        /\p{Ll}\p{Lu}/u.test(part) ||
+        capitals >= 3 ||
+        // All capitals, with or without a plural s: QA, NNs.
+        (capitals >= 2 && !/\p{Ll}/u.test(part.replace(/['’]?s$/, '')))
+      );
+    })
+  );
+}
 /** A word: letters, digits, and the marks that join them. No spaces. */
 const WORD = /^[\p{L}\p{N}'’.-]+$/u;
 const fits = (s: string) => s.length <= 60 && WORD.test(s);
@@ -295,6 +320,8 @@ export async function checkGrammar(
     const reads = readAs(src, segments, from, to).normalize('NFC');
     const spelling = m.rule.category.id === 'TYPOS';
     if (spelling && (known.has(reads.toLowerCase()) || known.has(words.toLowerCase()))) continue;
+    // An abbreviation or a made-up name is not a misspelt word.
+    if (spelling && coined(reads)) continue;
     findings.push({
       from: place(from, 0),
       to: place(to, -1),
