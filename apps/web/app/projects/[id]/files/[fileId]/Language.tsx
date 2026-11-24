@@ -2,6 +2,14 @@
 
 import type { LanguageFinding } from '@paperweave/server';
 import { useCallback, useEffect, useRef, useState } from 'react';
+import {
+  after,
+  type Line,
+  lines,
+  placeOf,
+  type Standing,
+  toShow,
+} from '../../../../../lib/findings';
 
 const KIND = { spelling: 'Spelling', grammar: 'Grammar', style: 'Style' } as const;
 
@@ -34,6 +42,8 @@ export default function Language(props: {
   const heading = useRef<HTMLHeadingElement>(null);
   const section = useRef<HTMLElement>(null);
   const [moved, setMoved] = useState(0);
+  // Where the line of a word that stands in several places is at, by the line's key.
+  const [standing, setStanding] = useState<Record<string, Standing>>({});
   // A finding that was dealt with is gone, and the button the keyboard was on with it. The
   // keyboard goes to the next finding, or to the heading if none is left. Pointer use, which
   // leaves the focus elsewhere (in the editor), is not disturbed.
@@ -94,17 +104,29 @@ export default function Language(props: {
       body: JSON.stringify({ used: kind, outcome }),
     }).catch(() => {});
   };
-  const use = async (f: LanguageFinding, replacement: string) => {
+  /**
+   * One press changes one place, the one the line stands at, and never the others: a word listed
+   * for seven places stays listed for six, and its line stands at the next of them.
+   */
+  const use = async (line: Line, at: number, replacement: string) => {
+    const f = line.places[at];
+    const left = line.places.length - 1;
+    const more = left ? ` It stands in ${left} more ${left === 1 ? 'place' : 'places'}.` : '';
+    const taken = () => {
+      drop((x) => x === f);
+      const next = after(line, at);
+      if (next) setStanding((now) => ({ ...now, [line.key]: next }));
+      setMoved((n) => n + 1);
+    };
     if (canWrite) {
       const done = await props.change(f.from, f.to, f.words, replacement);
       if (done) {
-        drop((x) => x === f);
+        taken();
         count(f.kind, 'changed');
-        setMoved((n) => n + 1);
       }
       return setNote(
         done
-          ? `Changed “${f.words}” to “${replacement}”.`
+          ? `Changed “${f.words}” to “${replacement}”.${more}`
           : 'That text has changed. It will be checked again in a moment.',
       );
     }
@@ -116,11 +138,10 @@ export default function Language(props: {
       reason: f.message,
     });
     if (!wrong) {
-      drop((x) => x === f);
+      taken();
       count(f.kind, 'proposed');
-      setMoved((n) => n + 1);
     }
-    setNote(wrong ?? `Proposed changing “${f.words}” to “${replacement}”.`);
+    setNote(wrong ?? `Proposed changing “${f.words}” to “${replacement}”.${more}`);
   };
 
   return (
@@ -134,64 +155,83 @@ export default function Language(props: {
       </p>
       {findings && findings.length === 0 && <p>Nothing found in this file.</p>}
       <ul>
-        {findings?.map((f, i) => (
-          <li key={`${f.from}:${f.rule}:${i}`}>
-            <article aria-label={`${KIND[f.kind]}: “${f.words}”`}>
-              <p>
-                <strong>{KIND[f.kind]}.</strong> <q>{f.words}</q>: {f.message}
-              </p>
-              <p>
-                {(canWrite || canPropose) &&
-                  f.replacements.slice(0, 3).map((r) => (
-                    <button key={r} type="button" onClick={() => use(f, r)}>
-                      {canWrite ? 'Change to' : 'Propose'} “{r}”
-                    </button>
-                  ))}
-                <button
-                  type="button"
-                  onClick={() =>
-                    setNote(props.show(f.from, f.to) ? '' : 'That text is no longer in the file.')
-                  }
-                >
-                  Show in the text
-                </button>
-                {canWrite && f.kind === 'spelling' && f.addable && (
+        {lines(findings ?? []).map((line) => {
+          // A misspelt word is one line for all its places; the buttons act on the one it is at.
+          const at = placeOf(line, standing[line.key]);
+          const f = line.places[at];
+          const places = line.places.length;
+          return (
+            <li key={line.key}>
+              <article aria-label={`${KIND[f.kind]}: “${f.words}”`}>
+                <p>
+                  <strong>{KIND[f.kind]}.</strong> <q>{f.words}</q>: {f.message}
+                  {places > 1 && ` Place ${at + 1} of ${places}.`}
+                </p>
+                <p>
+                  {(canWrite || canPropose) &&
+                    f.replacements.slice(0, 3).map((r) => (
+                      <button key={r} type="button" onClick={() => use(line, at, r)}>
+                        {canWrite ? 'Change to' : 'Propose'} “{r}”
+                      </button>
+                    ))}
                   <button
                     type="button"
-                    onClick={async () => {
-                      const wrong = await post(url, { word: f.reads, kind: f.kind });
-                      if (!wrong) {
-                        drop((x) => x.kind === 'spelling' && x.reads === f.reads);
-                        setMoved((n) => n + 1);
-                      }
-                      setNote(wrong ?? `“${f.reads}” is now one of the paper's own words.`);
-                    }}
-                  >
-                    It is a word of this paper
-                  </button>
-                )}
-                {canWrite && f.kind !== 'spelling' && (
-                  <button
-                    type="button"
-                    onClick={async () => {
-                      const wrong = await post(url, { rule: f.rule, kind: f.kind });
-                      if (!wrong) {
-                        drop((x) => x.rule === f.rule);
-                        setMoved((n) => n + 1);
-                      }
+                    onClick={() => {
+                      // The place the line is at; pressed again, the next one, and round.
+                      const n = toShow(line, standing[line.key]);
+                      const { from, to } = line.places[n];
+                      const shown = props.show(from, to);
+                      if (shown && places > 1)
+                        setStanding((now) => ({ ...now, [line.key]: { from, shown: true } }));
                       setNote(
-                        wrong ??
-                          'That rule is off for this paper. It can be switched on again on the paper’s page.',
+                        !shown
+                          ? 'That text is no longer in the file.'
+                          : places > 1
+                            ? `Place ${n + 1} of ${places} of “${f.words}”.`
+                            : '',
                       );
                     }}
                   >
-                    Do not check this in this paper
+                    Show in the text
                   </button>
-                )}
-              </p>
-            </article>
-          </li>
-        ))}
+                  {canWrite && f.kind === 'spelling' && f.addable && (
+                    <button
+                      type="button"
+                      onClick={async () => {
+                        const wrong = await post(url, { word: f.reads, kind: f.kind });
+                        if (!wrong) {
+                          drop((x) => x.kind === 'spelling' && x.reads === f.reads);
+                          setMoved((n) => n + 1);
+                        }
+                        setNote(wrong ?? `“${f.reads}” is now one of the paper's own words.`);
+                      }}
+                    >
+                      It is a word of this paper
+                    </button>
+                  )}
+                  {canWrite && f.kind !== 'spelling' && (
+                    <button
+                      type="button"
+                      onClick={async () => {
+                        const wrong = await post(url, { rule: f.rule, kind: f.kind });
+                        if (!wrong) {
+                          drop((x) => x.rule === f.rule);
+                          setMoved((n) => n + 1);
+                        }
+                        setNote(
+                          wrong ??
+                            'That rule is off for this paper. It can be switched on again on the paper’s page.',
+                        );
+                      }}
+                    >
+                      Do not check this in this paper
+                    </button>
+                  )}
+                </p>
+              </article>
+            </li>
+          );
+        })}
       </ul>
     </section>
   );

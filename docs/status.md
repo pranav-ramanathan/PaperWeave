@@ -6560,3 +6560,67 @@ of the paper's .bib files.`
   - Not tried: a real browser on this machine; a screen reader.
   - Carry over, unchanged: the "Not done" of "An imported paper starts in the spelling it is
     written in".
+
+## A misspelt word is one line of the spelling list
+
+- **What was wrong.** The panel drew a line for every finding, and a paper misspells the same word
+  again and again (a name, a method). Measured on the corpus (31 papers, 118 body files; counts
+  only, by the same grouping code this change ships):
+
+  | Corpus, 118 files                         | Before | Now   |
+  | ----------------------------------------- | ------ | ----- |
+  | Lines in the panel                        | 2,869  | 1,781 |
+  | of which spelling                         | 2,147  | 1,059 |
+  | Buttons (Tab stops)                       | 10,684 | 6,281 |
+  | Lines in a paper's main file, median      | 48     | 32    |
+  | Lines in a paper's main file, upper quart | 76     | 45    |
+  | Tab stops in a main file, median          | 188    | 117   |
+
+  A line goes in 59 files, in 28 of 29 papers. 26 lines stand for ten places or more, the most 164. The panel's height, median main file: 10.2 windows to 6.2 at 1280×800, 24.6 to 14.6 at
+  320×480. Those heights are from the app's CSS on static markup, not from the running page.
+
+- **Now** (`apps/web/lib/findings.ts`, `Language.tsx`).
+
+  | In the panel                    | Now                                                                                               |
+  | ------------------------------- | ------------------------------------------------------------------------------------------------- |
+  | A word misspelt in seven places | One line, where the first stood; it ends "Place 1 of 7."                                          |
+  | A word once; grammar or style   | The same line as before                                                                           |
+  | "Change to" / "Propose"         | Changes (or proposes for) the place the line stands at, and no other; the line stays for the rest |
+  | "Show in the text"              | Selects the place the line stands at; again, the next, and round                                  |
+  | "It is a word of this paper"    | Unchanged: every place leaves the list                                                            |
+  | The text                        | Unchanged: every place is still underlined                                                        |
+  | The keyboard after "Change to"  | Stays on the button while places are left                                                         |
+
+  One press changes one place, the one the line stands at. Places are one line only when the
+  checker says the same about each (same words, reading, rule, message and drawn suggestions); in
+  the corpus that never separates two places of a word: 1,059 lines either way.
+
+- **Why one place and not all.** The same letters are not always the same mistake (`teh` in a
+  quoted string or a name), so changing all at once edits places nobody looked at. One press with
+  seven edits is hard to take back, files seven proposals for a reviewer and changes seven words
+  under a collaborator. One place a press is what the button did before, and costs little, since
+  the line and its button stay put (Enter seven times). A "Change all" can be added later without
+  taking anything back. The owner had not answered and may overrule.
+- **Held by** `apps/web/lib/findings.test.ts` (7 tests; run on the development machine with the
+  unit suite, typecheck and lint) and one test in `tests/e2e/grammar.spec.ts`, written but not run
+  on the development machine (the local blob store refuses writes), so run only in CI. No
+  existing expectation was changed.
+- **Not done.**
+  - No "Change all": a word in seven places takes seven presses (the button stays under the pointer
+    and keeps the keyboard). The owner's to say.
+  - "Show in the text" puts the keyboard in the text, as it always did; stepping through seven
+    places by keyboard means coming back to the button each time.
+  - The line does not say where a place is (a line number, the words around it); the text shows it.
+  - Which place a line stands at is kept in the page only: opening the file again starts every line
+    at its first place.
+  - One line per word in a file, not in a paper: a word misspelt in five files is five lines
+    ("It is a word of this paper" takes all five).
+  - Grammar and style findings are not put together: 64 "three sentences begin with the same word",
+    44 "all of the" and the like are a line each.
+  - An unbroken word of thirty letters or more in a "Change to" button makes the page scroll
+    sideways at 320 px, before and after this change alike; the longest in the corpus has 18.
+  - The largest main file still has 155 lines (34 windows at 1280×800): its words are mostly
+    different ones.
+  - Not tried: a real browser on this machine; a screen reader.
+  - Carry over, unchanged: the "Not done" of "Comments and proposed changes come before the
+    spelling list", except its first line, which this section answers.
