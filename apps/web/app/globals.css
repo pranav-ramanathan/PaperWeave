@@ -461,8 +461,11 @@ div.pw-raw.pw-slim {
     grid-template-columns: minmax(0, 1fr);
   }
 }
-/* A table wider than the window scrolls sideways by itself, not the page with it. */
+/* A table wider than the window scrolls sideways by itself, not the page with it. It is also
+   where the table's absolutely placed words for screen readers (.sr-only) are kept: without a
+   positioned box here they sit outside the scroller, and the page is as wide as the table. */
 .wide {
+  position: relative;
   overflow-x: auto;
   max-width: 100%;
 }
