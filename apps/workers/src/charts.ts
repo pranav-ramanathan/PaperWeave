@@ -1,6 +1,6 @@
 // Takes queued charts from the charts table and draws them: Vega-Lite to SVG here, then SVG to
 // PDF and PNG in the sandbox.
-import { mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import { mkdtempSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import {
@@ -17,7 +17,10 @@ import {
 import type pg from 'pg';
 import * as vega from 'vega';
 import { compile, version as vegaLiteVersion } from 'vega-lite';
-import { sandbox } from './compile.ts';
+import { readOwn, sandbox } from './compile.ts';
+
+/** The most a drawn chart file is read for: a chart is far smaller; a bigger file is no chart. */
+const CHART_BYTES = 64 << 20;
 
 /** Draw a Vega-Lite specification as SVG. */
 export async function toSvg(vl: object): Promise<string> {
@@ -44,10 +47,11 @@ export async function render(vl: object): Promise<{ pdf: Uint8Array; png: Uint8A
       });
       if (code) throw new Error(`rsvg-convert ${args[1]} ended with ${code}`);
     }
-    return {
-      pdf: readFileSync(join(work, 'chart.pdf')),
-      png: readFileSync(join(work, 'chart.png')),
-    };
+    // rsvg-convert ran on a directory it could write to: read what it made without following links.
+    const pdf = readOwn(work, join(work, 'chart.pdf'), CHART_BYTES);
+    const png = readOwn(work, join(work, 'chart.png'), CHART_BYTES);
+    if (!pdf || !png) throw new Error('rsvg-convert made no usable chart file');
+    return { pdf, png };
   } finally {
     rmSync(work, { recursive: true, force: true });
   }

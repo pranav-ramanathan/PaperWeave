@@ -5,19 +5,24 @@
 import { execFile } from 'node:child_process';
 import {
   chownSync,
+  closeSync,
+  constants,
   cpSync,
   existsSync,
+  fstatSync,
   lstatSync,
   mkdirSync,
   mkdtempSync,
+  openSync,
   readdirSync,
   readFileSync,
+  readSync,
   renameSync,
   rmSync,
   writeFileSync,
 } from 'node:fs';
 import { tmpdir } from 'node:os';
-import { dirname, join } from 'node:path';
+import { dirname, isAbsolute, join, relative, resolve, sep } from 'node:path';
 import {
   LATEXMK_RULES,
   auxLabels,
@@ -1115,6 +1120,62 @@ function readingAt(
 const WARM_BYTES = 64 << 20;
 const WARM_FILES = 5000;
 
+/**
+ * The most each output of a build is read for, in bytes. The build directory is the paper's: a
+ * file there that is bigger is treated as if it were not there. Generous, so that no real paper
+ * comes near them.
+ */
+export const LOG_BYTES = 32 << 20;
+export const PDF_BYTES = 256 << 20;
+export const SYNCTEX_BYTES = 128 << 20;
+/** The largest .bbl kept: a bibliography is far smaller, and a ZIP must not grow by a surprise. */
+export const BBL_BYTES = 5_000_000;
+/** One .aux file, and the .fls (the paths TeX opened). */
+const AUX_BYTES = 16 << 20;
+const FLS_BYTES = 32 << 20;
+
+/**
+ * The bytes of the file at `path`, which must be inside `root`, or undefined. For what a build
+ * leaves in its directory, which the paper's own files can fill with anything: it is read only
+ * if it is a regular file (never a link), every folder between `root` and it is a real folder
+ * (never a link), and it is no bigger than `maxBytes`. Anything else, or any error, is undefined:
+ * the output is treated as absent.
+ */
+export function readOwn(root: string, path: string, maxBytes: number): Buffer | undefined {
+  let fd: number | undefined;
+  try {
+    const from = resolve(root);
+    const parts = relative(from, resolve(path)).split(sep);
+    if (isAbsolute(parts[0]) || parts[0] === '' || parts[0] === '..') return undefined;
+    let at = from;
+    for (const part of parts.slice(0, -1)) {
+      at = join(at, part);
+      if (!lstatSync(at).isDirectory()) return undefined;
+    }
+    const file = join(at, parts.at(-1)!);
+    const seen = lstatSync(file);
+    if (!seen.isFile() || seen.size > maxBytes) return undefined;
+    // O_NOFOLLOW: a link put in place of the file since the check is refused by the open itself.
+    fd = openSync(file, constants.O_RDONLY | (constants.O_NOFOLLOW ?? 0));
+    const opened = fstatSync(fd);
+    if (!opened.isFile() || opened.size > maxBytes) return undefined;
+    const buf = Buffer.alloc(opened.size);
+    let n = 0;
+    while (n < buf.length) {
+      const got = readSync(fd, buf, n, buf.length - n, null);
+      if (got === 0) break;
+      n += got;
+    }
+    // A file that grew since fstat is refused rather than cut short.
+    if (readSync(fd, Buffer.alloc(1), 0, 1, null) > 0) return undefined;
+    return n === buf.length ? buf : Buffer.from(buf.subarray(0, n));
+  } catch {
+    return undefined;
+  } finally {
+    if (fd !== undefined) closeSync(fd);
+  }
+}
+
 /** Each regular file under `from`, by its `/`-joined path: nothing else is followed or listed. */
 function eachFile(from: string, each: (rel: string, size: number) => void, rel = ''): void {
   for (const e of readdirSync(join(from, rel), { withFileTypes: true })) {
@@ -1236,7 +1297,9 @@ export async function compile(
     }
     const base = root.replace(/\.(tex|ltx)$/i, '');
     const logPath = join(work, base + '.log');
-    const log = existsSync(logPath) ? texText(readFileSync(logPath)) : run.output;
+    // A log that is a link, or bigger than any TeX writes, is no log: latexmk's output stands in.
+    const logBytes = readOwn(work, logPath, LOG_BYTES);
+    const log = logBytes ? texText(logBytes) : run.output;
     // A warm build that does not run BibTeX has none of its words on its output. While the .bbl
     // it made is still read, they are repeated.
     let output = run.output;
@@ -1250,21 +1313,25 @@ export async function compile(
     )
       output += '\n' + readFileSync(saidAt, 'utf8');
     mkdirSync(out, { recursive: true });
-    const keep = (ext: string) => {
-      if (!existsSync(join(work, base + ext))) return undefined;
-      cpSync(join(work, base + ext), join(out, 'output' + ext));
+    // Read, then written: a copy would follow a link. A link, or a file over `max`, is absent.
+    const keep = (ext: string, max: number, notEmpty = false) => {
+      const bytes = readOwn(work, join(work, base + ext), max);
+      if (!bytes || (notEmpty && bytes.length === 0)) return undefined;
+      writeFileSync(join(out, 'output' + ext), bytes);
       return 'output' + ext;
     };
-    const pdf = run.code === 0 ? keep('.pdf') : undefined;
+    const pdf = run.code === 0 ? keep('.pdf', PDF_BYTES) : undefined;
     // Every .aux file of the build: \include writes one per file.
     let aux = '';
     // After a warm start a file the paper no longer \include's has left its .aux behind: only
     // those the last TeX run wrote or read count (latexmk's .fls names them).
-    const flsAt = join(work, base + '.fls');
+    // Undefined when it is absent, a link or too big.
+    const flsBytes = readOwn(work, join(work, base + '.fls'), FLS_BYTES);
+    const flsText = flsBytes && texText(flsBytes);
     const live =
-      warmed && existsSync(flsAt)
+      warmed && flsText !== undefined
         ? new Set(
-            texText(readFileSync(flsAt))
+            flsText
               .split(/\r?\n/)
               .map((l) => /^(?:INPUT|OUTPUT) (.+)$/.exec(l)?.[1])
               .filter((f): f is string => f !== undefined)
@@ -1278,8 +1345,10 @@ export async function compile(
           e.name.endsWith('.aux') &&
           aux.length < 4_000_000 &&
           (!live || live.has(join(dir, e.name).slice(work.length + 1)))
-        )
-          aux += texText(readFileSync(join(dir, e.name))) + '\n';
+        ) {
+          const bytes = readOwn(work, join(dir, e.name), AUX_BYTES);
+          if (bytes) aux += texText(bytes) + '\n';
+        }
     };
     if (pdf) gather(work);
     // The paper's own text, read only to see which file an unclosed environment is in; nothing
@@ -1291,10 +1360,8 @@ export async function compile(
         try {
           const placed = place(rootDir(root), name);
           const path = placed && join(work, placed);
-          if (path) {
-            const st = lstatSync(path);
-            if (st.isFile() && st.size <= 2_000_000) text = texText(readFileSync(path));
-          }
+          const bytes = path ? readOwn(work, path, 2_000_000) : undefined;
+          if (bytes) text = texText(bytes);
         } catch {
           text = undefined;
         }
@@ -1306,9 +1373,8 @@ export async function compile(
     // pdfTeX and LuaTeX place EPS through epstopdf, which needs shell escape; without it the
     // picture is silently drawn as a box with its name, and the log says nothing. XeLaTeX
     // fails instead, and diagnostics() has said so.
-    const fls = join(work, base + '.fls');
-    if (pdf && compiler !== 'xelatex' && existsSync(fls))
-      for (const f of epsPictures(texText(readFileSync(fls)), rootDir(root)))
+    if (pdf && compiler !== 'xelatex' && flsText !== undefined)
+      for (const f of epsPictures(flsText, rootDir(root)))
         found.push({
           severity: 'warning',
           file: f,
@@ -1352,9 +1418,7 @@ export async function compile(
     // What TeX opened. Only from a run of TeX in this build: a warm build is started with the
     // .fls the last one left, and if latexmk ran no TeX that file is not this build's.
     const opened =
-      pdf && passes > 0 && existsSync(fls)
-        ? readFiles(texText(readFileSync(fls)), rootDir(root))
-        : undefined;
+      pdf && passes > 0 && flsText !== undefined ? readFiles(flsText, rootDir(root)) : undefined;
     return {
       warmed,
       passes,
@@ -1365,12 +1429,9 @@ export async function compile(
       diagnostics: found,
       log,
       pdf,
-      synctex: pdf && keep('.synctex.gz'),
+      synctex: pdf && keep('.synctex.gz', SYNCTEX_BYTES),
       // Not the empty file LATEXMK_RULES' pw_bbl puts where a paper's .bbl is missing.
-      bbl:
-        pdf && lstatSync(join(work, base + '.bbl'), { throwIfNoEntry: false })?.size
-          ? keep('.bbl')
-          : undefined,
+      bbl: pdf ? keep('.bbl', BBL_BYTES, true) : undefined,
       labels: pdf ? auxLabels(aux) : undefined,
     };
   } finally {

@@ -7285,3 +7285,25 @@ restores of a large paper got round it (`docs/security-review.md`, Open 1).
 - **Still not counted.** Imports (ZIP and the like), creating or uploading a file that does not
   replace one, deleting, saving a revision, comments and proposals (limited separately by
   `mayWrite`). The budget is kept per person over all their papers.
+
+### Build outputs are read without following links or past a size cap
+
+- **A fault found.** The worker read what a build left in its directory (log, PDF, SyncTeX,
+  .bbl, .fls, every .aux; a chart's PDF and PNG) by plain path, which follows links, and some
+  with no size cap. The directory holds the paper's own files.
+- **Now.** `readOwn(root, path, maxBytes)` in `compile.ts` is the one way: the path is inside
+  `root`, each folder on the way is a real folder, the file is a regular file, it is opened with
+  `O_NOFOLLOW`, and it is read up to `maxBytes`. A link, an oversized file or an error gives
+  `undefined`, and the output is absent: no log means latexmk's output is used, no PDF means the
+  build fails with the usual diagnostics. `keep()` reads and writes instead of `cpSync`. Used in
+  `compile.ts` (log, PDF, SyncTeX, .bbl, .fls once, .aux, and the paper-file reader, which was
+  already `lstat`-checked but not for folders), `builder.ts` (the stored outputs and the .bbl
+  size, which was `statSync`) and `charts.ts`.
+- **Caps** (constants, generous): log 32 MiB, PDF 256 MiB, SyncTeX 128 MiB, .bbl 5 MB (the
+  limit `builder.ts` already had, now `BBL_BYTES` in `compile.ts`), one .aux 16 MiB, .fls
+  32 MiB, a chart file 64 MiB.
+- **Held by** seven cases in `compile.test.ts` that make links with `symlinkSync` in a temp
+  directory and call `readOwn` directly. `keep()` is inside `compile()`, which needs the
+  container, so a linked `.pdf` is covered through `readOwn`. The compile, builds and charts
+  sandbox suites pass unchanged. `TEX_TEXT` is not bumped: an ordinary build's log and outputs
+  are byte for byte what they were.

@@ -1,21 +1,20 @@
 // Takes queued builds from the builds table and builds them in the sandbox.
 import { execFileSync } from 'node:child_process';
 import { createHash } from 'node:crypto';
-import {
-  existsSync,
-  mkdirSync,
-  mkdtempSync,
-  readdirSync,
-  readFileSync,
-  rmSync,
-  statSync,
-  writeFileSync,
-} from 'node:fs';
+import { mkdirSync, mkdtempSync, readdirSync, rmSync, statSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { dirname, join } from 'node:path';
 import { type BlobStore, cutRevision, type Db, transaction } from '@paperweave/server';
 import type pg from 'pg';
-import { compile, type Compiler, IMAGE } from './compile.ts';
+import {
+  BBL_BYTES,
+  compile,
+  type Compiler,
+  IMAGE,
+  PDF_BYTES,
+  readOwn,
+  SYNCTEX_BYTES,
+} from './compile.ts';
 
 /**
  * Part of every cache key. Builds cached before diagnostics and labels were read as UTF-8 hold
@@ -67,9 +66,6 @@ import { compile, type Compiler, IMAGE } from './compile.ts';
  */
 const TEX_TEXT =
   'utf8-biber-eps-glyphs-strings-forcedate-unicode-nullfont-csname-bbl-ended-unclosed-group-bibentry-minted-nobib-merged-opened-bibsaid-uncited-read-madebbl';
-
-/** The largest .bbl kept: a bibliography is far smaller, and a ZIP must not grow by a surprise. */
-const BBL_BYTES = 5_000_000;
 
 /**
  * Where each paper's last good build leaves what it made (BUILD_WARM_DIR; empty turns it off).
@@ -234,27 +230,32 @@ export function buildNext(
         Math.floor(new Date(revision.created_at).getTime() / 1000),
         warmDir(image, job.project_id),
       );
-      const put = async (name?: string) =>
-        name && existsSync(join(work, 'out', name))
-          ? store.put(readFileSync(join(work, 'out', name)))
-          : null;
+      // What compile() kept, read back without following links and no further than its cap.
+      const outDir = join(work, 'out');
+      const put = async (name: string | undefined, max: number) => {
+        const bytes = name ? readOwn(outDir, join(outDir, name), max) : undefined;
+        return bytes ? store.put(bytes) : null;
+      };
       // The .bbl is kept only if TeX read it in this build (not an empty stand-in, which has no
       // bytes, nor one a warm build left that the paper no longer reads) and it is a sane size.
       const bblName = revision.root.replace(/\.(tex|ltx)$/i, '.bbl');
-      const bblSize =
-        result.bbl && existsSync(join(work, 'out', result.bbl))
-          ? statSync(join(work, 'out', result.bbl)).size
-          : 0;
+      const bblBytes = result.bbl
+        ? readOwn(outDir, join(outDir, result.bbl), BBL_BYTES)
+        : undefined;
       const keepBbl =
-        !!result.pdf && !!result.read?.includes(bblName) && bblSize > 0 && bblSize < BBL_BYTES;
+        !!result.pdf &&
+        !!result.read?.includes(bblName) &&
+        !!bblBytes &&
+        bblBytes.length > 0 &&
+        bblBytes.length < BBL_BYTES;
       await finish({
         ...common,
         status: result.ok ? 'succeeded' : 'failed',
         diagnostics: JSON.stringify(result.diagnostics),
         timed_out: result.timedOut,
-        pdf_digest: await put(result.pdf),
-        synctex_digest: await put(result.synctex),
-        bbl_digest: keepBbl ? await put(result.bbl) : null,
+        pdf_digest: await put(result.pdf, PDF_BYTES),
+        synctex_digest: await put(result.synctex, SYNCTEX_BYTES),
+        bbl_digest: keepBbl ? await put(result.bbl, BBL_BYTES) : null,
         log_digest: await store.put(Buffer.from(result.log, 'utf8')),
         labels: result.labels && JSON.stringify(result.labels),
         read: result.read && JSON.stringify(result.read),

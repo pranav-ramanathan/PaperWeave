@@ -241,6 +241,19 @@ What it found is fixed in the same change, or listed under "Open" with what to d
   the database, so they hold across processes. Other outbound requests: the object store (own
   timeouts, signed, a host from configuration) and the model provider's library.
 
+- **Build outputs were read by plain path, which follows links.** After latexmk the worker read
+  the log, the PDF, SyncTeX, the .bbl, the .fls and every .aux from the build directory, which
+  the paper's own files can fill, and a chart's files from its own. Some of those reads had no
+  size cap either. All of them go through one helper now, `readOwn`: the path must be inside
+  the directory, every folder on the way must be a real folder, the file must be a regular file
+  (not a link), it is opened with `O_NOFOLLOW`, and it is read only up to a cap (log 32 MiB, PDF
+  256 MiB, SyncTeX 128 MiB, .bbl 5 MB, one .aux 16 MiB, .fls 32 MiB, a chart file 64 MiB). A
+  link, a file over its cap, or any error means the output is absent: no log (latexmk's output
+  stands in), no PDF (the build fails with the usual diagnostics). The copies into the output
+  folder are made by reading and writing, not `cpSync`. Unit tests make the links themselves
+  with `symlinkSync` in a temp directory and call `readOwn` directly; builds of ordinary papers
+  are unchanged.
+
 ## Open
 
 In rough order of how much they matter.
