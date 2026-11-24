@@ -7,6 +7,7 @@ import {
   compactFile,
   createFile,
   deleteFile,
+  deleteProject,
   editFile,
   exportZip,
   importZip,
@@ -1151,4 +1152,33 @@ test('an editor of a file that goes back to Latin-1 in a restore is closed', asy
   await restoreRevision(t.pool, store, users.owner.id, project, r1.id);
   await until('the editor to be closed', () => editor.state.closed > closedBefore);
   expect(editor.state.reasons.at(-1)).toMatch(/no-access/);
+});
+
+test('a paper deleted under its editors closes them for good, and the server serves on', async () => {
+  const { project, file } = await paper();
+  const other = await paper();
+  const editor = client(users.editor, file);
+  const owner = client(users.owner, file);
+  await saved(editor);
+  await saved(owner);
+  // Someone is typing as it goes: whether this edit is saved first or refused, nothing breaks.
+  editor.text.insert(0, 'LAST ');
+  await deleteProject(t.pool, users.owner.id, project, 'Sync test');
+  await until('both editors to be closed for good', () =>
+    [editor, owner].every((c) => c.state.reasons.some((r) => r.endsWith('no-access'))),
+  );
+  editor.text.insert(0, 'AFTER ');
+  const again = client(users.editor, file);
+  await until('connecting again to be refused', () => again.state.refused);
+  const { rows } = await t.pool.query(
+    'select (select count(*)::int from all_files where project_id = $1) as files, (select count(*)::int from file_updates where file_id = $2) as edits',
+    [project, file],
+  );
+  expect(rows[0]).toEqual({ files: 0, edits: 0 });
+  // Another paper's editors are not disturbed, and what they type is saved.
+  const elsewhere = client(users.editor, other.file);
+  await saved(elsewhere);
+  elsewhere.text.insert(0, 'STILL ');
+  await saved(elsewhere);
+  expect(await stored(other.project)).toContain('STILL ');
 });

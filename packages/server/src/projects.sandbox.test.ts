@@ -7,6 +7,7 @@ import {
   acceptInvitation,
   cancelInvitation,
   createProject,
+  deleteProject,
   findInvitation,
   getProject,
   invite,
@@ -14,6 +15,7 @@ import {
   listInvitations,
   listMembers,
   listProjects,
+  paperHoldings,
   removeMember,
   renameProject,
   setCompiler,
@@ -562,4 +564,108 @@ test('the sign-in page is told whom a valid invitation is for, partly hidden, an
     [paper.id],
   );
   expect(await invitedAddress(t.pool, late.token)).toBeNull();
+});
+
+test('only the owner deletes a paper: all of it goes at once, and nothing of another paper', async () => {
+  const store = blobStore(TEST_ENV);
+  // People of this test's own: the others have been invited as often as one address may be.
+  const owner = (await t.signIn('deletes-owner@example.org')).id;
+  const on = {} as Record<'editor' | 'reviewer' | 'viewer', User>;
+  const text = Buffer.from(
+    '\\documentclass{article}\n\\begin{document}Shared words.\\end{document}\n',
+  );
+  const { id: p } = await createProject(t.pool, owner, 'To be deleted');
+  // A second paper with a file of the very same bytes: one object in the store serves both.
+  const { id: kept } = await createProject(t.pool, owner, 'To be kept');
+  for (const paper of [p, kept]) await createFile(t.pool, store, owner, paper, 'main.tex', text);
+  const revision = await cutRevision(t.pool, store, owner, p);
+  for (const role of ['editor', 'reviewer', 'viewer'] as const) {
+    on[role] = await t.signIn(`deletes-${role}@example.org`);
+    const { token } = await invite(t.pool, owner, p, on[role].email, role);
+    await acceptInvitation(t.pool, on[role].id, token);
+  }
+  const waiting = await invite(t.pool, owner, p, 'not-yet@example.org', 'viewer');
+
+  for (const role of ['editor', 'reviewer', 'viewer'] as const) {
+    expect(await code(paperHoldings(t.pool, on[role].id, p))).toBe('permission_denied');
+    expect(await code(deleteProject(t.pool, on[role].id, p, 'To be deleted'))).toBe(
+      'permission_denied',
+    );
+  }
+  expect(await code(paperHoldings(t.pool, users.outsider.id, p))).toBe('not_found');
+  expect(await code(deleteProject(t.pool, users.outsider.id, p, 'To be deleted'))).toBe(
+    'not_found',
+  );
+  expect(await code(deleteProject(t.pool, owner, 'not-an-id', 'x'))).toBe('not_found');
+  expect(await paperHoldings(t.pool, owner, p)).toEqual({
+    name: 'To be deleted',
+    files: 1,
+    revisions: 1,
+    others: 3,
+    invited: 1,
+  });
+
+  // The owner must give the paper's exact name: a wrong, differently cased or missing one
+  // deletes nothing, and the paper is still whole.
+  for (const typed of ['', 'To be kept', 'to be deleted', 'To be deleted ', 'To be']) {
+    const refused = await deleteProject(t.pool, owner, p, typed).catch((e) => e);
+    expect(refused.code).toBe('invalid_input');
+    expect(refused.message).toMatch(/Nothing was deleted/);
+  }
+  expect(await paperHoldings(t.pool, owner, p)).toMatchObject({ name: 'To be deleted', files: 1 });
+  expect((await getProject(t.pool, on.viewer.id, p)).name).toBe('To be deleted');
+  expect((await getProject(t.pool, owner, kept)).name).toBe('To be kept');
+
+  // Something holds one of the paper's rows, as a worker does for the whole of a build: the
+  // delete does not wait behind it, says so, and deletes nothing.
+  const busy = await t.pool.connect();
+  try {
+    await busy.query('begin');
+    await busy.query('select 1 from revisions where id = $1 for update', [revision.id]);
+    const began = Date.now();
+    const refused = await deleteProject(t.pool, owner, p, 'To be deleted', 300).catch((e) => e);
+    expect(refused.code).toBe('conflict');
+    expect(refused.message).toMatch(/Nothing was deleted/);
+    expect(Date.now() - began).toBeLessThan(5000);
+    expect((await getProject(t.pool, on.viewer.id, p)).name).toBe('To be deleted');
+  } finally {
+    await busy.query('rollback');
+    busy.release();
+  }
+
+  expect(await deleteProject(t.pool, owner, p, 'To be deleted')).toEqual({ name: 'To be deleted' });
+  for (const who of [owner, on.editor.id, on.viewer.id])
+    expect(await code(getProject(t.pool, who, p))).toBe('not_found');
+  expect((await listProjects(t.pool, on.editor.id)).some((x) => x.id === p)).toBe(false);
+  expect(await invitedAddress(t.pool, waiting.token)).toBeNull();
+  expect(await code(deleteProject(t.pool, owner, p, 'To be deleted'))).toBe('not_found');
+  const left = await t.pool.query(
+    `select (select count(*) from all_files where project_id = $1)
+          + (select count(*) from revisions where project_id = $1)
+          + (select count(*) from revision_files where revision_id = $2)
+          + (select count(*) from project_members where project_id = $1)
+          + (select count(*) from invitations where project_id = $1) as n`,
+    [p, revision.id],
+  );
+  expect(Number(left.rows[0].n)).toBe(0);
+
+  // The other paper is whole, bytes included: the store was not touched.
+  expect((await getProject(t.pool, owner, kept)).name).toBe('To be kept');
+  const { rows } = await t.pool.query('select digest from files where project_id = $1', [kept]);
+  expect(Buffer.from((await store.get(rows[0].digest))!).equals(text)).toBe(true);
+});
+
+test('every column that points at a paper, a file, a revision or a build has an index to be found by', async () => {
+  // Deleting a paper follows these; without an index each row that goes reads a whole table.
+  const { rows } = await t.pool.query(
+    `select c.conrelid::regclass::text || '.' || a.attname as col
+     from pg_constraint c join pg_attribute a on a.attrelid = c.conrelid and a.attnum = c.conkey[1]
+     where c.contype = 'f'
+       and c.confrelid::regclass::text in
+         ('projects', 'all_files', 'revisions', 'builds', 'threads', 'charts', 'proposals')
+       and not exists (select 1 from pg_index i
+                       where i.indrelid = c.conrelid and i.indkey[0] = c.conkey[1]
+                         and i.indpred is null)`,
+  );
+  expect(rows.map((r) => r.col)).toEqual([]);
 });

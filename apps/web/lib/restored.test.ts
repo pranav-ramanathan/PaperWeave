@@ -93,6 +93,6 @@ test('the words for a file that is gone say what took it and where it still is',
     'This file has been deleted from the paper. The revision saved just before still has it.',
   );
   expect(goneWords({ why: 'off' }, 'ben@example.org', '')).toBe(
-    'You are no longer a member of this paper.',
+    'You are no longer a member of this paper, or its owner has deleted it.',
   );
 });

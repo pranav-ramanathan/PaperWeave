@@ -14,11 +14,11 @@ export const metadata = { title: 'Papers' };
 export default async function Projects({
   searchParams,
 }: {
-  searchParams: Promise<{ error?: string; imported?: string; left?: string }>;
+  searchParams: Promise<{ error?: string; imported?: string; left?: string; deleted?: string }>;
 }) {
   const user = await requireUser('/projects');
   const projects = await listProjects(db(), user.id);
-  const { error, imported, left } = await searchParams;
+  const { error, imported, left, deleted } = await searchParams;
   return (
     <main className="page">
       <header className="bar">
@@ -29,6 +29,7 @@ export default async function Projects({
       {error && <Result alert>{error}</Result>}
       {imported && <Result>Imported {imported} papers from the archive.</Result>}
       {left && <Result>You left {left}.</Result>}
+      {deleted && <Result>Deleted “{deleted}”. It is gone for everyone who was on it.</Result>}
       {projects.length ? (
         <ul className="list">
           {projects.map((p) => (
