@@ -327,6 +327,63 @@ async function load(db: Db, projectId: string, revisionId: string) {
   return { revision, files };
 }
 
+/** The types of file the ZIP of only the files the paper uses may leave out. */
+const LEFT_OUT = /\.(?:tex|ltx|pdf|png|jpe?g|eps)$/i;
+
+/**
+ * Of these files (never the held ones), those the revision's newest succeeded build never
+ * opened: not read, not the root, and of a type that can be left out. `null` if the revision has
+ * no succeeded build; none if that build did not record what it read (an older one).
+ */
+async function unusedPaths(
+  db: Db,
+  projectId: string,
+  revisionId: string,
+  root: string | null,
+  files: RevisionFile[],
+): Promise<string[] | null> {
+  const built = (
+    await db.query(
+      `select read from builds where revision_id = $1 and project_id = $2 and status = 'succeeded'
+       order by created_at desc limit 1`,
+      [revisionId, projectId],
+    )
+  ).rows[0];
+  if (!built) return null;
+  if (!Array.isArray(built.read)) return [];
+  const read = new Set<string>(
+    (built.read as unknown[]).flatMap((p) => (typeof p === 'string' ? [p.normalize('NFC')] : [])),
+  );
+  return files
+    .filter((f) => f.path !== root && LEFT_OUT.test(f.path) && !read.has(f.path.normalize('NFC')))
+    .map((f) => f.path);
+}
+
+/**
+ * The files of a revision, not held back from downloads, that its newest succeeded build never
+ * opened, as the ZIP of only the files the paper uses leaves them out. None when it has not
+ * been built, or the build did not record what it read.
+ */
+export async function unusedInRevision(
+  db: Db,
+  userId: string,
+  projectId: string,
+  revisionId: string,
+): Promise<string[]> {
+  await authorize(db, userId, id(projectId), 'project.read');
+  const { revision, files } = await load(db, projectId, revisionId);
+  const held = await heldFileIds(db, projectId);
+  return (
+    (await unusedPaths(
+      db,
+      projectId,
+      revisionId,
+      revision.root,
+      files.filter((f) => !held.has(f.file_id)),
+    )) ?? []
+  );
+}
+
 /** The files whose authors keep them out of downloads: data not marked to be included. */
 export async function heldFileIds(db: Db, projectId: string): Promise<Set<string>> {
   return new Set(
@@ -399,6 +456,8 @@ export async function exportRevision(
   manifest = false,
   /** More to put in the archive beside the paper's files. */
   extra: Entry[] = [],
+  /** Only the files the last good build opened (and those it cannot tell about). */
+  used = false,
 ): Promise<{ zip: Uint8Array; paper: string; number: number }> {
   const { shared, rest, paper, number } = await revisionEntries(
     db,
@@ -407,6 +466,7 @@ export async function exportRevision(
     revisionId,
     manifest,
     extra,
+    used,
   );
   // Sixteen blobs at a time, and the entries in the order of the files.
   const bytes = await mapLimit(shared, READS, (f) => blob(store, f.digest));
@@ -423,6 +483,7 @@ export async function exportRevisionStream(
   revisionId: string,
   manifest = false,
   extra: Entry[] = [],
+  used = false,
 ): Promise<{ zip: ReadableStream<Uint8Array>; paper: string; number: number }> {
   const { shared, rest, paper, number } = await revisionEntries(
     db,
@@ -431,6 +492,7 @@ export async function exportRevisionStream(
     revisionId,
     manifest,
     extra,
+    used,
   );
   // Each file is added as its blob arrives, in the order of the files, with sixteen being read
   // ahead of the one being added.
@@ -453,14 +515,24 @@ async function revisionEntries(
   manifest = false,
   /** More to put in the archive beside the paper's files. */
   extra: Entry[] = [],
+  /** Leave out the files the revision's last good build never opened (see `unusedPaths`). */
+  used = false,
 ): Promise<{ shared: RevisionFile[]; rest: Entry[]; paper: string; number: number }> {
   await authorize(db, userId, id(projectId), 'project.export');
   const { revision, files } = await load(db, projectId, revisionId);
   // Data goes into a download only if its author has said so. A CSV file nobody has described
   // as data is a file like any other. The hold is by file, whichever revision is downloaded.
   const held = await heldFileIds(db, projectId);
-  const shared = files.filter((f) => !held.has(f.file_id));
+  let shared = files.filter((f) => !held.has(f.file_id));
   const kept = files.filter((f) => held.has(f.file_id));
+  let unused: string[] = [];
+  if (used) {
+    const found = await unusedPaths(db, projectId, revisionId, revision.root, shared);
+    if (!found) throw new AppError('not_found', 'This revision has not been built.');
+    unused = found;
+    const gone = new Set(unused);
+    shared = shared.filter((f) => !gone.has(f.path));
+  }
   const rest: Entry[] = [];
   if (manifest) {
     const built = (
@@ -528,6 +600,8 @@ async function revisionEntries(
         charts,
         // Data files left out of this archive on purpose: their authors keep them back.
         held: kept.map((f) => f.path),
+        // Files this archive leaves out because the build never opened them (`?used` only).
+        ...(used ? { unused } : {}),
       },
       null,
       2,

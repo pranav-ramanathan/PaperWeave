@@ -49,6 +49,12 @@ export type CompileResult = {
   synctex?: string;
   /** The number and page LaTeX gave each label, when a PDF was produced. */
   labels?: Record<string, { number: string; page: string }>;
+  /**
+   * The project paths TeX opened (latexmk's .fls), when a PDF was produced by a TeX run that
+   * wrote that file in this build. Absent otherwise: a warm build that ran no TeX may hold the
+   * last build's .fls, which says nothing about this one.
+   */
+  read?: string[];
   /** Whether the build started from what the paper's last good build made, and that run stood. */
   warmed?: boolean;
   /** How many TeX runs latexmk made in the last run. For tests; the builder does not store it. */
@@ -142,6 +148,27 @@ function place(dir: string, file: string): string | undefined {
     if (depth < 0) return undefined;
   }
   return norm(dir + file);
+}
+
+/**
+ * The project paths a build opened, from latexmk's .fls ("INPUT ./figs//a.eps", one line per
+ * file opened, a name with spaces as it is; "OUTPUT" lines are files written and are ignored).
+ * `dir` is the root file's folder. Files of the installation ("INPUT /usr/share/...") and paths
+ * that climb out of the project are dropped; "/work/..." is the project itself. In order, once each.
+ */
+export function readFiles(fls: string, dir = ''): string[] {
+  const opened = new Set<string>();
+  for (const line of fls.split(/\r?\n/))
+    if (line.startsWith('INPUT ')) {
+      const name = line.slice(6);
+      const path = name.startsWith('/work/')
+        ? place('', name.slice(6))
+        : name.startsWith('/')
+          ? undefined
+          : place(dir, name);
+      if (path) opened.add(path);
+    }
+  return [...opened];
 }
 
 /**
@@ -1314,9 +1341,18 @@ export async function compile(
         rmSync(warm, { recursive: true, force: true });
       }
     }
+    const passes = (run.output.match(/^Latexmk: applying rule '(?:pdf|xe|lua)latex'/gm) ?? [])
+      .length;
+    // What TeX opened. Only from a run of TeX in this build: a warm build is started with the
+    // .fls the last one left, and if latexmk ran no TeX that file is not this build's.
+    const opened =
+      pdf && passes > 0 && existsSync(fls)
+        ? readFiles(texText(readFileSync(fls)), rootDir(root))
+        : undefined;
     return {
       warmed,
-      passes: (run.output.match(/^Latexmk: applying rule '(?:pdf|xe|lua)latex'/gm) ?? []).length,
+      passes,
+      read: opened,
       ok: !!pdf,
       // `timeout -s KILL` reports 137.
       timedOut: run.code === 137,

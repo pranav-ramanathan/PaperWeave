@@ -1538,3 +1538,35 @@ test(
   },
   WARM_TIME,
 );
+
+test(
+  'the files a build read are its own TeX run: a warm build does not keep the last one in the .fls',
+  async () => {
+    const project = wpaper({
+      'main.tex': doc('Start. \\input{extra}'),
+      'extra.tex': 'Extratext.\n',
+      'other.tex': 'Unread.\n',
+    });
+    const warm = wtmp();
+    const first = await built(project, 1, warm);
+    expect(first.read).toEqual(expect.arrayContaining(['main.tex', 'extra.tex']));
+    expect(first.read).not.toContain('other.tex');
+    // The .fls is among what is kept for the next build.
+    expect(existsSync(join(warm, 'made', 'main.fls'))).toBe(true);
+    writeFileSync(join(project, 'main.tex'), doc('Start.'));
+    const second = await built(project, 2, warm);
+    expect(second.warmed).toBe(true);
+    expect(second.passes).toBeGreaterThan(0);
+    expect(second.read).toContain('main.tex');
+    expect(second.read).not.toContain('extra.tex');
+    expect(second.read).toEqual((await built(project, 2)).read);
+  },
+  WARM_TIME,
+);
+
+test('a build with no PDF reads nothing', async () => {
+  const project = wpaper({ 'main.tex': doc('\\nosuchmacro') });
+  const r = await built(project, 1);
+  expect(r.ok).toBe(false);
+  expect(r.read).toBeUndefined();
+});

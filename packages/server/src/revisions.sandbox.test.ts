@@ -9,12 +9,15 @@ import { LATEXMK_RULES } from '@paperweave/latex';
 import { readZip, writeZip } from './archive.ts';
 import { blobStore } from './blobs.ts';
 import { createFile, deleteFile, replaceFile } from './files.ts';
+import { approveDataset, datasetProposal } from './data.ts';
 import { exportZip, importZip, listFiles } from './import.ts';
 import { acceptInvitation, getProject, invite } from './projects.ts';
 import { acceptProposal, listProposals, propose, undoAccept } from './proposals.ts';
 import {
   diffRevisions,
   exportRevision,
+  exportRevisionStream,
+  unusedInRevision,
   listRevisions,
   olderAutoRevisions,
   REVISIONS_SHOWN,
@@ -941,4 +944,194 @@ test('a read-only file that was once text takes a UTF-8 replacement into its log
   await replaceFile(t.pool, store, owner.id, p.id, 'refs.bib', v);
   expect(await textOf(p.bib)).toBe(v.toString());
   expect((await exported(p.id)).equals(v)).toBe(true);
+});
+
+/**
+ * A paper with a cover letter, an old draft and held data, whose revision "was built" with what
+ * TeX opened as given (no build when `read` is undefined). No TeX here: the worker's own tests
+ * run it.
+ */
+async function usedPaper(read?: string[] | null) {
+  const zip = await writeZip([
+    { path: 'main.tex', bytes: Buffer.from(MAIN) },
+    { path: 'body.tex', bytes: Buffer.from(BODY) },
+    { path: 'refs.bib', bytes: Buffer.from('@book{k, title={T}, year=2001}\n') },
+    { path: 'cover-letter.tex', bytes: Buffer.from('Dear editor.\n') },
+    { path: 'old/draft.pdf', bytes: Buffer.from('%PDF-1.4\n') },
+    { path: 'fig.png', bytes: Buffer.from([0x89, 0x50, 0x4e, 0x47, 1, 2, 3]) },
+    { path: 'data.csv', bytes: Buffer.from('day,ms\n1,9\n2,38\n') },
+  ]);
+  const [project] = await importZip(t.pool, store, owner.id, zip, 'Used');
+  const ids = Object.fromEntries(
+    (await listFiles(t.pool, owner.id, project.id)).map((f) => [f.path, f.id]),
+  );
+  // The CSV is data kept out of downloads.
+  await approveDataset(t.pool, store, owner.id, project.id, ids['data.csv'], {
+    version: (await datasetProposal(t.pool, store, owner.id, project.id, ids['data.csv'])).version,
+    columns: [
+      { name: 'day', type: 'number', unit: '' },
+      { name: 'ms', type: 'number', unit: 'ms' },
+    ],
+    missing: [],
+    exported: false,
+  });
+  const revision = await saveRevision(t.pool, store, owner.id, project.id, 'Cut');
+  const built = (at: string, status: string, what: unknown) =>
+    t.pool.query(
+      `insert into builds (project_id, status, pdf_digest, revision_id, finished_at, created_at, read)
+       values ($1, $2, repeat('a', 64), $3, now(), $4, $5)`,
+      [project.id, status, revision.id, at, what === undefined ? null : JSON.stringify(what)],
+    );
+  if (read !== undefined) await built('2030-01-01', 'succeeded', read);
+  return { id: project.id, revision, built };
+}
+const listing = (zip: Uint8Array) => {
+  const file = join(mkdtempSync(join(tmpdir(), 'paperweave-test-')), 'revision.zip');
+  writeFileSync(file, zip);
+  return execFileSync('unzip', ['-Z1', file], { encoding: 'utf8' })
+    .split('\n')
+    .filter(Boolean)
+    .sort();
+};
+const READ = ['main.tex', 'body.tex', 'refs.bib', 'fig.png', 'data.csv'];
+
+test('the ZIP of only the files the paper uses leaves out what the build never opened, and says so', async () => {
+  const p = await usedPaper(READ);
+  const used = await exportRevision(t.pool, store, owner.id, p.id, p.revision.id, true, [], true);
+  // Held data stays out of every ZIP, and is not named as unused; nothing else is gone but the two.
+  expect(listing(used.zip)).toEqual([
+    'body.tex',
+    'fig.png',
+    'main.tex',
+    'paperweave-toolchain.json',
+    'refs.bib',
+  ]);
+  const manifest = manifestOf(used.zip);
+  expect(Object.keys(manifest.files).sort()).toEqual([
+    'body.tex',
+    'fig.png',
+    'main.tex',
+    'refs.bib',
+  ]);
+  expect(manifest.unused).toEqual(['cover-letter.tex', 'old/draft.pdf']);
+  expect(manifest.held).toEqual(['data.csv']);
+  expect(await unusedInRevision(t.pool, owner.id, p.id, p.revision.id)).toEqual([
+    'cover-letter.tex',
+    'old/draft.pdf',
+  ]);
+  // The streamed archive is the same.
+  const streamed = await exportRevisionStream(
+    t.pool,
+    store,
+    owner.id,
+    p.id,
+    p.revision.id,
+    false,
+    [],
+    true,
+  );
+  const chunks: Uint8Array[] = [];
+  for await (const c of streamed.zip) chunks.push(c);
+  expect(listing(Buffer.concat(chunks))).toEqual(['body.tex', 'fig.png', 'main.tex', 'refs.bib']);
+});
+
+test('the plain ZIP and the manifest ZIP are as they were, whether or not the revision was built', async () => {
+  const p = await usedPaper();
+  const before = await exportRevision(t.pool, store, owner.id, p.id, p.revision.id);
+  const beforeManifest = manifestOf(
+    (await exportRevision(t.pool, store, owner.id, p.id, p.revision.id, true)).zip,
+  );
+  expect(listing(before.zip)).toEqual([
+    'body.tex',
+    'cover-letter.tex',
+    'fig.png',
+    'main.tex',
+    'old/draft.pdf',
+    'refs.bib',
+  ]);
+  await p.built('2030-01-01', 'succeeded', READ);
+  const after = await exportRevision(t.pool, store, owner.id, p.id, p.revision.id);
+  expect(Buffer.from(after.zip).equals(Buffer.from(before.zip))).toBe(true);
+  const afterManifest = manifestOf(
+    (await exportRevision(t.pool, store, owner.id, p.id, p.revision.id, true)).zip,
+  );
+  // Nothing about unused files in it, and nothing else different.
+  expect('unused' in afterManifest).toBe(false);
+  expect(afterManifest).toEqual(beforeManifest);
+});
+
+test('a revision that has not been built has no ZIP of only the files used', async () => {
+  const p = await usedPaper();
+  expect(
+    await code(exportRevision(t.pool, store, owner.id, p.id, p.revision.id, false, [], true)),
+  ).toBe('not_found');
+  expect(
+    await code(exportRevision(t.pool, store, owner.id, p.id, p.revision.id, true, [], true)),
+  ).toBe('not_found');
+  expect(
+    await code(exportRevisionStream(t.pool, store, owner.id, p.id, p.revision.id, false, [], true)),
+  ).toBe('not_found');
+  expect(await unusedInRevision(t.pool, owner.id, p.id, p.revision.id)).toEqual([]);
+  // A build that failed made nothing to go by.
+  await p.built('2030-01-01', 'failed', undefined);
+  expect(
+    await code(exportRevision(t.pool, store, owner.id, p.id, p.revision.id, false, [], true)),
+  ).toBe('not_found');
+});
+
+test('a build that did not say what it read leaves nothing out, and the newest good build decides', async () => {
+  const p = await usedPaper(null);
+  const all = await exportRevision(t.pool, store, owner.id, p.id, p.revision.id, false, [], true);
+  expect(listing(all.zip)).toHaveLength(6);
+  expect(await unusedInRevision(t.pool, owner.id, p.id, p.revision.id)).toEqual([]);
+  // An older build that read less, and a newer failed one, do not decide.
+  await p.built('2029-01-01', 'succeeded', ['main.tex']);
+  await p.built('2031-01-01', 'failed', ['main.tex']);
+  expect(await unusedInRevision(t.pool, owner.id, p.id, p.revision.id)).toEqual([]);
+  await p.built('2032-01-01', 'succeeded', [...READ, 'cover-letter.tex']);
+  expect(await unusedInRevision(t.pool, owner.id, p.id, p.revision.id)).toEqual(['old/draft.pdf']);
+});
+
+test('only a type TeX reads as a figure or a source can be left out, and the root never', async () => {
+  // Only the root is read: a .bib, a .png and the others of the types the ZIP may drop.
+  const p = await usedPaper(['main.tex']);
+  expect(await unusedInRevision(t.pool, owner.id, p.id, p.revision.id)).toEqual([
+    'body.tex',
+    'cover-letter.tex',
+    'fig.png',
+    'old/draft.pdf',
+  ]);
+  const none = await usedPaper([]);
+  expect(await unusedInRevision(t.pool, owner.id, none.id, none.revision.id)).not.toContain(
+    'main.tex',
+  );
+  expect(await unusedInRevision(t.pool, owner.id, none.id, none.revision.id)).not.toContain(
+    'refs.bib',
+  );
+});
+
+test('who may have the ZIP of only the files used: those who may have any ZIP', async () => {
+  const p = await usedPaper(READ);
+  const people: Record<string, { id: string }> = { owner };
+  for (const role of ['editor', 'reviewer', 'viewer'] as const) {
+    const who = await t.signIn(`${role}-used@example.org`);
+    const { token } = await invite(t.pool, owner.id, p.id, `${role}-used@example.org`, role);
+    await acceptInvitation(t.pool, who.id, token);
+    people[role] = who;
+  }
+  const ask = (id: string, project = p.id, revision = p.revision.id) =>
+    code(exportRevision(t.pool, store, id, project, revision, false, [], true));
+  expect(await ask(people.owner.id)).toBe('ok');
+  expect(await ask(people.editor.id)).toBe('ok');
+  expect(await ask(people.reviewer.id)).toBe('permission_denied');
+  expect(await ask(people.viewer.id)).toBe('permission_denied');
+  expect(await ask(outsider.id)).toBe('not_found');
+  // Whoever may read the paper may be told which files are unused; nobody else.
+  expect(await unusedInRevision(t.pool, people.viewer.id, p.id, p.revision.id)).toHaveLength(2);
+  expect(await code(unusedInRevision(t.pool, outsider.id, p.id, p.revision.id))).toBe('not_found');
+
+  // A revision of another paper cannot be reached through this one.
+  const other = await usedPaper(READ);
+  expect(await ask(owner.id, p.id, other.revision.id)).toBe('not_found');
+  expect(await code(unusedInRevision(t.pool, owner.id, p.id, other.revision.id))).toBe('not_found');
 });

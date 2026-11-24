@@ -8,6 +8,7 @@ import {
   heldInRevisions,
   heldLine,
   submissionChecks,
+  unusedInRevision,
 } from '@paperweave/server';
 import Again from '../../../Again';
 import Result from '../../../Result';
@@ -90,6 +91,10 @@ async function Submit({
             [],
         )
       : null;
+  const anyUnused =
+    checks.ready && checks.revisionId
+      ? (await unusedInRevision(db(), user.id, id, checks.revisionId)).length > 0
+      : false;
   const revision = `/projects/${id}/revisions/${checks.revisionId}`;
   return (
     <main className="page">
@@ -111,6 +116,13 @@ async function Submit({
             <p>
               <a href={`${revision}/zip`}>Download the ZIP</a>{' '}
               <a href={`${revision}/zip?manifest`}>Download the ZIP with a toolchain manifest</a>{' '}
+              {anyUnused && (
+                <>
+                  <a href={`${revision}/zip?used`}>
+                    Download the ZIP of only the files the paper uses
+                  </a>{' '}
+                </>
+              )}
               <a href={`${revision}/pdf`}>Download the PDF</a>
               {held && (
                 <>

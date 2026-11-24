@@ -2768,10 +2768,29 @@ update` held the paper's file rows for **189.6 s** (until the proxy was cut; it 
 - **Not changed:**
   - Data kept back never leaves, in any download, of any revision, and stays unticked by default:
     a backup ZIP is then not the whole paper, and says so.
-  - Every file of the paper goes in, used or not.
+  - Every file of the paper goes in, used or not, in the plain ZIP and the review ZIP, which are
+    byte for byte as before.
   - `unzip` (Info-ZIP 6.00) on a system whose locale is not UTF-8 shows the accented and Chinese
     names wrongly, though the ZIP marks them UTF-8.
   - A finding about held data names the file that reads it, not the line.
+- **The ZIP of only the files the paper uses** (`/revisions/<id>/zip?used`, a third link on
+  "Check before submitting", shown when the paper is ready and something is unused). Each build
+  that makes a PDF records the project paths TeX opened (`builds.read`, from latexmk's `.fls`;
+  `readFiles` in `compile.ts`). The ZIP leaves out a file only when the revision's newest
+  succeeded build has `read`, the file is not in it and is not the root, and it is a `.tex`,
+  `.ltx`, `.pdf`, `.png`, `.jpg`, `.jpeg` or `.eps` file. `.bib`, `.bst`, `.cls`, `.sty`, fonts
+  and data always stay; held data stays out, as in every ZIP, and is not named as unused. With
+  `?manifest`, `files` lists only what is in the archive and `unused` lists what was left out.
+  "Check before submitting" gives a warning that names the first ten unused files and how many
+  more; the paper stays ready. Same permissions as every ZIP (`project.export`).
+  - **Limits.** A revision with no succeeded build answers `not_found`; one whose build did not
+    record `read` (built before this, or a build that ran no TeX) leaves nothing out. `read` is
+    taken only from a TeX run of that build: a warm build starts with the `.fls` the last one
+    left, so it is ignored unless latexmk ran TeX (`passes` above zero). A cache hit copies
+    `read`; builds cached before this are not reused (the cache tag changed). It is what TeX
+    opened in that build, so a file read only under another condition (a changed
+    `\includeonly`, another compiler, a date) may be missing from the ZIP. A file named by a
+    macro and opened by a program other than TeX (a shell-escape tool) is not seen.
 - **How it was made.** Planned by one agent, probed and written by others, checked here.
 
 ## The emails

@@ -60,9 +60,11 @@ import { compile, type Compiler, IMAGE } from './compile.ts';
  * what and where; a cached failed build keeps "The bibliography could not be made."
  * '...-uncited': a bibliography with nothing cited is a warning; a cached build keeps it as an
  * error beside its PDF.
+ * '...-uncited-read': the files TeX opened are kept; a cached build has none, so the ZIP of
+ * only the files the paper uses could not tell which are unused.
  */
 const TEX_TEXT =
-  'utf8-biber-eps-glyphs-strings-forcedate-unicode-nullfont-csname-bbl-ended-unclosed-group-bibentry-minted-nobib-merged-opened-bibsaid-uncited';
+  'utf8-biber-eps-glyphs-strings-forcedate-unicode-nullfont-csname-bbl-ended-unclosed-group-bibentry-minted-nobib-merged-opened-bibsaid-uncited-read';
 
 /**
  * Where each paper's last good build leaves what it made (BUILD_WARM_DIR; empty turns it off).
@@ -184,7 +186,7 @@ export function buildNext(
     // Only this paper's own builds are looked at: nothing is ever shared between papers.
     const hit = (
       await db.query(
-        `select id, status, diagnostics, pdf_digest, synctex_digest, log_digest, labels from builds
+        `select id, status, diagnostics, pdf_digest, synctex_digest, log_digest, labels, read from builds
          where project_id = $1 and cache_key = $2 and status <> 'queued'
            and not coalesce(timed_out, false)
          order by created_at desc limit 1`,
@@ -201,6 +203,7 @@ export function buildNext(
         synctex_digest: hit.synctex_digest,
         log_digest: hit.log_digest,
         labels: hit.labels && JSON.stringify(hit.labels),
+        read: hit.read && JSON.stringify(hit.read),
       });
       return true;
     }
@@ -238,6 +241,7 @@ export function buildNext(
         synctex_digest: await put(result.synctex),
         log_digest: await store.put(Buffer.from(result.log, 'utf8')),
         labels: result.labels && JSON.stringify(result.labels),
+        read: result.read && JSON.stringify(result.read),
       });
     } catch (err) {
       // The build machinery itself failed (no Docker, no image). Say so rather than retry forever.

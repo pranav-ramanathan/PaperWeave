@@ -28,19 +28,23 @@ export async function GET(
       });
     }
     if (what !== 'zip') return new Response('Not found.', { status: 404 });
-    const manifest = new URL(request.url).searchParams.has('manifest');
+    const query = new URL(request.url).searchParams;
     const { zip, paper, number } = await exportRevisionStream(
       db(),
       blobs(),
       user.id,
       id,
       rev,
-      manifest,
+      query.has('manifest'),
+      [],
+      query.has('used'),
     );
     return new Response(zip, {
       headers: {
         'content-type': 'application/zip',
-        'content-disposition': contentDisposition(paper, 'zip', { suffix: ` r${number}` }),
+        'content-disposition': contentDisposition(paper, 'zip', {
+          suffix: ` r${number}${query.has('used') ? ' used' : ''}`,
+        }),
         'cache-control': 'no-store',
       },
     });

@@ -245,3 +245,40 @@ test('downloads are named after the paper, with its letters, and the PDF too', a
   await expect(ready).toBeVisible({ timeout: 90_000 });
   expect((await saved('Download the PDF')).suggested).toMatch(/^Network study r\d+\.pdf$/);
 });
+
+test('a ready paper with a cover letter offers a ZIP of only the files it uses, without the letter', async ({
+  browser,
+}) => {
+  test.setTimeout(180_000);
+  const { page, email } = await person(browser, 'submit-used');
+  const files = [
+    {
+      path: 'main.tex',
+      bytes: Buffer.from(MAIN.replace('As Section~\\ref{sec:intro} says.', 'Plain.')),
+    },
+    { path: 'cover-letter.tex', bytes: Buffer.from('Dear editor.\n') },
+  ];
+  const zip = join(mkdtempSync(join(tmpdir(), 'paperweave-e2e-')), `Used ${run}.zip`);
+  writeFileSync(zip, await writeZip(files));
+  await page.goto('/sign-in');
+  await signIn(page, email);
+  await page.getByLabel('Or import a ZIP of a LaTeX project').setInputFiles(zip);
+  await page.getByRole('button', { name: 'Import ZIP' }).click();
+  await page.getByRole('link', { name: 'Check before submitting' }).click();
+  const ready = page.getByText('Nothing stands in the way.');
+  const again = page.getByRole('button', { name: 'Build the paper and check again' });
+  await expect(again.or(ready).first()).toBeVisible({ timeout: 60_000 });
+  if (!(await ready.isVisible())) await again.click();
+  await expect(ready).toBeVisible({ timeout: 90_000 });
+  // The letter is worth a look, not a problem, and the plain ZIP still holds it.
+  await expect(page.getByText('never opened cover-letter.tex')).toBeVisible();
+  const link = page.getByRole('link', {
+    name: 'Download the ZIP of only the files the paper uses',
+    exact: true,
+  });
+  await expect(link).toBeVisible();
+  const [download] = await Promise.all([page.waitForEvent('download'), link.click()]);
+  const used = (await readZip(readFileSync(await download.path()))).entries.map((e) => e.path);
+  expect(used).toContain('main.tex');
+  expect(used).not.toContain('cover-letter.tex');
+});
