@@ -367,6 +367,46 @@ function bibliography(
 }
 
 /**
+ * Each entry once, the first of the same ones where it was: TeX says the same thing again when it
+ * comes to the same \end a second time. One pass, whatever the number of entries.
+ */
+export function dedupeDiagnostics(list: Diagnostic[]): Diagnostic[] {
+  const seen = new Set<string>();
+  return list.filter((d) => {
+    const key = JSON.stringify(d);
+    if (seen.has(key)) return false;
+    seen.add(key);
+    return true;
+  });
+}
+
+/** More diagnostics than this are not kept: the build log has them all. */
+export const MAX_DIAGNOSTICS = 1000;
+
+/**
+ * At most `max` entries, in their order, errors before warnings where something has to go, and
+ * one more that says how many were left out. That one is an error if an error was left out, so
+ * that a failed build still has one to show.
+ */
+export function capDiagnostics(list: Diagnostic[], max = MAX_DIAGNOSTICS): Diagnostic[] {
+  if (list.length <= max) return list;
+  const room = list.map((_, i) => i).filter((i) => list[i].severity === 'error');
+  room.length = Math.min(room.length, max);
+  for (let i = 0; i < list.length && room.length < max; i++)
+    if (list[i].severity !== 'error') room.push(i);
+  const kept = new Set(room);
+  const left = list.filter((_, i) => !kept.has(i));
+  const severity = left.some((d) => d.severity === 'error') ? 'error' : 'warning';
+  return [
+    ...list.filter((_, i) => kept.has(i)),
+    {
+      severity,
+      message: `${left.length} more ${left.length === 1 ? 'message' : 'messages'} left out. The build log has them all.`,
+    },
+  ];
+}
+
+/**
  * `dir` is the root file's folder with its trailing slash, or '': the build runs there (-cd),
  * so that is what the paths in the log are relative to. `read` gives the text of a paper file
  * named as the log names it (relative to that folder, "./" left off), or undefined.
@@ -409,12 +449,14 @@ export function diagnostics(
     found.push({ at: m.index, d });
   }
   const reading = readingAt(log, dir);
-  const out = found
-    .filter(({ d }) => !STOP.test(d.message))
-    .sort((x, y) => x.at - y.at)
-    .map(({ at, d }) => unclosed(runaway(log, at, d, reading.ended), reading.opened(at), read, dir))
-    // TeX says the same thing again when it comes to the same \end a second time.
-    .filter((d, i, all) => all.findIndex((e) => JSON.stringify(e) === JSON.stringify(d)) === i);
+  const out = dedupeDiagnostics(
+    found
+      .filter(({ d }) => !STOP.test(d.message))
+      .sort((x, y) => x.at - y.at)
+      .map(({ at, d }) =>
+        unclosed(runaway(log, at, d, reading.ended), reading.opened(at), read, dir),
+      ),
+  );
   // minted cannot run without shell escape: one error that says so, not the five it causes.
   minted(out, read);
   // The paper ends before \end{document}: TeX's own words for it are about its input.
@@ -913,7 +955,7 @@ export function diagnostics(
       if (!out.some((d) => JSON.stringify(d) === JSON.stringify(warning))) out.push(warning);
     }
   }
-  return out;
+  return capDiagnostics(out);
 }
 
 /** A font as the log names it: "[lmroman12-regular]:mapping=tex-text;" or "cmr10" or "Name/OT:..." */

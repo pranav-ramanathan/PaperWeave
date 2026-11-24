@@ -7307,3 +7307,21 @@ restores of a large paper got round it (`docs/security-review.md`, Open 1).
   container, so a linked `.pdf` is covered through `readOwn`. The compile, builds and charts
   sandbox suites pass unchanged. `TEX_TEXT` is not bumped: an ordinary build's log and outputs
   are byte for byte what they were.
+
+### Diagnostics are de-duplicated in one pass, and capped
+
+- **A fault found.** `diagnostics()` removed repeats of the TeX errors with `findIndex` and
+  `JSON.stringify` for each pair: quadratic. A log of 20,000 different error lines took 127 s on
+  the old code (20,000 identical ones took 84 ms, as the first match is found at once).
+- **Now.** `dedupeDiagnostics` keeps the first of the same entries, in order, with a `Set` of
+  their serialized form: 130 ms for the same 20,000 different lines. `capDiagnostics` keeps at
+  most `MAX_DIAGNOSTICS` (1,000; none existed) and adds one entry, "N more messages left out. The
+  build log has them all." Errors are kept before warnings where something has to go, and the
+  entry is an error if an error went, so a failed build still shows one.
+- **Held by** new cases in `compile.test.ts`: logs built line by line (no TeX) of 20,000
+  identical and 20,000 different errors, and the two functions on 20,000 entries each, each with
+  an elapsed-time assertion (limits 2 to 5 s).
+- **Not changed.** The other repeat checks in `diagnostics()` (`out.some` with `JSON.stringify`,
+  for warnings and BibTeX/Biber messages) are the same shape and not yet changed. A log with
+  many thousands of different warnings is still slow. `TEX_TEXT` is not bumped: below 1,000
+  entries nothing changes.

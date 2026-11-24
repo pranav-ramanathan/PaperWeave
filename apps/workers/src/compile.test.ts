@@ -2,7 +2,21 @@ import { mkdirSync, mkdtempSync, rmSync, symlinkSync, writeFileSync } from 'node
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterAll, beforeAll, describe, expect, test } from 'vitest';
-import { readFiles, readOwn } from './compile.ts';
+import {
+  capDiagnostics,
+  type Diagnostic,
+  dedupeDiagnostics,
+  diagnostics,
+  MAX_DIAGNOSTICS,
+  readFiles,
+  readOwn,
+} from './compile.ts';
+
+const timedRun = <T>(run: () => T) => {
+  const t = performance.now();
+  const result = run();
+  return { result, ms: Math.round(performance.now() - t) };
+};
 
 const FLS = [
   'PWD /work/paper',
@@ -107,5 +121,86 @@ describe('readOwn: build outputs are read without following links', () => {
   test('a missing file, or one under a file, is absent', () => {
     expect(readOwn(root, join(root, 'nothing.pdf'), 1000)).toBeUndefined();
     expect(readOwn(root, join(root, 'main.pdf', 'x'), 1000)).toBeUndefined();
+  });
+});
+
+// Logs made here, line by line; no TeX is run.
+describe('diagnostics: the same error again and again, and very many different ones', () => {
+  const N = 20_000;
+  const timed = timedRun;
+
+  test('20,000 identical errors are one, and quickly', () => {
+    const log = Array.from({ length: N }, () => './main.tex:3: Missing $ inserted.').join('\n');
+    const { result, ms } = timed(() => diagnostics(log));
+    expect(result).toEqual([
+      { severity: 'error', file: 'main.tex', line: 3, message: 'Missing $ inserted.' },
+    ]);
+    expect(ms, `took ${ms} ms`).toBeLessThan(5000);
+  });
+
+  test('20,000 different errors take no longer than a moment', () => {
+    const log = Array.from(
+      { length: N },
+      (_, i) => `./main.tex:${i + 1}: Missing $ inserted.`,
+    ).join('\n');
+    const { result, ms } = timed(() => diagnostics(log));
+    // The first 1,000 in the log's order, and one that says how many were left out.
+    expect(result).toHaveLength(MAX_DIAGNOSTICS + 1);
+    expect(result[0]).toMatchObject({ line: 1 });
+    expect(result[MAX_DIAGNOSTICS - 1]).toMatchObject({ line: MAX_DIAGNOSTICS });
+    expect(result.at(-1)).toEqual({
+      severity: 'error',
+      message: `${N - MAX_DIAGNOSTICS} more messages left out. The build log has them all.`,
+    });
+    expect(ms, `took ${ms} ms`).toBeLessThan(5000);
+  });
+});
+
+describe('dedupeDiagnostics and capDiagnostics', () => {
+  const N = 20_000;
+  const error = (line: number): Diagnostic => ({
+    severity: 'error',
+    file: 'main.tex',
+    line,
+    message: 'Missing $ inserted.',
+  });
+
+  test('20,000 identical entries are one, and 20,000 different ones are all kept, in order', () => {
+    const same = timedRun(() => dedupeDiagnostics(Array.from({ length: N }, () => error(1))));
+    expect(same.result).toEqual([error(1)]);
+    expect(same.ms, `took ${same.ms} ms`).toBeLessThan(2000);
+    const all = Array.from({ length: N }, (_, i) => error(i + 1));
+    const distinct = timedRun(() => dedupeDiagnostics(all));
+    expect(distinct.result).toEqual(all);
+    expect(distinct.ms, `took ${distinct.ms} ms`).toBeLessThan(2000);
+  });
+
+  test('the first of the same entries keeps its place; a different field is a different entry', () => {
+    const w: Diagnostic = { severity: 'warning', message: 'x' };
+    expect(
+      dedupeDiagnostics([error(2), w, error(1), error(2), { ...w, line: 3 }, w, error(1)]),
+    ).toEqual([error(2), w, error(1), { ...w, line: 3 }]);
+  });
+
+  test('a list within the cap is as it was; past it, errors are kept before warnings', () => {
+    const list = [error(1), { severity: 'warning' as const, message: 'w' }, error(2)];
+    expect(capDiagnostics(list, 3)).toBe(list);
+    expect(capDiagnostics(list, 2)).toEqual([
+      error(1),
+      error(2),
+      { severity: 'warning', message: '1 more message left out. The build log has them all.' },
+    ]);
+  });
+
+  test('when only warnings go, the note is a warning; when an error goes, an error', () => {
+    const warnings = Array.from({ length: 5 }, (_, i): Diagnostic => ({
+      severity: 'warning',
+      message: `w${i}`,
+    }));
+    expect(capDiagnostics(warnings, 2).at(-1)).toEqual({
+      severity: 'warning',
+      message: '3 more messages left out. The build log has them all.',
+    });
+    expect(capDiagnostics([error(1), error(2), error(3)], 1).at(-1)?.severity).toBe('error');
   });
 });
