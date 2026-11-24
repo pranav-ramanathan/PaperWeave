@@ -541,7 +541,21 @@ export async function importZip(
     } catch {
       // Reported by importReview as unreadable.
     }
-    const brought = await importReview(pool, store, made[i].id, parsed);
+    // All or nothing for this paper's review: one that cannot be written in full leaves none of
+    // it, and the paper, which is already there, still comes in. The error is not logged: it can
+    // carry words from the manuscript.
+    let brought: ReviewImport;
+    try {
+      brought = await transaction(pool, (db) => importReview(db, store, made[i].id, parsed));
+    } catch {
+      console.error('review data could not be brought in');
+      brought = {
+        threads: 0,
+        proposals: 0,
+        detached: 0,
+        missing: ['The review data could not be brought in, so none was.'],
+      };
+    }
     const report: ImportReport = { ...p.report, review: brought };
     // The paper's root where it came from, if the archive says: a plain ZIP leaves that to the
     // importer's guess, which can be another file.

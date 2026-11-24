@@ -587,8 +587,16 @@ Read this first. Update it in every pull request.
     if they are there more than once, where the surroundings match (`locateQuote`).
   - A thread whose words are not in the paper arrives detached, with its words. A proposal that
     cannot be placed is left out. The import report says how many of each came in and lists
-    what did not, with the reason. Review data that cannot be read is reported and never stops
-    the paper itself coming in.
+    what did not, with the reason. Review data that cannot be read, or cannot be written (a
+    comment with a NUL character, which the schema allows and Postgres refuses), is reported and
+    does not stop the paper itself coming in. A paper's review is brought in as one transaction:
+    if it fails, none of that paper's review is kept, and the report says "The review data could
+    not be brought in, so none was." (the error itself is not logged, as it can hold manuscript
+    text). A thread's comments are written by one statement per 500, not one per comment.
+  - **Not done:** placing quotes on a large file with many threads still costs CPU time: about
+    450 s worst case for 20,000 threads on a 5 MB file with a common quote (measured). A cap or a
+    time budget is an owner decision. The caps (20,000 threads, 5,000 comments a thread) are
+    unchanged.
   - The people named in the data may have no account here: they are kept as names
     (`imported_author`, migration 0019), and shown where an author is shown.
   - A service test exports a paper with two threads and four proposals (resolved, detached,
