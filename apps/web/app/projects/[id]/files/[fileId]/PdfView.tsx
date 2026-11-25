@@ -83,6 +83,8 @@ export default function PdfView(props: {
   // Set by the effect that draws the pages: puts the words and the pictures right for the
   // width the pages now have.
   const refit = useRef<() => void>(() => {});
+  // Set by the same effect: has a page say what size it is, so that a place on it can be found.
+  const measure = useRef<(n: number) => Promise<void>>(async () => {});
 
   // What was chosen before, read after mount so that the first draw matches the server's.
   useEffect(() => {
@@ -160,10 +162,25 @@ export default function PdfView(props: {
         const wrong = near.has(holder) ? !current(holder) : holder.dataset.drawn === 'yes';
         if (!stop && wrong && holder.clientWidth > 0) void settle(holder);
       };
+      // A page's own size, once, the first time it is wanted. Until then it has the first page's.
+      const measured = async (holder: HTMLElement) => {
+        if (holder.dataset.sized === 'yes') return;
+        const page = await doc.getPage(Number(holder.dataset.page));
+        if (stop || holder.dataset.sized === 'yes') return;
+        const { width, height } = page.getViewport({ scale: 1 });
+        holder.dataset.width = String(width);
+        holder.dataset.height = String(height);
+        holder.style.aspectRatio = `${width} / ${height}`;
+        holder.dataset.sized = 'yes';
+      };
       const draw = async (holder: HTMLElement) => {
+        await measured(holder);
         const page = await doc.getPage(Number(holder.dataset.page));
         if (stop) return;
-        const canvas = holder.querySelector('canvas')!;
+        // The picture's canvas is made when the page is first drawn, not with the thousands that
+        // never are.
+        let canvas = holder.querySelector('canvas');
+        if (!canvas) holder.prepend((canvas = document.createElement('canvas')));
         const width = holder.clientWidth;
         const natural = page.getViewport({ scale: 1 });
         const fitted = width / natural.width;
@@ -201,29 +218,38 @@ export default function PdfView(props: {
           .catch(() => {});
         holder.dataset.drawn = 'yes';
       };
+      // A paper can have tens of thousands of pages, so only the first is asked for its size:
+      // the rest are made like it, and each says what it really is when it is first needed.
+      const first = (await doc.getPage(1)).getViewport({ scale: 1 });
+      const [w0, h0] = [first.width, first.height];
       for (let n = 1; n <= doc.numPages; n++) {
-        const size = (await doc.getPage(n)).getViewport({ scale: 1 });
         const holder = document.createElement('div');
         holder.className = 'pdf-page';
         holder.dataset.page = String(n);
-        holder.dataset.width = String(size.width);
-        holder.dataset.height = String(size.height);
-        holder.style.aspectRatio = `${size.width} / ${size.height}`;
+        holder.dataset.width = String(w0);
+        holder.dataset.height = String(h0);
+        holder.style.aspectRatio = `${w0} / ${h0}`;
         holder.setAttribute('role', 'group');
         holder.setAttribute('aria-label', `Page ${n} of ${doc.numPages}`);
-        holder.append(document.createElement('canvas'));
-        holder.addEventListener('dblclick', (e) => {
-          const box = holder.getBoundingClientRect();
-          pick.current(
-            n,
-            ((e.clientX - box.left) / box.width) * size.width,
-            ((e.clientY - box.top) / box.height) * size.height,
-            false,
-            wordClicked(e, holder),
-          );
-        });
         pages.append(holder);
       }
+      pages.addEventListener('dblclick', (e) => {
+        const holder = (e.target as Element).closest<HTMLElement>('.pdf-page');
+        // A page that has not said what size it is has not been looked at.
+        if (!holder || holder.dataset.sized !== 'yes') return;
+        const box = holder.getBoundingClientRect();
+        pick.current(
+          Number(holder.dataset.page),
+          ((e.clientX - box.left) / box.width) * Number(holder.dataset.width),
+          ((e.clientY - box.top) / box.height) * Number(holder.dataset.height),
+          false,
+          wordClicked(e, holder),
+        );
+      });
+      measure.current = async (n) => {
+        const holder = pages.children[n - 1] as HTMLElement | undefined;
+        if (holder) await measured(holder);
+      };
       if (stop) return;
       host.current.replaceChildren(pages);
       for (const holder of pages.children) watch.observe(holder);
@@ -259,6 +285,7 @@ export default function PdfView(props: {
         resized.disconnect();
         clearTimeout(timer);
         refit.current = () => {};
+        measure.current = async () => {};
         destroy();
       };
     })().catch(() => !stop && setProblem(true));
@@ -309,37 +336,48 @@ export default function PdfView(props: {
     if (!el || !mark || drawn !== src) return;
     const holder = el.querySelector<HTMLElement>(`[data-page="${mark.page}"]`);
     if (!holder) return;
-    const height = Number(holder.dataset.height);
     const band = document.createElement('div');
-    band.className = 'pdf-mark';
-    band.dataset.page = String(mark.page);
-    band.style.top = `${(100 * mark.y) / height}%`;
-    band.style.height = `${(100 * mark.height) / height}%`;
-    // As wide as the line's column, when that is known, not the whole page.
-    const wide = Number(holder.dataset.width);
-    const narrow = mark.left !== undefined && mark.width !== undefined && mark.width > 0;
-    if (narrow) {
-      band.style.left = `${(100 * mark.left!) / wide}%`;
-      band.style.right = 'auto';
-      band.style.width = `${(100 * mark.width!) / wide}%`;
-    }
-    holder.append(band);
-    const top = holder.offsetTop + (holder.offsetHeight * mark.y) / height;
-    // Sideways too, when the pages are wider than the pane: the band's middle in the middle.
-    const across =
-      narrow && el.scrollWidth > el.clientWidth
-        ? holder.offsetLeft + (holder.offsetWidth * (mark.left! + mark.width! / 2)) / wide
-        : null;
-    el.scrollTo({
-      top: Math.max(0, top - el.clientHeight / 3),
-      ...(across !== null && { left: Math.max(0, across - el.clientWidth / 2) }),
-    });
-    // In a narrow window the pane is under the editor, off the screen: the band was shown to
-    // nobody. Only the window is moved, and only when the band is not on the screen.
-    const at = band.getBoundingClientRect();
-    const by = intoWindow(at.top, at.bottom, window.innerHeight);
-    if (by) window.scrollBy({ top: by });
-    return () => band.remove();
+    let gone = false;
+    // The page says what size it is first: only the pages that were looked at have.
+    void measure
+      .current(mark.page)
+      .catch(() => {})
+      .then(() => {
+        if (gone) return;
+        const height = Number(holder.dataset.height);
+        band.className = 'pdf-mark';
+        band.dataset.page = String(mark.page);
+        band.style.top = `${(100 * mark.y) / height}%`;
+        band.style.height = `${(100 * mark.height) / height}%`;
+        // As wide as the line's column, when that is known, not the whole page.
+        const wide = Number(holder.dataset.width);
+        const narrow = mark.left !== undefined && mark.width !== undefined && mark.width > 0;
+        if (narrow) {
+          band.style.left = `${(100 * mark.left!) / wide}%`;
+          band.style.right = 'auto';
+          band.style.width = `${(100 * mark.width!) / wide}%`;
+        }
+        holder.append(band);
+        const top = holder.offsetTop + (holder.offsetHeight * mark.y) / height;
+        // Sideways too, when the pages are wider than the pane: the band's middle in the middle.
+        const across =
+          narrow && el.scrollWidth > el.clientWidth
+            ? holder.offsetLeft + (holder.offsetWidth * (mark.left! + mark.width! / 2)) / wide
+            : null;
+        el.scrollTo({
+          top: Math.max(0, top - el.clientHeight / 3),
+          ...(across !== null && { left: Math.max(0, across - el.clientWidth / 2) }),
+        });
+        // In a narrow window the pane is under the editor, off the screen: the band was shown to
+        // nobody. Only the window is moved, and only when the band is not on the screen.
+        const at = band.getBoundingClientRect();
+        const by = intoWindow(at.top, at.bottom, window.innerHeight);
+        if (by) window.scrollBy({ top: by });
+      });
+    return () => {
+      gone = true;
+      band.remove();
+    };
   }, [mark, drawn, src]);
 
   return (
