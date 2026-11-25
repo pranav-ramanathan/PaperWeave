@@ -8,6 +8,8 @@ export {
   Check,
   ChevronRight,
   CircleCheck,
+  FileText,
+  Folder,
   Info,
   Pencil,
   Sparkles,

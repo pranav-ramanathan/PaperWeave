@@ -30,11 +30,11 @@ export const MIGRATED: readonly string[] = [
 
 /**
  * The pages being built in the new look over several changes, by the name each gives `ui()`. None
- * now. A page here is "next" only when UI_STAGED=1 on the server and the person's cookie is
+ * the editor ("file", T18 to T27). A page here is "next" only when UI_STAGED=1 on the server and the person's cookie is
  * "next"; for everyone else it is "classic", so a half-moved page is never shown. The last change
  * for a page moves it from here to MIGRATED.
  */
-export const STAGED: readonly string[] = [];
+export const STAGED: readonly string[] = ['file'];
 
 /**
  * What UI_STAGED says: "1" is on, "0" and not set are off. Anything else stops whoever asks, as

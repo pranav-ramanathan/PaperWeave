@@ -1,6 +1,8 @@
 'use client';
-import { useEffect, useState } from 'react';
+import { Fragment, useEffect, useState } from 'react';
 import Link from '../../../../Go';
+import { FileText, Folder } from '../../../../../components/icon';
+import { useLook } from '../../../../../components/look';
 import { onFiles, type PaperFile } from '../../../../../lib/paperfiles';
 
 /**
@@ -13,9 +15,29 @@ export function useFiles(projectId: string, made: PaperFile[]) {
   return got?.made === made ? got.files : made;
 }
 
-/** The list of the paper's files beside the editor. It follows files added, removed and renamed. */
-export default function Files(props: { projectId: string; fileId: string; files: PaperFile[] }) {
+/** The name of the file now open, as the list has it (a rename shows here too). */
+export function FileName(props: {
+  projectId: string;
+  fileId: string;
+  files: PaperFile[];
+  path: string;
+}) {
   const files = useFiles(props.projectId, props.files);
+  return <>{files.find((f) => f.id === props.fileId)?.path ?? props.path}</>;
+}
+
+/**
+ * The list of the paper's files beside the editor. It follows files added, removed and renamed.
+ * `root` is the path of the root file; only the new look says which it is.
+ */
+export default function Files(props: {
+  projectId: string;
+  fileId: string;
+  files: PaperFile[];
+  root?: string;
+}) {
+  const files = useFiles(props.projectId, props.files);
+  if (useLook() === 'next') return <Tree {...props} files={files} />;
   return (
     <nav aria-label="Files">
       <ul>
@@ -34,6 +56,80 @@ export default function Files(props: { projectId: string; fileId: string; files:
             )}
           </li>
         ))}
+      </ul>
+    </nav>
+  );
+}
+
+/**
+ * The new look's tree. The same links in the same order, each with its whole path as its text
+ * (the folders it sits in are said by a hidden prefix and drawn as a heading row above), so a
+ * link's name is what it is in the old look. A folder row is shown when the folder differs from
+ * the one the file before it sat in; it is not read out, the paths already say it.
+ */
+function Tree(props: { projectId: string; fileId: string; files: PaperFile[]; root?: string }) {
+  let before: string[] = [];
+  return (
+    <nav aria-label="Files" className="files-tree">
+      <h2>Files</h2>
+      <ul>
+        {props.files.map((f) => {
+          const parts = f.path.split('/');
+          const name = parts.pop() ?? f.path;
+          const rows: { folder: string; depth: number }[] = [];
+          let same = true;
+          parts.forEach((dir, depth) => {
+            same = same && before[depth] === dir;
+            if (!same) rows.push({ folder: dir, depth });
+          });
+          before = parts;
+          const current = f.id === props.fileId;
+          const inside = (
+            <>
+              <FileText aria-hidden="true" className="files-icon" />
+              {parts.length > 0 && <span className="sr-only">{`${parts.join('/')}/`}</span>}
+              <span className="files-name">{name}</span>
+            </>
+          );
+          return (
+            <Fragment key={f.id}>
+              {rows.map((r) => (
+                <li
+                  key={`${r.depth}/${r.folder}`}
+                  aria-hidden="true"
+                  className="files-folder"
+                  style={{ marginInlineStart: `${r.depth * 0.875}rem` }}
+                >
+                  <Folder className="files-icon" />
+                  {r.folder}
+                </li>
+              ))}
+              <li
+                className="files-file"
+                style={{ marginInlineStart: `${parts.length * 0.875}rem` }}
+              >
+                {f.readonly ? (
+                  <span title="Cannot be edited as text" className="files-entry">
+                    {inside}
+                  </span>
+                ) : (
+                  <Link
+                    prefetch={false}
+                    href={`/projects/${props.projectId}/files/${f.id}`}
+                    aria-current={current ? 'page' : undefined}
+                    className="files-entry"
+                    // The hidden folder prefix below keeps the link's text its whole path; this
+                    // keeps its name that too (a hidden box would put a space inside it).
+                    aria-label={f.path}
+                  >
+                    {inside}
+                  </Link>
+                )}
+                {props.root === f.path && <span className="files-root">root</span>}
+              </li>
+            </Fragment>
+          );
+        })}
       </ul>
     </nav>
   );
