@@ -55,7 +55,7 @@ export type Revision = {
  * no words. `partial` means some text was too large to compare, so the words are a lower bound.
  */
 export type RevisionStat = { files: number; added: number; removed: number; partial?: true };
-type RevisionFile = { file_id: string; path: string; digest: string };
+export type RevisionFile = { file_id: string; path: string; digest: string };
 
 /**
  * Freeze the paper as it is now. An automatic cut that finds nothing changed since the latest
@@ -825,6 +825,21 @@ export async function diffRevisions(
   await authorize(db, userId, id(projectId), 'project.read');
   const a = await load(db, projectId, fromId);
   const b = await load(db, projectId, toId);
+  return diffLoaded(db, store, a, b, () => heldFileIds(db, projectId));
+}
+
+/**
+ * The comparison of two loaded revisions whose files are paired by `file_id`: the same ID is the
+ * same file. `diffRevisions` pairs by a file's own ID; a comparison across a paper and its versions
+ * gives each file the ID of its origin instead. `held` says which of those IDs are held back.
+ */
+export async function diffLoaded(
+  db: Db,
+  store: BlobStore,
+  a: { revision: { number: number }; files: RevisionFile[] },
+  b: { revision: { number: number }; files: RevisionFile[] },
+  heldIds: () => Promise<Set<string>>,
+): Promise<{ from: number; to: number; files: FileDiff[] }> {
   const before = new Map(a.files.map((o) => [o.file_id, o]));
   const after = new Set(b.files.map((f) => f.file_id));
   const gone = a.files.filter((o) => !after.has(o.file_id));
@@ -841,7 +856,7 @@ export async function diffRevisions(
     ...fresh.filter((f) => !swappedIds.has(f.file_id)).map((file) => ({ file, op: '+' as const })),
     ...gone.filter((o) => !swappedIds.has(o.file_id)).map((file) => ({ file, op: '-' as const })),
   ].sort((p, q) => p.file.path.localeCompare(q.file.path));
-  const held = only.length || swapped.length ? await heldFileIds(db, projectId) : new Set<string>();
+  const held = only.length || swapped.length ? await heldIds() : new Set<string>();
 
   // Everything to be read is read first, sixteen at a time. The text of a file that changed;
   // for a file on one side only (or deleted and made again), the store is asked its size first,
