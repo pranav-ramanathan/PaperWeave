@@ -18,6 +18,7 @@ import {
   listMembers,
   listProposals,
   listRevisions,
+  listVersions,
   olderAutoRevisions,
   REVISIONS_SHOWN,
   listThreads,
@@ -26,6 +27,7 @@ import {
 import { notFound } from 'next/navigation';
 import { blobs, db, forTitle, paperOf, requireUser } from '../../../lib/server';
 import { ui } from '../../../lib/ui';
+import { switcherOf, versionsOn } from '../../../lib/versions';
 import { Assistance } from './sections/Assistance';
 import { Bibliography, CheckNotices } from './sections/Bibliography';
 import { ChartRemovedNotice, Data, DescribedNotice } from './sections/Data';
@@ -150,6 +152,13 @@ async function Project({
   const showReview = threads.length + proposals.length > 0;
   const look = await ui('paper');
   const next = look === 'next';
+  // The version switcher, in the new look and only with versions on: main and each version of it.
+  const family = next && versionsOn() ? await listVersions(db(), user.id, id) : null;
+  const mainId = family?.[0]?.paper ?? id;
+  const switcher = family && {
+    choices: switcherOf(mainId, family, id),
+    paper: mainId,
+  };
   const onThisPage = (
     <OnThisPage
       showLabels={showLabels}
@@ -252,7 +261,12 @@ async function Project({
   );
   return (
     <main className={next ? 'page paper' : 'page'} data-ui={look}>
-      <Header name={project.name} role={project.role} next={next} />
+      <Header
+        name={project.name}
+        role={project.role}
+        next={next}
+        versions={switcher ?? undefined}
+      />
       {next ? (
         <div className="paper-grid">
           {onThisPage}

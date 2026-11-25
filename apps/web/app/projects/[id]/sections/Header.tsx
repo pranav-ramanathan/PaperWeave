@@ -1,5 +1,6 @@
 import { ChevronRight } from '../../../../components/icon';
 import { Mark } from '../../../../components/mark';
+import { VersionMenu, type VersionChoice } from '../../../../components/version-menu';
 import Link from '../../../Go';
 import Once from '../../../Once';
 import Result from '../../../Result';
@@ -10,10 +11,13 @@ export function Header({
   name,
   role,
   next = false,
+  versions,
 }: {
   name: string;
   role: string;
   next?: boolean;
+  /** Only with versions turned on: the switcher's entries, and the address of main. */
+  versions?: { choices: VersionChoice[]; paper: string };
 }) {
   // The text is cut into the same pieces as before the page was split into sections
   // (the HTML keeps a marker between pieces), so it is kept as written.
@@ -49,6 +53,11 @@ export function Header({
               </li>
             </ol>
           </nav>
+          {versions && (
+            <div className="paper-versions">
+              <VersionMenu choices={versions.choices} page="" paper={versions.paper} />
+            </div>
+          )}
         </header>
         <div className="paper-title">
           <h1>{name}</h1>

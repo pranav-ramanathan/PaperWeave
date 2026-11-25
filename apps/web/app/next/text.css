@@ -1,1 +1,489 @@
-/* text: written by the look tasks that own this area. Empty on purpose; see next.css. */
+/*
+ * The visual text in the new look (T20, PLAN.md sections 8 and 15): the manuscript on a white sheet
+ * on the desk, set in Literata at 17 px and 1.72; LaTeX the view does not draw shown as quiet
+ * chips; the table and figure tools quiet until the pointer or the keyboard is near them.
+ *
+ * Only looks are here. What the tests hold the text to (content-visibility of the blocks, a wide
+ * formula scrolling in its own block, the names above other people's carets, the marks that do not
+ * depend on colour) is in functional.css and is not repeated. Where a rule of functional.css names
+ * a colour of the old look (`--accent`, `--warn`), the rule here is one class stronger
+ * (`.visual .x` over `.x`) and uses this look's tokens.
+ *
+ * Nothing here changes a line's height or a box's width by more than the chips always did: the
+ * caret tests in visual and editing read positions, and a hover must not move the text, so what
+ * appears on hover or focus is a colour or an edge, not a size. The one thing that does grow is a
+ * raw block with the caret or the keyboard in it, which opens to show its source.
+ *
+ * `:root` is the page's <main> (next.css). The selectors below are plain.
+ */
+
+/* The desk the sheet lies on. The pane keeps the definite height and the scroll that editor.css
+   and functional.css give it. */
+.visual {
+  padding: 0.75rem;
+  background: var(--desk);
+  border-radius: 6px;
+}
+.visual:focus-within {
+  outline: 2px solid var(--ring);
+  outline-offset: -2px;
+}
+@media (min-width: 40rem) {
+  .visual {
+    padding: 1.5rem;
+  }
+}
+
+/* The sheet: square corners, one hairline of shadow, a 41 rem measure. */
+.visual .ProseMirror {
+  box-sizing: border-box;
+  max-width: 41rem;
+  min-height: 100%;
+  margin-inline: auto;
+  padding: 1.5rem 1.25rem;
+  background: var(--card);
+  color: var(--card-foreground);
+  border-radius: 2px;
+  box-shadow: var(--shadow-rest);
+  outline: none;
+  font-family: var(--font-serif);
+  font-size: 1.0625rem;
+  line-height: 1.72;
+  font-kerning: normal;
+  hyphens: manual;
+}
+@media (min-width: 40rem) {
+  .visual .ProseMirror {
+    padding: 3rem 3.5rem;
+  }
+}
+.visual ::selection {
+  background: color-mix(in srgb, var(--primary) 24%, transparent);
+}
+
+/* Paragraphs, headings, lists. */
+.visual p {
+  margin: 0 0 0.95em;
+}
+.visual h2,
+.visual h3,
+.visual h4,
+.visual h5,
+.visual h6 {
+  margin: 1.7em 0 0.5em;
+  font-family: var(--font-heading);
+  font-weight: 650;
+  line-height: 1.3;
+  text-wrap: balance;
+}
+.visual h2 {
+  font-size: 1.375rem;
+}
+.visual h3 {
+  font-size: 1.2rem;
+}
+.visual h4 {
+  font-size: 1.0625rem;
+}
+.visual h5,
+.visual h6 {
+  font-size: 1.0625rem;
+  font-style: italic;
+  font-weight: 600;
+}
+.visual .ProseMirror > :first-child {
+  margin-top: 0;
+}
+.visual ul,
+.visual ol {
+  margin: 0 0 0.95em;
+  padding-left: 1.6em;
+}
+.visual li {
+  margin: 0.15em 0;
+}
+.visual strong {
+  font-weight: 650;
+}
+.visual code {
+  padding: 0.05em 0.3em;
+  border-radius: 3px;
+  background: var(--secondary);
+  font-family: var(--font-mono);
+  font-size: 0.86em;
+}
+
+/* Marks in the text. The line differs by kind, so colour is never the only cue. */
+.visual .thread-mark {
+  background: color-mix(in srgb, var(--comment-wash) 85%, transparent);
+  border-bottom: 2px solid var(--comment-line);
+}
+.visual .proposal-mark {
+  background: color-mix(in srgb, var(--proposal-wash) 85%, transparent);
+  border-bottom: 2px dashed var(--proposal-line);
+}
+.visual .finding-mark {
+  text-decoration: underline wavy var(--finding-line);
+  text-decoration-skip-ink: none;
+  text-underline-offset: 3px;
+}
+.visual .model-mark {
+  border-bottom: 2px dotted var(--model-line);
+}
+/* The name above another person's caret: this look's face; the place and size are functional.css's. */
+.visual .remote-caret::after {
+  font-family: var(--font-sans);
+}
+
+/* Something the view does not draw as text: a quiet chip in the line. */
+.visual span.pw-atom {
+  padding: 0 0.3em;
+  border-radius: 4px;
+  background: var(--secondary);
+  color: var(--muted-foreground);
+  font-family: var(--font-mono);
+  font-size: 0.82em;
+  line-height: normal;
+  white-space: nowrap;
+}
+/* A logo such as \LaTeX, one of the paper's own words: it reads as the word it prints. */
+.visual span.pw-atom.pw-word {
+  padding: 0;
+  background: none;
+  color: inherit;
+  font: inherit;
+}
+/* A comment prints nothing: a quiet italic note. A command that prints nothing: a small mark. */
+.visual span.pw-atom.pw-comment,
+.visual span.pw-atom.pw-quiet {
+  padding: 0;
+  background: none;
+  font: inherit;
+}
+.visual span.pw-atom.pw-comment {
+  font-size: 0.85em;
+  font-style: italic;
+}
+.visual span.pw-atom.pw-quiet {
+  font-size: 0.8em;
+}
+/* A \label in a paragraph reads as its key, small. */
+.visual span.pw-atom.pw-tag {
+  font-size: 0.75em;
+}
+/* A formula that is drawn has no chip; one that is not drawn (shown as its source) keeps it. */
+.visual span.pw-math:not(.pw-raw) {
+  padding: 0;
+  background: none;
+  color: inherit;
+  font: inherit;
+  line-height: normal;
+}
+.visual span.pw-cite,
+.visual span.pw-ref {
+  padding: 0;
+  background: none;
+  color: var(--primary);
+  font: inherit;
+}
+/* A number taken from a PDF that is behind the text; a citation or reference that has no target. */
+.visual .pw-stale.pw-ref,
+.visual .pw-stale .katex-tag {
+  color: var(--muted-foreground);
+  font-style: italic;
+}
+.visual .pw-unknown {
+  color: var(--finding);
+  text-decoration: underline dotted var(--finding-line);
+  text-underline-offset: 3px;
+}
+.visual .pw-ref .pw-unknown,
+.visual span.pw-cite.pw-unknown,
+.visual span.pw-ref.pw-unknown {
+  color: var(--finding);
+}
+
+/* A drawn formula holds a one-pixel copy of itself for screen readers (KaTeX's MathML), which sits
+   where the line's top would be. A pointer test that takes the first box of a formula as its aim
+   (Playwright does) then aims at that pixel, which on a tall line is above the formula's own box
+   and so is the paragraph's. Placed in the middle of the formula, it is on the formula. */
+.visual .pw-math:not(.pw-raw) {
+  position: relative;
+}
+.visual .pw-math .katex-mathml {
+  top: 50%;
+  left: 50%;
+}
+
+/* A selected atom, the one Enter opens. */
+.visual .ProseMirror-selectednode {
+  outline: 2px solid var(--ring);
+  outline-offset: 2px;
+  border-radius: 4px;
+}
+
+/* Blocks. */
+.visual .pw-block {
+  display: block;
+  margin: 0 0 0.95em;
+}
+.visual div.pw-math:not(.pw-raw) {
+  margin: 1.1em 0;
+  font-size: 1em;
+  text-align: center;
+}
+
+/* LaTeX the view does not draw, as one quiet line: what it is and the way into the source. The
+   source itself is kept for screen readers (as .sr-only keeps text) and is shown, all of it,
+   while the keyboard is in the block or it is the selected block. It is not cut short with an
+   ellipsis: text that is cut off is lost to someone who spaces their text out (zoom.spec). */
+.visual div.pw-raw:not(.pw-slim) {
+  position: relative;
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  grid-template-areas: 'what go';
+  align-items: center;
+  column-gap: 0.625rem;
+  padding: 0.25rem 0.375rem 0.25rem 0.625rem;
+  border-radius: 6px;
+  background: var(--secondary);
+  color: var(--muted-foreground);
+  font-family: var(--font-sans);
+  font-size: 0.8125rem;
+  line-height: 1.5;
+}
+.visual div.pw-raw:not(.pw-slim) > .pw-label {
+  grid-area: what;
+  font-weight: 600;
+}
+.visual div.pw-raw:not(.pw-slim) > pre {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  margin: 0;
+  overflow: hidden;
+  clip-path: inset(50%);
+  white-space: nowrap;
+}
+.visual div.pw-raw:not(.pw-slim) > button {
+  grid-area: go;
+}
+.visual div.pw-raw:not(.pw-slim):is(:focus-within, .ProseMirror-selectednode) {
+  grid-template-areas:
+    'what go'
+    'source source';
+  row-gap: 0.25rem;
+  padding-block: 0.375rem;
+}
+.visual div.pw-raw:not(.pw-slim):is(:focus-within, .ProseMirror-selectednode) > pre {
+  position: static;
+  grid-area: source;
+  width: auto;
+  height: auto;
+  max-height: 9em;
+  overflow: auto;
+  clip-path: none;
+  white-space: pre-wrap;
+  color: var(--foreground);
+  font-family: var(--font-mono);
+  font-size: 0.78rem;
+}
+
+/* A block that is not valid LaTeX yet is not quiet: it says so, and shows the last good text. */
+.visual div.pw-frozen {
+  padding: 0.5rem 0.75rem;
+  border: 1px solid var(--finding-line);
+  border-radius: 6px;
+  background: var(--finding-wash);
+  font-family: var(--font-sans);
+  font-size: 0.875rem;
+}
+.visual div.pw-frozen strong {
+  display: block;
+  color: var(--finding);
+  font-weight: 600;
+}
+.visual .pw-last {
+  margin: 0.25rem 0;
+  color: var(--muted-foreground);
+  font-family: var(--font-serif);
+}
+.visual .pw-last:empty {
+  display: none;
+}
+.visual div.pw-frozen pre {
+  margin: 0.25rem 0;
+  max-height: 9em;
+  overflow: auto;
+  white-space: pre-wrap;
+  font-family: var(--font-mono);
+  font-size: 0.78rem;
+}
+.visual .pw-label {
+  color: var(--muted-foreground);
+  font-family: var(--font-sans);
+}
+
+/* The buttons in a block: small, in the tool face. */
+.visual .pw-block > button,
+.visual .pw-slim > button {
+  min-height: 24px;
+  border: 0;
+  border-radius: 4px;
+  background: none;
+  padding: 0 0.375rem;
+  color: var(--primary);
+  font-family: var(--font-sans);
+  font-size: 0.8125rem;
+  text-decoration: underline;
+  text-underline-offset: 2px;
+  cursor: pointer;
+}
+.visual .pw-block > button:hover {
+  background: var(--card);
+}
+
+/* A lone \label, an environment's \begin or \end line, the end of the document: one line. */
+.visual div.pw-raw.pw-slim {
+  display: flex;
+  align-items: baseline;
+  gap: 0.5em;
+  margin: 0 0 0.3em;
+  font-size: 0.8125rem;
+  line-height: 1.5;
+}
+.visual .pw-slim-begin .pw-label {
+  color: var(--foreground);
+  font-weight: 600;
+}
+
+/* A figure or table: its caption and cells are edited where they stand. */
+.visual .pw-float {
+  padding: 0.5rem 0.75rem;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+}
+.visual .pw-float table {
+  border-collapse: collapse;
+  margin: 0 auto 0.4rem;
+}
+.visual .pw-float caption {
+  caption-side: top;
+  padding-bottom: 0.3rem;
+  text-align: left;
+}
+.visual .pw-float th,
+.visual .pw-float td {
+  border: 1px solid var(--border);
+  padding: 0;
+  text-align: left;
+}
+.visual .pw-float th {
+  background: var(--secondary);
+  font-weight: 600;
+}
+.visual .pw-float img {
+  display: block;
+  max-width: 100%;
+  max-height: 16rem;
+  margin: 0 auto 0.4rem;
+}
+.visual .pw-describe,
+.visual .pw-caption {
+  margin: 0.2rem 0;
+}
+.visual .pw-float .pw-describe {
+  color: var(--muted-foreground);
+  font-family: var(--font-sans);
+  font-size: 0.8125rem;
+}
+
+/* The parts that are edited in place: a cell, a caption, a description. */
+.visual button.pw-part {
+  display: block;
+  width: 100%;
+  min-height: 1.6em;
+  padding: 0.15rem 0.5rem;
+  border: 0;
+  border-radius: 3px;
+  background: none;
+  color: inherit;
+  font: inherit;
+  text-align: inherit;
+  cursor: text;
+}
+.visual caption button.pw-part,
+.visual .pw-caption button.pw-part,
+.visual .pw-describe button.pw-part {
+  display: inline;
+  width: auto;
+  padding: 0 0.2rem;
+}
+.visual span.pw-part {
+  display: inline-block;
+  padding: 0.15rem 0.5rem;
+}
+.visual button.pw-part:hover {
+  background: var(--secondary);
+}
+.visual button.pw-part:focus-visible {
+  background: var(--secondary);
+  outline: 2px solid var(--ring);
+  outline-offset: -2px;
+}
+.visual input.pw-part {
+  max-width: 100%;
+  padding: 0.15rem 0.4rem;
+  border: 1px solid var(--input);
+  border-radius: 4px;
+  background: var(--card);
+  color: var(--foreground);
+  font-family: var(--font-mono);
+  font-size: 0.85rem;
+}
+.visual input.pw-part:focus-visible {
+  outline: 2px solid var(--ring);
+  outline-offset: 1px;
+}
+/* A picture with no description: said in words, and marked. */
+.visual button.pw-missing {
+  color: var(--finding);
+  text-decoration: underline;
+}
+
+/* The buttons that add or remove a row or a column: quiet until the pointer or the keyboard is in
+   the table. Their place is always taken, so nothing moves when they show; and they are drawn,
+   not hidden, so they stay in the tab order and are named for a screen reader at all times. */
+.visual .pw-float td.pw-ops {
+  padding: 0 0.2rem;
+  border: 0;
+  background: none;
+  white-space: nowrap;
+  text-align: center;
+}
+.visual button.pw-op {
+  width: 1.5rem;
+  height: 1.5rem;
+  margin: 0.1rem;
+  padding: 0;
+  border: 1px solid transparent;
+  border-radius: 4px;
+  background: none;
+  color: var(--muted-foreground);
+  font: inherit;
+  line-height: 1;
+  cursor: pointer;
+}
+.visual .pw-float:is(:hover, :focus-within) button.pw-op {
+  border-color: var(--border);
+  background: var(--card);
+}
+.visual button.pw-op:hover {
+  background: var(--secondary);
+  color: var(--foreground);
+}
+.visual button.pw-op:focus-visible {
+  outline: 2px solid var(--ring);
+  outline-offset: 1px;
+  color: var(--foreground);
+}
