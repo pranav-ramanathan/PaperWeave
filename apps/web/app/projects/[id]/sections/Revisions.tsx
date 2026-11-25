@@ -191,6 +191,12 @@ export function RevisionsSection({
           )}
         </p>
       )}
+      {/* Last in the section: the save form stays the first stop after the heading. */}
+      <p>
+        <Link prefetch={false} href={`/projects/${id}/history`}>
+          History and versions
+        </Link>
+      </p>
     </>
   );
 }

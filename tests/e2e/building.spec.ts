@@ -965,5 +965,7 @@ test('a paper that names a .bib it does not have still builds, and says what is 
   await page.getByRole('link', { name: 'main.tex', exact: true }).click();
   await showSource(page);
   await expect(missing).toContainText('only the capital letters differ', { timeout: 60_000 });
-  await expect(buildStatus(page)).toHaveText('The PDF is up to date.');
+  // The note is worked out from the paper's files and the last build's log, so it shows as soon as
+  // Refs.bib is added; the build that adding it started may still be running.
+  await expect(buildStatus(page)).toHaveText('The PDF is up to date.', { timeout: 60_000 });
 });

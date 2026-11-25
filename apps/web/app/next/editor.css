@@ -33,13 +33,6 @@
 .source .cm-editor {
   height: 100%;
 }
-/* A placeholder, so that the staged page works until the task that owns it (T24: the PDF pane)
-   replaces it in pdf.css. The PDF pane is a definite height where the page flows (the wide and
-   tall block below overrides it). The menu at the caret is drawn in windows.css. */
-.build .pdf {
-  height: 70vh;
-  border: 1px solid var(--border);
-}
 
 /* The file tree. */
 .files-tree {
