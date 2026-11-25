@@ -195,6 +195,8 @@ test("a code listing's label is a label: not reported, offered, renamed", async 
   await page.goto(paper);
   await page.getByRole('link', { name: 'main.tex' }).first().click();
   await showSource(page);
+  // The file's text comes from sync after the page opens: read it once it is there.
+  await expect(page.locator('.editor .cm-content')).toContainText('label={lst:greeting}]');
   const text = await sourceText(page);
   expect(text).toContain('label={lst:greeting}]');
   expect(text).toContain('\\ref{lst:greeting}');

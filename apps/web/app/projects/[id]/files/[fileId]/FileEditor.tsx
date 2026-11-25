@@ -16,6 +16,9 @@ import {
   highlightSpecialChars,
   keymap,
   lineNumbers,
+  MatchDecorator,
+  ViewPlugin,
+  type ViewUpdate,
 } from '@codemirror/view';
 import { HocuspocusProvider } from '@hocuspocus/provider';
 import {
@@ -30,6 +33,7 @@ import { useEffect, useLayoutEffect, useRef, useState } from 'react';
 import { flushSync } from 'react-dom';
 import { yCollab, yUndoManagerKeymap } from 'y-codemirror.next';
 import * as Y from 'yjs';
+import { useLook } from '../../../../../components/look';
 import { setBibliography } from '../../../../../lib/bibliography';
 import { pageNonce } from '../../../../../lib/nonce';
 import {
@@ -198,6 +202,50 @@ const rememberView = (m: Mode) => {
 };
 
 /**
+ * The source view in the new look: the mono face, the new look's colours, and three token colours
+ * (a comment, a control sequence, a dollar sign). Only face and colour: no size, line height or
+ * padding is set, so a line is as tall as in the classic look and the caret lands in the same
+ * places. The token colours are variables (next/source.css), so the dark theme changes them there.
+ */
+const nextTokens = {
+  comment: Decoration.mark({ class: 'pw-src-comment' }),
+  command: Decoration.mark({ class: 'pw-src-command' }),
+  math: Decoration.mark({ class: 'pw-src-math' }),
+};
+const nextDecorator = new MatchDecorator({
+  // A comment to the end of the line, a control sequence (`\%` is one, so not a comment), `$`.
+  regexp: /%.*|\\(?:[a-zA-Z@]+\*?|[^a-zA-Z@])|\$\$?/g,
+  decoration: (m) =>
+    m[0][0] === '%' ? nextTokens.comment : m[0][0] === '\\' ? nextTokens.command : nextTokens.math,
+});
+const nextTheme = [
+  EditorView.theme({
+    '&': { color: 'var(--foreground)', backgroundColor: 'var(--card)' },
+    '.cm-scroller': { fontFamily: 'var(--font-mono)' },
+    '.cm-gutters': {
+      color: 'var(--muted-foreground)',
+      backgroundColor: 'var(--background)',
+      borderRight: '1px solid var(--border)',
+    },
+    '.cm-activeLine, .cm-activeLineGutter': { backgroundColor: 'transparent' },
+    '.cm-selectionBackground, &.cm-focused > .cm-scroller > .cm-selectionLayer .cm-selectionBackground':
+      { backgroundColor: 'var(--accent)' },
+  }),
+  ViewPlugin.fromClass(
+    class {
+      tokens: DecorationSet;
+      constructor(view: EditorView) {
+        this.tokens = nextDecorator.createDeco(view);
+      }
+      update(u: ViewUpdate) {
+        this.tokens = nextDecorator.updateDeco(u, this.tokens);
+      }
+    },
+    { decorations: (v) => v.tokens },
+  ),
+];
+
+/**
  * The source view's name, and an explicit tab stop, editable or not: a bare contenteditable reads
  * as tabIndex -1 to tools that check whether a scrolling region can be reached by keyboard.
  */
@@ -238,6 +286,8 @@ export default function FileEditor(props: {
   canReview: boolean;
 }) {
   const { projectId, fileId, canWrite, user, syncUrl, sourceOnly } = props;
+  // Read when the editors are made: the look does not change while a page is open.
+  const nextLook = useLook() === 'next';
   const host = useRef<HTMLDivElement>(null);
   const visualHost = useRef<HTMLDivElement>(null);
   const live = useRef<{ view: EditorView; visual: Visual | null; undo: Y.UndoManager }>(null);
@@ -740,6 +790,7 @@ export default function FileEditor(props: {
             },
           }),
           lineNumbers(),
+          ...(nextLook ? nextTheme : []),
           // Spaces and zero-width characters that pdfLaTeX stops at are shown as a red dot, with
           // their code on hover. U+00A0, U+200C, U+200D and U+3000 build and are left alone.
           highlightSpecialChars({
