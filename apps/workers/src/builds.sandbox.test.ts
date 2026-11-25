@@ -18,6 +18,7 @@ import {
   buildLabels,
   buildOutput,
   createFile,
+  cutRevision,
   deleteFile,
   exportRevision,
   importReport,
@@ -48,6 +49,7 @@ import { labelIndex } from '../../../packages/latex/src/labels.ts';
 import { parseSyncTeX } from '../../../packages/latex/src/synctex.ts';
 import { FIXTURES } from '../../../packages/latex/src/testutil.ts';
 import { pdfText } from '../../../packages/server/src/pdftext.ts';
+import { startVersion } from '../../../packages/server/src/versions.ts';
 import { TEST_ENV, testDb } from '../../../packages/server/src/testing.ts';
 import { buildNext, imageId, takeBuild, warmDir } from './builder.ts';
 
@@ -174,6 +176,34 @@ test('a paper builds to a PDF, and the same inputs are never built twice', async
   expect(await build(project)).toMatchObject({ status: 'succeeded', cached: false });
   await t.pool.query("update projects set compiler = 'lualatex' where id = $1", [project]);
   expect(await build(project)).toMatchObject({ status: 'succeeded', cached: false });
+});
+
+test('a version begun at a built revision, and its paper, share the cache; another paper does not', async () => {
+  const { project } = await paper();
+  const first = await build(project);
+  expect(first.cached).toBe(false);
+  const revision = (await cutRevision(t.pool, store, owner.id, project)).id;
+  const v = await startVersion(t.pool, store, owner.id, project, revision, 'camera-ready', {
+    env: { VERSIONS: '1' },
+  });
+  // Same content, same toolchain: no TeX run, the PDF is the paper's.
+  const there = await build(v.id);
+  expect(there).toMatchObject({ status: 'succeeded', cached: true });
+  expect(await digest(there.id)).toBe(await digest(first.id));
+  // The other way round: a build made on the version is found from its paper.
+  const second = await paper();
+  const rev2 = (await cutRevision(t.pool, store, owner.id, second.project)).id;
+  const v2 = await startVersion(t.pool, store, owner.id, second.project, rev2, 'draft', {
+    env: { VERSIONS: '1' },
+  });
+  const made = await build(v2.id);
+  expect(made.cached).toBe(false);
+  const back = await build(second.project);
+  expect(back).toMatchObject({ status: 'succeeded', cached: true });
+  expect(await digest(back.id)).toBe(await digest(made.id));
+  // A paper outside the family builds for itself, though its content is the same.
+  const stranger = await paper();
+  expect((await build(stranger.project)).cached).toBe(false);
 });
 
 test('a build records when it finished, not when the worker picked it up', async () => {

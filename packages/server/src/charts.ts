@@ -7,7 +7,7 @@ import { type BlobStore, sha256 } from './blobs.ts';
 import { type Column, datasetTable } from './data.ts';
 import { type Db, transaction } from './db.ts';
 import { AppError } from './errors.ts';
-import { id } from './projects.ts';
+import { familySql, id } from './projects.ts';
 import { currentBytes } from './sync.ts';
 
 export const CHART_KINDS = ['scatter', 'line', 'bar'] as const;
@@ -290,7 +290,8 @@ export async function saveChart(
   await authorize(pool, userId, id(projectId), 'file.write');
   // Each drawing runs a sandbox, as a build does, and is held to the same number.
   const drawn = await pool.query(
-    "select count(*)::int as n from chart_requests where project_id = $1 and created_at > now() - interval '1 hour'",
+    `select count(*)::int as n from chart_requests
+     where project_id in ${familySql('$1')} and created_at > now() - interval '1 hour'`,
     [projectId],
   );
   if (drawn.rows[0].n >= perHour)

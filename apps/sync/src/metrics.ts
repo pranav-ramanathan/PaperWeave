@@ -89,6 +89,18 @@ export async function metricsText(pool: pg.Pool, counts: Counts, open: number) {
     'Papers at least two people have edited.',
     product.twoAuthors,
   );
+  put(
+    'paperweave_papers_with_version',
+    'gauge',
+    'Papers that have at least one version.',
+    product.withVersion,
+  );
+  put(
+    'paperweave_papers_with_merge',
+    'gauge',
+    'Papers that have had a version merged, either way.',
+    product.withMerge,
+  );
   for (const p of product.proposals)
     put(
       'paperweave_proposals',

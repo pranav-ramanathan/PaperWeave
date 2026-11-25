@@ -75,6 +75,8 @@ const ReviewData = z.object({
   format: z.literal(FORMAT),
   paper: text(200),
   exported: when,
+  /** The name of the version of the paper this came from. Absent for the paper itself, and in older files. */
+  version: text(60).optional(),
   /** The path of the paper's root file where this came from. */
   root: z.string().max(255).optional(),
   threads: z.array(z.unknown()),
@@ -142,7 +144,7 @@ export async function exportReview(
   await authorize(pool, userId, id(projectId), 'project.export');
   const paper = (
     await pool.query(
-      `select p.name, f.path as root from projects p left join files f on f.id = p.root_file_id
+      `select p.name, p.version_name as version, f.path as root from projects p left join files f on f.id = p.root_file_id
        where p.id = $1`,
       [projectId],
     )
@@ -238,6 +240,7 @@ export async function exportReview(
     format: FORMAT,
     paper: paper.name,
     exported: new Date().toISOString(),
+    ...(paper.version ? { version: paper.version } : {}),
     ...(paper.root ? { root: paper.root } : {}),
     threads,
     proposals,

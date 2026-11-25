@@ -159,6 +159,17 @@ export async function person(browser: Browser, who: string) {
   // would report.
   const ip = `10.${Math.floor(Math.random() * 250)}.${Math.floor(Math.random() * 250)}.${++people}`;
   const context = await browser.newContext({ extraHTTPHeaders: { 'x-forwarded-for': ip } });
+  // E2E_UI=next: the person has chosen the new look (apps/web/lib/ui.ts), as the form on the
+  // papers page will set it. Pages not yet moved to the new look ignore it.
+  if (process.env.E2E_UI === 'next')
+    await context.addCookies([
+      {
+        name: 'pw_ui',
+        value: 'next',
+        domain: new URL(test.info().project.use.baseURL ?? 'http://localhost:3100').hostname,
+        path: '/',
+      },
+    ]);
   refusals(context);
   opened.push(context);
   slowDown(context);

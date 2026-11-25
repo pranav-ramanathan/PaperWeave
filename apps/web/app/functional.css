@@ -1,0 +1,232 @@
+/* What every look of the app needs, and what the tests assert about styles. Never scoped: the
+   old look (legacy.css) and the new one both stand on it. A rule goes here when taking it away
+   would break something that is not a matter of taste: a screen reader's text, the page's width
+   on a narrow window, the PDF and its words, a mark that must not depend on colour, a speed. Where
+   a rule mixes the two, the look is left in legacy.css and only the functional part is here.
+
+   Rules here are plain, with no scope in front. This file is loaded after legacy.css (layout.tsx),
+   so that where a rule here and one of a look are equally strong, this one wins: the busy button
+   below is greyed whatever a look says about the cursor of buttons. Colours come from the
+   variables below; a look that wants other colours for these rules sets the variables, not the
+   rules. */
+
+:root {
+  --ink: #1b1f24;
+  --muted: #5b6470;
+  --line: #d5dae1;
+  --paper: #ffffff;
+  --wash: #f4f6f8;
+  --accent: #1f5fbf;
+  --warn: #8a4b00;
+  --warn-wash: #fff4e0;
+}
+* {
+  box-sizing: border-box;
+}
+
+/* Text for screen readers only; a link that is seen only when it has the keyboard. */
+.sr-only,
+.skip:not(:focus):not(:active) {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  overflow: hidden;
+  clip-path: inset(50%);
+  white-space: nowrap;
+}
+
+/* A paragraph, heading, list, formula or figure that is out of sight is not laid out or painted
+   until it comes near: in a long file each key was paying for all of them. Its height is
+   remembered once seen (4em until then). Another person's name stands above their caret, just
+   outside the first line of a paragraph: the margin keeps it drawn. Not the blocks the caret
+   is in or has just left (the class `caret-block`, see visual.ts): a block skipped for a frame
+   has no layout, and a key typed into one in that frame, a new paragraph just opened with Enter,
+   puts the caret back before the letter. */
+.visual .ProseMirror > *:not(.caret-block) {
+  content-visibility: auto;
+  contain-intrinsic-size: auto 4em;
+  overflow-clip-margin: 1.5em;
+}
+/* The same rule cuts content wider than the pane, which used to make the whole pane scroll
+   sideways. A wide formula or table now scrolls inside its own block instead. */
+.visual .ProseMirror > div {
+  overflow-x: auto;
+}
+
+/* A paper's name with no space in it (a ZIP is often named with underscores) breaks at the end
+   of the line where it is shown, in the list and in a page's heading, in place of making the
+   page wider than the screen. "break-word" and not "anywhere": a heading in a .bar still takes
+   the width of its longest word when that fits, so ordinary names wrap as they did. */
+.list li,
+h1 {
+  overflow-wrap: break-word;
+}
+h1 {
+  max-width: 100%;
+}
+
+/* A table wider than the window scrolls sideways by itself, not the page with it. It is also
+   where the table's absolutely placed words for screen readers (.sr-only) are kept: without a
+   positioned box here they sit outside the scroller, and the page is as wide as the table. */
+.wide {
+  position: relative;
+  overflow-x: auto;
+  max-width: 100%;
+}
+
+/* A problem is said in words, not by its box alone. */
+.page [role='alert']::before {
+  content: 'Problem: ';
+  font-weight: 600;
+}
+.editor-bar [data-state='offline']::before {
+  content: '⚠ ';
+}
+
+/* Busy, but still in the tab order: the button is aria-disabled, not disabled. */
+button[aria-disabled='true'] {
+  opacity: 0.55;
+  cursor: not-allowed;
+}
+
+/* The PDF, drawn page by page in a pane that scrolls by itself: the pane, a page, its picture. */
+.build .pdf {
+  position: relative;
+  overflow: auto;
+}
+.build .pdf-page {
+  position: relative;
+  width: 100%;
+  margin-bottom: 6px;
+  background: var(--paper);
+}
+.build .pdf-page canvas {
+  display: block;
+  width: 100%;
+  height: 100%;
+}
+/* The words of a page, laid invisibly over its picture so that they can be selected and read
+   aloud. The rules are those of the PDF library's own viewer, cut down to what is used here. */
+.build .textLayer {
+  position: absolute;
+  inset: 0;
+  overflow: clip;
+  line-height: 1;
+  text-align: initial;
+  text-size-adjust: none;
+  forced-color-adjust: none;
+  transform-origin: 0 0;
+  --min-font-size: 1;
+  --text-scale-factor: calc(var(--total-scale-factor) * var(--min-font-size));
+  --min-font-size-inv: calc(1 / var(--min-font-size));
+}
+.build .textLayer :is(span, br) {
+  color: transparent;
+  position: absolute;
+  white-space: pre;
+  cursor: text;
+  transform-origin: 0% 0%;
+}
+.build .textLayer > :not(.markedContent),
+.build .textLayer .markedContent span:not(.markedContent) {
+  --font-height: 0;
+  font-size: calc(var(--text-scale-factor) * var(--font-height));
+  --scale-x: 1;
+  --rotate: 0deg;
+  transform: rotate(var(--rotate)) scaleX(var(--scale-x)) scale(var(--min-font-size-inv));
+}
+.build .textLayer .markedContent {
+  display: contents;
+}
+.build .textLayer ::selection {
+  background: rgb(31 95 191 / 30%);
+}
+
+/* The line the editor asked to be shown: a band across the page, with an edge that does not
+   depend on telling colours apart. */
+.build .pdf-mark {
+  position: absolute;
+  left: 0;
+  right: 0;
+  min-height: 4px;
+  background: rgb(255 214 10 / 35%);
+  outline: 2px solid var(--warn);
+  pointer-events: none;
+}
+
+/* What changed between two revisions is told by a line and by weight as well as by colour. */
+.diff .added:not(.part) {
+  font-weight: 600;
+}
+.diff .removed:not(.part) {
+  text-decoration: line-through;
+}
+.diff del {
+  text-decoration: line-through;
+}
+.diff ins {
+  font-weight: 600;
+  text-decoration: none;
+}
+
+/* The comment that is being looked at, outlined (threads.spec asserts the outline). */
+.threads article[aria-current='true'] {
+  outline: 3px solid var(--accent);
+  outline-offset: 2px;
+}
+
+/* Text that has a thread of comments, in either view. Underlined as well as tinted, so that it
+   does not depend on telling colours apart. */
+.thread-mark {
+  background: rgb(255 214 10 / 28%);
+  border-bottom: 2px solid var(--warn);
+}
+
+/* Where another person is in the visual view: a thin line with their name above it. The name is
+   drawn here, not in the text, so that it is not selected, copied or read out in the text. */
+.remote-caret {
+  display: inline;
+  position: relative;
+  border-left: 2px solid;
+  margin-left: -1px;
+  margin-right: -1px;
+  pointer-events: none;
+}
+.remote-caret::after {
+  content: attr(data-name);
+  position: absolute;
+  bottom: 100%;
+  left: -2px;
+  padding: 0 0.25rem;
+  font:
+    0.7rem/1.3 system-ui,
+    sans-serif;
+  color: #fff;
+  background: var(--c);
+  white-space: nowrap;
+  border-radius: 2px;
+  user-select: none;
+}
+
+/* Text that someone has proposed to change: a dashed line under it, to tell it from a thread
+   without telling colours apart. */
+.proposal-mark {
+  background: rgb(31 95 191 / 12%);
+  border-bottom: 2px dashed var(--accent);
+}
+
+/* A spelling or grammar finding: a wavy line under it, as writers know it from elsewhere. */
+.finding-mark {
+  text-decoration: underline wavy var(--warn);
+  text-decoration-skip-ink: none;
+  text-underline-offset: 3px;
+}
+
+/* Where the page says that it is waiting for the server (Waiting.tsx) says nothing: not seen. */
+.waiting:empty {
+  display: none;
+}
+/* "All" selects every match as several carets; the editor is single-caret. */
+.cm-search button[name='select'] {
+  display: none;
+}

@@ -5,6 +5,7 @@ import {
   exportRevisionStream,
   revisionPdfDigest,
   revisionTitle,
+  versionOf,
 } from '@paperweave/server';
 import { blobs, currentUser, db, sendBlob } from '../../../../../../lib/server';
 
@@ -24,7 +25,10 @@ export async function GET(
       const { paper, number } = await revisionTitle(db(), user.id, id, rev);
       return sendBlob(request, digest, {
         'content-type': 'application/pdf',
-        'content-disposition': contentDisposition(paper, 'pdf', { suffix: ` r${number}` }),
+        'content-disposition': contentDisposition(paper, 'pdf', {
+          suffix: ` r${number}`,
+          version: await versionOf(db(), id),
+        }),
       });
     }
     if (what !== 'zip') return new Response('Not found.', { status: 404 });
@@ -44,6 +48,7 @@ export async function GET(
         'content-type': 'application/zip',
         'content-disposition': contentDisposition(paper, 'zip', {
           suffix: ` r${number}${query.has('used') ? ' used' : ''}`,
+          version: await versionOf(db(), id),
         }),
         'cache-control': 'no-store',
       },

@@ -5,11 +5,13 @@ import { writeZip } from './archive.ts';
 import { blobStore } from './blobs.ts';
 import { exportZip, importZip, listFiles } from './import.ts';
 import { productMetrics, recordGrammarOutcome } from './metrics.ts';
-import { acceptInvitation, createProject, invite } from './projects.ts';
+import { acceptInvitation, createProject, deleteProject, invite } from './projects.ts';
 import { acceptProposal, closeProposal, propose } from './proposals.ts';
+import { cutRevision } from './revisions.ts';
 import { compactFile, editFile, loadUpdates, TEXT } from './sync.ts';
 import { createFromTemplate } from './templates.ts';
 import { TEST_ENV, testDb } from './testing.ts';
+import { startVersion } from './versions.ts';
 
 const store = blobStore(TEST_ENV);
 let t: Awaited<ReturnType<typeof testDb>>;
@@ -30,6 +32,8 @@ test('how papers fare is counted, by how they began, and says nothing of what th
     papers: [],
     edited: 0,
     twoAuthors: 0,
+    withVersion: 0,
+    withMerge: 0,
     proposals: [],
     grammar: [],
   });
@@ -81,6 +85,8 @@ test('how papers fare is counted, by how they began, and says nothing of what th
     ],
     edited: 2,
     twoAuthors: 1,
+    withVersion: 0,
+    withMerge: 0,
     proposals: [
       { origin: 'critique', status: 'open', count: 1 },
       { origin: 'person', status: 'accepted', count: 1 },
@@ -111,6 +117,38 @@ test('how papers fare is counted, by how they began, and says nothing of what th
   expect(await productMetrics(t.pool)).toEqual(want);
   // Counts and names of templates and states: nothing of any paper.
   expect(JSON.stringify(await productMetrics(t.pool))).not.toMatch(/secret|sentence|Imported/);
+});
+
+test('papers with a version and papers with a merge are counted by paper, not by version', async () => {
+  const base = await productMetrics(t.pool);
+  const zip = await writeZip([{ path: 'main.tex', bytes: Buffer.from(MAIN) }]);
+  const [paper] = await importZip(t.pool, store, owner.id, zip, 'Versioned');
+  const revision = (await cutRevision(t.pool, store, owner.id, paper.id)).id;
+  const env = { VERSIONS: '1' };
+  const one = await startVersion(t.pool, store, owner.id, paper.id, revision, 'one', { env });
+  // Two versions of one paper are one paper with a version; the versions are not papers.
+  await startVersion(t.pool, store, owner.id, paper.id, revision, 'two', { env });
+  const now = await productMetrics(t.pool);
+  expect(now.withVersion).toBe(base.withVersion + 1);
+  expect(now.withMerge).toBe(base.withMerge);
+  expect(now.papers.reduce((n, r) => n + r.papers, 0)).toBe(
+    base.papers.reduce((n, r) => n + r.papers, 0) + 1,
+  );
+  // Merging is not built yet: the table is what will be counted. Two into the paper and one into
+  // a version are one paper with a merge.
+  for (const target of [paper.id, paper.id, one.id])
+    await t.pool.query('insert into merges (target_id, source_id, by) values ($1, $2, $3)', [
+      target,
+      target === paper.id ? one.id : paper.id,
+      owner.id,
+    ]);
+  expect((await productMetrics(t.pool)).withMerge).toBe(base.withMerge + 1);
+  // Deleting the paper takes its versions and merges with it.
+  await deleteProject(t.pool, owner.id, paper.id, 'Versioned', 0);
+  expect(await productMetrics(t.pool)).toMatchObject({
+    withVersion: base.withVersion,
+    withMerge: base.withMerge,
+  });
 });
 
 test('a finding of the grammar checker is counted by kind and outcome, and no other way', async () => {
