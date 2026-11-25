@@ -10,6 +10,13 @@ import {
   type Standing,
   toShow,
 } from '../../../../../lib/findings';
+import {
+  CardKindMark,
+  cardActions,
+  cardButton,
+  cardClass,
+  useReviewCount,
+} from '../../../../../components/review-card';
 
 const KIND = { spelling: 'Spelling', grammar: 'Grammar', style: 'Style' } as const;
 
@@ -144,6 +151,7 @@ export default function Language(props: {
     setNote(wrong ?? `Proposed changing “${f.words}” to “${replacement}”.${more}`);
   };
 
+  useReviewCount('language', findings ? findings.length : null);
   return (
     <section ref={section} className="threads" id="language" aria-label="Spelling and grammar">
       <h2 ref={heading} tabIndex={-1}>
@@ -162,20 +170,30 @@ export default function Language(props: {
           const places = line.places.length;
           return (
             <li key={line.key}>
-              <article aria-label={`${KIND[f.kind]}: “${f.words}”`}>
+              <article
+                aria-label={`${KIND[f.kind]}: “${f.words}”`}
+                className={cardClass('finding')}
+              >
+                <CardKindMark kind="finding" />
                 <p>
                   <strong>{KIND[f.kind]}.</strong> <q>{f.words}</q>: {f.message}
                   {places > 1 && ` Place ${at + 1} of ${places}.`}
                 </p>
-                <p>
+                <p className={cardActions}>
                   {(canWrite || canPropose) &&
-                    f.replacements.slice(0, 3).map((r) => (
-                      <button key={r} type="button" onClick={() => use(line, at, r)}>
+                    f.replacements.slice(0, 3).map((r, i) => (
+                      <button
+                        key={r}
+                        type="button"
+                        className={cardButton(i === 0 ? 'primary' : 'secondary')}
+                        onClick={() => use(line, at, r)}
+                      >
                         {canWrite ? 'Change to' : 'Propose'} “{r}”
                       </button>
                     ))}
                   <button
                     type="button"
+                    className={cardButton()}
                     onClick={async () => {
                       // The place the line is at; pressed again, the next one, and round.
                       const n = toShow(line, standing[line.key]);
@@ -197,6 +215,7 @@ export default function Language(props: {
                   {canWrite && f.kind === 'spelling' && f.addable && (
                     <button
                       type="button"
+                      className={cardButton()}
                       onClick={async () => {
                         const wrong = await post(url, { word: f.reads, kind: f.kind });
                         if (!wrong) {
@@ -212,6 +231,7 @@ export default function Language(props: {
                   {canWrite && f.kind !== 'spelling' && (
                     <button
                       type="button"
+                      className={cardButton()}
                       onClick={async () => {
                         const wrong = await post(url, { rule: f.rule, kind: f.kind });
                         if (!wrong) {

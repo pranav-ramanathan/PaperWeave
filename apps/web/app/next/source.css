@@ -1,1 +1,17 @@
-/* source: written by the look tasks that own this area. Empty on purpose; see next.css. */
+/* The source view (T21). The CodeMirror theme itself is in FileEditor.tsx (nextTheme); this
+   gives it the three token colours. Variables, so the dark theme (T47) changes them here.
+   Contrast on the white sheet: command 7.3, comment 6.5, math 6.8 (all above 4.5). */
+:root {
+  --src-command: var(--primary);
+  --src-comment: var(--muted-foreground);
+  --src-math: var(--comment);
+}
+.cm-editor .pw-src-command {
+  color: var(--src-command);
+}
+.cm-editor .pw-src-comment {
+  color: var(--src-comment);
+}
+.cm-editor .pw-src-math {
+  color: var(--src-math);
+}

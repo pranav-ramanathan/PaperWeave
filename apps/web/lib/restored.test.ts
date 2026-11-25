@@ -1,6 +1,13 @@
 import type { RestoreNote } from '@paperweave/server';
 import { expect, test } from 'vitest';
-import { goneWords, isNews, restoreChanges, restoredWords, whyGone } from './restored';
+import {
+  goneWords,
+  isNews,
+  restoreChanges,
+  restoreHistory,
+  restoredWords,
+  whyGone,
+} from './restored';
 
 const note = (more: Partial<RestoreNote> = {}): RestoreNote => ({
   id: 'id-9',
@@ -95,4 +102,9 @@ test('the words for a file that is gone say what took it and where it still is',
   expect(goneWords({ why: 'off' }, 'ben@example.org', '')).toBe(
     'You are no longer a member of this paper, or its owner has deleted it.',
   );
+});
+
+test('the history page opens on the restore, or on the timeline if the paper before was not kept', () => {
+  expect(restoreHistory('p1', note())).toBe('/projects/p1/history?from=id-8&to=id-9');
+  expect(restoreHistory('p1', note({ kept: null }))).toBe('/projects/p1/history');
 });

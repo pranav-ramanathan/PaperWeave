@@ -64,8 +64,8 @@ async function FilePage({
           Skip to the text
         </a>
         {look === 'next' ? (
-          // The new look: the app bar holds the same two things, the paper's name (the h1) and the
-          // link to its page, after the mark, the paper and the file being the way there.
+          // The new look: the app bar holds the paper's name (the h1), the link to its page and
+          // the link to its history, after the mark, the paper and the file being the way there.
           <AppBar
             home="/projects"
             crumbs={[
@@ -82,6 +82,13 @@ async function FilePage({
               className={buttonVariants({ variant: 'outline', size: 'sm' })}
             >
               Paper overview
+            </Link>
+            <Link
+              prefetch={false}
+              href={`/projects/${id}/history`}
+              className={buttonVariants({ variant: 'outline', size: 'sm' })}
+            >
+              History
             </Link>
           </AppBar>
         ) : (
