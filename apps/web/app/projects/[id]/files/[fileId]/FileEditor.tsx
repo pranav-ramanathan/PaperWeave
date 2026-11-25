@@ -55,6 +55,7 @@ import {
 import { setTyping } from '../../../../../lib/typing';
 import { createVisual, type Visual } from '../../../../../lib/visual';
 import type { LanguageFinding, Proposal, RestoreNote, Thread } from '@paperweave/server';
+import { ReviewPanel } from '../../../../../components/review-card';
 import Language from './Language';
 import Proposals from './Proposals';
 import Toolbar from './Toolbar';
@@ -1428,52 +1429,54 @@ export default function FileEditor(props: {
         />
         <div className="source" ref={host} hidden={mode !== 'source'} />
       </div>
-      <Proposals
-        projectId={projectId}
-        fileId={fileId}
-        canPropose={props.canComment}
-        canDecide={canWrite}
-        canReview={props.canReview}
-        selection={() => stretch.current(true)}
-        show={show}
-        standing={(from, to) => standing.current(from, to)}
-        onProposals={(list) => {
-          proposalsNow.current = list;
-          markThreads.current();
-        }}
-      />
-      <Threads
-        projectId={projectId}
-        fileId={fileId}
-        canComment={props.canComment}
-        members={props.members}
-        selection={() => stretch.current()}
-        standing={(from, to) => standing.current(from, to)}
-        onThreads={(list) => {
-          threadsNow.current = list;
-          markThreads.current();
-        }}
-        show={show}
-      />
-      {/* Last, and on purpose: the findings of a real file run to several screens, and what people
-          say to each other must not lie under them. */}
-      {props.visual && (
-        <Language
+      <ReviewPanel>
+        <Proposals
           projectId={projectId}
           fileId={fileId}
-          canWrite={canWrite && !sync.refused}
           canPropose={props.canComment}
-          unsaved={!sync.loaded || sync.unsaved}
-          change={(from, to, expected, replacement) =>
-            changeText.current(from, to, expected, replacement)
-          }
+          canDecide={canWrite}
+          canReview={props.canReview}
+          selection={() => stretch.current(true)}
           show={show}
-          onFindings={(list) => {
-            findingsNow.current = list;
+          standing={(from, to) => standing.current(from, to)}
+          onProposals={(list) => {
+            proposalsNow.current = list;
             markThreads.current();
           }}
         />
-      )}
+        <Threads
+          projectId={projectId}
+          fileId={fileId}
+          canComment={props.canComment}
+          members={props.members}
+          selection={() => stretch.current()}
+          standing={(from, to) => standing.current(from, to)}
+          onThreads={(list) => {
+            threadsNow.current = list;
+            markThreads.current();
+          }}
+          show={show}
+        />
+        {/* Last, and on purpose: the findings of a real file run to several screens, and what people
+          say to each other must not lie under them. */}
+        {props.visual && (
+          <Language
+            projectId={projectId}
+            fileId={fileId}
+            canWrite={canWrite && !sync.refused}
+            canPropose={props.canComment}
+            unsaved={!sync.loaded || sync.unsaved}
+            change={(from, to, expected, replacement) =>
+              changeText.current(from, to, expected, replacement)
+            }
+            show={show}
+            onFindings={(list) => {
+              findingsNow.current = list;
+              markThreads.current();
+            }}
+          />
+        )}
+      </ReviewPanel>
     </section>
   );
 }
