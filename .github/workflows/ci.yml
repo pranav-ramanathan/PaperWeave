@@ -52,21 +52,23 @@ jobs:
       - run: docker compose -f infra/compose.yaml up -d --wait || (docker compose -f infra/compose.yaml logs --tail 60; exit 1)
       - run: pnpm test:sandbox
 
-  # The browser tests, in two shards that run side by side, each with its own containers.
+  # The browser tests, in three shards that run side by side, each with its own containers.
   browser:
     runs-on: ubuntu-latest
     strategy:
       # A failure in one shard does not hide the other's result.
       fail-fast: false
       matrix:
-        shard: [1, 2]
+        shard: [1, 2, 3]
     # Took about 35 minutes with the browser tests one at a time (27.5 of them measured on a
-    # fast machine, 15.6 with two at a time, 11.5 with three). Two run now: with three, the one
-    # build worker's queue made a test wait too long for a build. building.spec.ts alone is about
-    # 7 minutes, so it bounds what more workers or shards could save. The files are split by
-    # file, not by test, so one shard can end up with more of the long ones.
-    # Each shard needs the TeX image too, so it pays for the image (3.4) and compose (0.5) again;
-    # with half of the 13.5 minutes of tests that is about 12 minutes.
+    # fast machine, 15.6 with two at a time, 11.5 with three). Two workers per shard run now: with
+    # three, the one build worker's queue made a test wait too long for a build. building.spec.ts
+    # alone is about 7 minutes, so it bounds what more workers or shards could save. The files are
+    # split by file, not by test, so one shard can end up with more of the long ones.
+    # First run with two shards: shard 1 took about 18 minutes and shard 2 about 4.7 (sandbox was
+    # about 12 and check about 3), because shard 1 got building.spec.ts and most of the other
+    # long files. Three shards spread them out.
+    # Each shard needs the TeX image too, so it pays for the image (3.4) and compose (0.5) again.
     # mail-down.spec.ts depends on the other tests having run (it pauses the mail container).
     # Playwright runs a shard's share of that dependency first, and the file is in one shard
     # only, so it still runs alone at the end of that shard against that shard's own mail container.
@@ -83,7 +85,7 @@ jobs:
       - run: docker build -t paperweave-tex infra/tex
       - run: docker compose -f infra/compose.yaml up -d --wait || (docker compose -f infra/compose.yaml logs --tail 60; exit 1)
       - run: pnpm exec playwright install --with-deps chromium
-      - run: pnpm e2e --shard=${{ matrix.shard }}/2
+      - run: pnpm e2e --shard=${{ matrix.shard }}/3
         env:
           E2E_WORKERS: 2
       # What each failed browser test's page looked like, kept for a week. The log alone says
