@@ -3,12 +3,15 @@ import { afterAll, beforeAll, expect, test } from 'vitest';
 import { writeZip } from './archive.ts';
 import { blobStore } from './blobs.ts';
 import { lineMap, requestBuild } from './builds.ts';
+import { saveChart } from './charts.ts';
 import { importZip, listFiles } from './import.ts';
-import { createProject } from './projects.ts';
-import { saveRevision } from './revisions.ts';
+import { createProject, familySql } from './projects.ts';
+import { cutRevision, saveRevision } from './revisions.ts';
 import { editFile } from './sync.ts';
 import { TEST_ENV, testDb } from './testing.ts';
+import { startVersion } from './versions.ts';
 
+const store = blobStore(TEST_ENV);
 let t: Awaited<ReturnType<typeof testDb>>;
 beforeAll(async () => {
   t = await testDb();
@@ -106,6 +109,88 @@ const finish = (userId: string) =>
     "update builds set status = 'succeeded', finished_at = now() where requested_by = $1",
     [userId],
   );
+
+/** A paper of the person's with one version, begun at its first revision. */
+async function withVersion(userId: string) {
+  const [main] = await papers(userId, 1);
+  const revision = (await cutRevision(t.pool, store, userId, main)).id;
+  const v = await startVersion(t.pool, store, userId, main, revision, 'camera-ready', {
+    env: { VERSIONS: '1' },
+  });
+  return { main, version: v.id as string };
+}
+
+test('the hourly build limit of a paper is one for it and its versions together', async () => {
+  const u = await t.signIn('fam1@example.org');
+  const { main, version } = await withVersion(u.id);
+  const opts = { perHour: 3, perUserHour: 100, waitingPerUser: 100, reserve: 0 };
+  expect(await code(requestBuild(t.pool, u.id, main, opts))).toBe('ok');
+  await finish(u.id);
+  expect(await code(requestBuild(t.pool, u.id, version, opts))).toBe('ok');
+  await finish(u.id);
+  expect(await code(requestBuild(t.pool, u.id, version, opts))).toBe('ok');
+  await finish(u.id);
+  // Three in the family: neither side has a fourth, and the refusal is the paper's.
+  for (const p of [main, version])
+    expect(await code(requestBuild(t.pool, u.id, p, opts))).toBe('conflict');
+  const paused = await requestBuild(t.pool, u.id, version, { ...opts, automatic: true });
+  expect(paused).toEqual({ paused: expect.stringContaining('built 3 times this hour') });
+});
+
+test('a paper with no versions has its own hour, as before', async () => {
+  const u = await t.signIn('fam2@example.org');
+  const [a, b] = await papers(u.id, 2);
+  const opts = { perHour: 2, perUserHour: 100, waitingPerUser: 100, reserve: 0 };
+  for (let i = 0; i < 2; i++) {
+    expect(await code(requestBuild(t.pool, u.id, a, opts))).toBe('ok');
+    await finish(u.id);
+  }
+  expect(await code(requestBuild(t.pool, u.id, a, opts))).toBe('conflict');
+  expect(await code(requestBuild(t.pool, u.id, b, opts))).toBe('ok');
+});
+
+test('the hourly chart limit of a paper is one for it and its versions together', async () => {
+  const u = await t.signIn('fam3@example.org');
+  const { main, version } = await withVersion(u.id);
+  const [other] = await papers(u.id, 1);
+  const draw = (paper: string) =>
+    t.pool.query('insert into chart_requests (project_id, user_id) values ($1, $2)', [paper, u.id]);
+  await draw(main);
+  await draw(version);
+  // Two drawings in the family: the limit of two is met from either side, and the limit of
+  // three is not. Charts are refused before the input is looked at, so an empty one tells.
+  for (const p of [main, version])
+    expect(await code(saveChart(t.pool, store, u.id, p, {}, 2))).toBe('conflict');
+  expect(await code(saveChart(t.pool, store, u.id, main, {}, 3))).not.toBe('conflict');
+  // A paper of its own is not in the count.
+  expect(await code(saveChart(t.pool, store, u.id, other, {}, 2))).not.toBe('conflict');
+});
+
+test('the queries for the family hour use the indexes of the paper, its parent and the requests', async () => {
+  const u = await t.signIn('fam4@example.org');
+  const { main } = await withVersion(u.id);
+  // Small tables are scanned whatever indexes there are; with scans off, the plan shows
+  // whether an index could serve the query at all.
+  const client = await t.pool.connect();
+  try {
+    await client.query('set enable_seqscan = off');
+    for (const table of ['builds', 'chart_requests', 'model_requests']) {
+      const plan = (
+        await client.query(
+          `explain select count(*) from ${table}
+           where project_id in ${familySql('$1')} and created_at > now() - interval '1 hour'`,
+          [main],
+        )
+      ).rows
+        .map((r) => r['QUERY PLAN'])
+        .join('\n');
+      expect(plan).toMatch(/Index/);
+      expect(plan).not.toMatch(/Seq Scan on (builds|chart_requests|model_requests)/);
+    }
+  } finally {
+    client.release();
+  }
+});
 
 test('automatic builds stop short of the paper limit, and a pressed build still gets in', async () => {
   const f = await t.signIn('f@example.org');

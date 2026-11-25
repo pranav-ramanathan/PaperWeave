@@ -4,7 +4,7 @@ import { createHash } from 'node:crypto';
 import { mkdirSync, mkdtempSync, readdirSync, rmSync, statSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { dirname, join } from 'node:path';
-import { type BlobStore, cutRevision, type Db, transaction } from '@paperweave/server';
+import { type BlobStore, cutRevision, type Db, familySql, transaction } from '@paperweave/server';
 import type pg from 'pg';
 import {
   BBL_BYTES,
@@ -186,11 +186,13 @@ export function buildNext(
     }
 
     // The same inputs give the same output, so an earlier result for this paper is reused.
-    // Only this paper's own builds are looked at: nothing is ever shared between papers.
+    // Only builds of this paper and its versions (or of its paper, for a version) are looked at:
+    // nothing is ever shared between papers. The key is the revision's content, so a version
+    // started from a built revision, or merged to the same text, shows that PDF without a build.
     const hit = (
       await db.query(
         `select id, status, diagnostics, pdf_digest, synctex_digest, bbl_digest, log_digest, labels, read from builds
-         where project_id = $1 and cache_key = $2 and status <> 'queued'
+         where project_id in ${familySql('$1')} and cache_key = $2 and status <> 'queued'
            and not coalesce(timed_out, false)
          order by created_at desc limit 1`,
         [job.project_id, key],
