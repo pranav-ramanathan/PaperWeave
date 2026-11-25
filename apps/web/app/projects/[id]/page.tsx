@@ -25,6 +25,8 @@ import {
   modelProcessing,
 } from '@paperweave/server';
 import { notFound } from 'next/navigation';
+import { Fragment } from 'react';
+import { OverlayRoot } from '../../../components/ui/overlay-root';
 import { blobs, db, forTitle, paperOf, requireUser } from '../../../lib/server';
 import { ui } from '../../../lib/ui';
 import { switcherOf, versionPowers, versionsOn } from '../../../lib/versions';
@@ -260,25 +262,30 @@ async function Project({
       )}
     </>
   );
+  // The new look's menus (the version switcher) mount in the overlay root, inside <main>, where
+  // its rules and colours are; without it they would go to <body>, outside both.
+  const Overlays = next ? OverlayRoot : Fragment;
   return (
     <main className={next ? 'page paper' : 'page'} data-ui={look}>
-      <Header
-        name={project.name}
-        role={project.role}
-        next={next}
-        versions={switcher ?? undefined}
-      />
-      {next ? (
-        <div className="paper-grid">
-          {onThisPage}
-          <div className="paper-flow">{sections}</div>
-        </div>
-      ) : (
-        <>
-          {onThisPage}
-          {sections}
-        </>
-      )}
+      <Overlays>
+        <Header
+          name={project.name}
+          role={project.role}
+          next={next}
+          versions={switcher ?? undefined}
+        />
+        {next ? (
+          <div className="paper-grid">
+            {onThisPage}
+            <div className="paper-flow">{sections}</div>
+          </div>
+        ) : (
+          <>
+            {onThisPage}
+            {sections}
+          </>
+        )}
+      </Overlays>
     </main>
   );
 }

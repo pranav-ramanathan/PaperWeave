@@ -1,17 +1,20 @@
 // The editor's workspace shell in the new look (T18): the app bar, the three-pane grid and the
-// file tree. The editor is a STAGED page (apps/web/lib/ui.ts): it is in the new look only on a
-// server with UI_STAGED=1, for a person whose cookie is `pw_ui=next`. This spec sets that cookie
-// itself, so it needs only UI_STAGED=1; without it the editor is always the old look and these
-// tests have nothing to look at. (The editor-heavy specs run as they are in both looks.)
+// file tree. While the editor is a STAGED page (apps/web/lib/ui.ts) it is in the new look only on
+// a server with UI_STAGED=1; once it is MIGRATED, always, for a person whose cookie is
+// `pw_ui=next`. This spec sets that cookie itself; if the editor is not in the new look at all,
+// these tests have nothing to look at.
 import { expect, type Page, test } from '@playwright/test';
 import { mkdtempSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { writeZip } from '../../packages/server/src/archive';
 import { audit, ORIGIN, person, run, signIn, sticksOut } from './helpers';
-import { enlarged, lost, spaced } from './look';
+import { editorIsNext, enlarged, lost, spaced } from './look';
 
-test.skip(process.env.UI_STAGED !== '1', 'the editor is in the new look only with UI_STAGED=1');
+test.skip(
+  !editorIsNext(),
+  'the editor is in the new look only once it is moved (or staged, with UI_STAGED=1)',
+);
 
 const MAIN = [
   '\\documentclass{article}',

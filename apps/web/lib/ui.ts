@@ -22,6 +22,7 @@ export const UI_COOKIE = 'pw_ui';
 export const MIGRATED: readonly string[] = [
   'chart',
   'data-file',
+  'file',
   'file-delete',
   'file-rename',
   'invitation',
@@ -38,12 +39,12 @@ export const MIGRATED: readonly string[] = [
 ];
 
 /**
- * The pages being built in the new look over several changes, by the name each gives `ui()`: now
- * the editor ("file", T18 to T27). A page here is "next" only when UI_STAGED=1 on the server and
- * the person's cookie is "next"; for everyone else it is "classic", so a half-moved page is never shown. The last change
- * for a page moves it from here to MIGRATED.
+ * The pages being built in the new look over several changes, by the name each gives `ui()`: none
+ * now (the editor, "file", was here from T18 to T27). A page here is "next" only when UI_STAGED=1
+ * on the server and the person's cookie is "next"; for everyone else it is "classic", so a
+ * half-moved page is never shown. The last change for a page moves it from here to MIGRATED.
  */
-export const STAGED: readonly string[] = ['file'];
+export const STAGED: readonly string[] = [];
 
 /**
  * What UI_STAGED says: "1" is on, "0" and not set are off. Anything else stops whoever asks, as

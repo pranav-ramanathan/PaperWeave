@@ -1,6 +1,6 @@
 // The paper page in the new look (apps/web/app/projects/[id]): the checks that matter to how it
 // reads, not what it does (the other specs do that, in both looks). Only in a run with the new
-// look chosen (E2E_UI=next), and, while the page is staged, UI_STAGED=1 on the server.
+// look chosen (E2E_UI=next).
 import { expect, type Page, test } from '@playwright/test';
 import { mkdirSync, mkdtempSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';

@@ -1,9 +1,11 @@
 import {
   AppError,
   can,
+  compareAcross,
   diffRevisions,
   heldInRevisions,
   heldLine,
+  listMerges,
   listRevisions,
   listVersions,
   MAX_VERSIONS,
@@ -12,6 +14,7 @@ import {
   revisionStats,
   versionOf,
   withScope,
+  type MergeRecord,
   type Revision,
   type RevisionStat,
   type Version,
@@ -27,6 +30,7 @@ import { VersionMenu } from '../../../../components/version-menu';
 import { buttonVariants } from '../../../../components/ui/button';
 import { Input } from '../../../../components/ui/input';
 import { Label } from '../../../../components/ui/label';
+import { NativeSelect } from '../../../../components/ui/native-select';
 import { OverlayRoot } from '../../../../components/ui/overlay-root';
 import { called, NOW, since } from '../../../../lib/compare';
 import { blobs, db, forTitle, paperOf, requireUser } from '../../../../lib/server';
@@ -37,6 +41,7 @@ import Once from '../../../Once';
 import Result from '../../../Result';
 import {
   buildHistoryAction,
+  compareAcrossAction,
   compareHistoryAction,
   deleteVersionAction,
   nameRevisionAction,
@@ -100,7 +105,13 @@ type Query = {
   version?: string;
   renamed?: string;
   deleted?: string;
+  across?: string;
+  mine?: string;
+  theirs?: string;
 };
+
+/** A paper of the family as a person reads it: a version in quotes, the paper itself as "main". */
+const nameOf = (n: string) => (n === 'main' ? 'main' : `\u201c${n}\u201d`);
 
 async function History({
   params,
@@ -140,6 +151,51 @@ async function History({
   const olderAutos = oldestAuto ? await olderAutoRevisions(db(), user.id, id, oldestAuto) : 0;
   const byId = new Map(revisions.map((r) => [r.id, r]));
   const byNumber = new Map(revisions.map((r) => [r.number, r]));
+  // The merges made into this paper, by the revision each made (read for everyone who may read it).
+  const merged = new Map<string, MergeRecord>();
+  if (versionsShown)
+    for (const m of await listMerges(db(), user.id, id)) if (m.result) merged.set(m.result.id, m);
+
+  // Comparing with another paper of the family, if the address asks for it.
+  const hereName = here ? (versions.find((v) => v.id === id)?.name ?? 'this version') : 'main';
+  const others = versionsShown
+    ? [{ id: mainId, name: 'main' }, ...versions.map((v) => ({ id: v.id, name: v.name }))].filter(
+        (p) => p.id !== id,
+      )
+    : [];
+  const across = versionsShown ? others.find((p) => p.id === query.across) : undefined;
+  let acrossRefused =
+    versionsShown && !!query.across && !across ? 'No such paper to compare with.' : '';
+  // The other paper's revisions, and what its reader may do there: read through the service, which
+  // answers "no such paper" to someone who is not on it.
+  let there: { revisions: Revision[]; writer: boolean } | null = null;
+  if (across)
+    try {
+      const [theirs, theirPaper] = await Promise.all([
+        listRevisions(db(), user.id, across.id, { autos: REVISIONS_SHOWN }),
+        paperOf(user.id, across.id),
+      ]);
+      there = { revisions: theirs, writer: can(theirPaper.role, 'revision.write') };
+    } catch (err) {
+      if (!(err instanceof AppError && err.code === 'not_found')) throw err;
+      acrossRefused = 'No such paper to compare with.';
+    }
+  const [mine, theirs] = [query.mine, query.theirs];
+  let acrossDiff: Awaited<ReturnType<typeof compareAcross>> | null = null;
+  if (across && there && mine && theirs && UUID.test(mine) && UUID.test(theirs))
+    acrossDiff = await compareAcross(
+      db(),
+      blobs(),
+      user.id,
+      { paper: id, revision: mine },
+      { paper: across.id, revision: theirs },
+    ).catch((err) => {
+      if (err instanceof AppError && ['not_found', 'invalid_input'].includes(err.code)) {
+        acrossRefused = 'No such revision to compare.';
+        return null;
+      }
+      throw err;
+    });
 
   // The comparison in the address, if there is one.
   const [from, to] = [query.from, query.to];
@@ -197,6 +253,7 @@ async function History({
   const named = (row: Extract<TimelineRow, { type: 'named' | 'restore' | 'merge' }>) => {
     const r = row.revision as Revision;
     const kept = row.type === 'restore' ? byNumber.get(r.number - 1) : undefined;
+    const merge = row.type === 'merge' ? merged.get(r.id) : undefined;
     return (
       <li key={row.id} className={`history-row history-${row.type}`}>
         <span className="history-dot" aria-hidden="true">
@@ -207,8 +264,12 @@ async function History({
         <div className="history-body">
           <p className="history-title">
             <span className="history-name">
-              {r.name ??
-                (r.kind === 'restore' ? `Restore of revision ${r.restoredFrom}` : 'Unnamed')}
+              {row.type === 'merge' && !r.name
+                ? merge
+                  ? `Merged ${merge.from ? nameOf(merge.from) : 'another version'} into ${nameOf(merge.into)}`
+                  : 'Merge'
+                : (r.name ??
+                  (r.kind === 'restore' ? `Restore of revision ${r.restoredFrom}` : 'Unnamed'))}
             </span>{' '}
             <span className="history-number">Revision {r.number}</span>
           </p>
@@ -218,6 +279,19 @@ async function History({
               The paper as it was is revision {r.number - 1}.{' '}
               {kept && (
                 <Link prefetch={false} href={`/projects/${id}/revisions/${r.id}/diff/${kept.id}`}>
+                  Compare with what it replaced
+                </Link>
+              )}
+            </p>
+          )}
+          {merge && (
+            <p>
+              {plural(merge.files, 'file')} merged, {plural(merge.conflicts, 'conflict')} decided.{' '}
+              {merge.kept && (
+                <Link
+                  prefetch={false}
+                  href={`/projects/${id}/revisions/${r.id}/diff/${merge.kept.id}`}
+                >
                   Compare with what it replaced
                 </Link>
               )}
@@ -327,6 +401,105 @@ async function History({
         <Once>Save a named revision</Once>
       </div>
     </form>
+  );
+
+  // Compare with another version: pick the paper (a plain GET), then a revision of each (a form).
+  const acrossSection = versionsShown && (
+    <section id="across" aria-labelledby="history-across" className="history-across">
+      <h3 id="history-across">Compare with another version</h3>
+      {others.length === 0 ? (
+        <p>There is no other version of this paper to compare with.</p>
+      ) : (
+        <>
+          <form method="get" action={`/projects/${id}/history#across`} className="history-picker">
+            <div>
+              <Label htmlFor="across-paper">Another version, or main</Label>
+              <NativeSelect
+                id="across-paper"
+                name="across"
+                defaultValue={across?.id}
+                wrapperClassName="w-full"
+              >
+                {others.map((p) => (
+                  <option key={p.id} value={p.id}>
+                    {p.name}
+                  </option>
+                ))}
+              </NativeSelect>
+            </div>
+            <Once variant="outline">Choose its revisions</Once>
+          </form>
+          {acrossRefused && <Result alert>{acrossRefused}</Result>}
+          {across && there && revisions.length > 0 && there.revisions.length > 0 && (
+            <form action={compareAcrossAction.bind(null, id)} className="history-picker">
+              <input type="hidden" name="across" value={across.id} />
+              <div className="history-lists">
+                <div>
+                  <Label htmlFor="across-mine">Revision of {nameOf(hereName)}</Label>
+                  <NativeSelect
+                    id="across-mine"
+                    name="mine"
+                    defaultValue={mine && byId.has(mine) ? mine : writer ? NOW : revisions[0].id}
+                    wrapperClassName="w-full"
+                  >
+                    {writer && <option value={NOW}>The paper as it is now</option>}
+                    {revisions.map((r) => (
+                      <option key={r.id} value={r.id}>
+                        {called(r)}
+                      </option>
+                    ))}
+                  </NativeSelect>
+                </div>
+                <div>
+                  <Label htmlFor="across-theirs">Revision of {nameOf(across.name)}</Label>
+                  <NativeSelect
+                    id="across-theirs"
+                    name="theirs"
+                    defaultValue={
+                      theirs && there.revisions.some((r) => r.id === theirs)
+                        ? theirs
+                        : there.writer
+                          ? NOW
+                          : there.revisions[0].id
+                    }
+                    wrapperClassName="w-full"
+                  >
+                    {there.writer && <option value={NOW}>The paper as it is now</option>}
+                    {there.revisions.map((r) => (
+                      <option key={r.id} value={r.id}>
+                        {called(r)}
+                      </option>
+                    ))}
+                  </NativeSelect>
+                </div>
+              </div>
+              <Once variant="outline">Show the changes across versions</Once>
+            </form>
+          )}
+          {acrossDiff && across && mine && theirs && (
+            <div className="history-diff">
+              <h4>
+                Revision {acrossDiff.from.number} of {nameOf(hereName)} to revision{' '}
+                {acrossDiff.to.number} of {nameOf(across.name)}
+              </h4>
+              {acrossDiff.files.length === 0 && <p>Nothing differs between these two revisions.</p>}
+              <FileDiffs
+                id={id}
+                diff={{
+                  from: acrossDiff.from.number,
+                  to: acrossDiff.to.number,
+                  files: acrossDiff.files,
+                }}
+                other={mine}
+                rev={theirs}
+                papers={{ from: id, to: across.id }}
+                Heading="h5"
+              />
+            </div>
+          )}
+        </>
+      )}
+    </section>
   );
 
   return (
@@ -522,6 +695,7 @@ async function History({
                     )}
                   </div>
                 )}
+                {acrossSection}
               </section>
             </div>
           </CompareProvider>

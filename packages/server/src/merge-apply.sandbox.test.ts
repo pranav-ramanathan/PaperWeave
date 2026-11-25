@@ -7,7 +7,7 @@ import { blobStore } from './blobs.ts';
 import { createFile, deleteFile, replaceFile, setRootFile } from './files.ts';
 import { exportZip, importZip, listFiles } from './import.ts';
 import { applyMerge, type MergeChoices } from './merge-apply.ts';
-import { type MergePlan, planMerge } from './merge.ts';
+import { listMerges, type MergePlan, planMerge } from './merge.ts';
 import { setCompiler } from './projects.ts';
 import {
   cutRevision,
@@ -667,4 +667,42 @@ test('a merge keeps what is anchored in text it did not change, as a restore doe
     after.doc,
   );
   expect(abs?.index).toBe(after.text.toString().indexOf('Beta'));
+});
+
+test('the record of merges names both papers, and is read only by those who may read them', async () => {
+  const s = await setup();
+  await write(s.ver['body.tex'], 'Alpha one.\n\nBeta two.\n\nGamma by version.\n');
+  const into = await merge(s, await plan(s.mainId, s.verId));
+  const p = await plan(s.verId, s.mainId);
+  const up = await applyMerge(t.pool, store, users.owner.id, s.verId, s.mainId, ref(p), {});
+
+  const [one] = await listMerges(t.pool, users.viewer.id, s.mainId);
+  expect(one).toMatchObject({
+    from: 'camera-ready',
+    into: 'main',
+    files: 1,
+    conflicts: 0,
+    by: users.owner.email,
+    result: { id: into.id, number: into.number },
+    kept: { id: into.kept.id, number: into.kept.number },
+  });
+  const [two] = await listMerges(t.pool, users.reviewer.id, s.verId);
+  expect(two).toMatchObject({ from: 'main', into: 'camera-ready', result: { id: up.id } });
+  // Only the paper's own merges, and not for a stranger.
+  expect(await listMerges(t.pool, users.owner.id, s.mainId)).toHaveLength(1);
+  const refused = await listMerges(t.pool, users.outsider.id, s.mainId).then(
+    () => 'ok',
+    (e) => e.code,
+  );
+  expect(refused).toBe('not_found');
+  // A member of the paper who may not read the other one reads the merge but not its name.
+  const alone = await t.signIn(`alone-merges${seq}@example.org`);
+  await t.pool.query(
+    'insert into project_members (project_id, user_id, role) values ($1, $2, $3)',
+    [s.mainId, alone.id, 'viewer'],
+  );
+  expect((await listMerges(t.pool, alone.id, s.mainId))[0]).toMatchObject({
+    from: null,
+    into: 'main',
+  });
 });

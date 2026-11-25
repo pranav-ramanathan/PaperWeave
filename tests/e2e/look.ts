@@ -3,6 +3,8 @@
 // imported without registering them), copied unchanged: a change to the detector there is to be
 // made here too, until the two specs can share one module.
 import type { Page } from '@playwright/test';
+import { readFileSync } from 'node:fs';
+import { join } from 'node:path';
 
 /** The text-spacing bookmarklet's rules, as WCAG 1.4.12 names the values. */
 const SPACING = `
@@ -136,3 +138,24 @@ export const lost = (page: Page) =>
       }
     return out.slice(0, 12);
   });
+
+/**
+ * The page names in one of the lists of apps/web/lib/ui.ts (`MIGRATED` or `STAGED`), read from the
+ * source: a spec cannot import that module (it needs `next/headers`).
+ */
+export function pagesIn(list: 'MIGRATED' | 'STAGED'): string[] {
+  const src = readFileSync(join(process.cwd(), 'apps/web/lib/ui.ts'), 'utf8');
+  const body = new RegExp(`export const ${list}: readonly string\\[\\] = \\[([^\\]]*)\\]`).exec(
+    src,
+  )?.[1];
+  if (body === undefined) throw new Error(`apps/web/lib/ui.ts has no ${list} list`);
+  return [...body.matchAll(/'([^']+)'/g)].map((m) => m[1]!);
+}
+
+/** Whether the editor is drawn in the new look for a person who has chosen it, on this server. */
+export function editorIsNext(): boolean {
+  return (
+    pagesIn('MIGRATED').includes('file') ||
+    (pagesIn('STAGED').includes('file') && process.env.UI_STAGED === '1')
+  );
+}

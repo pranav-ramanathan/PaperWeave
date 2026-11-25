@@ -66,8 +66,18 @@ test('a page that is not in the list is classic, chosen or not', () => {
   expect(look('sign-in', 'next', 'next', moved)).toBe('classic');
 });
 
-test('only the editor ("file") is staged so far', () => {
-  expect(STAGED).toEqual(['file']);
+test('the editor ("file") has been moved, so nothing is staged now', () => {
+  expect(MIGRATED).toContain('file');
+  expect(STAGED).toEqual([]);
+  expect([...STAGED].sort()).toEqual(STAGED);
+  for (const page of STAGED) expect(MIGRATED).not.toContain(page);
+});
+
+test('the editor is next for a person who chose it, with or without UI_STAGED', () => {
+  expect(look('file', 'next', 'classic')).toBe('next');
+  expect(look('file', 'classic', 'next')).toBe('classic');
+  expect(look('file', undefined, 'next')).toBe('next');
+  expect(look('file', undefined, 'classic')).toBe('classic');
 });
 
 test('a staged page is classic without UI_STAGED, whatever is chosen', () => {
