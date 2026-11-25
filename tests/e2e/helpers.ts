@@ -437,13 +437,20 @@ export const sticksOut = (page: Page) =>
   });
 
 /**
- * A drop as the browser makes it: a dragover and then a drop, at the middle of the element,
- * carrying a file (given as base64) and/or words. Says whether each was cancelled: one that is
- * not makes the browser open a dropped file in the tab, away from the app.
+ * A drop as the browser makes it: a dragover and then a drop, at the middle of the element (or,
+ * with `at: 'end'`, just after its last word, so that a drop on a paragraph lands after its text
+ * however wide the paragraph is drawn), carrying a file (given as base64) and/or words. Says
+ * whether each was cancelled: one that is not makes the browser open a dropped file in the tab,
+ * away from the app.
  */
 export function dropOn(
   target: Locator,
-  what: { file?: { name: string; type: string; base64: string }; text?: string; html?: string },
+  what: {
+    file?: { name: string; type: string; base64: string };
+    text?: string;
+    html?: string;
+    at?: 'middle' | 'end';
+  },
 ) {
   return target.evaluate((el, c) => {
     const data = new DataTransfer();
@@ -454,9 +461,13 @@ export function dropOn(
     if (c.html) data.setData('text/html', c.html);
     if (c.text) data.setData('text/plain', c.text);
     const box = el.getBoundingClientRect();
+    const range = document.createRange();
+    range.selectNodeContents(el);
+    const last = [...range.getClientRects()].at(-1);
+    const end = c.at === 'end' && last;
     const at = {
-      clientX: box.left + box.width / 2,
-      clientY: box.top + box.height / 2,
+      clientX: end ? Math.min(last.right + 2, box.right - 1) : box.left + box.width / 2,
+      clientY: end ? last.top + last.height / 2 : box.top + box.height / 2,
       bubbles: true,
       cancelable: true,
       dataTransfer: data,
