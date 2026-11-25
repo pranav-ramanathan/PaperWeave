@@ -26,7 +26,7 @@ export const MIGRATED: readonly string[] = [];
  * "next"; for everyone else it is "classic", so a half-moved page is never shown. The last change
  * for a page moves it from here to MIGRATED.
  */
-export const STAGED: readonly string[] = [];
+export const STAGED: readonly string[] = ['paper'];
 
 /**
  * What UI_STAGED says: "1" is on, "0" and not set are off. Anything else stops whoever asks, as

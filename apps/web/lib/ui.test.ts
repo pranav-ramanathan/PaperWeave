@@ -65,8 +65,8 @@ test('a page that is not in the list is classic, chosen or not', () => {
   expect(look('sign-in', 'next', 'next', moved)).toBe('classic');
 });
 
-test('no page is staged yet', () => {
-  expect(STAGED).toEqual([]);
+test('the pages being built in the new look', () => {
+  expect(STAGED).toEqual(['paper']);
 });
 
 test('a staged page is classic without UI_STAGED, whatever is chosen', () => {

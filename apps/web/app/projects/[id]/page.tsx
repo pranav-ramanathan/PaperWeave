@@ -25,6 +25,7 @@ import {
 } from '@paperweave/server';
 import { notFound } from 'next/navigation';
 import { blobs, db, forTitle, paperOf, requireUser } from '../../../lib/server';
+import { ui } from '../../../lib/ui';
 import { Assistance } from './sections/Assistance';
 import { Bibliography, CheckNotices } from './sections/Bibliography';
 import { ChartRemovedNotice, Data, DescribedNotice } from './sections/Data';
@@ -147,16 +148,21 @@ async function Project({
   const showBibliography = cited.entries.length > 0 || cited.missing.length > 0;
   const showData = dataFiles.length > 0;
   const showReview = threads.length + proposals.length > 0;
-  return (
-    <main className="page">
-      <Header name={project.name} role={project.role} />
-      <OnThisPage
-        showLabels={showLabels}
-        showBibliography={showBibliography}
-        showData={showData}
-        showReview={showReview}
-        owner={owner}
-      />
+  const look = await ui('paper');
+  const next = look === 'next';
+  const onThisPage = (
+    <OnThisPage
+      showLabels={showLabels}
+      showBibliography={showBibliography}
+      showData={showData}
+      showReview={showReview}
+      owner={owner}
+    />
+  );
+  // Everything after the list of sections. In the new look the list sits beside it, in a grid of
+  // two columns; in the old look both are the page's own children, as they were.
+  const sections = (
+    <>
       <ErrorNotice error={query.error} />
       <FileNotices
         added={query.added}
@@ -240,6 +246,22 @@ async function Project({
           <PendingInvitations id={id} pending={pending} />
           <Invite id={id} invited={query.invited} />
           <Delete id={id} />
+        </>
+      )}
+    </>
+  );
+  return (
+    <main className={next ? 'page paper' : 'page'} data-ui={look}>
+      <Header name={project.name} role={project.role} next={next} />
+      {next ? (
+        <div className="paper-grid">
+          {onThisPage}
+          <div className="paper-flow">{sections}</div>
+        </div>
+      ) : (
+        <>
+          {onThisPage}
+          {sections}
         </>
       )}
     </main>
