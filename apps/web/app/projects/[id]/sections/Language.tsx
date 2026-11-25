@@ -24,7 +24,7 @@ export function LanguageSection({
         Language
       </h2>
       {saved && <Result>Language settings saved.</Result>}
-      <form action={languageAction.bind(null, id)}>
+      <form action={languageAction.bind(null, id)} className="stack">
         {/* What this page showed, so that a save changes only what the person changed. */}
         <input type="hidden" name="shownLanguage" value={language.language} />
         <input type="hidden" name="shownGlossary" value={language.glossary.join(' ')} />

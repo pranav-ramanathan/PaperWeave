@@ -40,7 +40,7 @@ export function FirstSteps({ steps, owner }: { steps: Steps; owner: boolean }) {
                 ],
               ] as const
             ).map(([done, what, how]) => (
-              <li key={what}>
+              <li key={what} data-done={done}>
                 <strong>{done ? 'Done' : 'To do'}:</strong> {what}.{!done && ` ${how}`}
               </li>
             ))}

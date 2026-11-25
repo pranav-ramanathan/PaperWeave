@@ -83,7 +83,7 @@ export function Bibliography({
               : 'Some need attention:'}
           </p>
           {cited.missing.length + cited.duplicates.length > 0 && (
-            <ul className="report">
+            <ul className="report attention">
               {cited.missing.map((m) => (
                 <li key={`${m.fileId}:${m.line}:${m.key}`}>
                   <Link prefetch={false} href={`/projects/${id}/files/${m.fileId}`}>

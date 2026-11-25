@@ -1,25 +1,65 @@
+import { ChevronRight } from '../../../../components/icon';
+import { Mark } from '../../../../components/mark';
 import Link from '../../../Go';
 import Once from '../../../Once';
 import Result from '../../../Result';
 import { renamePaperAction } from '../../actions';
 
-/** The paper's name and the reader's role in it. */
-export function Header({ name, role }: { name: string; role: string }) {
+/** The paper's name and the reader's role in it. `next` is the new look's top: a bar, then the title. */
+export function Header({
+  name,
+  role,
+  next = false,
+}: {
+  name: string;
+  role: string;
+  next?: boolean;
+}) {
+  // The text is cut into the same pieces as before the page was split into sections
+  // (the HTML keeps a marker between pieces), so it is kept as written.
+  // prettier-ignore
+  const who = (
+    <span>
+      You are{' '}
+      {role === 'viewer' || role === 'reviewer'
+        ? 'a'
+        : role === 'owner'
+          ? 'the'
+          : 'an'}{' '}
+      {role}
+    </span>
+  );
+  if (next)
+    return (
+      <>
+        {/* The mark and the word are not a link here: a link before "All papers" would be a new
+            stop for the keyboard before the ones the page has. */}
+        <header className="paper-bar">
+          <span className="paper-brand">
+            <Mark />
+            PaperWeave
+          </span>
+          <nav aria-label="Where you are">
+            <ol>
+              <li>
+                <ChevronRight aria-hidden="true" />
+                <Link prefetch={false} href="/projects">
+                  All papers
+                </Link>
+              </li>
+            </ol>
+          </nav>
+        </header>
+        <div className="paper-title">
+          <h1>{name}</h1>
+          {who}
+        </div>
+      </>
+    );
   return (
     <header className="bar">
       <h1>{name}</h1>
-      {/* The text is cut into the same pieces as before the page was split into sections
-          (the HTML keeps a marker between pieces), so it is kept as written. */}
-      {/* prettier-ignore */}
-      <span>
-        You are{' '}
-        {role === 'viewer' || role === 'reviewer'
-          ? 'a'
-          : role === 'owner'
-            ? 'the'
-            : 'an'}{' '}
-        {role}
-      </span>
+      {who}
       <Link prefetch={false} href="/projects">
         All papers
       </Link>
