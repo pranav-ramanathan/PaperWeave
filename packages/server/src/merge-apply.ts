@@ -30,6 +30,7 @@ import {
   versionOf,
 } from './merge.ts';
 import { id } from './projects.ts';
+import { type Carried, carryReview } from './merge-carry.ts';
 import { compactIfDue } from './sync.ts';
 import {
   announceRestore,
@@ -67,6 +68,8 @@ export type Merged = {
   /** Files the merge changed (written, added, removed or renamed), and conflicts decided. */
   files: number;
   conflicts: number;
+  /** Only when asked for: what was brought across from the source's open threads and proposals. */
+  carried?: Carried & { failed?: true };
 };
 
 type Decision = {
@@ -229,6 +232,10 @@ function decide(plan: MergePlan, choices: MergeChoices, oursDigest: Map<string, 
  *   moves to the source's revision, and the editors are told on the `restored` channel after the
  *   edits. It costs the person the bytes of edits it adds, as a restore does.
  * - All or nothing. Undo: restore the kept revision.
+ * - With `carry`, after the merge has committed (so it cannot change what the merge wrote), the
+ *   source's open threads and proposals whose words are in the merged text are copied to the
+ *   target's matching files (`merge-carry.ts`). If that fails the merge stands and `carried.failed`
+ *   says so.
  */
 export async function applyMerge(
   pool: pg.Pool,
@@ -239,6 +246,8 @@ export async function applyMerge(
   ref: MergePlanRef,
   choices: MergeChoices,
   budget: RewriteOpts = {},
+  /** Also bring the source's open threads and proposals across, once the merge has committed. */
+  carry = false,
 ): Promise<Merged> {
   const [target, source] = await members(
     pool,
@@ -498,6 +507,17 @@ export async function applyMerge(
   // The files appended to while held did not read their logs; each is looked at now, once the
   // merge has committed. The merge stands whatever this does.
   for (const fileId of appendedTo) await compactIfDue(pool, fileId).catch(() => undefined);
+  const carried = carry
+    ? await carryReview(pool, store, userId, target.id, source.id).catch(
+        (): Carried & { failed: true } => ({
+          threads: 0,
+          proposals: 0,
+          notCarried: 0,
+          left: ['Comments and proposals could not be brought across. The merge itself is done.'],
+          failed: true,
+        }),
+      )
+    : undefined;
   return {
     id: made.id,
     number: made.number,
@@ -505,5 +525,6 @@ export async function applyMerge(
     merge: made.merge,
     files: made.files,
     conflicts: made.conflicts,
+    ...(carried ? { carried } : {}),
   };
 }
