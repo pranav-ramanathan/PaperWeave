@@ -19,6 +19,7 @@ type Node = {
   selector?: string;
   parent?: Node;
   walkRules(cb: (rule: Node) => void): void;
+  walkDecls(cb: (decl: { prop: string; value?: string }) => void): void;
   walkAtRules(cb: (rule: Node) => void): void;
 };
 type Postcss = (plugins: unknown[]) => {
@@ -90,6 +91,25 @@ test('the prefix leaves @keyframes and @property alone, and :root stands for the
   expect(out.css).toContain(":where([data-ui='next']) {");
   expect(out.css).toContain(":where([data-ui='next']) .b > c");
   expect(out.css).toMatch(/@media[^{]*\{\s*:where\(\[data-ui='next'\]\) \.a/);
+});
+
+test('only the editor is held to one screen: no rule makes every page in the new look that high', async () => {
+  // `:root` stands for the page's <main>, so a one-screen rule on it would cut off the long pages
+  // (the paper page is several screens high) unless it is held to the page that has a workspace.
+  const file = join(APP, 'next.css');
+  const out = await (await pipeline())(readFileSync(file, 'utf8'), file);
+  const screenHigh: string[] = [];
+  out.root.walkRules((rule) => {
+    let fixed = false;
+    rule.walkDecls((d) => {
+      if (d.prop === 'height' && /^100d?vh$/.test(d.value ?? '')) fixed = true;
+    });
+    if (fixed) screenHigh.push(...(rule.selectors ?? []).map((s) => s.replace(SCOPE, '')));
+  });
+  // Not vacuous: the editor's one-screen layout is in it.
+  expect(screenHigh).toContain(':has(.workspace)');
+  // The scope alone is every page's <main>.
+  expect(screenHigh).not.toContain('');
 });
 
 test('legacy.css, functional.css and katex come through the same pipeline untouched', async () => {

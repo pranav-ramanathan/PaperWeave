@@ -156,3 +156,36 @@ jobs:
       - run: |
           echo "sandbox: ${{ needs.sandbox.result }}, browser: ${{ needs.browser.result }}"
           test "${{ needs.sandbox.result }}" = success && test "${{ needs.browser.result }}" = success
+
+  # A view of progress, not a check: the whole suite with the new look chosen AND the pages that
+  # are still being built in it shown (UI_STAGED=1: the editor, until it is moved, T18 to T27).
+  # `continue-on-error`, so a red run here never turns the workflow red; it is not a required
+  # check and must not become one. The last task for the editor (T27) moves it to the finished
+  # pages and removes this job.
+  browser-staged:
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+    continue-on-error: true
+    steps:
+      - uses: actions/checkout@v4
+      - uses: pnpm/action-setup@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: pnpm
+      - run: pnpm install --frozen-lockfile
+      - run: docker build -t paperweave-tex infra/tex
+      - run: docker compose -f infra/compose.yaml up -d --wait || (docker compose -f infra/compose.yaml logs --tail 60; exit 1)
+      - run: pnpm exec playwright install --with-deps chromium
+      - run: pnpm e2e
+        env:
+          E2E_WORKERS: 2
+          E2E_UI: next
+          UI_STAGED: 1
+      - if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: browser-staged-test-results
+          path: test-results/
+          if-no-files-found: ignore
+          retention-days: 7

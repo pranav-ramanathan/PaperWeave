@@ -156,7 +156,17 @@ export async function person(browser: Browser, who: string) {
   // person of a test closes the last test's windows. (The last test's close with the browser.)
   if (running !== test.info().testId) {
     running = test.info().testId;
-    await Promise.all(opened.splice(0).map((context) => context.close()));
+    // A route the last test set may be handling a request as its window closes; its handler's
+    // fetch then fails, and that failure would land on this test. Dropped first, quietly.
+    await Promise.all(
+      opened.splice(0).map(async (context) => {
+        await context.unrouteAll({ behavior: 'ignoreErrors' });
+        await Promise.all(
+          context.pages().map((page) => page.unrouteAll({ behavior: 'ignoreErrors' })),
+        );
+        await context.close();
+      }),
+    );
   }
   // Sign-in is rate-limited per client address (five links a minute) where the server trusts a
   // header for it. The test server does (TRUSTED_IP_HEADER in playwright.config.ts), and each
