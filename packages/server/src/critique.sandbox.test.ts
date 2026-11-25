@@ -9,6 +9,8 @@ import { setLanguageSettings } from './grammar.ts';
 import { exportZip, importZip, listFiles } from './import.ts';
 import { acceptInvitation, invite, modelProcessing, setModelProcessing } from './projects.ts';
 import { listProposals } from './proposals.ts';
+import { cutRevision } from './revisions.ts';
+import { startVersion } from './versions.ts';
 import { loadUpdates, TEXT } from './sync.ts';
 import { TEST_ENV, testDb } from './testing.ts';
 import { listThreads } from './threads.ts';
@@ -227,4 +229,49 @@ test('evidence is stored cut to 500 characters each, and ten of them', async () 
   const [proposal] = await listProposals(t.pool, store, users.owner.id, p.id);
   expect(proposal.evidence).toHaveLength(10);
   expect(proposal.evidence.every((e: string) => e.length === 500)).toBe(true);
+});
+
+test('the hourly limit of reviews is one for a paper and its versions together', async () => {
+  const p = await paper();
+  await setModelProcessing(t.pool, users.owner.id, p.id, true);
+  const revision = (await cutRevision(t.pool, store, users.owner.id, p.id)).id;
+  const v = await startVersion(t.pool, store, users.owner.id, p.id, revision, 'camera-ready', {
+    env: { VERSIONS: '1' },
+  });
+  const [vfile] = await listFiles(t.pool, users.owner.id, v.id);
+  const { ask } = fake({ suggestions: [], questions: [] });
+  const go = async (paperId: string, file: string) =>
+    code(
+      reviewPassage(t.pool, store, users.owner.id, paperId, file, await ends(file, PASSAGE), {
+        ask,
+        perHour: 3,
+      }),
+    );
+  // Two on the paper, one on the version: that is the three.
+  expect(await go(p.id, p.file)).toBe('ok');
+  expect(await go(p.id, p.file)).toBe('ok');
+  expect(await go(v.id, vfile.id)).toBe('ok');
+  // Both are at the limit, whichever the next request is made on.
+  expect(await go(p.id, p.file)).toBe('conflict');
+  expect(await go(v.id, vfile.id)).toBe('conflict');
+});
+
+test('a paper with no versions counts its own reviews alone, as before', async () => {
+  const p = await paper();
+  const other = await paper();
+  await setModelProcessing(t.pool, users.owner.id, p.id, true);
+  await setModelProcessing(t.pool, users.owner.id, other.id, true);
+  const { ask } = fake({ suggestions: [], questions: [] });
+  const go = async (paperId: string, file: string) =>
+    code(
+      reviewPassage(t.pool, store, users.owner.id, paperId, file, await ends(file, PASSAGE), {
+        ask,
+        perHour: 2,
+      }),
+    );
+  expect(await go(p.id, p.file)).toBe('ok');
+  expect(await go(p.id, p.file)).toBe('ok');
+  expect(await go(p.id, p.file)).toBe('conflict');
+  // Another paper of the same person has its own hour.
+  expect(await go(other.id, other.file)).toBe('ok');
 });
