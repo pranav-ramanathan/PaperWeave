@@ -4,6 +4,8 @@ import Link from '../../../../../Go';
 import Once from '../../../../../Once';
 import { notFound } from 'next/navigation';
 import { blobs, db, requireUser } from '../../../../../../lib/server';
+import { FormPage, Say } from '../../../../../../components/form-page';
+import { ui } from '../../../../../../lib/ui';
 import { renameFileAction } from '../../../../actions';
 
 export const dynamic = 'force-dynamic';
@@ -27,6 +29,7 @@ export default async function RenameFile({
     if (err.code === 'not_found') notFound();
     return err.message;
   });
+  const look = await ui('file-rename');
   const back = (
     <Link prefetch={false} href={`/projects/${id}`}>
       Back to the paper
@@ -34,24 +37,25 @@ export default async function RenameFile({
   );
   if (typeof proposal === 'string')
     return (
-      <main className="page">
-        <header className="bar">
-          <h1>Rename a file</h1>
-          {back}
-        </header>
-        <p role="alert">{proposal}</p>
-      </main>
+      <FormPage look={look} title="Rename a file" back={back}>
+        <Say look={look} role="alert">
+          {proposal}
+        </Say>
+      </FormPage>
     );
   const files = [...new Set(proposal.changes.map((c) => c.path))];
   const lines = proposal.changes.length;
   return (
-    <main className="page">
-      <header className="bar">
-        <h1>
+    <FormPage
+      look={look}
+      wide
+      title={
+        <>
           Rename <code>{proposal.from}</code> to <code>{proposal.to}</code>
-        </h1>
-        {back}
-      </header>
+        </>
+      }
+      back={back}
+    >
       {error && <Result alert>{error}</Result>}
       {lines === 0 ? (
         <p>
@@ -100,11 +104,11 @@ export default async function RenameFile({
             : `Rename and update ${lines === 1 ? 'that line' : `those ${lines} lines`}`}
         </Once>{' '}
         {lines > 0 && (
-          <Once type="submit" name="how" value="only">
+          <Once type="submit" name="how" value="only" variant="outline">
             Rename only. The paper will not build until those lines are fixed.
           </Once>
         )}
       </form>
-    </main>
+    </FormPage>
   );
 }

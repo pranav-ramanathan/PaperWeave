@@ -156,7 +156,17 @@ export async function person(browser: Browser, who: string) {
   // person of a test closes the last test's windows. (The last test's close with the browser.)
   if (running !== test.info().testId) {
     running = test.info().testId;
-    await Promise.all(opened.splice(0).map((context) => context.close()));
+    // A route the last test set may be handling a request as its window closes; its handler's
+    // fetch then fails, and that failure would land on this test. Dropped first, quietly.
+    await Promise.all(
+      opened.splice(0).map(async (context) => {
+        await context.unrouteAll({ behavior: 'ignoreErrors' });
+        await Promise.all(
+          context.pages().map((page) => page.unrouteAll({ behavior: 'ignoreErrors' })),
+        );
+        await context.close();
+      }),
+    );
   }
   // Sign-in is rate-limited per client address (five links a minute) where the server trusts a
   // header for it. The test server does (TRUSTED_IP_HEADER in playwright.config.ts), and each
@@ -262,29 +272,51 @@ export async function selectWord(page: Page, within: string, word: string) {
 
 /** Put the caret just after a word in an editor, with one click at the word's end. */
 export async function clickAfter(page: Page, within: string, word: string) {
+  const at = await pointAfter(page, within, word);
+  await page.mouse.click(at.x, at.y);
+}
+
+/**
+ * Where to press to be on a word's last letter in an editor (or in its middle, to double-click it),
+ * with the pointer moved there. Measured, then pressed, and what is under the point is looked at
+ * between the two. In the visual view the lines around a short paragraph are buttons ("Edit in
+ * source" on the preamble above, on the end of the document below), a few lines away. Text moved by
+ * something drawn above it a moment later put the press on one of them: the editor switched to the
+ * source view and the visual view's tools were gone (a chart test waited for "Figure" there until
+ * its timeout). So the press is made only where the word's own line still is, else measured again.
+ *
+ * The look is taken after the page has drawn a frame. A block of the visual view out of sight is
+ * not laid out (content-visibility), and stands at a guessed height until the frame after it is
+ * scrolled to; the word is measured before that frame. Near the end of a file, with the editor
+ * scrolled to its bottom, the blocks taking their true height moved the last word 33px up, and a
+ * double-click measured on it landed on the "End of document" block below, selecting nothing
+ * (insert.spec.ts, with two tests at a time). So what is under the point must also hold the word.
+ */
+export async function pointAfter(
+  page: Page,
+  within: string,
+  word: string,
+  on: 'end' | 'middle' = 'end',
+) {
   await expect(page.locator(within)).toContainText(word);
-  // Measured, then pressed, and what is under the point is looked at between the two. In the
-  // visual view the lines around a short paragraph are buttons ("Edit in source" on the preamble
-  // above, on the end of the document below), a few lines away. Text moved by something drawn
-  // above it a moment later put the press on one of them: the editor switched to the source view
-  // and the visual view's tools were gone (a chart test waited for "Figure" there until its
-  // timeout). So the press is made only where the word's own line still is, else measured again.
   for (let attempt = 1; ; attempt++) {
-    const at = await measureAfter(page, within, word);
-    if (!at) throw new Error(`"${word}" is not shown in ${within}`);
+    const measured = await measureAfter(page, within, word);
+    if (!measured) throw new Error(`"${word}" is not shown in ${within}`);
+    const at = { x: on === 'end' ? measured.x : measured.middle, y: measured.y };
     await page.mouse.move(at.x, at.y);
     const under = await page.evaluate(
-      ([sel, x, y]) => {
+      async ([sel, w, x, y]) => {
+        await new Promise((drawn) => requestAnimationFrame(() => requestAnimationFrame(drawn)));
         const el = document.elementFromPoint(x as number, y as number);
-        if (el && el.closest(sel as string) && !el.closest('button')) return null;
+        const root = el?.closest(sel as string);
+        if (el && root && !el.closest('button'))
+          for (let e: Element | null = el; e && e !== root; e = e.parentElement)
+            if (e.textContent?.includes(w as string)) return null;
         return el ? `<${el.tagName.toLowerCase()} class="${el.className}">` : 'nothing';
       },
-      [within, at.x, at.y] as const,
+      [within, word, at.x, at.y] as const,
     );
-    if (under === null) {
-      await page.mouse.click(at.x, at.y);
-      return;
-    }
+    if (under === null) return { ...at, end: measured.x };
     if (attempt === 5)
       throw new Error(
         `"${word}" in ${within} kept moving from under the pointer: ${under} is there`,
@@ -313,7 +345,7 @@ async function measureAfter(page: Page, within: string, word: string) {
           scrollBy(0, r.top + r.height / 2 - innerHeight / 2);
           r = range.getBoundingClientRect();
         }
-        return { x: r.right - 1, y: r.y + r.height / 2 };
+        return { x: r.right - 1, y: r.y + r.height / 2, middle: r.x + r.width / 2 };
       };
       const walker = document.createTreeWalker(document.querySelector(sel)!, NodeFilter.SHOW_TEXT);
       for (let n = walker.nextNode(); n; n = walker.nextNode()) {

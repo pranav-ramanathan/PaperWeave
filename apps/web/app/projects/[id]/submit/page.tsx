@@ -18,6 +18,8 @@ import Once from '../../../Once';
 import { notFound } from 'next/navigation';
 import { blobs, db, forTitle, paperOf, requireUser } from '../../../../lib/server';
 import { buildNowAction } from '../../actions';
+import { FormPage, Say } from '../../../../components/form-page';
+import { ui } from '../../../../lib/ui';
 
 export const dynamic = 'force-dynamic';
 
@@ -100,22 +102,26 @@ async function Submit({
         (await bblInRevision(db(), user.id, id, checks.revisionId)) !== null
       : false;
   const revision = `/projects/${id}/revisions/${checks.revisionId}`;
+  const look = await ui('submit');
   return (
-    <main className="page">
-      {/* While a build runs, look again every two seconds. */}
-      {checks.building && <Again />}
-      <header className="bar">
-        <h1>Check {project.name} before submitting</h1>
+    <FormPage
+      look={look}
+      wide
+      // While a build runs, look again every two seconds.
+      before={checks.building && <Again />}
+      title={<>Check {project.name} before submitting</>}
+      back={
         <Link prefetch={false} href={`/projects/${id}`}>
           Back to the paper
         </Link>
-      </header>
+      }
+    >
       {error && <Result alert>{error}</Result>}
       {checks.ready ? (
         <>
-          <p role="status">
+          <Say look={look} role="status" tone="success">
             Nothing stands in the way. The ZIP and the PDF below are of the same revision.
-          </p>
+          </Say>
           {can(project.role, 'project.export') ? (
             <p>
               <a href={`${revision}/zip`}>Download the ZIP</a>{' '}
@@ -158,7 +164,7 @@ async function Submit({
           <Once type="submit">Build the paper and check again</Once>
         </form>
       )}
-    </main>
+    </FormPage>
   );
 }
 
