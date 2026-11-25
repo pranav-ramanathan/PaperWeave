@@ -4,6 +4,12 @@ on:
     branches: [main]
   pull_request:
 
+# Several PRs are updated in quick succession, and superseded runs held runners for nothing.
+# A newer run for the same PR cancels the older one; pushes to main are never cancelled.
+concurrency:
+  group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
 jobs:
   check:
     runs-on: ubuntu-latest
