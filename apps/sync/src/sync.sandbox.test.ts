@@ -1560,7 +1560,7 @@ test('a small presence message with many people and a long name is cut down to o
   await new Promise((r) => setTimeout(r, 500));
   expect(owner.provider.awareness!.getStates().size).toBeLessThanOrEqual(2);
   expect(owner.provider.awareness!.getStates().get(3_000_000)).toEqual({
-    user: { name: 'N'.repeat(80) },
+    user: { name: users.viewer.email },
   });
   expect(viewer.state.closed).toBe(0);
 });
@@ -1600,10 +1600,10 @@ test('people on a file, viewers and reviewers too, still see each other by name 
   await saved(owner);
   await until('the text to arrive', () => viewer.text.length > 10 && reviewer.text.length > 10);
   const who: [Client, string, string][] = [
-    [owner, 'Ada Lovelace', '#aabbcc'],
-    [editor, 'Grace Hopper', '#112233'],
-    [viewer, 'Viewer V', '#445566'],
-    [reviewer, 'Reviewer R', '#778899'],
+    [owner, users.owner.email, '#aabbcc'],
+    [editor, users.editor.email, '#112233'],
+    [viewer, users.viewer.email, '#445566'],
+    [reviewer, users.reviewer.email, '#778899'],
   ];
   for (const [c, name, colour] of who) {
     // yCollab sends the positions themselves; the visual view their JSON, which leaves out nulls.
@@ -1637,6 +1637,113 @@ test('people on a file, viewers and reviewers too, still see each other by name 
       expect([index(s.cursor.anchor), index(s.cursor.head)]).toEqual([2, 6]);
     }
   for (const [c] of who) expect(c.state.closed).toBe(0);
+});
+
+// Presence belongs to the connection that sends it: its name is the server's, and a client ID is
+// held by one connection at a time.
+
+/** Like `rawAwareness`, with the clock each state carries (null removes the client). */
+function rawAwarenessAt(file: string, states: [id: number, clock: number, state: unknown][]) {
+  const body = Buffer.concat([
+    varUint(states.length),
+    ...states.flatMap(([id, clock, state]) => [
+      varUint(id),
+      varUint(clock),
+      varBytes(Buffer.from(JSON.stringify(state))),
+    ]),
+  ]);
+  return Buffer.concat([varBytes(Buffer.from(file)), varUint(1), varBytes(body)]);
+}
+const spot = { anchor: { tname: 'x', assoc: 0 }, head: { tname: 'x', assoc: 0 } };
+const seenBy = (c: Client, of: number) => c.provider.awareness!.getStates().get(of);
+// One paper for these tests: each makes its own clients, and the service sends only so many
+// invitations an hour, which a paper for every test would add to.
+let sharedPaper: ReturnType<typeof paper> | undefined;
+const presencePaper = () => (sharedPaper ??= paper());
+
+test('a viewer cannot go by the owner’s name: presence carries the viewer’s own', async () => {
+  const { file } = await presencePaper();
+  const [owner, editor, viewer] = [
+    client(users.owner, file),
+    client(users.editor, file),
+    client(users.viewer, file),
+  ];
+  await saved(owner, editor, viewer);
+  const mine = viewer.doc.clientID;
+  sendRaw(
+    viewer,
+    rawAwarenessAt(file, [
+      [mine, 1000, { user: { name: users.owner.email, color: '#445566' }, cursor: spot }],
+    ]),
+  );
+  await until('the viewer to be seen', () => !!seenBy(editor, mine)?.cursor);
+  expect(seenBy(editor, mine)?.user).toEqual({ name: users.viewer.email, color: '#445566' });
+  expect(seenBy(owner, mine)?.user?.name).toBe(users.viewer.email);
+  expect(viewer.state.closed).toBe(0);
+});
+
+test('a viewer cannot rewrite or remove the owner’s presence', async () => {
+  const { file } = await presencePaper();
+  const [owner, editor, viewer] = [
+    client(users.owner, file),
+    client(users.editor, file),
+    client(users.viewer, file),
+  ];
+  await saved(owner, editor, viewer);
+  const theirs = owner.doc.clientID;
+  const awareness = owner.provider.awareness!;
+  awareness.setLocalStateField('user', { name: users.owner.email, color: '#112233' });
+  awareness.setLocalStateField('cursor', spot);
+  await until('the owner to be seen', () => !!seenBy(editor, theirs)?.cursor);
+  const clock = awareness.meta.get(theirs)!.clock;
+  const was = seenBy(editor, theirs);
+  sendRaw(viewer, rawAwarenessAt(file, [[theirs, clock + 1, { user: { name: 'Someone else' } }]]));
+  sendRaw(viewer, rawAwarenessAt(file, [[theirs, clock + 2, null]]));
+  // Long enough for what was taken to have reached the other editor.
+  await new Promise((r) => setTimeout(r, 1000));
+  expect(seenBy(editor, theirs)).toEqual(was);
+  expect(seenBy(editor, theirs)?.user?.name).toBe(users.owner.email);
+  expect(viewer.state.closed).toBe(0);
+});
+
+test('a viewer’s own cursor and colours still arrive, under the server’s name for them', async () => {
+  const { file } = await presencePaper();
+  const editor = client(users.editor, file);
+  const viewer = client(users.viewer, file);
+  await saved(editor, viewer);
+  const at = Y.createRelativePositionFromTypeIndex(viewer.text, 0);
+  viewer.provider.awareness!.setLocalStateField('user', {
+    name: 'Chosen by the client',
+    color: '#445566',
+    colorLight: '#44556633',
+  });
+  viewer.provider.awareness!.setLocalStateField('cursor', { anchor: at, head: at });
+  await until('the cursor to arrive', () => !!seenBy(editor, viewer.doc.clientID)?.cursor);
+  const s = seenBy(editor, viewer.doc.clientID)!;
+  expect(s.user).toEqual({ name: users.viewer.email, color: '#445566', colorLight: '#44556633' });
+  expect(Object.keys(s.cursor).sort()).toEqual(['anchor', 'head']);
+});
+
+test('a client ID is held by one connection, and free again when it closes', async () => {
+  const { file } = await presencePaper();
+  const owner = client(users.owner, file);
+  const first = client(users.viewer, file);
+  const again = client(users.viewer, file);
+  await saved(owner, first, again);
+  const id = 777_001;
+  sendRaw(first, rawAwarenessAt(file, [[id, 1000, { user: { color: '#111111' }, cursor: spot }]]));
+  await until('the first to be seen', () => seenBy(owner, id)?.user?.color === '#111111');
+  // Held: another connection cannot take it over while the first is open.
+  sendRaw(again, rawAwarenessAt(file, [[id, 2000, { user: { color: '#222222' }, cursor: spot }]]));
+  await new Promise((r) => setTimeout(r, 700));
+  expect(seenBy(owner, id)?.user?.color).toBe('#111111');
+  // Closed: its presence goes, and the ID can be claimed by a tab that comes back with it.
+  first.provider.destroy();
+  first.socket.destroy();
+  await until('the first to be gone', () => !seenBy(owner, id));
+  sendRaw(again, rawAwarenessAt(file, [[id, 3000, { user: { color: '#333333' }, cursor: spot }]]));
+  await until('the next to be seen', () => seenBy(owner, id)?.user?.color === '#333333');
+  expect(seenBy(owner, id)?.user?.name).toBe(users.viewer.email);
 });
 
 // Connections per person: at most two to a file and three in all, on a server of their own.

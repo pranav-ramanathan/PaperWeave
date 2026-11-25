@@ -373,3 +373,43 @@ test('everything changed since a revision somebody named, up to now, is one pres
   await expect(page.getByRole('row', { name: /3\. Unnamed/ })).toBeVisible();
   await expect(page.getByRole('row', { name: /4\. Unnamed/ })).toHaveCount(0);
 });
+
+test('a link on another site cannot make the paper cut a revision by downloading it', async ({
+  browser,
+}) => {
+  const owner = await person(browser, 'export-cross-site');
+  const page = owner.page;
+  const main = '\\documentclass{article}\n\\begin{document}\nHello.\n\\end{document}\n';
+  const zip = join(mkdtempSync(join(tmpdir(), 'paperweave-e2e-')), `Cross ${run}.zip`);
+  writeFileSync(zip, await writeZip([{ path: 'main.tex', bytes: Buffer.from(main) }]));
+  await page.goto('/sign-in');
+  await signIn(page, owner.email);
+  await page.getByLabel('Or import a ZIP of a LaTeX project').setInputFiles(zip);
+  await page.getByRole('button', { name: 'Import ZIP' }).click();
+  const paper = page.url();
+
+  // What a browser sends when a link on another site is followed, and what a foreign form says.
+  const foreign: Record<string, string>[] = [
+    { 'sec-fetch-site': 'cross-site' },
+    { 'sec-fetch-site': 'same-site' },
+    { origin: 'https://elsewhere.example' },
+  ];
+  for (const headers of foreign) {
+    expect((await page.request.get(`${paper}/export`, { headers })).status()).toBe(403);
+    expect((await page.request.get(`${paper}/export?review`, { headers })).status()).toBe(403);
+  }
+  await page.goto(paper);
+  await expect(page.getByRole('row', { name: /1\. Unnamed/ })).toHaveCount(0);
+
+  // The paper's own link, as a browser follows it from the paper's page, still downloads, and
+  // that is what cuts the revision.
+  const [download] = await Promise.all([
+    page.waitForEvent('download'),
+    page.getByRole('link', { name: 'Download ZIP' }).click(),
+  ]);
+  expect((await readZip(readFileSync(await download.path()))).entries.map((e) => e.path)).toEqual([
+    'main.tex',
+  ]);
+  await page.goto(paper);
+  await expect(page.getByRole('row', { name: /1\. Unnamed/ })).toBeVisible();
+});

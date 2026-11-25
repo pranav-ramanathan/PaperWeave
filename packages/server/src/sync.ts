@@ -90,12 +90,13 @@ export function verifyTicket(
 /** What the user may do with a file. Someone not on the paper gets `not_found`. */
 export async function openFile(db: Db, userId: string, fileId: string) {
   const { rows } = await db.query(
-    `select f.project_id as "projectId", f.path, f.eol, m.role from files f
-     join project_members m on m.project_id = f.project_id and m.user_id = $2 where f.id = $1`,
+    `select f.project_id as "projectId", f.path, f.eol, m.role, u.email from files f
+     join project_members m on m.project_id = f.project_id and m.user_id = $2
+     join "user" u on u.id = m.user_id where f.id = $1`,
     [id(fileId), userId],
   );
   const f = rows[0] as
-    { projectId: string; path: string; eol: string | null; role: Role } | undefined;
+    { projectId: string; path: string; eol: string | null; role: Role; email: string } | undefined;
   if (!f) throw new AppError('not_found', 'No such file.');
   // A file that is not editable text (an image, a file in another encoding) is never opened live.
   if (!f.eol) throw new AppError('invalid_input', 'This file cannot be edited as text.');
@@ -103,6 +104,8 @@ export async function openFile(db: Db, userId: string, fileId: string) {
     projectId: f.projectId,
     path: f.path,
     role: f.role,
+    /** What the editor shows for this person (their email): the name presence goes under. */
+    email: f.email,
     canWrite: can(f.role, 'file.write'),
   };
 }

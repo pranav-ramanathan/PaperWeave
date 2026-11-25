@@ -7512,8 +7512,22 @@ Measured in-process with 20 read-only connections: one message of 100,000 states
   over-budget close: the socket is closed and opened again after 10 seconds, without saying
   edits are paused; nothing the editor sends can be that large.
 - **Held by** `presence.test.ts` and four tests at the end of `sync.sandbox.test.ts`.
-- **Not done.** A connection can still name another person's client ID in its one state. The
-  budget is in memory and starts afresh when the server restarts.
+- **Tied to the person.** `openFile` also returns the person's email, which goes in the
+  connection's context as `name`. `cleanPresence(states, removed, who)` overwrites `user.name`
+  with it, keeps a state only under a client ID the connection holds or that nobody holds (then
+  taken, up to 8 a connection), and keeps a removal only for the connection's own IDs. The
+  claims are in memory, per connection, and `onDisconnect` frees them, so a tab that reconnects
+  with the same ID works. Peers that vanish: the library removes every ID a connection added when
+  it closes, and y-protocols removes IDs not renewed for 30 seconds. Held by four sandbox tests
+  (a viewer under the owner's name, a viewer rewriting or removing the owner's state, a viewer's
+  own cursor and colours, a claim freed on close). The existing test "people on a file ... see
+  each other by name and cursor" asserted that a client-chosen name comes through; its names are
+  now the users' emails, which is what the editor sends.
+- **Export is not opened from another site.** `GET /projects/[id]/export` (which cuts a revision)
+  answers 403 to a cross-site request: `notCrossSite` in `apps/web/lib/server.ts` reads
+  `Sec-Fetch-Site` (`same-origin` and `none` pass), else `Origin`. A new e2e test in
+  `revisions.spec.ts`.
+- **Not done.** The budget is in memory and starts afresh when the server restarts.
 
 ## Connections are capped for each person
 

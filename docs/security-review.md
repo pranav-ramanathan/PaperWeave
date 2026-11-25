@@ -299,7 +299,22 @@ In rough order of how much they matter.
    state of at most 4 KB with a name of at most 80 characters, simple colours and a cursor,
    and charged to a budget of its own for each person (2,000 at once, 1,200 a minute), over which
    it is dropped and the connection stays open. Counted as `paperweave_sync_presence_dropped_total`.
+   Presence was also not tied to the person sending it: a viewer could set `user.name` to the
+   owner's email and be listed under it for everyone ("Also here", the cursor label), and could
+   send a state or a removal for the owner's client ID with a higher clock and rewrite or remove
+   the owner's cursor. The name is now the server's (the email from `openFile`, as the editor
+   sends it), whatever the client says; a client ID is held by the connection that first sends a
+   state under it, a state under an ID another live connection holds is dropped, a removal is
+   kept only for the sender's own IDs, and at most 8 IDs are held to a connection. The claims
+   are in the sync server's memory and are released when the connection closes. Peers that
+   vanish are cleared by the library, on close (`removeConnection` takes down every ID the
+   connection added) and by y-protocols' 30-second timeout of IDs not renewed.
    Who may connect, read or write is unchanged.
+   `GET /projects/[id]/export` cuts a revision, and a link on another site, opened by an editor,
+   cut one. It now answers 403 when the browser says the request is cross-site or same-site but not
+   same-origin (`Sec-Fetch-Site`), or, if it says nothing, when `Origin` is another site's. Our own
+   link, the address bar and a bookmark (`same-origin`, `none`) and clients that send neither still
+   download.
    Connections were not limited either: one person could open any number to a file and to all,
    each costing two queries and multiplying every broadcast. Each person now holds at most 8
    to a file and 64 in all (`connectionCap`); the newest is refused with `too-many` and
