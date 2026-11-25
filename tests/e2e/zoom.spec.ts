@@ -145,36 +145,41 @@ const lost = (page: Page) =>
     // Controls that cover each other. What each shows is its box cut down by every ancestor that
     // hides or scrolls what is outside it. A window opened with showModal, or the menu at a place,
     // is all that can be used while it is open, so only what is in it is compared.
+    // A link that wraps onto a second line is two boxes, one per line (getClientRects). Its one
+    // bounding box would span both lines' widths and cover the link before it on the first line,
+    // though nothing on the screen overlaps.
     const scope =
       document.querySelector('dialog[open]') ?? document.querySelector('.menu') ?? document;
     const seen = [
       ...scope.querySelectorAll(
         'a[href], button, input:not([type=hidden]), select, textarea, summary',
       ),
-    ]
-      .map((el) => {
-        // Not drawn at all: the parts of a closed <details> keep a box, but it is not painted.
-        if (!el.checkVisibility({ visibilityProperty: true, contentVisibilityAuto: true }))
-          return null;
-        let { left, top, right, bottom } = el.getBoundingClientRect();
-        for (let p = el.parentElement; p; p = p.parentElement) {
-          const s = getComputedStyle(p);
-          if (s.display === 'none' || s.visibility === 'hidden') return null;
-          if (s.overflowX === 'visible' && s.overflowY === 'visible') continue;
-          const r = p.getBoundingClientRect();
+    ].flatMap((el) => {
+      // Not drawn at all: the parts of a closed <details> keep a box, but it is not painted.
+      if (!el.checkVisibility({ visibilityProperty: true, contentVisibilityAuto: true })) return [];
+      const clips: DOMRect[] = [];
+      for (let p = el.parentElement; p; p = p.parentElement) {
+        const s = getComputedStyle(p);
+        if (s.display === 'none' || s.visibility === 'hidden') return [];
+        if (s.overflowX === 'visible' && s.overflowY === 'visible') continue;
+        clips.push(p.getBoundingClientRect());
+      }
+      return [...el.getClientRects()].flatMap((box) => {
+        let { left, top, right, bottom } = box;
+        for (const r of clips) {
           left = Math.max(left, r.left);
           top = Math.max(top, r.top);
           right = Math.min(right, r.right);
           bottom = Math.min(bottom, r.bottom);
         }
-        return right - left > 3 && bottom - top > 3 ? { el, left, top, right, bottom } : null;
-      })
-      .filter((x) => x !== null);
+        return right - left > 3 && bottom - top > 3 ? [{ el, left, top, right, bottom }] : [];
+      });
+    });
     for (let i = 0; i < seen.length; i++)
       for (let j = i + 1; j < seen.length; j++) {
         const a = seen[i];
         const b = seen[j];
-        if (a.el.contains(b.el) || b.el.contains(a.el)) continue;
+        if (a.el === b.el || a.el.contains(b.el) || b.el.contains(a.el)) continue;
         const across = Math.min(a.right, b.right) - Math.max(a.left, b.left);
         const down = Math.min(a.bottom, b.bottom) - Math.max(a.top, b.top);
         if (across > 1 && down > 1)
@@ -347,7 +352,10 @@ test('the checks see what they are for', async ({ page }) => {
       <button style="position: absolute; left: 0; top: 0">First button</button>
       <button style="position: absolute; left: 20px; top: 5px">Second button</button>
     </div>
+    <p style="width: 160px"><a href="#">Download ZIP</a> <a href="#" id="wraps">ZIP with review data</a></p>
     <div style="width: 3000px; height: 1px"></div>`);
+  // The second link wraps, so its bounding box covers the first; on the screen they do not meet.
+  expect(await page.locator('#wraps').evaluate((e) => e.getClientRects().length)).toBe(2);
   const found = await lost(page);
   expect(found.some((s) => s.startsWith('the page scrolls sideways'))).toBe(true);
   expect(found.filter((s) => s.includes('cuts off its text'))).toHaveLength(2);
