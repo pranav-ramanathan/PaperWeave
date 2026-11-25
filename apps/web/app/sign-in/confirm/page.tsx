@@ -1,7 +1,9 @@
 import { redirect } from 'next/navigation';
 import Once from '../../Once';
 import { signInLinkAddress } from '@paperweave/server';
+import { SmallPage } from '../../../components/small-page';
 import { auth, safePath } from '../../../lib/server';
+import { ui } from '../../../lib/ui';
 import { confirmSignInAction } from './actions';
 
 export const dynamic = 'force-dynamic';
@@ -22,8 +24,9 @@ export default async function Confirm({
   // Read only: this page must not use the token up. Whose link it is, so that someone sent
   // another person's link cannot sign a person in as them without seeing whose it is.
   const who = await signInLinkAddress(auth(), token).catch(() => null);
+  const look = await ui('sign-in-confirm');
   return (
-    <main className="page narrow">
+    <SmallPage look={look}>
       <h1>Sign in to PaperWeave</h1>
       {who ? (
         <p id="who">
@@ -40,6 +43,6 @@ export default async function Confirm({
           Sign in
         </Once>
       </form>
-    </main>
+    </SmallPage>
   );
 }

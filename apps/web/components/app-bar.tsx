@@ -24,8 +24,11 @@ export type Crumb = { label: string; href?: string };
  * second "main.tex" breaks the strict locators.
  */
 export function AppBar(props: {
-  /** Where the mark and the word lead. */
-  home?: string;
+  /**
+   * Where the mark and the word lead. `null`: nowhere, as on the page that is home (the papers
+   * list), where a link to itself would only be one more stop for the keyboard.
+   */
+  home?: string | null;
   crumbs?: Crumb[];
   /** The right side. */
   children?: ReactNode;
@@ -39,13 +42,20 @@ export function AppBar(props: {
         className,
       )}
     >
-      <a
-        href={home}
-        className="flex items-center gap-2 rounded-sm font-heading text-[1.0625rem] font-semibold tracking-tight"
-      >
-        <Mark />
-        PaperWeave
-      </a>
+      {home === null ? (
+        <span className="flex items-center gap-2 font-heading text-[1.0625rem] font-semibold tracking-tight">
+          <Mark />
+          PaperWeave
+        </span>
+      ) : (
+        <a
+          href={home}
+          className="flex items-center gap-2 rounded-sm font-heading text-[1.0625rem] font-semibold tracking-tight"
+        >
+          <Mark />
+          PaperWeave
+        </a>
+      )}
       {crumbs && crumbs.length > 0 && (
         <nav aria-label="Where you are" className="min-w-0">
           <ol className="flex min-w-0 flex-wrap items-center gap-1">

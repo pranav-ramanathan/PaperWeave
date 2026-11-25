@@ -100,6 +100,50 @@ jobs:
           if-no-files-found: ignore
           retention-days: 7
 
+  # The same browser tests with the new look chosen: every person starts with the cookie
+  # `pw_ui=next` (E2E_UI, tests/e2e/helpers.ts). A page not yet moved to the new look ignores it,
+  # so this is "new where moved, old everywhere else". It is a job of its own, not a second step
+  # of the one above, so that it runs beside it on its own runner (no wall-clock added: the
+  # slower of the two decides) and so that the name of `sandbox-and-browser` stays what branch
+  # protection knows it as. It is not a required check: it is told apart by name, and the owner
+  # decides when it becomes one. The unit tests, lint and the sandbox tests do not depend on the
+  # look and are not run again.
+  # Sharded like the job above, for the same reason and the same way.
+  browser-next:
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        shard: [1, 2, 3]
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@v4
+      - uses: pnpm/action-setup@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: pnpm
+      - run: pnpm install --frozen-lockfile
+      # (No poppler: only the sandbox tests read PDFs with it.)
+      - run: docker build -t paperweave-tex infra/tex
+      - run: docker compose -f infra/compose.yaml up -d --wait || (docker compose -f infra/compose.yaml logs --tail 60; exit 1)
+      - run: pnpm exec playwright install --with-deps chromium
+      - run: pnpm e2e --project=e2e --shard=${{ matrix.shard }}/3
+        env:
+          E2E_WORKERS: 2
+          E2E_UI: next
+      - if: matrix.shard == 3
+        run: pnpm e2e --project=mail-down --no-deps
+        env:
+          E2E_UI: next
+      - if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: browser-next-test-results-${{ matrix.shard }}
+          path: test-results/
+          if-no-files-found: ignore
+          retention-days: 7
+
   # The name branch protection requires. It runs whatever the other two did (a skipped or
   # cancelled job would otherwise leave this one skipped, which counts as passing) and fails
   # unless both succeeded.

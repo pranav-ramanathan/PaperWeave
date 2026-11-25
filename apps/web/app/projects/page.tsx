@@ -2,11 +2,14 @@ import { listProjects, TEMPLATES } from '@paperweave/server';
 import Link from '../Go';
 import { reviewWaiting } from '../../lib/review';
 import { db, requireUser } from '../../lib/server';
+import { chosenLook, ui } from '../../lib/ui';
 import DirectUpload from '../DirectUpload';
 import Once from '../Once';
 import Result from '../Result';
 import SignOut from '../SignOut';
 import { createAction } from './actions';
+import { lookAction } from './look-action';
+import NextPapers from './NextPapers';
 
 export const dynamic = 'force-dynamic';
 export const metadata = { title: 'Papers' };
@@ -19,6 +22,16 @@ export default async function Projects({
   const user = await requireUser('/projects');
   const projects = await listProjects(db(), user.id);
   const { error, imported, left, deleted } = await searchParams;
+  const choice = await chosenLook();
+  if ((await ui('papers')) === 'next')
+    return (
+      <NextPapers
+        email={user.email}
+        projects={projects}
+        said={{ error, imported, left, deleted }}
+        choice={choice}
+      />
+    );
   return (
     <main className="page">
       <header className="bar">
@@ -103,6 +116,13 @@ export default async function Projects({
         </label>
         <Once>Import ZIP or tar</Once>
       </DirectUpload>
+      {/* Last in the page, after every form above, so that no Tab stop comes before an existing
+          one. The new look is being built page by page: pages that are not in it yet look as
+          they did, so the button is the only thing here that shows which look is chosen. */}
+      <form action={lookAction} aria-label="Look of the pages">
+        <input type="hidden" name="look" value={choice === 'next' ? 'classic' : 'next'} />
+        <Once>{choice === 'next' ? 'Use the old look' : 'Try the new look'}</Once>
+      </form>
     </main>
   );
 }

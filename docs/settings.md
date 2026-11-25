@@ -49,6 +49,28 @@ the services in `infra/compose.yaml`.
 | `VERSIONS`                                                                                                                                                    | web                | no                      | `1` lets the owner and editors of a paper start versions of it: linked copies begun at one of its revisions, up to 10 for each paper (`packages/server/src/versions.ts`). Unset or `0`: starting a version is refused, and no page offers one. Anything else is an error. Off by default until the whole suite has run with it on.                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                      |
 | `NODE_ENV`                                                                                                                                                    | web                | set by the framework    | In development the pages' content policy is looser: it also allows `eval` and style sheets it did not send.                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                             |
 
+## Choosing the look
+
+The new look is being brought in page by page, behind a switch, and the old look stays until the
+owner says the new one is final.
+
+- **A person's switch.** At the foot of the papers page, a button reads "Try the new look"; once
+  pressed it reads "Use the old look". It sets the cookie `pw_ui` (`next` or `classic`) for a
+  year, for the whole site, `SameSite=Lax`, `HttpOnly` (only the server reads it). It is a
+  preference, not a credential, so the cookie is not marked `Secure`: it also has to work on the
+  plain-http address local work uses. The choice wins over `UI_DEFAULT`.
+- **Everyone.** `UI_DEFAULT` (above) is the look for a person who has not pressed the button.
+  `classic` is the default and takes everyone back; `next` shows the new look to everyone who has
+  not chosen.
+- **Only moved pages change.** A page is drawn in the new look only when it has been moved (the
+  `MIGRATED` list in `apps/web/lib/ui.ts`). While none has been, the button changes nothing but
+  its own words. A page still being built (`STAGED`) is shown only on a server with
+  `UI_STAGED=1`, and only to a person whose choice is `next`.
+- **In the tests.** `E2E_UI=next` starts every person in the browser tests with the cookie set to
+  `next`. CI runs the browser tests twice: the job `sandbox-and-browser` as they are, and the job
+  `browser-next` with `E2E_UI=next`. Only the first is a required check; the second tells whether
+  the new look breaks anything the old one does not.
+
 ## Fixed in the code
 
 - **The session cookie cache, 60 seconds.** Better Auth keeps a copy of the session in a cookie

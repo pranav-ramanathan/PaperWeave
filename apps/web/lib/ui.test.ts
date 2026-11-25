@@ -1,13 +1,48 @@
 import { expect, test, vi } from 'vitest';
-import { look, MIGRATED, STAGED, ui, uiDefault, uiStaged } from './ui';
+import {
+  asLook,
+  chosen,
+  look,
+  MIGRATED,
+  STAGED,
+  ui,
+  UI_COOKIE_OPTIONS,
+  uiDefault,
+  uiStaged,
+} from './ui';
+
+test('the switch shows the person’s choice, then the default, whatever pages have moved', () => {
+  expect(chosen('next', 'classic')).toBe('next');
+  expect(chosen('classic', 'next')).toBe('classic');
+  expect(chosen(undefined, 'next')).toBe('next');
+  expect(chosen('NEXT', 'classic')).toBe('classic');
+  expect(chosen('', 'next')).toBe('next');
+});
+
+test('the switch’s form can put only "next" or "classic" in the cookie', () => {
+  expect(asLook('next')).toBe('next');
+  expect(asLook('classic')).toBe('classic');
+  for (const bad of [null, undefined, '', 'Next', 'next; Path=/', 'x'.repeat(500), 1])
+    expect(() => asLook(bad)).toThrow('"next" or "classic"');
+});
+
+test('the choice is kept for a year, site-wide, Lax and for the server only', () => {
+  expect(UI_COOKIE_OPTIONS).toEqual({
+    httpOnly: true,
+    sameSite: 'lax',
+    path: '/',
+    maxAge: 31_536_000,
+  });
+});
 
 const moved = ['papers'];
 
-test('no page has been moved yet, so every page is classic whatever is chosen', async () => {
-  expect(MIGRATED).toEqual([]);
+test('a page that has not been moved is classic whatever is chosen; the list is in order', async () => {
+  expect([...MIGRATED].sort()).toEqual(MIGRATED);
+  expect(MIGRATED).not.toContain('not-yet-moved');
   for (const cookie of ['next', 'classic', undefined, 'other'])
     for (const fallback of ['next', 'classic'] as const)
-      expect(look('papers', cookie, fallback)).toBe('classic');
+      expect(look('not-yet-moved', cookie, fallback)).toBe('classic');
 });
 
 test('a moved page is next when the person chose it, or when they chose nothing and the default is', () => {
@@ -79,7 +114,8 @@ test('ui() reads the cookie of the request and the setting', async () => {
   vi.doMock('next/headers', () => ({ cookies: async () => jar }));
   vi.resetModules();
   const fresh = await import('./ui');
-  expect(await fresh.ui('papers')).toBe('classic'); // none moved
+  expect(await fresh.ui('not-yet-moved')).toBe('classic');
+  expect(await fresh.ui('papers')).toBe('next'); // moved, and the cookie says next
   vi.stubEnv('UI_DEFAULT', 'sideways');
   await expect(fresh.ui('papers')).rejects.toThrow('UI_DEFAULT');
   vi.unstubAllEnvs();
