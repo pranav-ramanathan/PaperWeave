@@ -1,0 +1,67 @@
+'use server';
+
+import {
+  nameRevision,
+  requestBuild,
+  restoreRevision,
+  revisionOfNow,
+  saveRevision,
+} from '@paperweave/server';
+import { NOW } from '../../../../lib/compare';
+import { act, blobs, db, requireUser } from '../../../../lib/server';
+
+// The history page's own actions. Each one goes back to the history page, and each is checked by
+// the service it calls (`authorize` in packages/server), not by the page that shows the button.
+const text = (form: FormData, name: string) => String(form.get(name) ?? '').replace(/\r\n/g, '\n');
+const at = (projectId: string) => `/projects/${projectId}/history`;
+
+/** Save the paper as it is now under a name. */
+export async function saveNamedAction(projectId: string, form: FormData) {
+  const back = at(projectId);
+  const user = await requireUser(back);
+  await act(back, async () => {
+    const { number } = await saveRevision(db(), blobs(), user.id, projectId, text(form, 'name'));
+    return `${back}?saved=${number}`;
+  });
+}
+
+/** Give a revision that exists a name. */
+export async function nameRevisionAction(projectId: string, revisionId: string, form: FormData) {
+  const back = at(projectId);
+  const user = await requireUser(back);
+  await act(back, async () => {
+    const { number } = await nameRevision(db(), user.id, projectId, revisionId, text(form, 'name'));
+    return `${back}?named=${number}`;
+  });
+}
+
+/** Put the paper back to a revision; the paper as it stands is kept as a revision first. */
+export async function restoreHistoryAction(projectId: string, revisionId: string) {
+  const back = at(projectId);
+  const user = await requireUser(back);
+  await act(back, async () => {
+    const { number } = await restoreRevision(db(), blobs(), user.id, projectId, revisionId);
+    return `${back}?restored=${number}`;
+  });
+}
+
+/** Ask for the PDF of a revision to be built. */
+export async function buildHistoryAction(projectId: string, revisionId: string) {
+  const back = at(projectId);
+  const user = await requireUser(back);
+  await act(back, async () => {
+    await requestBuild(db(), user.id, projectId, { revisionId });
+    return `${back}?building=1`;
+  });
+}
+
+/** Show what changed between two revisions, or up to the paper as it is now, in place. */
+export async function compareHistoryAction(projectId: string, form: FormData) {
+  const back = at(projectId);
+  const user = await requireUser(back);
+  await act(back, async () => {
+    const [from, to] = [text(form, 'from'), text(form, 'to')];
+    const end = to === NOW ? (await revisionOfNow(db(), blobs(), user.id, projectId)).id : to;
+    return `${back}?from=${encodeURIComponent(from)}&to=${encodeURIComponent(end)}#comparison`;
+  });
+}
