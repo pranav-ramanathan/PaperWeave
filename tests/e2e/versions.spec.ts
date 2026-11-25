@@ -425,6 +425,60 @@ if (ON) {
       expect(await lost(page), `${where} twice as big`).toEqual([]);
     }
   });
+
+  test('the switcher, open, in light and in dark: inside the page, in its colours, clean for axe', async ({
+    browser,
+  }) => {
+    // The menu mounts in the page's overlay root, inside <main data-ui='next'>, where the new
+    // look's rules and colours are. Mounted on <body> instead, it has neither: no surface of its
+    // own, and in dark the page's light text on the classic white (axe: color-contrast).
+    test.skip(process.env.E2E_UI !== 'next', 'the switcher is in the new look only');
+    test.setTimeout(180_000);
+    const editorNext =
+      pagesIn('MIGRATED').includes('file') ||
+      (pagesIn('STAGED').includes('file') && process.env.UI_STAGED === '1');
+    const owner = await person(browser, 'ver-menu-theme');
+    const { page } = owner;
+    const paper = await newPaper(owner);
+    await startNow(page, paper, 'camera-ready');
+    await page.goto(paper);
+    const file = (await page.getByRole('link', { name: 'main.tex' }).first().getAttribute('href'))!;
+    // --popover and --popover-foreground in app/next.css.
+    const colours = {
+      light: { background: 'rgb(255, 255, 255)', color: 'rgb(22, 29, 26)' },
+      dark: { background: 'rgb(32, 38, 34)', color: 'rgb(232, 236, 233)' },
+    };
+    for (const theme of ['light', 'dark'] as const) {
+      await page
+        .context()
+        .addCookies([
+          { name: 'pw_theme', value: theme, domain: new URL(paper).hostname, path: '/' },
+        ]);
+      for (const [where, url] of [
+        ['the paper page', paper],
+        ...(editorNext ? [['the editor', file]] : []),
+      ]) {
+        await page.goto(url);
+        await page.getByRole('button', { name: /^Version: main/ }).click();
+        const menu = page.getByRole('menu');
+        await expect(menu).toBeVisible();
+        // Soft, so that axe below reports what the person would meet as well.
+        expect
+          .soft(
+            await menu.evaluate((el) => ({
+              inPage: !!el.closest("main[data-ui='next']"),
+              background: getComputedStyle(el).backgroundColor,
+              color: getComputedStyle(el).color,
+            })),
+            `${where}, ${theme}`,
+          )
+          .toEqual({ inPage: true, ...colours[theme] });
+        await audit(page, `${where} with the switcher open, ${theme}`);
+        await page.keyboard.press('Escape');
+        await expect(menu).toBeHidden();
+      }
+    }
+  });
 } else {
   test('with VERSIONS off nothing of versions shows, and none can be started', async ({
     browser,
