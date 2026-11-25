@@ -23,7 +23,10 @@ jobs:
   # Tests that need Docker: the TeX image, Postgres and the object store.
   sandbox-and-browser:
     runs-on: ubuntu-latest
-    # Takes about 35 minutes now, most of it the browser tests, which run one at a time.
+    # Took about 35 minutes with the browser tests one at a time (27.5 of them measured on a
+    # fast machine, 15.6 with two at a time, 11.5 with three). Two run now: with three, the one
+    # build worker's queue made a test wait too long for a build. building.spec.ts alone is about
+    # 7 minutes, so it bounds what more workers could save.
     # 60 leaves room for a slow runner. A run that hangs is still stopped here rather than
     # after the six hours GitHub allows.
     timeout-minutes: 60
@@ -42,6 +45,8 @@ jobs:
       - run: pnpm test:sandbox
       - run: pnpm exec playwright install --with-deps chromium
       - run: pnpm e2e
+        env:
+          E2E_WORKERS: 2
       # What each failed browser test's page looked like, kept for a week. The log alone says
       # which line failed, not what was on the screen.
       - if: failure()
