@@ -61,6 +61,11 @@ export function RevisionsSection({
       <p>
         A revision is the whole paper at one moment. Its ZIP and its PDF always belong together.
       </p>
+      <p>
+        <Link prefetch={false} href={`/projects/${id}/history`}>
+          History and versions
+        </Link>
+      </p>
       {writer && (
         <form action={saveRevisionAction.bind(null, id)} className="stack">
           <label>
