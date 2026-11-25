@@ -37,7 +37,14 @@ type Context = {
   canWrite: boolean;
   /** Which connection this was to its server, in the order they were let past the ticket. */
   n: number;
+  /** What the editor shows for this person (their email): the name their presence goes under. */
+  name: string;
+  /** The Yjs client IDs this connection has claimed for its presence. Held in memory only. */
+  claims: Set<number>;
 };
+
+/** The most client IDs one connection may claim. An editor uses one. */
+const MAX_CLAIMS = 8;
 
 /** The most connections one person may hold open: to one file, and to all files together. */
 export type ConnectionCap = { perFile: number; perPerson: number };
@@ -133,6 +140,8 @@ export async function startSync(opts: {
    * `readOnly` says.
    */
   const shut = new WeakSet<Connection<Context>>();
+  /** Which connection holds each Yjs client ID in a file's presence. Released on disconnect. */
+  const owners = new Map<string, Map<number, Context>>();
   const BUDGET_MESSAGE = 'Too many edits at once. Try again in a moment.';
   /** For a file being read from its log: where the log stood when the reading began. */
   const loadedAt = new Map<string, number>();
@@ -226,6 +235,8 @@ export async function startSync(opts: {
           role: file.role,
           canWrite: file.canWrite,
           n,
+          name: file.email,
+          claims: new Set<number>(),
         };
       } catch (err) {
         counts.refusedConnections++;
@@ -233,8 +244,13 @@ export async function startSync(opts: {
       }
     },
 
-    async onDisconnect() {
+    async onDisconnect({ context, documentName }) {
       counts.disconnections++;
+      // Its client IDs are free to be claimed again, by a tab that reconnects with the same one.
+      const held = owners.get(documentName);
+      for (const id of (context as Context | undefined)?.claims ?? [])
+        if (held?.get(id) === context) held.delete(id);
+      if (held && !held.size) owners.delete(documentName);
     },
 
     async onRequest({ request, response }) {
@@ -383,7 +399,7 @@ export async function startSync(opts: {
     // Presence from anyone on the file, viewers and reviewers included: it is not an edit, and
     // not held back by role. What it may say is cut to what the editors send, and each person
     // may send so many a minute. Emptying both sets drops the message and keeps the connection.
-    async beforeHandleAwareness({ states, removedClients, context }) {
+    async beforeHandleAwareness({ states, removedClients, context, documentName }) {
       const over = !!context && !presenceBudget.take(context.userId, 1);
       if (over) {
         states.clear();
@@ -391,7 +407,22 @@ export async function startSync(opts: {
         counts.presenceDropped++;
         return;
       }
-      if (cleanPresence(states, removedClients)) counts.presenceDropped++;
+      // Presence is the connection's own: under the name the server knows, and only under client
+      // IDs it holds. Without a context there is no connection to hold anything for.
+      const who = context && {
+        name: context.name,
+        owns: (id: number) => context.claims.has(id),
+        claim: (id: number) => {
+          if (context.claims.has(id)) return true;
+          const held = owners.get(documentName) ?? new Map<number, Context>();
+          if (held.has(id) || context.claims.size >= MAX_CLAIMS) return false;
+          held.set(id, context);
+          owners.set(documentName, held);
+          context.claims.add(id);
+          return true;
+        },
+      };
+      if (cleanPresence(states, removedClients, who)) counts.presenceDropped++;
     },
 
     // Runs, and is awaited, before an incoming edit is applied and before it is acknowledged.
@@ -460,6 +491,7 @@ export async function startSync(opts: {
       const file = await openFile(pool, connection.context.userId, name);
       connection.readOnly = shut.has(connection) || !file.canWrite;
       connection.context.canWrite = file.canWrite;
+      connection.context.name = file.email;
       if (connection.context.role !== file.role) {
         connection.context.role = file.role;
         tellRole(connection, file.role);

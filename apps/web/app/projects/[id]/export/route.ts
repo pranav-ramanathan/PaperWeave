@@ -1,12 +1,14 @@
 // Download the paper's files as a ZIP. With ?review, its threads and proposed changes go in too,
 // as a file of their own.
 import { AppError, contentDisposition, exportZipStream, getProject } from '@paperweave/server';
-import { blobs, currentUser, db } from '../../../../lib/server';
+import { blobs, currentUser, db, notCrossSite } from '../../../../lib/server';
 
 // Vercel stops the function after this many seconds. Reading every file and zipping it.
 export const maxDuration = 120;
 
 export async function GET(request: Request, { params }: { params: Promise<{ id: string }> }) {
+  // This cuts a revision, so a link on another site must not be able to open it.
+  if (!notCrossSite(request)) return new Response('Forbidden', { status: 403 });
   const { id } = await params;
   const user = await currentUser();
   if (!user) return new Response('Sign in first.', { status: 401 });

@@ -68,6 +68,20 @@ export const sameOrigin = (request: Request) =>
   request.headers.get('origin') === new URL(baseUrl()).origin;
 
 /**
+ * Whether a GET that changes something (it cuts a revision) was made by this site's own pages or
+ * by the person themselves, not by a link on another site. A browser says so in `Sec-Fetch-Site`:
+ * `same-origin` for our pages, `none` for the address bar or a bookmark. A browser too old to
+ * say falls back on `Origin`, when it sends one. A request with neither is not a browser
+ * following a link, and is let through.
+ */
+export function notCrossSite(request: Request) {
+  const site = request.headers.get('sec-fetch-site');
+  if (site) return site === 'same-origin' || site === 'none';
+  const origin = request.headers.get('origin');
+  return origin === null || origin === new URL(baseUrl()).origin;
+}
+
+/**
  * An answer that is private to the people on a paper and worth the browser's keeping: a PDF,
  * a picture. The browser may keep it, and must ask before each use. The server then sees who
  * is asking, and says "as you have it" without sending it again. Kept to be used unasked for

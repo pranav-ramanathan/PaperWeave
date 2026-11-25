@@ -83,7 +83,7 @@ function cleanPosition(v: unknown) {
 }
 
 /** One state, rebuilt from known fields only; null if it is too large to be one. */
-function cleanState(state: unknown): Record<string, unknown> | null {
+function cleanState(state: unknown, name?: string): Record<string, unknown> | null {
   if (!isObject(state)) return null;
   let json: string;
   try {
@@ -93,16 +93,16 @@ function cleanState(state: unknown): Record<string, unknown> | null {
   }
   if (Buffer.byteLength(json) > MAX_PRESENCE_BYTES) return null;
   const out: Record<string, unknown> = {};
-  if (isObject(state.user)) {
-    const user: Record<string, string> = {};
-    if (typeof state.user.name === 'string')
-      user.name = state.user.name.slice(0, MAX_PRESENCE_NAME);
-    for (const key of ['color', 'colorLight'] as const) {
-      const colour = state.user[key];
-      if (typeof colour === 'string' && SIMPLE_COLOUR.test(colour)) user[key] = colour;
-    }
-    if (Object.keys(user).length) out.user = user;
+  const sent = isObject(state.user) ? state.user : {};
+  const user: Record<string, string> = {};
+  // A name the server knows for this connection replaces whatever the client says.
+  if (name !== undefined) user.name = name.slice(0, MAX_PRESENCE_NAME);
+  else if (typeof sent.name === 'string') user.name = sent.name.slice(0, MAX_PRESENCE_NAME);
+  for (const key of ['color', 'colorLight'] as const) {
+    const colour = sent[key];
+    if (typeof colour === 'string' && SIMPLE_COLOUR.test(colour)) user[key] = colour;
   }
+  if (Object.keys(user).length) out.user = user;
   if (state.cursor === null) out.cursor = null;
   else if (isObject(state.cursor)) {
     const anchor = cleanPosition(state.cursor.anchor);
@@ -112,6 +112,15 @@ function cleanState(state: unknown): Record<string, unknown> | null {
   return out;
 }
 
+/** What a connection is, for presence: the name it goes under and the client IDs it holds. */
+export type PresenceOwner = {
+  name: string;
+  /** True if the client ID is now this connection's (it was, or was free and is taken). */
+  claim: (id: number) => boolean;
+  /** True if the client ID is this connection's. */
+  owns: (id: number) => boolean;
+};
+
 /**
  * Bring what one awareness message says down to what an editor sends: its own state, and the
  * removals of people whose presence timed out. At most one state is kept (the first that is
@@ -119,19 +128,28 @@ function cleanState(state: unknown): Record<string, unknown> | null {
  * (two relative positions); everything else goes. At most 64 removals are kept. Changes `states`
  * and `removed` in place, as the sync server's hook is made to. Returns how many states it did
  * not keep.
+ *
+ * With `who`, presence is tied to the connection that sent it: `user.name` is `who.name`, whatever
+ * the client said; a state is kept only under a client ID that `who.claim` gives this connection
+ * (its own already, or one nobody else holds); and a removal is kept only for its own IDs.
  */
-export function cleanPresence(states: Map<number, unknown>, removed: Set<number>): number {
+export function cleanPresence(
+  states: Map<number, unknown>,
+  removed: Set<number>,
+  who?: PresenceOwner,
+): number {
   const before = states.size;
   let kept: [number, Record<string, unknown>] | null = null;
   for (const [id, state] of states) {
-    const clean = cleanState(state);
-    if (clean) {
+    const clean = cleanState(state, who?.name);
+    if (clean && (!who || who.claim(id))) {
       kept = [id, clean];
       break;
     }
   }
   states.clear();
   if (kept) states.set(kept[0], kept[1]);
+  if (who) for (const id of removed) if (!who.owns(id)) removed.delete(id);
   let n = 0;
   for (const id of removed) if (++n > MAX_PRESENCE_REMOVALS) removed.delete(id);
   return before - states.size;
