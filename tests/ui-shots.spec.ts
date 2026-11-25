@@ -166,6 +166,17 @@ test.describe('screenshots', () => {
           mask: varying(page, email),
           maskColor: '#ff00ff',
         });
+        if (process.env.UI_SHOTS_TWICE && !full) {
+          // The same state a second time, to tell a difference in the page from one in the
+          // painting of it: a run's pictures against its own `.again.png`.
+          await page.screenshot({
+            path: join(OUT!, `${file}.again.png`),
+            animations: 'disabled',
+            caret: 'hide',
+            mask: varying(page, email),
+            maskColor: '#ff00ff',
+          });
+        }
         await steady(page, false);
       };
       // The viewport, and then the whole page where the page is longer.
@@ -278,8 +289,9 @@ test.describe('screenshots', () => {
       await expect(page.locator(`${VISUAL} .proposal-mark`)).toHaveText('high');
       await page.evaluate(() => (document.activeElement as HTMLElement | null)?.blur());
       await page.evaluate(() => scrollTo(0, 0));
-      // Not the whole page: with the review lists below the text, the boxes that cover the
-      // person's address are put a few pixels off in a picture of the whole of this page.
+      // Not the whole page (nor for the source view below): with the review lists below the
+      // text, the boxes that cover the person's address are put a few pixels off in a picture
+      // of the whole of the page, and the address shows under them.
       await shot('editor-visual-viewport');
       await page.getByRole('region', { name: 'Comments' }).scrollIntoViewIfNeeded();
       await shot('editor-review');
@@ -327,10 +339,15 @@ test.describe('screenshots', () => {
       // The source view, with the PDF built.
       await showSource(page);
       await expect(page.locator('.editor .cm-content')).toContainText('forty');
-      await page.evaluate(() => (document.activeElement as HTMLElement | null)?.blur());
-      await expect(page.locator('.editor .cm-focused')).toHaveCount(0);
+      // The source editor takes the keyboard a moment after it is shown, and may do so after
+      // this: let go of it until it stays let go of.
+      await expect(async () => {
+        await page.evaluate(() => (document.activeElement as HTMLElement | null)?.blur());
+        await page.waitForTimeout(300);
+        await expect(page.locator('.editor .cm-focused')).toHaveCount(0, { timeout: 500 });
+      }).toPass({ timeout: 15_000 });
       await page.evaluate(() => scrollTo(0, 0));
-      await both('editor-source');
+      await shot('editor-source-viewport');
 
       // A second revision, and what differs; then a third, with nothing different.
       await page.locator('.editor .cm-content').getByText('Measurements').first().waitFor();

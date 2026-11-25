@@ -7755,3 +7755,56 @@ pointing to the new page).
   - One window size (1280 by 720), and spacing and size are not tried together.
   - Nobody has looked at the pages in these modes by eye, or in Firefox or Safari, or with the
     browser's own text-size setting.
+
+## Rails for a new look: the old CSS is split and scoped, `ui(page)` exists, no page uses it
+
+- **What.** The plan for a new look (shadcn/ui, Tailwind, one page at a time, switched per
+  person) starts with changes that show nothing. Three are in.
+  - `tests/ui-shots.spec.ts` (config `playwright.ui-shots.config.ts`, not run by `pnpm e2e` or CI)
+    signs in, imports a paper (two `.tex` files, a `.bib`, a CSV), draws a chart, saves three
+    revisions, builds it, adds a thread and a proposal, and takes pictures of the main pages and
+    states at 1440x900 and 390x844 into `UI_SHOTS_DIR`. With `UI_SHOTS_STYLES=1` it also keeps
+    every element's computed style beside each picture. What differs from run to run (the
+    person's address, times, dates) is covered with flat boxes in the screenshot call, and digits
+    are made equally wide for the picture only; the app is not changed.
+  - `apps/web/app/globals.css` is now `functional.css` (never scoped: screen-reader text, the
+    PDF and its text layer, `content-visibility`, the marks' line styles, remote carets, wide
+    regions, the busy button, the colours as variables) and `legacy.css` (today's look, every
+    rule inside `:where(main:not([data-ui='next']))`; `body` and `.waiting` are outside `<main>`
+    and stay unscoped). `:where()`, not a plain `main:not(...)`: a plain scope makes each rule
+    stronger by a class and a type, and ProseMirror's own
+    `.ProseMirror [contenteditable=false] { white-space: normal }`, which was stronger than
+    `span.pw-atom { white-space: nowrap }`, then lost to it (found by the style comparison below).
+    `functional.css` is imported after `legacy.css`, so it wins where equally strong.
+  - `apps/web/lib/ui.ts`: `ui(page)` is `next` only when the person's `pw_ui` cookie is `next`
+    (or, with no cookie, `UI_DEFAULT` is) **and** the page is in `MIGRATED`, which is empty: every
+    page is `classic`. `UI_DEFAULT` is `classic` or `next`; anything else stops the first request
+    of the web service, saying what to set (`docs/settings.md`). `tests/e2e/helpers.ts`:
+    `E2E_UI=next` gives each new person the cookie.
+- **Now.** No visible change, and checked as such: the screenshot run on `origin/main` and on
+  this change, 56 pictures compared pixel for pixel (53 identical; the other 3 are explained
+  below) and the computed style of every element, in the 38 states that have one, property by
+  property (no difference). The two causes of a difference between two runs of the _same_ code:
+  a corner of a rounded box or dialog painted with a colour one step (of 255) off, which the
+  same state shows between two pictures taken one after the other (`UI_SHOTS_TWICE=1`); and,
+  in a picture of a whole page, the box that covers the person's address a few pixels off the
+  address. `docs/settings.md` lists `UI_DEFAULT`. A test (`lib/css.test.ts`) fails if a rule in
+  `legacy.css` is outside the scope (but `body` and `.waiting`) or one in `functional.css` is
+  inside it.
+- **Held by.** `apps/web/lib/ui.test.ts` (the cookie, the default, the list, a wrong setting),
+  `apps/web/lib/css.test.ts`, the style assertions in `large.spec` and `threads.spec`, which
+  read `functional.css`.
+- **Not done.**
+  - No page sets `data-ui` on its `<main>` yet, the form "Try the new look" and its server
+    action are not there, and the second CI job (`E2E_UI=next`) is not added: all three wait for
+    the first migrated page, as none can be seen or tried before.
+  - `functional.css` keeps three things that are generated words or lines the new look must
+    carry or replace on purpose: "Problem: " before a `[role=alert]` on `.page`, the warning sign
+    before an offline status, and the line-through and weight on a diff's added and removed
+    lines (colours are left to each look).
+  - The old and the new look share one set of colour variables (`--accent`, `--muted`, ...) in
+    `functional.css`; the plan's new tokens must be declared on `[data-ui='next']`, not `:root`.
+  - The pictures of the editor (visual and source view) are of the window only: the boxes that
+    cover the person's address were a few pixels off in a picture of the whole page.
+  - The picture run does not compare anything itself: the two folders are compared by a script
+    kept outside the repository (it used `sharp`, which the app's dependencies bring).
