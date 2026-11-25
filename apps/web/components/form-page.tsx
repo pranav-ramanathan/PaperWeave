@@ -42,7 +42,7 @@ export function FormPage({
     >
       {before}
       <header className={next ? 'bar flex flex-wrap items-baseline gap-x-4 gap-y-1' : 'bar'}>
-        {next ? <h1 className="min-w-0 flex-1">{title}</h1> : <h1>{title}</h1>}
+        {next ? <h1 className="min-w-0 flex-[1_1_14rem]">{title}</h1> : <h1>{title}</h1>}
         {back}
       </header>
       {children}

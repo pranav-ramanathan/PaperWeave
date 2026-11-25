@@ -35,3 +35,25 @@ export * from './presence.ts';
 export * from './download.ts';
 export * from './uploads.ts';
 export * from './versions.ts';
+export {
+  compareAcross,
+  planFromRevisions,
+  planMerge,
+  settleFile,
+  type ChoiceName,
+  type CompareSide,
+  type Comparison,
+  type MergePlan,
+  type MergeStatus,
+  type PlanConflict,
+  type PlannedFile,
+  type SettingPlan,
+} from './merge.ts';
+export { openReview, type Carried } from './merge-carry.ts';
+export {
+  applyMerge,
+  SETTING_CHOICES,
+  type MergeChoices,
+  type MergePlanRef,
+  type Merged,
+} from './merge-apply.ts';

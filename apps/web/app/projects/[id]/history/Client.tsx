@@ -457,14 +457,17 @@ export function VersionMenuRow({
   name,
   rename,
   remove,
+  merge,
 }: {
   name: string;
   rename?: (form: FormData) => void | Promise<void>;
   remove?: (form: FormData) => void | Promise<void>;
+  /** The merge page of this version (owner and editors): into main, or main into the version. */
+  merge?: string;
 }) {
   const [dialog, setDialog] = useState<'rename' | 'delete' | null>(null);
   const trigger = useRef<HTMLButtonElement>(null);
-  if (!rename && !remove) return null;
+  if (!rename && !remove && !merge) return null;
   const refocus = (e: Event) => {
     e.preventDefault();
     trigger.current?.focus();
@@ -484,6 +487,16 @@ export function VersionMenuRow({
           </Button>
         </DropdownMenuTrigger>
         <DropdownMenuContent align="end">
+          {merge && (
+            <>
+              <DropdownMenuItem asChild>
+                <a href={merge}>Merge into main</a>
+              </DropdownMenuItem>
+              <DropdownMenuItem asChild>
+                <a href={`${merge}?direction=up`}>Bring up to date from main</a>
+              </DropdownMenuItem>
+            </>
+          )}
           {rename && (
             <DropdownMenuItem onSelect={() => setDialog('rename')}>Rename</DropdownMenuItem>
           )}

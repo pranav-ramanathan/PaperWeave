@@ -16,6 +16,8 @@ export function versionPowers(role: Role | null | undefined) {
     see: !!role && can(role, 'project.read'),
     start: !!role && can(role, 'revision.write'),
     rename: !!role && can(role, 'revision.write'),
+    // Merging rewrites text, as a restore does: the owner and editors, as starting a version.
+    merge: !!role && can(role, 'revision.write'),
     delete: !!role && can(role, 'project.settings'),
   };
 }
