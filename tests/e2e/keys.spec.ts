@@ -969,6 +969,10 @@ test('a reply sent with Enter on a Mention checkbox keeps the keyboard in the co
   await second.page.goto(await emailedLink(second.email, '/invitations/'));
   await signIn(second.page, second.email);
   await second.page.getByRole('button', { name: 'Join this paper' }).click();
+  // Wait for the join to land. The file page lists the people to mention as they are when it is
+  // drawn: opened before the second member is on the paper, it has no one to mention, and Tab
+  // from the reply goes to its button.
+  await expect(second.page.getByText('You are an editor')).toBeVisible();
   await page.getByRole('link', { name: 'main.tex' }).first().click();
   await expect(page.locator('.editor .visual .ProseMirror[contenteditable=true]')).toBeVisible();
 

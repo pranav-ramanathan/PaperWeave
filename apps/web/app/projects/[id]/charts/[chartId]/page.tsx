@@ -6,6 +6,8 @@ import Once from '../../../../Once';
 import { notFound } from 'next/navigation';
 import { blobs, chartsOf, db, forTitle, paperOf, requireUser } from '../../../../../lib/server';
 import { removeChartAction, saveChartAction } from '../../../actions';
+import { FormPage, Say } from '../../../../../components/form-page';
+import { ui } from '../../../../../lib/ui';
 
 export const dynamic = 'force-dynamic';
 
@@ -51,6 +53,7 @@ export default async function ChartPage({
   const draws = chart ? await chartDraws(db(), user.id, id, chart.name) : [];
   const dataset = datasets.find((d) => d.fileId === (chart?.dataFileId ?? data));
   const writer = can(project.role, 'file.write');
+  const look = await ui('chart');
   const back = (
     <Link prefetch={false} href={`/projects/${id}#data`}>
       Back to the paper
@@ -69,30 +72,37 @@ export default async function ChartPage({
     !!chart.waitingSince &&
     Date.now() - Date.parse(chart.waitingSince) > 120_000;
   return (
-    <main className="page">
-      {/* Until it is drawn, look again every two seconds: but not for ever. */}
-      {chart?.status === 'queued' && !stuck && <Again />}
-      <header className="bar">
-        <h1>{chart ? `Chart ${chart.name}` : 'New chart'}</h1>
-        {back}
-      </header>
+    <FormPage
+      look={look}
+      wide
+      // Until it is drawn, look again every two seconds: but not for ever.
+      before={chart?.status === 'queued' && !stuck && <Again />}
+      title={chart ? `Chart ${chart.name}` : 'New chart'}
+      back={back}
+    >
       {error && <Result alert>{error}</Result>}
       {chart?.status === 'queued' &&
         (stuck ? (
-          <p role="alert">
+          <Say look={look} role="alert">
             Still waiting to be drawn after two minutes. The service that draws charts may be busy
             or not running. Load this page again to look once more.
-          </p>
+          </Say>
         ) : (
-          <p role="status">Waiting to be drawn…</p>
+          <Say look={look} role="status">
+            Waiting to be drawn…
+          </Say>
         ))}
-      {chart?.status === 'failed' && <p role="alert">Could not be drawn: {chart.problem}</p>}
+      {chart?.status === 'failed' && (
+        <Say look={look} role="alert">
+          Could not be drawn: {chart.problem}
+        </Say>
+      )}
       {chart?.missing && (
-        <p role="status">
+        <Say look={look} role="status" tone="warning">
           <strong>Not in the paper.</strong> This chart was drawn, but its files are no longer in
           the paper: they were deleted, or the paper was put back to how it was before the chart was
           drawn. Draw the chart again to put them back.
-        </p>
+        </Say>
       )}
       {chart?.drawnAt && !chart.missing && (
         <>
@@ -113,7 +123,7 @@ export default async function ChartPage({
         </>
       )}
       {chart?.stale && (
-        <p role="status">
+        <Say look={look} role="status" tone="warning">
           <strong>Out of date.</strong>{' '}
           {chart.changed === 'settings' ? (
             'The paper holds a drawing made with other settings. Draw it again.'
@@ -122,7 +132,7 @@ export default async function ChartPage({
               The data file has changed since this was drawn. {describe}, then draw the chart again.
             </>
           )}
-        </p>
+        </Say>
       )}
       {dataset && (
         <p>
@@ -130,11 +140,11 @@ export default async function ChartPage({
         </p>
       )}
       {!dataset ? (
-        <p role="alert">
+        <Say look={look} role="alert">
           {chart
             ? 'The data file of this chart has been deleted, or is no longer described.'
             : 'Choose a described data file on the paper’s page to make a chart from.'}
-        </p>
+        </Say>
       ) : (
         writer && (
           <form action={saveChartAction.bind(null, id, chart?.id ?? null, dataset.fileId)}>
@@ -281,6 +291,6 @@ export default async function ChartPage({
           <small>Its files stay in the paper until you delete them.</small>
         </form>
       )}
-    </main>
+    </FormPage>
   );
 }

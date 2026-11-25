@@ -7853,3 +7853,104 @@ pointing to the new page).
 - **Held by** `timeline.test.ts`, including midnight and daylight-saving days in five zones.
 - **Not done.** Nothing draws it yet. Files per revision and the merge kind come with later work, so
   both are optional inputs.
+
+## Limits and the build cache across a paper's versions
+
+- **What.** Hourly limits for builds, model reviews and chart drawings are counted over a paper and
+  its versions together, so starting versions does not multiply them; limits per person are
+  unchanged. The build cache looks across the family: a version started from a revision main has
+  built gets that PDF without a TeX run, and the other way round. A paper outside the family never
+  shares a build, even with identical files.
+- **Held by** sandbox tests for builds, chart drawings and model reviews, which fail on the old
+  queries; cache hits both ways and none for a stranger; a plan check that all three counts use
+  indexes.
+- **Not done.** Deleting a version that main's cached build came from clears that build's "cached"
+  mark (the PDF stays).
+
+## A version's name on its downloads, in its review file, and in the metrics
+
+- **What.** A version's ZIP and PDF are named "Paper (version) rN". The review file carries the
+  version's name in an optional field, which import ignores (it always makes a paper). The metrics
+  page counts papers with a version and papers with a merge (none until merging exists).
+- **Held by** unit tests of the names; sandbox tests of the review file's round trip and of the
+  counts.
+
+## Tailwind and the new look's tokens, with nothing shown yet
+
+- **What.** Tailwind v4 through PostCSS, and every package the new look needs (`tailwindcss`,
+  `@tailwindcss/postcss`, `postcss-prefix-selector`, `clsx`, `tailwind-merge`,
+  `class-variance-authority`, `lucide-react`, `radix-ui`), added once so no later change touches
+  the lockfile. `app/next.css` holds the tokens (light, and dark ready for an attribute) and an
+  empty file per area under `app/next/`. Every selector it produces is prefixed with
+  `:where([data-ui='next'])`, so it matches nothing until a page's `<main>` asks for the new look;
+  `:root`, `html` and `body` in it land on that `<main>`. `components.json` and `lib/utils.ts`
+  (`cn`) are ready for the components; `tsconfig.json` gains the `@/*` alias they import by.
+- **Cost.** 9.6 KB of CSS on every page (2.1 KB gzipped), mostly Tailwind's reset copy and the
+  tokens.
+- **Held by** `lib/nextcss.test.ts`: it runs the real pipeline and fails on any selector outside
+  the scope, a bare `:root`, or a change to `legacy.css`, `functional.css` or KaTeX's CSS. The old
+  look's built CSS is byte-for-byte as before; screenshots and computed styles match. `next dev`
+  serves the same scoped CSS.
+- **Not done.** Fonts, components, the dark attribute.
+
+## Browser tests on more than one slot, and staged pages
+
+- **What.** `playwright.config.ts` reads `E2E_WEB_PORT` and `E2E_SYNC_PORT` (3100 and 4100 unless
+  set) and derives the app's addresses from them; with `DATABASE_URL`, several sets of browser
+  tests can run at once on one machine. The specs take the site's address from `ORIGIN` and
+  `SYNC_SOCKET` in `tests/e2e/helpers.ts` instead of writing 3100 and 4100 out. README.md lists
+  the slots (A 3100/4100, B 3200/4200, C 3300/4300, each with its own database). The local store
+  accepts uploads from 3200 and 3300 once its container is made again.
+- **Staged pages.** `lib/ui.ts` has a `STAGED` list (empty) and `UI_STAGED`: a page there is in
+  the new look only for someone who asked for it on a server started with `UI_STAGED=1`, so a page
+  can be built over several changes before anyone sees it.
+- **Held by** `projects.spec` and `recover.spec` passing on slot B (48 tests); with nothing set,
+  every value is as before. `ui.test.ts` covers staged pages; `docs/settings.md` has the row.
+- **Not done.** `uploading.spec` on slots B and C until the store's container is made again.
+
+## The new look's first pages, and how a page moves
+
+- **What.** A switch at the foot of the papers page keeps the person's choice in the `pw_ui`
+  cookie. `MIGRATED` (`lib/ui.ts`) lists the pages drawn in the new look for whoever chose it:
+  sign-in, its confirm page, the invitation page, not-found, the papers list, the paper page, the
+  five form pages (rename and delete a file, rename a label, change owner, delete the paper), the
+  data file, the chart, the checks before submitting, and the comparison of two revisions. The
+  editor (`file`) is in `STAGED`: its frame and file tree are built, and only a server started
+  with `UI_STAGED=1` shows them.
+- **Held by** a classic pixel compare for every moved page (zero differences beyond antialiasing
+  noise), the browser suite in both looks (CI's `browser-next` job, three shards, not required),
+  `look.spec` (same links and buttons in both looks), `paper-look.spec` and `editor-shell.spec`
+  (axe, 320 px, text spacing, 200% text), and `lib/nextcss.test.ts`, which now also fails if a
+  one-screen rule lands on every page.
+- **Not done.** The error pages stay classic: they are client components and cannot read the
+  httpOnly cookie. The editor's inside (toolbar, text, source, review panel, PDF pane, windows,
+  menu) is T19 to T26; `browser-staged` in CI shows its progress and is never required.
+
+## The browser tests really run in three shards
+
+- **What.** The `mail-down` project depends on `e2e`, and Playwright kept that whole chain in one
+  shard: shard 1 ran every test and the others ran none. Each shard now runs its share of `e2e`,
+  and the last then runs `mail-down` alone with `--no-deps`. A run takes about 11 minutes, not 20.
+
+## "Show in the text" before the file has arrived
+
+- **What.** Pressed before the editor had the text from sync, it said "That text is no longer in
+  the file." It now waits for the file and then shows the words; the message appears only when
+  the text really is gone.
+- **Held by** a test in `threads.spec` that holds back the sync ticket, presses, and releases it.
+
+## Three test races, found and fixed in the tests
+
+- `keys.spec`: the owner opened the file before the second person's join was saved, so there was
+  nobody to mention. It now waits for the join.
+- `insert.spec`: a word was measured, then the layout settled (`content-visibility`) and the
+  double-click landed elsewhere. `pointAfter` in `helpers.ts` looks under the pointer on a settled
+  layout before clicking.
+- `building.spec`: a route the last test set could be mid-fetch when the next test closed its
+  window, failing the next test. `person()` drops old windows' routes before closing them.
+
+## The local store
+
+- Slots D (3400) and E (3500) are in the store's allowed origins and in README.md.
+- A fresh store on a machine with little free disk refused every write: it sized volumes at 30 GB
+  and made too few. `infra/compose.yaml` now gives it 1 GB volumes and room for 100.

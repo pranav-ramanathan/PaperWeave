@@ -18,14 +18,21 @@ export function SmallPage({
   children,
   className,
   bare = false,
+  wide = false,
+  classic,
 }: {
   look: Look;
   children: ReactNode;
   className?: string;
   /** Classic only: a <main> with no class at all, as "nothing here" has always had. */
   bare?: boolean;
+  /** New look: a wider sheet, for a page that shows lines of text or a table (48rem, not 28rem). */
+  wide?: boolean;
+  /** Classic only: the <main>'s class, when it is not "page narrow" (a form page is "page"). */
+  classic?: string;
 }) {
-  if (look !== 'next') return <main className={bare ? undefined : 'page narrow'}>{children}</main>;
+  if (look !== 'next')
+    return <main className={bare ? undefined : (classic ?? 'page narrow')}>{children}</main>;
   return (
     // `page` keeps the "Problem: " that functional.css puts before an alert.
     // The utilities need an element inside the scope element: they do not match the <main> itself.
@@ -39,7 +46,9 @@ export function SmallPage({
             <Mark />
             PaperWeave
           </p>
-          <Card className="w-full max-w-md [--card-spacing:--spacing(6)]">
+          <Card
+            className={(wide ? 'max-w-3xl' : 'max-w-md') + ' w-full [--card-spacing:--spacing(6)]'}
+          >
             <CardContent
               className={
                 'grid gap-4 [&_a]:text-primary [&_a]:underline [&_a]:underline-offset-4 [&_a:hover]:no-underline [&_h1]:font-heading [&_h1]:text-[1.75rem] [&_h1]:leading-tight [&_h1]:font-semibold [&_h1]:tracking-tight [&_h1]:text-balance' +

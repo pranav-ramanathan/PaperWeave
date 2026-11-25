@@ -255,6 +255,15 @@ export default function FileEditor(props: {
   /** The selected stretch as two places that move with the text, and how to select one again. */
   const stretch = useRef<(orCaret?: boolean) => Stretch | null>(() => null);
   const showStretch = useRef<(from: string, to: string) => boolean>(() => false);
+  /** Whether this connection has the file's text yet, and who is waiting for that (see `show`). */
+  const synced = useRef({ yes: false, waiting: [] as (() => void)[] });
+  /** Shows a stretch once the text is here: before then, where it stands cannot be told. */
+  const show = (from: string, to: string) =>
+    new Promise<boolean>((done) => {
+      const go = () => done(showStretch.current(from, to));
+      if (synced.current.yes) go();
+      else synced.current.waiting.push(go);
+    });
   /** Where a stretch stands in this copy of the text now, as fresh places and its words. */
   const standing = useRef<(from: string, to: string) => Stretch | null>(() => null);
   /** The file's threads as last read, and how to mark their stretches where they now stand. */
@@ -504,6 +513,10 @@ export default function FileEditor(props: {
         // Synced with nothing unsent: a pause that was for the reconnect's own payload (what an
         // idle tab sends when it connects) is over. With edits unsent, the saved-check ends it.
         setSync((s) => ({ ...s, loaded: true, paused: s.unsaved ? s.paused : false }));
+        synced.current.yes = true;
+        // A moment later, once the editors have taken the text in: shown at once, the selection
+        // is made over a view that has not caught up.
+        for (const go of synced.current.waiting.splice(0)) setTimeout(go, 0);
         // Let in. The server may still close a connection that came too late, a moment after
         // it has synced, so "too many windows" is taken down only once this one has held.
         if (admitting) clearTimeout(admitting);
@@ -1450,7 +1463,7 @@ export default function FileEditor(props: {
         canDecide={canWrite}
         canReview={props.canReview}
         selection={() => stretch.current(true)}
-        show={(from, to) => showStretch.current(from, to)}
+        show={show}
         standing={(from, to) => standing.current(from, to)}
         onProposals={(list) => {
           proposalsNow.current = list;
@@ -1468,7 +1481,7 @@ export default function FileEditor(props: {
           threadsNow.current = list;
           markThreads.current();
         }}
-        show={(from, to) => showStretch.current(from, to)}
+        show={show}
       />
       {/* Last, and on purpose: the findings of a real file run to several screens, and what people
           say to each other must not lie under them. */}
@@ -1482,7 +1495,7 @@ export default function FileEditor(props: {
           change={(from, to, expected, replacement) =>
             changeText.current(from, to, expected, replacement)
           }
-          show={(from, to) => showStretch.current(from, to)}
+          show={show}
           onFindings={(list) => {
             findingsNow.current = list;
             markThreads.current();
