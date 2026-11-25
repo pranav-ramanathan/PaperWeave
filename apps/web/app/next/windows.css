@@ -185,3 +185,62 @@ dialog.tool h2 {
 }
 
 /* ---- T26: the menu at the caret ---- */
+
+/* Where Tools.tsx puts it (position: fixed, left and top from the caret) is its own; here is how
+   it looks. As wide as its longest item wherever it opens, and never taller than the window:
+   Tools.tsx works out where it goes from that size. */
+.menu {
+  position: fixed;
+  z-index: 50;
+  margin: 0;
+  padding: 0.25rem;
+  list-style: none;
+  color: var(--popover-foreground);
+  background: var(--popover);
+  border-radius: 8px;
+  box-shadow:
+    var(--shadow-lift),
+    0 0 0 1px var(--border);
+  max-height: calc(100vh - 1rem);
+  overflow-y: auto;
+  width: max-content;
+  min-width: 10rem;
+  max-width: calc(100vw - 1rem);
+}
+.menu button {
+  display: flex;
+  align-items: center;
+  width: 100%;
+  min-height: 2rem;
+  padding: 0.25rem 0.5rem;
+  font: inherit;
+  font-size: 0.875rem;
+  text-align: left;
+  color: inherit;
+  background: none;
+  border: 0;
+  border-radius: 6px;
+  cursor: default;
+}
+.menu button:hover,
+.menu button:focus-visible {
+  color: var(--accent-foreground);
+  background: var(--accent);
+}
+.menu button:focus-visible {
+  outline: 2px solid var(--ring);
+  outline-offset: -2px;
+}
+@media (pointer: coarse) {
+  .menu button {
+    min-height: 2.5rem;
+  }
+}
+.menu .hint {
+  margin-top: 0.25rem;
+  padding: 0.5rem 0.5rem 0.25rem;
+  font-size: 0.75rem;
+  line-height: 1.35;
+  color: var(--muted-foreground);
+  border-top: 1px solid var(--border);
+}
