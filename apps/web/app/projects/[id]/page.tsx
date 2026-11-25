@@ -27,7 +27,7 @@ import {
 import { notFound } from 'next/navigation';
 import { blobs, db, forTitle, paperOf, requireUser } from '../../../lib/server';
 import { ui } from '../../../lib/ui';
-import { switcherOf, versionsOn } from '../../../lib/versions';
+import { switcherOf, versionPowers, versionsOn } from '../../../lib/versions';
 import { Assistance } from './sections/Assistance';
 import { Bibliography, CheckNotices } from './sections/Bibliography';
 import { ChartRemovedNotice, Data, DescribedNotice } from './sections/Data';
@@ -158,6 +158,7 @@ async function Project({
   const switcher = family && {
     choices: switcherOf(mainId, family, id),
     paper: mainId,
+    merge: versionPowers(project.role).merge,
   };
   const onThisPage = (
     <OnThisPage

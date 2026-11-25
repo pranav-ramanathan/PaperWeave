@@ -344,6 +344,7 @@ async function History({
                 choices={switcherOf(mainId, versions, id)}
                 page="/history"
                 paper={mainId}
+                merge={powers.merge}
               />
             )}
             <Link
@@ -405,6 +406,11 @@ async function History({
                           </span>
                           <VersionMenuRow
                             name={v.name}
+                            merge={
+                              powers.merge
+                                ? `/projects/${mainId}/versions/${v.id}/merge`
+                                : undefined
+                            }
                             rename={
                               powers.rename ? renameVersionAction.bind(null, id, v.id) : undefined
                             }

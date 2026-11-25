@@ -4,22 +4,42 @@ import { switcherOf, versionPowers } from './versions';
 // What each role is offered about versions. The service asks `authorize` again for every action;
 // this is only what the pages draw, and it must agree with it.
 test('the owner and editors start and rename, only the owner deletes, everyone sees', () => {
-  expect(versionPowers('owner')).toEqual({ see: true, start: true, rename: true, delete: true });
-  expect(versionPowers('editor')).toEqual({ see: true, start: true, rename: true, delete: false });
+  expect(versionPowers('owner')).toEqual({
+    see: true,
+    start: true,
+    rename: true,
+    merge: true,
+    delete: true,
+  });
+  expect(versionPowers('editor')).toEqual({
+    see: true,
+    start: true,
+    rename: true,
+    merge: true,
+    delete: false,
+  });
   expect(versionPowers('reviewer')).toEqual({
     see: true,
     start: false,
     rename: false,
+    merge: false,
     delete: false,
   });
   expect(versionPowers('viewer')).toEqual({
     see: true,
     start: false,
     rename: false,
+    merge: false,
     delete: false,
   });
   // Not on the paper: nothing.
-  expect(versionPowers(null)).toEqual({ see: false, start: false, rename: false, delete: false });
+  expect(versionPowers(null)).toEqual({
+    see: false,
+    start: false,
+    rename: false,
+    merge: false,
+    delete: false,
+  });
 });
 
 test('the switcher lists main first, then the versions, and marks the one in view', () => {

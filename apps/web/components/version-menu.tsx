@@ -26,13 +26,18 @@ export function VersionMenu({
   choices,
   page,
   paper,
+  merge = false,
 }: {
   choices: VersionChoice[];
   page: '' | '/history';
   /** The address of "main", for the link to where versions are made. */
   paper: string;
+  /** Whether this person may merge (owner and editors): the entries that lead to the merge page. */
+  merge?: boolean;
 }) {
   const here = choices.find((c) => c.current)?.label ?? 'main';
+  // On a version: the way to merge it into main, and to bring it up to date from main.
+  const version = merge ? choices.find((c) => c.current && c.id !== paper) : undefined;
   return (
     <DropdownMenu>
       <DropdownMenuTrigger asChild>
@@ -60,6 +65,18 @@ export function VersionMenu({
           </DropdownMenuItem>
         ))}
         <DropdownMenuSeparator />
+        {version && (
+          <>
+            <DropdownMenuItem asChild>
+              <a href={`/projects/${paper}/versions/${version.id}/merge`}>Merge into main</a>
+            </DropdownMenuItem>
+            <DropdownMenuItem asChild>
+              <a href={`/projects/${paper}/versions/${version.id}/merge?direction=up`}>
+                Bring up to date from main
+              </a>
+            </DropdownMenuItem>
+          </>
+        )}
         <DropdownMenuItem asChild>
           <a href={`/projects/${paper}/history#versions`}>All versions</a>
         </DropdownMenuItem>
