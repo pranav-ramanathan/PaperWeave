@@ -30,7 +30,10 @@ import {
 } from '@paperweave/server';
 import { afterAll, beforeAll, expect, test } from 'vitest';
 import * as Y from 'yjs';
+import { applyMerge } from '../../../packages/server/src/merge-apply.ts';
+import { planMerge } from '../../../packages/server/src/merge.ts';
 import { TEST_ENV, testDb } from '../../../packages/server/src/testing.ts';
+import { startVersion } from '../../../packages/server/src/versions.ts';
 import { serveMetrics } from './metrics.ts';
 import { startSync } from './server.ts';
 import { type Client, closeAll, connect, saved, until } from './testing.ts';
@@ -541,6 +544,46 @@ test('a restore is announced to the people who have the file open, after its edi
     fromName: 'Good',
     by: users.owner.email,
     kept: { number: made.number - 1 },
+  });
+});
+
+test('a merge is announced as a restore is, after its edits, with what was merged', async () => {
+  // The owner alone: the service sends invitations at a limited rate, and the others have none to give.
+  const zip = await writeZip([{ path: 'main.tex', bytes: Buffer.from(MAIN) }]);
+  const [made1] = await importZip(t.pool, store, users.owner.id, zip, 'Merge test');
+  const project = made1.id as string;
+  const file = (await listFiles(t.pool, users.owner.id, project))[0].id as string;
+  const first = await saveRevision(t.pool, store, users.owner.id, project, 'First');
+  const v = await startVersion(t.pool, store, users.owner.id, project, first.id, 'camera-ready', {
+    env: { VERSIONS: '1' },
+  });
+  const [theirs] = await listFiles(t.pool, users.owner.id, v.id);
+  await editFile(t.pool, store, theirs.id, users.owner.id, (y) =>
+    y.insert(y.toString().indexOf('Hello.'), 'Merged '),
+  );
+  const editor = client(users.owner, file);
+  await saved(editor);
+  const told = () => editor.state.replies.filter((r) => r.restored !== undefined);
+  expect(told()).toEqual([]);
+
+  const plan = await planMerge(t.pool, store, users.owner.id, project, v.id);
+  const made = await applyMerge(
+    t.pool,
+    store,
+    users.owner.id,
+    project,
+    v.id,
+    { target: plan.target.revision, source: plan.source.revision, base: plan.base.revision },
+    {},
+  );
+  await until('the editor to be told of the merge', () => told().length > 0);
+  expect(told()[0].restored).toBe(made.number);
+  // The merged text had reached it by then.
+  expect(told()[0].had).toContain('Merged Hello.');
+  expect(told()[0].restore).toMatchObject({
+    number: made.number,
+    kept: { number: made.number - 1 },
+    merge: { paper: v.id, version: 'camera-ready' },
   });
 });
 

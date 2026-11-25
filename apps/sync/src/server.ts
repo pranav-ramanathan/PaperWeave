@@ -595,7 +595,7 @@ export async function startSync(opts: {
           papers.add(c.context.projectId);
       for (const projectId of papers) {
         const { rows } = await pool.query(
-          "select coalesce(max(number), 0)::int as n from revisions where project_id = $1 and kind = 'restore'",
+          "select coalesce(max(number), 0)::int as n from revisions where project_id = $1 and kind in ('restore', 'merge')",
           [projectId],
         );
         await tellRestored(projectId, rows[0].n, false);
