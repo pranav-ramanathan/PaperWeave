@@ -208,6 +208,64 @@ test('a long PDF read to its end keeps pictures only of the pages near the windo
   await expect(holder(1)).toContainText('Page 1.');
 });
 
+test('a PDF of very many pages opens at once, and a jump to a far page still lands there', async ({
+  browser,
+}) => {
+  test.setTimeout(300_000);
+  // What a build of a minute can make: blank pages by the tens of thousands.
+  const PAGES = 30_000;
+  const { page, email } = await person(browser, 'synctex-many');
+  const MANY = [
+    '\\documentclass{article}',
+    '\\newcount\\pwi',
+    '\\begin{document}',
+    `\\loop\\null\\newpage\\advance\\pwi by 1 \\ifnum\\pwi<${PAGES} \\repeat`,
+    'The last page.',
+    '\\end{document}',
+    '',
+  ].join('\n');
+  const zip = join(mkdtempSync(join(tmpdir(), 'paperweave-e2e-')), `Many ${run}.zip`);
+  writeFileSync(zip, await writeZip([{ path: 'main.tex', bytes: Buffer.from(MANY) }]));
+  await page.goto('/sign-in');
+  await signIn(page, email);
+  await page.getByLabel('Or import a ZIP of a LaTeX project').setInputFiles(zip);
+  await page.getByRole('button', { name: 'Import ZIP' }).click();
+  await page.getByRole('link', { name: 'main.tex' }).first().click();
+  await expect(page.getByRole('region', { name: 'Editor for main.tex' })).toBeVisible();
+  await showSource(page);
+  await expect(build(page).getByRole('status')).toHaveText('The PDF is up to date.', {
+    timeout: 200_000,
+  });
+  // The first page is there at once: the pages that are far off are not asked about one by one.
+  const opened = Date.now();
+  const first = build(page).locator('.pdf-page[data-page="1"]');
+  await expect(first).toHaveAttribute('data-drawn', 'yes', { timeout: 30_000 });
+  expect(Date.now() - opened).toBeLessThan(2500);
+  await expect(first).toHaveAttribute('aria-label', `Page 1 of ${PAGES + 1}`);
+  const pictures = () =>
+    build(page)
+      .locator('.pdf-page canvas')
+      .evaluateAll((all) => all.filter((c) => (c as HTMLCanvasElement).width > 0).length);
+  expect(await pictures()).toBeLessThanOrEqual(8);
+
+  // The line of the last page is shown there, far down: the pane goes to it and draws it.
+  await clickAfter(page, '.editor .cm-content', 'The last page');
+  await page.getByRole('button', { name: 'Show in PDF' }).click();
+  await expect(build(page).locator('.pdf-said')).toHaveText(
+    `Shown on page ${PAGES + 1} of the PDF.`,
+    { timeout: 60_000 },
+  );
+  const mark = build(page).locator('.pdf-mark');
+  await expect(mark).toHaveAttribute('data-page', String(PAGES + 1));
+  await expect(mark).toBeInViewport();
+  await expect(build(page).locator(`.pdf-page[data-page="${PAGES + 1}"]`)).toHaveAttribute(
+    'data-drawn',
+    'yes',
+    { timeout: 30_000 },
+  );
+  await expect.poll(pictures).toBeLessThanOrEqual(8);
+});
+
 // A two-column paper whose paragraphs wrap: each is three lines of text, with a marker word on the
 // second, so that the PDF has several lines for each of them.
 const paragraph = (m: string) =>
