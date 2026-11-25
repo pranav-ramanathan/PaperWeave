@@ -7756,6 +7756,26 @@ pointing to the new page).
   - Nobody has looked at the pages in these modes by eye, or in Firefox or Safari, or with the
     browser's own text-size setting.
 
+## Versions of a paper, server side
+
+- **What.** Migration 0039 and `packages/server/src/versions.ts`, behind `VERSIONS` (off by
+  default; `docs/settings.md`). A version is a paper of its own with `parent_id`, started from a
+  revision of main (`startVersion`); `listVersions`, `renameVersion` and `deleteVersion` (owner
+  only, the name typed). Its files get their own ids and keep `origin_id`, the main file they came
+  from. Members, language, glossary, datasets (held data stays held) and charts are copied, and its
+  revision 1 is cut at once, in one transaction. Comments and proposals are not carried. At most
+  10 versions a paper; a version of a version is refused; "main" is not a version's name.
+- **Members.** Accepting an invitation, changing a role, handing the paper on, removing someone
+  and deleting the paper apply to main and all its versions together, with every paper's open
+  editors told. Handing on is refused, and nothing changes, if the new owner is missing from any of
+  them. `authorize` and `openFile` are unchanged: versions use the existing `project.read`,
+  `revision.write` and `project.settings` permissions, so the role-by-action test stays as it was.
+- **Held by** `versions.sandbox.test.ts` (15 tests: the setting, each role, other papers, names,
+  the limit, starting at the revision asked for, held data, the family's members, deleting).
+- **Not done.** Hourly build and model-review limits counted over the family, merging, comparing
+  across versions, product metrics for versions, and any UI. What happens to a deleted version's
+  stored bytes waits on the retention decision.
+
 ## Three-way merge of text
 
 - **What.** `merge3(base, ours, theirs)` and `resolveMerge` in `packages/server/src/textdiff.ts`, for
