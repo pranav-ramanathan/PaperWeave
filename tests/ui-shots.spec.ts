@@ -378,6 +378,30 @@ test.describe('screenshots', () => {
       await expect(page.getByRole('heading', { name: /before submitting$/ })).toBeVisible();
       await both('submit-checks');
 
+      // The pages that ask before something is changed: rename and delete a file, rename a label,
+      // hand the paper over (nobody else is on it), delete the paper.
+      await page.goto(paper);
+      const intro = await page
+        .getByRole('link', { name: 'sections/intro.tex' })
+        .first()
+        .getAttribute('href');
+      const fileId = intro!.split('/files/')[1]!.split(/[/?#]/)[0];
+      await page.goto(`${paper}/files/${fileId}/rename?to=sections/background.tex`);
+      await expect(page.getByRole('heading', { name: /^Rename / })).toBeVisible();
+      await both('file-rename');
+      await page.goto(`${paper}/files/${fileId}/delete`);
+      await expect(page.getByRole('heading', { name: /^Delete / })).toBeVisible();
+      await both('file-delete');
+      await page.goto(`${paper}/labels/rename?from=sec:results&to=sec:findings`);
+      await expect(page.getByRole('heading', { name: /^Rename / })).toBeVisible();
+      await both('label-rename');
+      await page.goto(`${paper}/owner`);
+      await expect(page.getByRole('heading', { name: /^Hand / })).toBeVisible();
+      await shot('owner');
+      await page.goto(`${paper}/delete`);
+      await expect(page.getByRole('heading', { name: /^Delete “/ })).toBeVisible();
+      await shot('paper-delete');
+
       // Nothing here.
       await page.goto('/no-such-page');
       await expect(page.getByRole('heading', { name: 'Nothing here' })).toBeVisible();

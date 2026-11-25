@@ -28,7 +28,7 @@ export default function Language(props: {
   unsaved: boolean;
   /** Replace a stretch with other words, if it still says what it said. */
   change(from: string, to: string, expected: string, replacement: string): Promise<boolean>;
-  show(from: string, to: string): boolean;
+  show(from: string, to: string): Promise<boolean>;
   /** Told the findings each time they are read, so that the editor can mark them in the text. */
   onFindings(findings: LanguageFinding[]): void;
 }) {
@@ -176,11 +176,11 @@ export default function Language(props: {
                     ))}
                   <button
                     type="button"
-                    onClick={() => {
+                    onClick={async () => {
                       // The place the line is at; pressed again, the next one, and round.
                       const n = toShow(line, standing[line.key]);
                       const { from, to } = line.places[n];
-                      const shown = props.show(from, to);
+                      const shown = await props.show(from, to);
                       if (shown && places > 1)
                         setStanding((now) => ({ ...now, [line.key]: { from, shown: true } }));
                       setNote(
