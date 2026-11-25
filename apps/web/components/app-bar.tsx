@@ -3,7 +3,11 @@ import { cn } from '../lib/utils';
 import { ChevronRight } from './icon';
 import { Mark } from './mark';
 
-export type Crumb = { label: string; href?: string };
+/**
+ * One step of "where you are". `label` may be a node (a name that follows a rename); then `id`
+ * keys it. `heading` makes the step the page's <h1> (it has no link and is not "current").
+ */
+export type Crumb = { label: ReactNode; href?: string; id?: string; heading?: boolean };
 
 /**
  * The app bar of the new look: 48 px, sheet colour, a hairline below. The mark and the word, then
@@ -50,9 +54,14 @@ export function AppBar(props: {
         <nav aria-label="Where you are" className="min-w-0">
           <ol className="flex min-w-0 flex-wrap items-center gap-1">
             {crumbs.map((c) => (
-              <li key={c.label} className="flex min-w-0 items-center gap-1 text-muted-foreground">
+              <li
+                key={c.id ?? String(c.label)}
+                className="flex min-w-0 items-center gap-1 text-muted-foreground"
+              >
                 <ChevronRight className="size-3.5 shrink-0" aria-hidden="true" />
-                {c.href ? (
+                {c.heading ? (
+                  <h1 className="truncate text-base font-medium text-foreground">{c.label}</h1>
+                ) : c.href ? (
                   <a href={c.href} className="rounded-sm underline-offset-4 hover:underline">
                     {c.label}
                   </a>
