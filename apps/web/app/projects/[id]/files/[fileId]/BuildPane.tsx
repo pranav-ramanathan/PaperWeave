@@ -156,6 +156,18 @@ export default function BuildPane({
           : latest.stale
             ? 'The PDF is behind the text.'
             : 'The PDF is up to date.';
+  // What kind of thing the status says, for the new look to draw (a sign and a colour; the words
+  // are the status).
+  const kind =
+    builds && !building && latest
+      ? latest.status === 'failed'
+        ? 'failed'
+        : latest.stale
+          ? 'behind'
+          : 'ok'
+      : stuck
+        ? 'failed'
+        : 'busy';
   // In the status itself, so it is read out, and in words, not only a colour.
   const state =
     paused && !building && auto ? `${status} Automatic compiling is paused: ${paused}` : status;
@@ -228,7 +240,7 @@ export default function BuildPane({
   return (
     <section className="build" aria-label="Compiled PDF">
       <div className="editor-bar">
-        <span role="status" aria-live="polite">
+        <span role="status" aria-live="polite" data-kind={kind}>
           {state}
         </span>
         {canBuild && (
