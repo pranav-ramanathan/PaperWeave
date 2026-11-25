@@ -17,7 +17,7 @@ export function Header({
   role: string;
   next?: boolean;
   /** Only with versions turned on: the switcher's entries, and the address of main. */
-  versions?: { choices: VersionChoice[]; paper: string };
+  versions?: { choices: VersionChoice[]; paper: string; merge?: boolean };
 }) {
   // The text is cut into the same pieces as before the page was split into sections
   // (the HTML keeps a marker between pieces), so it is kept as written.
@@ -55,7 +55,12 @@ export function Header({
           </nav>
           {versions && (
             <div className="paper-versions">
-              <VersionMenu choices={versions.choices} page="" paper={versions.paper} />
+              <VersionMenu
+                choices={versions.choices}
+                page=""
+                paper={versions.paper}
+                merge={versions.merge}
+              />
             </div>
           )}
         </header>

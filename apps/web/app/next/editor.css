@@ -33,25 +33,6 @@
 .source .cm-editor {
   height: 100%;
 }
-/* A placeholder, so that the staged page works until the task that owns it (T26: the menu at the
-   caret) replaces it in windows.css: the menu is where Tools.tsx puts it and no taller than the
-   window. The PDF pane's own height (a definite one where the page flows) is in pdf.css; the wide
-   and tall block below overrides it. */
-.menu {
-  position: fixed;
-  z-index: 10;
-  margin: 0;
-  padding: 0.25rem;
-  list-style: none;
-  background: var(--popover);
-  border: 1px solid var(--border);
-  border-radius: 8px;
-  box-shadow: var(--shadow-lift);
-  max-height: calc(100vh - 1rem);
-  overflow-y: auto;
-  width: max-content;
-  max-width: calc(100vw - 1rem);
-}
 
 /* The file tree. */
 .files-tree {

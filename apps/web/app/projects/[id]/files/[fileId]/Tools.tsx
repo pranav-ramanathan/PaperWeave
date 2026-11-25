@@ -4,7 +4,17 @@
 // labels to refer to, and the menu of things to do at a place in the text.
 import type { CommandResult } from '@paperweave/bridge';
 import { captionText, cellText, footnoteBody, stray, strayAdvice } from '@paperweave/latex';
-import { type RefObject, useEffect, useLayoutEffect, useRef, useState } from 'react';
+import {
+  type ComponentProps,
+  type ReactNode,
+  type RefObject,
+  useEffect,
+  useLayoutEffect,
+  useRef,
+  useState,
+} from 'react';
+import { useLook } from '../../../../../components/look';
+import { Button } from '../../../../../components/ui/button';
 import { numbers } from '../../../../../lib/numbers';
 import { tooLongText, TooLong } from '../../../../../lib/mathlimit';
 import { renderMath } from '../../../../../lib/visual';
@@ -19,6 +29,76 @@ function useDialog(open: boolean): RefObject<HTMLDialogElement | null> {
     if (!open && box.current?.open) box.current.close();
   }, [open]);
   return box;
+}
+
+/**
+ * One of the small windows: a native <dialog> that holds the focus while it is open (`box`, from
+ * useDialog), with its title and a form. The same element in both looks; the new look only draws
+ * it differently (windows.css) and gives its buttons the kit's classes.
+ *
+ * It stays a native <dialog> in the new look, not Radix's Dialog (PLAN.md section 7, fallback):
+ * Radix hides the rest of the page from the accessibility tree while it is open (aria-hidden on
+ * everything outside it), and the figure and footnote specs read the page behind a window that
+ * is still open after a refusal. The native one keeps the rest inert without hiding it, takes
+ * the keys typed straight after it opens, and gives the keyboard back to the text on Escape.
+ */
+function Window(props: {
+  box: RefObject<HTMLDialogElement | null>;
+  /** The id of the title, which names the window. */
+  id: string;
+  title: ReactNode;
+  onSubmit(): void;
+  onClose(): void;
+  children: ReactNode;
+}) {
+  return (
+    <dialog ref={props.box} className="tool" aria-labelledby={props.id} onClose={props.onClose}>
+      <form
+        onSubmit={(e) => {
+          e.preventDefault();
+          props.onSubmit();
+        }}
+      >
+        <h2 id={props.id}>{props.title}</h2>
+        {props.children}
+      </form>
+    </dialog>
+  );
+}
+
+/** A button of the window: the new look's button there, the plain one in the old. */
+function Btn({ variant, ...rest }: ComponentProps<'button'> & { variant?: 'outline' | 'default' }) {
+  if (useLook() === 'next') return <Button variant={variant ?? 'default'} {...rest} />;
+  return <button {...rest} />;
+}
+
+/**
+ * The window's buttons: the action, then Cancel, in that order for the keyboard. The new look
+ * draws them as the footer of a dialog, Cancel first, and so lays them out in the other direction.
+ */
+function Actions(props: { action: ComponentProps<'button'>; label: string; onCancel(): void }) {
+  const cancel = (
+    <Btn variant="outline" type="button" onClick={props.onCancel}>
+      Cancel
+    </Btn>
+  );
+  const action = (
+    <Btn type="submit" {...props.action}>
+      {props.label}
+    </Btn>
+  );
+  if (useLook() === 'next')
+    return (
+      <div className="tool-actions">
+        {action}
+        {cancel}
+      </div>
+    );
+  return (
+    <p>
+      {action} {cancel}
+    </p>
+  );
 }
 
 /**
@@ -103,83 +183,78 @@ export function FormulaBox(props: {
     }
   };
   return (
-    <dialog ref={box} className="tool" aria-labelledby="formula-title" onClose={onDone}>
-      <form
-        onSubmit={(e) => {
-          e.preventDefault();
-          void apply();
-        }}
-      >
-        <h2 id="formula-title">
-          {request?.place
-            ? 'Insert an equation'
-            : request?.what
-              ? `Edit ${request.what}`
-              : 'Edit formula'}
-        </h2>
-        {request?.place && (
-          <fieldset>
-            <legend>Where it goes</legend>
-            <label>
-              <input
-                type="radio"
-                name="place"
-                checked={place === 'inline'}
-                onChange={() => setPlace('inline')}
-              />{' '}
-              In the line
-            </label>{' '}
-            <label>
-              <input
-                type="radio"
-                name="place"
-                checked={place === 'display'}
-                onChange={() => setPlace('display')}
-              />{' '}
-              On a line of its own, numbered
-            </label>
-          </fieldset>
-        )}
-        <label>
-          LaTeX
-          <textarea
-            ref={field}
-            rows={request?.place ? 3 : 6}
-            spellCheck={false}
-            value={draft}
-            onChange={(e) => {
-              setDraft(e.target.value);
-              setProblem('');
-            }}
-          />
-        </label>
-        {!request?.what && <p className="label">As it will look</p>}
-        {!request?.what && (
-          <div
-            className="preview"
-            ref={preview}
-            tabIndex={0}
-            role="group"
-            aria-label="As it will look"
-          />
-        )}
-        {!request?.what && undrawable && draft.trim() && (
-          <p className="note">
-            This cannot be drawn here ({undrawable}). It can still be applied: the PDF is what
-            decides.
-          </p>
-        )}
-        {problem && <p role="alert">{problem}</p>}
-        <p>
-          <button type="submit" disabled={!draft.trim() || busy}>
-            {request?.place ? 'Insert' : 'Apply'}
-          </button>{' '}
-          <button type="button" onClick={onDone}>
-            Cancel
-          </button>
+    <Window
+      box={box}
+      id="formula-title"
+      title={
+        request?.place
+          ? 'Insert an equation'
+          : request?.what
+            ? `Edit ${request.what}`
+            : 'Edit formula'
+      }
+      onSubmit={() => void apply()}
+      onClose={onDone}
+    >
+      {request?.place && (
+        <fieldset>
+          <legend>Where it goes</legend>
+          <label>
+            <input
+              type="radio"
+              name="place"
+              checked={place === 'inline'}
+              onChange={() => setPlace('inline')}
+            />{' '}
+            In the line
+          </label>{' '}
+          <label>
+            <input
+              type="radio"
+              name="place"
+              checked={place === 'display'}
+              onChange={() => setPlace('display')}
+            />{' '}
+            On a line of its own, numbered
+          </label>
+        </fieldset>
+      )}
+      <label>
+        LaTeX
+        <textarea
+          ref={field}
+          rows={request?.place ? 3 : 6}
+          spellCheck={false}
+          value={draft}
+          onChange={(e) => {
+            setDraft(e.target.value);
+            setProblem('');
+          }}
+        />
+      </label>
+      {!request?.what && <p className="label">As it will look</p>}
+      {!request?.what && (
+        <div
+          className="preview"
+          ref={preview}
+          tabIndex={0}
+          role="group"
+          aria-label="As it will look"
+        />
+      )}
+      {!request?.what && undrawable && draft.trim() && (
+        <p className="note">
+          This cannot be drawn here ({undrawable}). It can still be applied: the PDF is what
+          decides.
         </p>
-      </form>
-    </dialog>
+      )}
+      {problem && <p role="alert">{problem}</p>}
+      <Actions
+        action={{ disabled: !draft.trim() || busy }}
+        label={request?.place ? 'Insert' : 'Apply'}
+        onCancel={onDone}
+      />
+    </Window>
   );
 }
 
@@ -339,88 +414,80 @@ export function FloatBox(props: {
     />
   );
   return (
-    <dialog ref={box} className="tool" aria-labelledby="float-title" onClose={onDone}>
-      <form
-        onSubmit={(e) => {
-          e.preventDefault();
-          void insert();
-        }}
-      >
-        <h2 id="float-title">{figure ? 'Insert a figure' : 'Insert a table'}</h2>
-        {figure ? (
-          <>
-            <label>
-              Picture
-              <select
-                value={target ?? '?'}
-                onChange={(e) => choose(pictures.find((p) => p.target === e.target.value))}
-              >
-                {load === 'loading' && (
-                  <option value="?" disabled>
-                    Loading pictures…
-                  </option>
-                )}
-                {load === 'failed' && (
-                  <option value="?" disabled>
-                    Pictures not loaded
-                  </option>
-                )}
-                {load === 'ready' && target === null && (
-                  <option value="?" disabled>
-                    Choose a picture…
-                  </option>
-                )}
-                {pictures.map((p) => (
-                  <option key={p.path} value={p.target}>
-                    {p.path}
-                  </option>
-                ))}
-                {load === 'ready' && <option value="">No picture yet</option>}
-              </select>
-            </label>
-            {load === 'failed' && (
-              <p className="note">
-                Could not load the pictures.{' '}
-                <button type="button" onClick={() => setAttempt((n) => n + 1)}>
-                  Retry
-                </button>
-              </p>
-            )}
-            {load === 'ready' && pictures.length === 0 && (
-              <p className="note">
-                This paper has no pictures yet. Add them on the paper&apos;s page, under Files.
-              </p>
-            )}
-            <label>
-              Description, for people who cannot see the picture
-              <input value={alt} onChange={(e) => setAlt(e.target.value)} disabled={!target} />
-            </label>
-          </>
-        ) : (
-          <>
-            <label>Rows, the heading row included {count(rows, setRows, 30, 2)}</label>
-            <label>Columns {count(columns, setColumns, 12, 1)}</label>
-          </>
-        )}
-        <label>
-          Caption
-          <input value={caption} onChange={(e) => setCaption(e.target.value)} required />
-        </label>
-        {problem && <p role="alert">{problem}</p>}
-        <p>
-          <button
-            type="submit"
-            // aria-disabled, not disabled, so the button keeps the keyboard while it waits.
-            aria-disabled={busy || (figure && load !== 'ready') || undefined}
-          >
-            Insert
-          </button>{' '}
-          <button type="button" onClick={onDone}>
-            Cancel
-          </button>
-        </p>
-      </form>
-    </dialog>
+    <Window
+      box={box}
+      id="float-title"
+      title={figure ? 'Insert a figure' : 'Insert a table'}
+      onSubmit={() => void insert()}
+      onClose={onDone}
+    >
+      {figure ? (
+        <>
+          <label>
+            Picture
+            <select
+              value={target ?? '?'}
+              onChange={(e) => choose(pictures.find((p) => p.target === e.target.value))}
+            >
+              {load === 'loading' && (
+                <option value="?" disabled>
+                  Loading pictures…
+                </option>
+              )}
+              {load === 'failed' && (
+                <option value="?" disabled>
+                  Pictures not loaded
+                </option>
+              )}
+              {load === 'ready' && target === null && (
+                <option value="?" disabled>
+                  Choose a picture…
+                </option>
+              )}
+              {pictures.map((p) => (
+                <option key={p.path} value={p.target}>
+                  {p.path}
+                </option>
+              ))}
+              {load === 'ready' && <option value="">No picture yet</option>}
+            </select>
+          </label>
+          {load === 'failed' && (
+            <p className="note">
+              Could not load the pictures.{' '}
+              <Btn variant="outline" type="button" onClick={() => setAttempt((n) => n + 1)}>
+                Retry
+              </Btn>
+            </p>
+          )}
+          {load === 'ready' && pictures.length === 0 && (
+            <p className="note">
+              This paper has no pictures yet. Add them on the paper&apos;s page, under Files.
+            </p>
+          )}
+          <label>
+            Description, for people who cannot see the picture
+            <input value={alt} onChange={(e) => setAlt(e.target.value)} disabled={!target} />
+          </label>
+        </>
+      ) : (
+        <>
+          <label>Rows, the heading row included {count(rows, setRows, 30, 2)}</label>
+          <label>Columns {count(columns, setColumns, 12, 1)}</label>
+        </>
+      )}
+      <label>
+        Caption
+        <input value={caption} onChange={(e) => setCaption(e.target.value)} required />
+      </label>
+      {problem && <p role="alert">{problem}</p>}
+      <Actions
+        // aria-disabled, not disabled, so the button keeps the keyboard while it waits.
+        action={{ 'aria-disabled': busy || (figure && load !== 'ready') || undefined }}
+        label="Insert"
+        onCancel={onDone}
+      />
+    </Window>
   );
 }
 
@@ -484,49 +551,35 @@ export function HeadingBox(props: {
     }
   };
   return (
-    <dialog
-      ref={box}
-      className="tool"
-      aria-labelledby="heading-title"
+    <Window
+      box={box}
+      id="heading-title"
+      title="Insert a heading"
+      onSubmit={() => void insert()}
       // A close event can arrive after the window was asked for again (a key pressed just after
       // Escape): it is about the window that went, so it ends that request and not the new one.
       onClose={() => !box.current?.open && onDone(shown.current)}
     >
-      <form
-        onSubmit={(e) => {
-          e.preventDefault();
-          void insert();
-        }}
-      >
-        <h2 id="heading-title">Insert a heading</h2>
-        <label>
-          Level
-          <select value={level} onChange={(e) => setLevel(e.target.value as Level)}>
-            <option value="section">Section</option>
-            <option value="subsection">Subsection</option>
-            <option value="subsubsection">Subsubsection</option>
-          </select>
-        </label>
-        <label>
-          Title
-          <input
-            ref={field}
-            value={title}
-            onChange={(e) => setTitle(e.target.value)}
-            aria-invalid={!!problem}
-          />
-        </label>
-        {problem && <p role="alert">{problem}</p>}
-        <p>
-          <button type="submit" disabled={busy}>
-            Insert
-          </button>{' '}
-          <button type="button" onClick={() => onDone(request)}>
-            Cancel
-          </button>
-        </p>
-      </form>
-    </dialog>
+      <label>
+        Level
+        <select value={level} onChange={(e) => setLevel(e.target.value as Level)}>
+          <option value="section">Section</option>
+          <option value="subsection">Subsection</option>
+          <option value="subsubsection">Subsubsection</option>
+        </select>
+      </label>
+      <label>
+        Title
+        <input
+          ref={field}
+          value={title}
+          onChange={(e) => setTitle(e.target.value)}
+          aria-invalid={!!problem}
+        />
+      </label>
+      {problem && <p role="alert">{problem}</p>}
+      <Actions action={{ disabled: busy }} label="Insert" onCancel={() => onDone(request)} />
+    </Window>
   );
 }
 
@@ -585,54 +638,40 @@ export function FootnoteBox(props: {
     }
   };
   return (
-    <dialog
-      ref={box}
-      className="tool"
-      aria-labelledby="footnote-title"
+    <Window
+      box={box}
+      id="footnote-title"
+      title="Insert a footnote"
+      onSubmit={() => void insert()}
       onClose={() => !box.current?.open && onDone(shown.current)}
     >
-      <form
-        onSubmit={(e) => {
-          e.preventDefault();
-          void insert();
-        }}
-      >
-        <h2 id="footnote-title">Insert a footnote</h2>
-        <label>
-          Text
-          <textarea
-            ref={field}
-            rows={3}
-            value={draft}
-            aria-invalid={!!problem}
-            onChange={(e) => {
-              setDraft(e.target.value);
-              setProblem('');
-            }}
-            onKeyDown={(e) => {
-              // One paragraph: Enter inserts, as in the heading window.
-              if (e.key === 'Enter' && !e.shiftKey && !e.nativeEvent.isComposing) {
-                e.preventDefault();
-                void insert();
-              }
-            }}
-          />
-        </label>
-        <p className="note">
-          Goes in where the caret is, as a numbered note at the foot of the page. LaTeX works here
-          too: a formula between $ signs, {'\\cite'}, {'\\url'}.
-        </p>
-        {problem && <p role="alert">{problem}</p>}
-        <p>
-          <button type="submit" disabled={busy}>
-            Insert
-          </button>{' '}
-          <button type="button" onClick={() => onDone(request)}>
-            Cancel
-          </button>
-        </p>
-      </form>
-    </dialog>
+      <label>
+        Text
+        <textarea
+          ref={field}
+          rows={3}
+          value={draft}
+          aria-invalid={!!problem}
+          onChange={(e) => {
+            setDraft(e.target.value);
+            setProblem('');
+          }}
+          onKeyDown={(e) => {
+            // One paragraph: Enter inserts, as in the heading window.
+            if (e.key === 'Enter' && !e.shiftKey && !e.nativeEvent.isComposing) {
+              e.preventDefault();
+              void insert();
+            }
+          }}
+        />
+      </label>
+      <p className="note">
+        Goes in where the caret is, as a numbered note at the foot of the page. LaTeX works here
+        too: a formula between $ signs, {'\\cite'}, {'\\url'}.
+      </p>
+      {problem && <p role="alert">{problem}</p>}
+      <Actions action={{ disabled: busy }} label="Insert" onCancel={() => onDone(request)} />
+    </Window>
   );
 }
 
@@ -688,54 +727,45 @@ function Picker(props: {
     }
   };
   return (
-    <dialog ref={box} className="tool" aria-labelledby={props.id} onClose={onDone}>
-      <form
-        onSubmit={(e) => {
-          e.preventDefault();
-          void insert();
-        }}
-      >
-        <h2 id={props.id}>{props.title}</h2>
+    <Window
+      box={box}
+      id={props.id}
+      title={props.title}
+      onSubmit={() => void insert()}
+      onClose={onDone}
+    >
+      <label>
+        {props.find}
+        <input value={filter} onChange={(e) => setFilter(e.target.value)} />
+      </label>
+      {choices === null ? (
+        <p>Reading the paper…</p>
+      ) : shown.length === 0 ? (
+        <p>{choices.length ? 'Nothing matches.' : props.none}</p>
+      ) : (
         <label>
-          {props.find}
-          <input value={filter} onChange={(e) => setFilter(e.target.value)} />
+          {props.listed}
+          <select
+            size={Math.max(2, Math.min(8, shown.length))}
+            value={pick?.key ?? ''}
+            onChange={(e) => setChosen(e.target.value)}
+          >
+            {shown.map((c) => (
+              <option key={c.key} value={c.key}>
+                {c.text}
+              </option>
+            ))}
+          </select>
         </label>
-        {choices === null ? (
-          <p>Reading the paper…</p>
-        ) : shown.length === 0 ? (
-          <p>{choices.length ? 'Nothing matches.' : props.none}</p>
-        ) : (
-          <label>
-            {props.listed}
-            <select
-              size={Math.max(2, Math.min(8, shown.length))}
-              value={pick?.key ?? ''}
-              onChange={(e) => setChosen(e.target.value)}
-            >
-              {shown.map((c) => (
-                <option key={c.key} value={c.key}>
-                  {c.text}
-                </option>
-              ))}
-            </select>
-          </label>
-        )}
-        {pick && (
-          <p className="note">
-            Inserts <code>{pick.latex}</code>.
-          </p>
-        )}
-        {problem && <p role="alert">{problem}</p>}
-        <p>
-          <button type="submit" disabled={!pick || busy}>
-            Insert
-          </button>{' '}
-          <button type="button" onClick={onDone}>
-            Cancel
-          </button>
+      )}
+      {pick && (
+        <p className="note">
+          Inserts <code>{pick.latex}</code>.
         </p>
-      </form>
-    </dialog>
+      )}
+      {problem && <p role="alert">{problem}</p>}
+      <Actions action={{ disabled: !pick || busy }} label="Insert" onCancel={onDone} />
+    </Window>
   );
 }
 
