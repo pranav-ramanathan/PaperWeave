@@ -7680,3 +7680,22 @@ from them landing on a multiple skipped that round, and bytes were not counted: 
 - **Not done.** A single edit of up to 2 MB can still be saved before a compaction is looked
   for; a log may be 16 MB plus one tally's worth past it. Compaction rewrites the whole log in
   one transaction, so a log of 16 MB holds the row lock for as long as that takes.
+
+## A Railway option, written down
+
+`docs/deploy-railway.md` sets out Railway as an alternative to Vercel plus a home machine. It is
+an option for the owner to weigh; no default changed and `docs/deploy.md` stays (with one line
+pointing to the new page).
+
+- **Layout.** Sync server (one instance), Postgres, a Bucket and LanguageTool on Railway; the web
+  app on either; the workers off Railway on a machine with Docker, reaching Postgres through
+  Railway's TCP proxy and the bucket outbound. Removes the tunnel and the Postgres port on your own
+  machine. The deploy-order note (web app first, then the sync server) is carried over.
+- **Why the workers are off.** Ordinary Railway services have no Docker (community threads, not an
+  official page). Sandboxes have Docker, untested here. Sandboxing without Docker is not advised.
+- **Code: `S3_PATH_STYLE`.** The S3 client built every address path-style, always. The new setting
+  defaults to that, so nothing changes; `false` gives `https://bucket.host/key`, and the pages'
+  content policy names the bucket's host then. Held by a test in `blobs.test.ts`. Presigned uploads
+  needed nothing path-style.
+- **Not tried.** Anything on Railway itself, including a bucket, the TCP proxy's certificate and a
+  Sandbox as a worker. The page lists them.
