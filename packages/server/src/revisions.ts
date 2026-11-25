@@ -1224,6 +1224,66 @@ export function restoreEdits(
   return edits.reverse();
 }
 
+/** Make `text` the text `want`, by the smallest edits (`restoreEdits`), so what is anchored in it stays. */
+export function applyRestoreEdits(text: Y.Text, want: string): void {
+  for (const e of restoreEdits(text.toString(), want)) {
+    if (e.del) text.delete(e.at, e.del);
+    if (e.ins) text.insert(e.at, e.ins);
+  }
+}
+
+/**
+ * Hold every file of the paper (live or deleted) for the rest of the transaction, so no edit
+ * lands between keeping the paper as it stands and replacing it. Each file's place in its log, as
+ * of this moment, by file.
+ */
+export async function holdPaper(
+  db: Db,
+  projectId: string,
+): Promise<Map<string, { head_seq: string }>> {
+  return new Map(
+    (
+      await db.query(
+        `select id, head_seq, path, digest, eol, bom from all_files
+         where project_id = $1 order by path for update`,
+        [projectId],
+      )
+    ).rows.map((r) => [r.id, r]),
+  );
+}
+
+/**
+ * What is about to be replaced is kept as a revision first, so that nothing is erased: not even
+ * what someone typed a moment ago. Held files only (see `holdPaper`).
+ */
+export async function keepPaper(
+  db: Db,
+  store: BlobStore,
+  userId: string | null,
+  projectId: string,
+  ready?: Ready,
+): Promise<{ id: string; number: number }> {
+  return cut(db, store, userId, projectId, { ready });
+}
+
+/**
+ * An edit made ahead of time for a file is still the edit if nobody has typed in the file since
+ * its place in the log was read, and its line endings are as they were. Otherwise it is made again
+ * with the file held.
+ */
+export function stillStands(
+  had: { seenSeq: string; eol: string },
+  locked: Map<string, { head_seq: string }>,
+  file: { id: string; eol: string },
+): boolean {
+  return had.seenSeq === String(locked.get(file.id)?.head_seq) && had.eol === file.eol;
+}
+
+/** Told once the transaction commits, after the edits it made: connected editors learn the paper was restored. */
+export async function announceRestore(db: Db, projectId: string, number: number): Promise<void> {
+  await db.query("select pg_notify('restored', $1)", [`${projectId}:${number}`]);
+}
+
 /**
  * Put the paper back to how it was in a revision, as new edits on top of what is there now.
  * Nothing is erased: the restore is itself a new revision, and the ones in between remain. It
@@ -1255,18 +1315,8 @@ export async function restoreRevision(
   // as it stands and replacing it. Typing waits for the moment this takes.
   let appendedTo: string[] = [];
   const made = await transaction(pool, async (db) => {
-    const locked = new Map<string, { head_seq: string }>(
-      (
-        await db.query(
-          `select id, head_seq, path, digest, eol, bom from all_files
-           where project_id = $1 order by path for update`,
-          [projectId],
-        )
-      ).rows.map((r) => [r.id, r]),
-    );
-    // What is about to be replaced is kept as a revision first, so a restore erases nothing: not
-    // even what someone typed a moment ago.
-    await cut(db, store, userId, projectId, { ready });
+    const locked = await holdPaper(db, projectId);
+    await keepPaper(db, store, userId, projectId, ready);
     // Files deleted since come back as the same files, edit history and all. They wait under a
     // placeholder name until the names they had are free.
     await db.query(
@@ -1311,7 +1361,7 @@ export async function restoreRevision(
         const want = decoded.text;
         const had = prepared.get(file.id);
         // Nobody has typed since it was read: the edit made ahead of time is still the edit.
-        if (had && had.seenSeq === String(locked.get(file.id)?.head_seq) && had.eol === file.eol) {
+        if (had && stillStands(had, locked, file)) {
           if (had.update) {
             appends.push({ fileId: file.id, update: had.update });
             appended += had.update.length;
@@ -1325,12 +1375,9 @@ export async function restoreRevision(
           }
           continue;
         }
-        appended += await editLocked(db, store, file.id, userId, (text) => {
-          for (const e of restoreEdits(text.toString(), want)) {
-            if (e.del) text.delete(e.at, e.del);
-            if (e.ins) text.insert(e.at, e.ins);
-          }
-        });
+        appended += await editLocked(db, store, file.id, userId, (text) =>
+          applyRestoreEdits(text, want),
+        );
       } else if (file.eol) {
         // Text now, but the revision's bytes are not: the file goes back to being read-only, and
         // its log stays where it is. Connected editors are told below.
@@ -1367,12 +1414,9 @@ export async function restoreRevision(
             if (!read.editable)
               throw new Error(`file ${file.id} is text in one place and not in another`);
             const want = read.text;
-            appended += await editLocked(db, store, file.id, userId, (text) => {
-              for (const e of restoreEdits(text.toString(), want)) {
-                if (e.del) text.delete(e.at, e.del);
-                if (e.ins) text.insert(e.at, e.ins);
-              }
-            });
+            appended += await editLocked(db, store, file.id, userId, (text) =>
+              applyRestoreEdits(text, want),
+            );
           }
         }
       }
@@ -1422,8 +1466,7 @@ export async function restoreRevision(
       restoredFrom: revisionId,
       ready,
     });
-    // Told once the restore commits, after the edits it made: connected editors learn it was one.
-    await db.query("select pg_notify('restored', $1)", [`${projectId}:${made.number}`]);
+    await announceRestore(db, projectId, made.number);
     return made;
   });
   // The files made ahead of time were appended to while held, which did not read their logs (that
@@ -1474,11 +1517,7 @@ async function prepareRestore(
     const doc = new Y.Doc();
     for (const u of log) Y.applyUpdate(doc, u);
     const before = Y.encodeStateVector(doc);
-    const text = doc.getText(TEXT);
-    for (const e of restoreEdits(text.toString(), want)) {
-      if (e.del) text.delete(e.at, e.del);
-      if (e.ins) text.insert(e.at, e.ins);
-    }
+    applyRestoreEdits(doc.getText(TEXT), want);
     const update = Y.encodeStateAsUpdate(doc, before);
     // Two zero bytes: nothing was inserted or deleted.
     out.set(file.id, {
