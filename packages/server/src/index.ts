@@ -37,6 +37,8 @@ export * from './uploads.ts';
 export * from './versions.ts';
 export {
   compareAcross,
+  listMerges,
+  type MergeRecord,
   planFromRevisions,
   planMerge,
   settleFile,
