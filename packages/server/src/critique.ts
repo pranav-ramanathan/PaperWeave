@@ -14,7 +14,7 @@ import { authorize } from './authz.ts';
 import type { BlobStore } from './blobs.ts';
 import { CLAIM_RULES } from './claims.ts';
 import { AppError } from './errors.ts';
-import { id } from './projects.ts';
+import { familySql, id } from './projects.ts';
 import { propose } from './proposals.ts';
 import { loadUpdates, TEXT } from './sync.ts';
 import { startThread } from './threads.ts';
@@ -169,7 +169,7 @@ export async function reviewPassage(
   const perHour = opts.perHour ?? REVIEWS_PER_HOUR;
   const recent = await pool.query(
     `select count(*)::int as n from model_requests
-     where project_id = $1 and created_at > now() - interval '1 hour'`,
+     where project_id in ${familySql('$1')} and created_at > now() - interval '1 hour'`,
     [projectId],
   );
   if (recent.rows[0].n >= perHour)

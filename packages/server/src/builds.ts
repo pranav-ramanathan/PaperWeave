@@ -5,7 +5,7 @@ import type { BlobStore } from './blobs.ts';
 import type pg from 'pg';
 import type { Db } from './db.ts';
 import { AppError } from './errors.ts';
-import { id } from './projects.ts';
+import { familySql, id } from './projects.ts';
 import { currentBytes } from './sync.ts';
 import { carryLine, diffLinesFar } from './textdiff.ts';
 import { gunzipSync } from 'node:zlib';
@@ -157,7 +157,7 @@ export async function requestBuild(
       const recent = await client.query(
         `select count(*)::int as n,
                 extract(epoch from now() - max(created_at))::float as "sinceLast"
-         from builds where project_id = $1 and created_at > now() - interval '1 hour'`,
+         from builds where project_id in ${familySql('$1')} and created_at > now() - interval '1 hour'`,
         [projectId],
       );
       const mine = (

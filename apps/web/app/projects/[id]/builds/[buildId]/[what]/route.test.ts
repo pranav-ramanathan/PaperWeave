@@ -4,6 +4,7 @@ vi.mock('@paperweave/server', async (original) => ({
   ...(await original<typeof import('@paperweave/server')>()),
   buildOutputDigest: async () => 'digest',
   getProject: async () => ({ name: 'Paper' }),
+  versionOf: async () => null,
 }));
 vi.mock('../../../../../../lib/server', () => ({
   currentUser: async () => ({ id: 'u' }),
