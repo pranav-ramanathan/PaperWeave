@@ -13,6 +13,11 @@ import {
   test,
 } from '@playwright/test';
 
+// Where the web server and the sync server are: slot A's ports unless E2E_WEB_PORT and
+// E2E_SYNC_PORT say otherwise (playwright.config.ts reads the same two; see README.md).
+export const ORIGIN = `http://localhost:${process.env.E2E_WEB_PORT || 3100}`;
+/** Matches the address of the sync server's socket, for `routeWebSocket`. */
+export const SYNC_SOCKET = new RegExp(`:${process.env.E2E_SYNC_PORT || 4100}`);
 export const MAIL = process.env.MAILPIT_URL ?? 'http://localhost:8025';
 // Each worker process loads this file itself. The worker's number keeps two workers that start
 // in the same millisecond from sharing addresses and names.
@@ -159,6 +164,17 @@ export async function person(browser: Browser, who: string) {
   // would report.
   const ip = `10.${Math.floor(Math.random() * 250)}.${Math.floor(Math.random() * 250)}.${++people}`;
   const context = await browser.newContext({ extraHTTPHeaders: { 'x-forwarded-for': ip } });
+  // E2E_UI=next: the person has chosen the new look (apps/web/lib/ui.ts), as the form on the
+  // papers page will set it. Pages not yet moved to the new look ignore it.
+  if (process.env.E2E_UI === 'next')
+    await context.addCookies([
+      {
+        name: 'pw_ui',
+        value: 'next',
+        domain: new URL(test.info().project.use.baseURL ?? ORIGIN).hostname,
+        path: '/',
+      },
+    ]);
   refusals(context);
   opened.push(context);
   slowDown(context);
@@ -443,7 +459,7 @@ export async function slowLine(page: Page, each = 0) {
       });
     };
   };
-  await page.routeWebSocket(/:4100/, (socket) => {
+  await page.routeWebSocket(SYNC_SOCKET, (socket) => {
     const server = socket.connectToServer();
     socket.onMessage(lane((m) => server.send(m)));
     server.onMessage(lane((m) => socket.send(m)));

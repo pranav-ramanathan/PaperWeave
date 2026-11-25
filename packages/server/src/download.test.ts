@@ -35,6 +35,31 @@ test('a name keeps its letters in filename*, and has an ASCII fallback', () => {
   expect(contentDisposition("it's (1)*", 'zip')).toContain("''it%27s%20%281%29%2A.zip");
 });
 
+test('a version is named after the paper, then the version, then the revision', () => {
+  expect(
+    parts(contentDisposition('Tail latency', 'zip', { version: 'camera-ready', suffix: ' r9' })),
+  ).toEqual({
+    disposition: 'attachment',
+    plain: 'Tail latency (camera-ready) r9.zip',
+    full: 'Tail latency (camera-ready) r9.zip',
+  });
+  // A long paper name is cut; the version after it is not.
+  const long = parts(
+    contentDisposition('x'.repeat(200), 'pdf', { version: 'reviewer B', suffix: ' r2' }),
+  );
+  expect(long.full).toBe(`${'x'.repeat(80)} (reviewer B) r2.pdf`);
+  // Letters outside ASCII stay in filename*, and are `_` in the plain name.
+  expect(parts(contentDisposition('Étude', 'pdf', { version: 'révision' }))).toMatchObject({
+    plain: '_tude (r_vision).pdf',
+    full: 'Étude (révision).pdf',
+  });
+  // A paper is named as before, with no version or an empty one.
+  for (const version of [undefined, null, ''])
+    expect(contentDisposition('Étude', 'zip', { version })).toBe(
+      contentDisposition('Étude', 'zip'),
+    );
+});
+
 test('the line about held files names every one', () => {
   expect(heldLine([])).toBeNull();
   expect(heldLine(['data.csv', 'b/c.csv'])).toBe(

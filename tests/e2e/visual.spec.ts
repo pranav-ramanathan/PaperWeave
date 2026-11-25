@@ -10,6 +10,7 @@ import {
   clickAfter,
   dropOn,
   emailedLink,
+  ORIGIN,
   person,
   run,
   showSource,
@@ -1019,7 +1020,7 @@ test('a selection across a formula and a heading is deleted, typed over and cut;
   const { page, email } = await person(browser, 'vis-xblock');
   const other = await person(browser, 'vis-xblock-2');
   await page.context().grantPermissions(['clipboard-read', 'clipboard-write'], {
-    origin: 'http://localhost:3100',
+    origin: ORIGIN,
   });
   const main = [
     '\\documentclass{article}',
@@ -1300,7 +1301,7 @@ test('cut and paste keep formulas, citations, references, footnotes and emphasis
 }) => {
   const owner = await person(browser, 'vis-clip-owner');
   const reviewer = await person(browser, 'vis-clip-reviewer');
-  const origin = 'http://localhost:3100';
+  const origin = ORIGIN;
   for (const p of [owner, reviewer])
     await p.page.context().grantPermissions(['clipboard-read', 'clipboard-write'], { origin });
   const sentence =
@@ -1409,7 +1410,7 @@ test('cut and paste keep formulas, citations, references, footnotes and emphasis
 test('a [ pasted at the start of a list item does not become its label', async ({ browser }) => {
   const { page, email } = await person(browser, 'vis-clip-guard');
   await page.context().grantPermissions(['clipboard-read', 'clipboard-write'], {
-    origin: 'http://localhost:3100',
+    origin: ORIGIN,
   });
   const main = [
     '\\documentclass{article}',
@@ -1447,7 +1448,7 @@ test('a copy across list items is not pasted as a lonely \\item, and paragraphs 
 }) => {
   const { page, email } = await person(browser, 'vis-clip-place');
   await page.context().grantPermissions(['clipboard-read', 'clipboard-write'], {
-    origin: 'http://localhost:3100',
+    origin: ORIGIN,
   });
   const main = [
     '\\documentclass{article}',

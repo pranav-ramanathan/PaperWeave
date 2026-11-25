@@ -144,6 +144,17 @@ export async function getProject(
   return { ...rows[0], role };
 }
 
+/**
+ * The name of the version a paper is, or null for a paper. Downloads are named with it. The
+ * caller has authorised the paper already.
+ */
+export async function versionOf(db: Db, projectId: string): Promise<string | null> {
+  const { rows } = await db.query('select version_name from projects where id = $1', [
+    id(projectId),
+  ]);
+  return rows[0]?.version_name ?? null;
+}
+
 /** The TeX engines a paper may be built with: what the `projects.compiler` check allows. */
 export const COMPILERS = ['pdflatex', 'xelatex', 'lualatex'] as const;
 
