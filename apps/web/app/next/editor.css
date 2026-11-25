@@ -162,9 +162,11 @@ span.files-entry {
   }
 }
 
-/* Wide and tall: one screen, each pane with its own scroll. */
+/* Wide and tall: one screen, each pane with its own scroll. `:root` here is the page's <main>
+   (next.css), so it is held to the editor's: without `:has`, every page in the new look would be
+   one screen high and cut off below it. */
 @media (min-width: 60rem) and (min-height: 37.5rem) {
-  :root {
+  :root:has(.workspace) {
     display: flex;
     flex-direction: column;
     height: 100dvh;
