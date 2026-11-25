@@ -1,1 +1,182 @@
-/* toolbar: written by the look tasks that own this area. Empty on purpose; see next.css. */
+/*
+ * The editor bar and the toolbar in the new look (T19). Written for the DOM of FileEditor.tsx:
+ *   .editor-bar   the file's path, the save status, what to do about it, who else is here
+ *   .toolbar      role=toolbar: groups "View", "Edit", "Go to", then the note
+ *   .editor-notice  the line above the text about a restore or a file that has left
+ * One row where it fits; where it does not (a phone, a narrow column) the groups wrap, so that
+ * nothing is hidden. Nothing here is drawn on the text and nothing runs per key.
+ */
+
+/* The bar: small, grey and still. */
+.editor-bar {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 0.25rem 0.75rem;
+  margin-bottom: 0.5rem;
+  font-size: 0.8125rem;
+  color: var(--muted-foreground);
+}
+.editor-bar code {
+  font-family: var(--font-mono);
+  font-size: 0.8125rem;
+  color: var(--foreground);
+  overflow-wrap: anywhere;
+}
+.editor-bar [role='status'] {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.375rem;
+  color: var(--muted-foreground);
+}
+.editor-bar [role='status']::before {
+  content: '';
+  width: 0.5rem;
+  height: 0.5rem;
+  flex: none;
+  border-radius: 999px;
+  background: var(--ok-line);
+}
+.editor-bar [role='status'][data-state='offline']::before {
+  background: var(--comment-line);
+}
+.editor-bar [role='group'] {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.25rem 0.5rem;
+}
+.editor-bar a,
+.editor-notice a {
+  color: var(--primary);
+  text-underline-offset: 0.2em;
+}
+
+/* Buttons that sit in the bar and in the notice: outlined, 28 px. */
+.editor-bar button,
+.editor-notice button {
+  min-height: 1.75rem;
+  padding: 0.125rem 0.625rem;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  background: var(--card);
+  color: var(--foreground);
+  font: inherit;
+  font-size: 0.8125rem;
+  cursor: pointer;
+}
+.editor-bar button:hover,
+.editor-notice button:hover {
+  background: var(--muted);
+}
+
+/* The toolbar. */
+.toolbar {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 0.25rem 0.5rem;
+  margin-bottom: 0.5rem;
+  padding: 0.25rem;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  background: var(--card);
+}
+.toolbar [role='group'] {
+  display: flex;
+  align-items: center;
+  gap: 1px;
+}
+.toolbar [role='group'] + [role='group'] {
+  padding-inline-start: 0.5rem;
+  border-inline-start: 1px solid var(--border);
+}
+.toolbar button {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 1.75rem;
+  min-height: 1.75rem;
+  padding: 0.125rem 0.375rem;
+  border: 1px solid transparent;
+  border-radius: 6px;
+  background: transparent;
+  color: var(--foreground);
+  font: inherit;
+  font-size: 0.8125rem;
+  white-space: nowrap;
+  cursor: pointer;
+  transition: background-color var(--pw-fast) var(--ease-pw);
+}
+.toolbar button:hover {
+  background: var(--muted);
+}
+/* The View switch: two words as one segmented control; the one in use is raised on the sheet. */
+.toolbar [role='group'][aria-label='View'] {
+  gap: 0;
+  padding: 2px;
+  border-radius: 7px;
+  background: var(--secondary);
+}
+.toolbar [role='group'][aria-label='View'] button {
+  padding-inline: 0.625rem;
+  color: var(--muted-foreground);
+}
+.toolbar [role='group'][aria-label='View'] button:hover {
+  background: transparent;
+  color: var(--foreground);
+}
+.toolbar [role='group'][aria-label='View'] button[aria-pressed='true'] {
+  background: var(--card);
+  color: var(--foreground);
+  font-weight: 600;
+  box-shadow: var(--shadow-rest);
+}
+.toolbar [role='group'][aria-label='View'] + [role='group'] {
+  border-inline-start: 0;
+  padding-inline-start: 0;
+}
+.toolbar .note {
+  flex-basis: 100%;
+  min-width: 0;
+  color: var(--muted-foreground);
+  font-size: 0.8125rem;
+}
+.toolbar .note:empty {
+  display: none;
+}
+@media (pointer: coarse) {
+  .toolbar button,
+  .editor-bar button,
+  .editor-notice button {
+    min-height: 2.5rem;
+    min-width: 2.5rem;
+  }
+}
+
+/* The tooltip's shortcut, beside the name. */
+[data-slot='tooltip-content'] kbd {
+  font-family: var(--font-sans);
+  font-size: 0.6875rem;
+  opacity: 0.75;
+}
+
+/* The notice above the text. */
+.editor-notice {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 0.25rem 1rem;
+  margin-bottom: 0.5rem;
+  padding: 0.5rem 0.75rem;
+  border: 1px solid var(--border);
+  border-inline-start: 4px solid var(--comment-line);
+  border-radius: 6px;
+  background: var(--card);
+  font-size: 0.875rem;
+}
+.editor-notice [role='group'] {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 0.25rem 0.75rem;
+}
