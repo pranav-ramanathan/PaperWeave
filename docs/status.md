@@ -7808,6 +7808,7 @@ pointing to the new page).
     cover the person's address were a few pixels off in a picture of the whole page.
   - The picture run does not compare anything itself: the two folders are compared by a script
     kept outside the repository (it used `sharp`, which the app's dependencies bring).
+
 ## Three-way merge of text
 
 - **What.** `merge3(base, ours, theirs)` and `resolveMerge` in `packages/server/src/textdiff.ts`, for
