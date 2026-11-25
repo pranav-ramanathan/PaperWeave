@@ -69,3 +69,29 @@ docker compose -f infra/compose.yaml up -d --wait
 pnpm test:sandbox
 pnpm e2e
 ```
+
+### Test slots
+
+`pnpm e2e` uses ports 3100 (web) and 4100 (sync) and the database `paperweave`. To run browser tests
+at the same time as another run, use another slot: its own ports and its own database.
+
+| Slot | `E2E_WEB_PORT` | `E2E_SYNC_PORT` | Database       |
+| ---- | -------------- | --------------- | -------------- |
+| A    | 3100 (default) | 4100 (default)  | `paperweave`   |
+| B    | 3200           | 4200            | `paperweave_b` |
+| C    | 3300           | 4300            | `paperweave_c` |
+
+Start a slot with a fresh database (slot B shown), check that its two ports are free (`ss -ltn`),
+and use `--project=e2e` (the `mail-down` project pauses the shared mail container):
+
+```bash
+docker exec infra-postgres-1 dropdb -U paperweave --if-exists paperweave_b
+docker exec infra-postgres-1 createdb -U paperweave paperweave_b
+E2E_WEB_PORT=3200 E2E_SYNC_PORT=4200 \
+  DATABASE_URL=postgres://paperweave:paperweave@localhost:5432/paperweave_b \
+  pnpm exec playwright test tests/e2e/files.spec.ts --project=e2e
+```
+
+The object store only accepts uploads from the web ports in `infra/compose.yaml`; after that list
+changes, make the container again (`docker compose -f infra/compose.yaml up -d`) for `uploading.spec`
+to pass on slots B and C.

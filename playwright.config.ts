@@ -1,10 +1,17 @@
 import { defineConfig } from '@playwright/test';
 
+// The ports of the two servers this run starts. Slot A (3100, 4100) is what CI uses; another
+// slot sets both, and DATABASE_URL, so that two runs do not meet (README.md, "Test slots").
+const webPort = Number(process.env.E2E_WEB_PORT) || 3100;
+const syncPort = Number(process.env.E2E_SYNC_PORT) || 4100;
+
 // The services in infra/compose.yaml. The environment overrides these.
 const services = {
   DATABASE_URL: 'postgres://paperweave:paperweave@localhost:5432/paperweave',
   BETTER_AUTH_SECRET: 'local-tests-only-3kq9Zr7mVx2Lp8Tn5Wc1Yd4Hb6Jf0Gs',
-  BETTER_AUTH_URL: 'http://localhost:3100',
+  BETTER_AUTH_URL: `http://localhost:${webPort}`,
+  SYNC_URL: `ws://localhost:${syncPort}`,
+  SYNC_PORT: String(syncPort),
   SMTP_URL: 'smtp://localhost:1025',
   S3_ENDPOINT: 'http://localhost:8333',
   S3_BUCKET: 'paperweave',
@@ -29,7 +36,7 @@ export default defineConfig({
   // worker's queue make a test wait longer than its five seconds for a build.
   workers: Number(process.env.E2E_WORKERS) || 1,
   reporter: 'list',
-  use: { baseURL: 'http://localhost:3100', trace: 'off' },
+  use: { baseURL: `http://localhost:${webPort}`, trace: 'off' },
   projects: [
     { name: 'e2e', testIgnore: /mail-down\.spec\.ts/ },
     // Pauses the one mail container for everyone, so it runs when nothing else is running.
@@ -39,9 +46,8 @@ export default defineConfig({
     {
       // A production build: the dev server reloads the page whenever a file in the repo
       // changes, test output included.
-      command:
-        'pnpm --filter @paperweave/server migrate && pnpm --filter @paperweave/web build && pnpm --filter @paperweave/web start',
-      url: 'http://localhost:3100/spike',
+      command: `pnpm --filter @paperweave/server migrate && pnpm --filter @paperweave/web build && pnpm --filter @paperweave/web exec next start -p ${webPort}`,
+      url: `http://localhost:${webPort}/spike`,
       reuseExistingServer: !process.env.CI,
       timeout: 300_000,
       env: services,
@@ -56,7 +62,7 @@ export default defineConfig({
     },
     {
       command: 'pnpm --filter @paperweave/sync start',
-      url: 'http://localhost:4100',
+      url: `http://localhost:${syncPort}`,
       reuseExistingServer: !process.env.CI,
       timeout: 60_000,
       env: services,

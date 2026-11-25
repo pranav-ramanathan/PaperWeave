@@ -9,6 +9,7 @@ import {
   audit,
   clickAfter,
   emailedLink,
+  ORIGIN,
   person,
   run,
   showSource,
@@ -16,6 +17,7 @@ import {
   signIn,
   slowPaper,
   sticksOut,
+  SYNC_SOCKET,
 } from './helpers';
 
 const MAIN = '\\documentclass{article}\n\\begin{document}\nHello.\n\\end{document}\n';
@@ -233,7 +235,7 @@ test('a file takes no typing until it has arrived', async ({ browser }) => {
   // loaded: it takes hold of the connections of pages loaded after it.)
   let letIn!: () => void;
   const waiting = new Promise<void>((done) => (letIn = done));
-  await page.routeWebSocket(/:4100/, async (socket) => {
+  await page.routeWebSocket(SYNC_SOCKET, async (socket) => {
     const held: (string | Buffer)[] = [];
     socket.onMessage((message) => void held.push(message));
     await waiting;
@@ -303,7 +305,7 @@ test('a structural edit whose answer is lost is made once, and not said to have 
   // connection drops between the edit and its answer. (Set up before any page is loaded:
   // it takes hold of the connections of pages loaded after it.)
   let lost = 0;
-  await page.routeWebSocket(/:4100/, (socket) => {
+  await page.routeWebSocket(SYNC_SOCKET, (socket) => {
     const server = socket.connectToServer();
     socket.onMessage((message) => server.send(message));
     server.onMessage((message) => {
@@ -354,7 +356,7 @@ test('an editor whose sign-in has ended says so, keeps what is typed, and carrie
   // no need for its connection to drop first. Not "you no longer have access": more can be
   // typed, it is kept, and there is a way back in.
   const out = await page.request.post('/api/auth/sign-out', {
-    headers: { origin: 'http://localhost:3100' },
+    headers: { origin: ORIGIN },
     data: {},
   });
   expect(out.ok()).toBe(true);
@@ -408,7 +410,7 @@ test('a page left open by one person does not carry on as the next person to sig
   await showSource(page);
   await expect(status(page)).toHaveText('All edits saved.');
   const out = await page.request.post('/api/auth/sign-out', {
-    headers: { origin: 'http://localhost:3100' },
+    headers: { origin: ORIGIN },
     data: {},
   });
   expect(out.ok()).toBe(true);
@@ -857,7 +859,7 @@ test('a restore is not taken as seen because a ticket was fetched: edits typed b
   const hasTyped = new Promise<void>((r) => (typed = r));
   let live = null as { close: () => unknown } | null;
   let mocked = false;
-  await editor.page.routeWebSocket(/:4100/, (ws) => {
+  await editor.page.routeWebSocket(SYNC_SOCKET, (ws) => {
     if (!online) return ws.close();
     // The first socket opened after coming back is answered by nothing, and closed once its
     // ticket is out.
@@ -994,7 +996,7 @@ async function typedWhileSyncIsAway(
   const page = editor.page;
   let up = true;
   const open = new Set<{ close: () => unknown }>();
-  await page.routeWebSocket(/:4100/, (ws) => {
+  await page.routeWebSocket(SYNC_SOCKET, (ws) => {
     if (!up) return ws.close();
     open.add(ws);
     ws.connectToServer();
