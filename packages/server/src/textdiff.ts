@@ -408,3 +408,282 @@ export function carryLine(
   // Nothing was kept, or the line is past the end of the text: the nearest line that is there.
   return { line: near ? near.to : Math.max(1, Math.min(line, to)), moved: true };
 }
+
+/** One run of the base replaced by `repl`: base items `start` up to `end` become `repl`. */
+type Hunk = { start: number; end: number; repl: string[] };
+
+/** The changed runs of a diff of x to y, in order, each added item mapped through `item`. */
+function hunksOf(ops: DiffLine[], item: (text: string) => string): Hunk[] {
+  const out: Hunk[] = [];
+  let at = 0;
+  let cur: Hunk | null = null;
+  for (const { op, text } of ops) {
+    if (op === ' ') {
+      cur = null;
+      at++;
+      continue;
+    }
+    if (!cur) out.push((cur = { start: at, end: at, repl: [] }));
+    if (op === '-') cur.end = ++at;
+    else cur.repl.push(item(text));
+  }
+  return out;
+}
+
+/** What one stretch of the three texts is: base, ours and theirs, and whether the sides clash. */
+type Piece = { base: string[]; ours: string[]; theirs: string[]; clash: boolean };
+
+const same = (a: string[], b: string[]) => a.length === b.length && a.every((s, i) => s === b[i]);
+
+/**
+ * The diff3 walk over a base and the changed runs of two sides. Runs of the two sides that overlap
+ * or start at the same place are one stretch (a change that only starts where another ends is not); a stretch changed by one side only, or changed the same way by both,
+ * is settled; any other is a clash.
+ */
+function walk(base: string[], ho: Hunk[], ht: Hunk[]): Piece[] {
+  const out: Piece[] = [];
+  const apply = (hs: Hunk[], from: number, to: number, lo: number, hi: number) => {
+    let r: string[] = [];
+    let at = lo;
+    for (let k = from; k < to; k++) {
+      r = r.concat(base.slice(at, hs[k].start), hs[k].repl);
+      at = hs[k].end;
+    }
+    return r.concat(base.slice(at, hi));
+  };
+  let pos = 0;
+  let i = 0;
+  let j = 0;
+  while (i < ho.length || j < ht.length) {
+    const lo = Math.min(ho[i]?.start ?? Infinity, ht[j]?.start ?? Infinity);
+    let hi = lo;
+    const i0 = i;
+    const j0 = j;
+    for (let grew = true; grew;) {
+      grew = false;
+      if (i < ho.length && (ho[i].start < hi || ho[i].start === lo)) {
+        hi = Math.max(hi, ho[i++].end);
+        grew = true;
+      }
+      if (j < ht.length && (ht[j].start < hi || ht[j].start === lo)) {
+        hi = Math.max(hi, ht[j++].end);
+        grew = true;
+      }
+    }
+    if (lo > pos) {
+      const kept = base.slice(pos, lo);
+      out.push({ base: kept, ours: kept, theirs: kept, clash: false });
+    }
+    const ours = apply(ho, i0, i, lo, hi);
+    const theirs = apply(ht, j0, j, lo, hi);
+    out.push({
+      base: base.slice(lo, hi),
+      ours,
+      theirs,
+      clash: i > i0 && j > j0 && !same(ours, theirs),
+    });
+    pos = hi;
+  }
+  if (pos < base.length) {
+    const kept = base.slice(pos);
+    out.push({ base: kept, ours: kept, theirs: kept, clash: false });
+  }
+  return out;
+}
+
+export type MergeConflict = {
+  /**
+   * `both-changed`: both sides changed the same words differently. `deleted-vs-changed`: one side
+   * removed the stretch and the other changed it. `both-added`: both added different text at one
+   * place. `too-large`: the texts were too large or too changed to compare; the whole text is the
+   * conflict.
+   */
+  kind: 'both-changed' | 'deleted-vs-changed' | 'both-added' | 'too-large';
+  base: string;
+  ours: string;
+  theirs: string;
+  /** Where each version of the stretch sits in its own text: `[start, end)` in characters. */
+  baseStart: number;
+  baseEnd: number;
+  oursStart: number;
+  oursEnd: number;
+  theirsStart: number;
+  theirsEnd: number;
+  /** Where `ours` sits in the merged `text` (which holds ours at every conflict). */
+  textStart: number;
+  /** The line of the base the stretch starts on, from 1. */
+  line: number;
+};
+
+export type MergeChoice = 'ours' | 'theirs' | 'both' | 'base' | { text: string };
+
+export type MergeResult = {
+  /** The merge with `ours` kept at every conflict. With no conflicts, the merge. */
+  text: string;
+  conflicts: MergeConflict[];
+  /** The merge in order: settled text, and each conflict where it sits. With ours chosen they join to `text`. */
+  chunks: (string | MergeConflict)[];
+};
+
+/** Lines with the newline each ends in; the last has none if the text does not end in one. */
+const lineParts = (text: string) => text.match(/[^\n]*\n|[^\n]+/g) ?? [];
+
+function conflictOf(
+  kind: MergeConflict['kind'] | null,
+  base: string,
+  ours: string,
+  theirs: string,
+  at: number[],
+  textStart: number,
+  whole = '',
+): MergeConflict {
+  return {
+    kind:
+      kind ??
+      (base === ''
+        ? 'both-added'
+        : ours === '' || theirs === ''
+          ? 'deleted-vs-changed'
+          : 'both-changed'),
+    base,
+    ours,
+    theirs,
+    baseStart: at[0],
+    baseEnd: at[0] + base.length,
+    oursStart: at[1],
+    oursEnd: at[1] + ours.length,
+    theirsStart: at[2],
+    theirsEnd: at[2] + theirs.length,
+    textStart,
+    line: whole.slice(0, at[0]).split('\n').length,
+  };
+}
+
+/**
+ * Merges two edits of one text: `ours` and `theirs` are each a change of `base`.
+ *
+ * Lines are compared first. A run of lines changed by one side is taken; one changed the same way
+ * by both is taken once. Where both changed the same lines, the stretch is merged
+ * again by words (the pieces `diffWords` compares), because a paragraph is often one long line:
+ * words changed by one side are taken, and only words changed differently by both, or removed by
+ * one and changed by the other, are a conflict. Two neighbouring lines each edited in different
+ * words merge without a conflict. Bytes outside the changed words are kept exactly, including the
+ * kind of newline and whether the text ends in one.
+ *
+ * The size guard is that of the comparisons: if `base` and either side differ by more than
+ * `diffLinesFar` will report (`FAR_EDITS` lines, or its table or step limits) the whole text is
+ * one `too-large` conflict with ours in `text`; if the words of one stretch of lines need more
+ * than `wordCells` table cells (default 1,000,000, as `diffWords`), that stretch is one conflict.
+ */
+export function merge3(
+  base: string,
+  ours: string,
+  theirs: string,
+  limits: { maxCells?: number; wordCells?: number } = {},
+): MergeResult {
+  if (ours === theirs || theirs === base) return { text: ours, conflicts: [], chunks: [ours] };
+  if (ours === base) return { text: theirs, conflicts: [], chunks: [theirs] };
+
+  const B = lineParts(base);
+  const O = lineParts(ours);
+  const T = lineParts(theirs);
+  // Each distinct line as a number, so that diffLinesFar can compare them. Every encoded line ends
+  // in "\n", so all three encodings end alike and the last element of a diff is dropped.
+  const ids = new Map<string, number>();
+  const lines: string[] = [];
+  const encode = (ls: string[]) =>
+    ls
+      .map((l) => {
+        let n = ids.get(l);
+        if (n === undefined) {
+          ids.set(l, (n = lines.length));
+          lines.push(l);
+        }
+        return `${n}\n`;
+      })
+      .join('');
+  const eb = encode(B);
+  const diffO = diffLinesFar(eb, encode(O), limits.maxCells);
+  const diffT = diffLinesFar(eb, encode(T), limits.maxCells);
+  if (!diffO || !diffT) {
+    const c = conflictOf('too-large', base, ours, theirs, [0, 0, 0], 0);
+    return { text: ours, conflicts: [c], chunks: [c] };
+  }
+  const byLine = (id: string) => lines[Number(id)];
+  const pieces = walk(B, hunksOf(diffO.slice(0, -1), byLine), hunksOf(diffT.slice(0, -1), byLine));
+
+  // Merge each clashing stretch again by words.
+  type Final = { base: string; ours: string; theirs: string; clash: boolean };
+  const final: Final[] = [];
+  for (const p of pieces) {
+    const f: Final = {
+      base: p.base.join(''),
+      ours: p.ours.join(''),
+      theirs: p.theirs.join(''),
+      clash: p.clash,
+    };
+    if (!p.clash) {
+      final.push(f);
+      continue;
+    }
+    const wb = f.base.match(WORDS) ?? [];
+    const cells = limits.wordCells ?? 1_000_000;
+    const dO = diffSeq(wb, f.ours.match(WORDS) ?? [], cells);
+    const dT = diffSeq(wb, f.theirs.match(WORDS) ?? [], cells);
+    if (!dO || !dT) {
+      final.push(f);
+      continue;
+    }
+    for (const w of walk(
+      wb,
+      hunksOf(dO, (s) => s),
+      hunksOf(dT, (s) => s),
+    ))
+      final.push({
+        base: w.base.join(''),
+        ours: w.ours.join(''),
+        theirs: w.theirs.join(''),
+        clash: w.clash,
+      });
+  }
+
+  const chunks: (string | MergeConflict)[] = [];
+  const conflicts: MergeConflict[] = [];
+  let text = '';
+  const at = [0, 0, 0]; // offsets in base, ours and theirs
+  const addText = (s: string) => {
+    text += s;
+    const last = chunks.length - 1;
+    if (typeof chunks[last] === 'string') chunks[last] += s;
+    else chunks.push(s);
+  };
+  for (const f of final) {
+    if (f.clash) {
+      const c = conflictOf(null, f.base, f.ours, f.theirs, at, text.length, base);
+      conflicts.push(c);
+      chunks.push(c);
+      text += f.ours;
+    } else addText(f.ours !== f.base ? f.ours : f.theirs);
+    at[0] += f.base.length;
+    at[1] += f.ours.length;
+    at[2] += f.theirs.length;
+  }
+  return { text, conflicts, chunks };
+}
+
+/**
+ * The merged text with each conflict settled by the choice at its index: ours, theirs, both (ours
+ * first), the base, or text written by hand. Throws if a conflict has no choice.
+ */
+export function resolveMerge(result: MergeResult, choices: MergeChoice[]): string {
+  let k = 0;
+  return result.chunks
+    .map((c) => {
+      if (typeof c === 'string') return c;
+      const choice = choices[k++];
+      if (!choice) throw new Error(`No choice for conflict ${k}.`);
+      if (typeof choice === 'object') return choice.text;
+      return choice === 'both' ? c.ours + c.theirs : c[choice];
+    })
+    .join('');
+}

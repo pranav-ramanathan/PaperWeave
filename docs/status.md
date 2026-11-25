@@ -7823,3 +7823,28 @@ pointing to the new page).
 - **Held by** `projects.spec` and `recover.spec` passing on slot B (48 tests); with nothing set,
   every value is as before. `ui.test.ts` covers staged pages; `docs/settings.md` has the row.
 - **Not done.** `uploading.spec` on slots B and C until the store's container is made again.
+
+## Three-way merge of text
+
+- **What.** `merge3(base, ours, theirs)` and `resolveMerge` in `packages/server/src/textdiff.ts`, for
+  merging a version back into main (plan section 14.2). Pure: it merges by lines, then by words
+  inside a clashing stretch, because a LaTeX paragraph is often one line. Each conflict carries the
+  base, ours and theirs text, where it sits in each, and its kind (both changed, deleted against
+  changed, both added, too large). Lines keep their own endings, so CRLF and a missing final
+  newline come out as they went in.
+- **A choice.** Two changes are one stretch when they overlap or start at the same place; a change
+  that only starts where the other ends is merged, not a conflict (Git would call it one).
+- **Held by** `textdiff.test.ts`: a test per rule, and a seeded random check (`FUZZ`, 2,000 seeds;
+  run once at 20,000).
+- **Not done.** Nothing calls it yet. Over the size guards a whole file, or a whole stretch of
+  lines, is one conflict. Binary files and renames are the merge plan's job.
+
+## The history timeline, grouped
+
+- **What.** `timeline()` in `apps/web/lib/timeline.ts`: revisions grouped by day in the viewer's
+  time zone, newest first; runs of automatic revisions folded into one row with their count, times,
+  authors and files; named revisions, restores and merges on rows of their own; a marker where a
+  version began. Pure; it reads no clock.
+- **Held by** `timeline.test.ts`, including midnight and daylight-saving days in five zones.
+- **Not done.** Nothing draws it yet. Files per revision and the merge kind come with later work, so
+  both are optional inputs.
