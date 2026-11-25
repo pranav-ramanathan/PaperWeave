@@ -9,11 +9,14 @@ import {
   type EditBudgetConfig,
   editBudget,
   editBudgetFromEnv,
+  cleanPresence,
   holds,
   listen,
   loadUpdates,
   openFile,
+  MAX_AWARENESS_BYTES,
   MAX_EDIT_BYTES,
+  presenceSize,
   restoreNote,
   runCommand,
   tooLarge,
@@ -44,6 +47,8 @@ const TRY_AGAIN = 'try-again';
 export const TOO_LARGE = 'too-large';
 /** Why it closes a connection whose person has sent too many edits lately. Not final: the editor waits. */
 export const OVER_BUDGET = 'over-budget';
+/** Why it closes a connection that sent a presence message too large to be read. Not final. */
+export const PRESENCE_TOO_LARGE = 'presence-too-large';
 
 export async function startSync(opts: {
   pool: pg.Pool;
@@ -75,6 +80,9 @@ export async function startSync(opts: {
       `the edit budget's burst (${config.burst} bytes) is below the largest edit (${MAX_EDIT_BYTES}): check SYNC_EDIT_BURST_BYTES`,
     );
   const budget = editBudget(config);
+  // Presence is charged apart from edits, a message at a time: a person's cursor moving is
+  // many small messages, and must never use up what their edits may send, nor the other way.
+  const presenceBudget = editBudget({ burst: 2000, perMinute: 1200, floor: 1 });
   /**
    * Connections closed because of an edit the server would not take (too large, over budget).
    * The library goes on through what was already queued on such a connection, and a later look at
@@ -299,6 +307,34 @@ export async function startSync(opts: {
         counts.commandsNotApplied++;
         answer({ error: err instanceof AppError ? err.message : 'That edit could not be made.' });
       }
+    },
+
+    // Before the library reads a message at all, so before it parses presence. The library has
+    // no way to drop a message from here: throwing is the only way to refuse one, and it closes
+    // the connection, with the reason. Only a client that is not ours sends this much presence:
+    // the editor cuts what it sends to a few hundred bytes.
+    async beforeHandleMessage({ update }) {
+      const size = presenceSize(update);
+      if (size !== null && size > MAX_AWARENESS_BYTES) {
+        counts.presenceDropped++;
+        throw Object.assign(new Error('presence message too large'), {
+          reason: PRESENCE_TOO_LARGE,
+        });
+      }
+    },
+
+    // Presence from anyone on the file, viewers and reviewers included: it is not an edit, and
+    // not held back by role. What it may say is cut to what the editors send, and each person
+    // may send so many a minute. Emptying both sets drops the message and keeps the connection.
+    async beforeHandleAwareness({ states, removedClients, context }) {
+      const over = !!context && !presenceBudget.take(context.userId, 1);
+      if (over) {
+        states.clear();
+        removedClients.clear();
+        counts.presenceDropped++;
+        return;
+      }
+      if (cleanPresence(states, removedClients)) counts.presenceDropped++;
     },
 
     // Runs, and is awaited, before an incoming edit is applied and before it is acknowledged.

@@ -1487,3 +1487,150 @@ test('the metrics count the edits refused for the budget', async () => {
     owner.provider.destroy();
   });
 });
+
+// Presence: names and cursors, which every connection on a file sends and every other receives.
+
+const varUint = (n: number) => {
+  const out: number[] = [];
+  for (; n > 0x7f; n = Math.floor(n / 128)) out.push(0x80 | (n & 0x7f));
+  return Buffer.from([...out, n]);
+};
+const varBytes = (b: Buffer) => Buffer.concat([varUint(b.length), b]);
+/** An awareness message written by hand, for the file: whatever states, under whatever client IDs. */
+function rawAwareness(file: string, states: [number, unknown][]) {
+  const body = Buffer.concat([
+    varUint(states.length),
+    ...states.flatMap(([id, state]) => [
+      varUint(id),
+      varUint(1),
+      varBytes(Buffer.from(JSON.stringify(state))),
+    ]),
+  ]);
+  return Buffer.concat([varBytes(Buffer.from(file)), varUint(1), varBytes(body)]);
+}
+const sendRaw = (c: Client, bytes: Buffer) => c.socket.webSocket!.send(new Uint8Array(bytes));
+const presenceDropped = async () => {
+  const res = await fetch(`http://127.0.0.1:${sync.port}/metrics`, {
+    headers: { authorization: `Bearer ${METRICS_TOKEN}` },
+  });
+  return Number(/^paperweave_sync_presence_dropped_total (\S+)$/m.exec(await res.text())?.[1]);
+};
+const longestName = (c: Client) =>
+  Math.max(
+    0,
+    ...[...c.provider.awareness!.getStates().values()].map((s) =>
+      typeof s.user?.name === 'string' ? s.user.name.length : 0,
+    ),
+  );
+
+test('a viewer cannot fill everyone else with presence: a message of 1 MB is refused', async () => {
+  const { file } = await paper();
+  const viewer = client(users.viewer, file);
+  const owner = client(users.owner, file);
+  await saved(viewer, owner);
+  const before = await presenceDropped();
+  const crowd: [number, unknown][] = [];
+  for (let i = 0; i < 1000; i++) crowd.push([1_000_000 + i, { user: { name: `p${i}` } }]);
+  crowd.push([2_000_000, { user: { name: 'N'.repeat(1_000_000) } }]);
+  sendRaw(viewer, rawAwareness(file, crowd));
+  // Long enough for a message that was taken to have reached the other editor.
+  await new Promise((r) => setTimeout(r, 1500));
+  expect(owner.provider.awareness!.getStates().size).toBeLessThanOrEqual(2);
+  expect(longestName(owner)).toBeLessThanOrEqual(80);
+  expect(await presenceDropped()).toBeGreaterThan(before);
+  // The connection is closed, with a reason the editor knows, and not for good.
+  expect(viewer.state.reasons.some((r) => r.endsWith(':presence-too-large'))).toBe(true);
+  expect(owner.state.closed).toBe(0);
+});
+
+test('a small presence message with many people and a long name is cut down to one', async () => {
+  const { file } = await paper();
+  const viewer = client(users.viewer, file);
+  const owner = client(users.owner, file);
+  await saved(viewer, owner);
+  const crowd: [number, unknown][] = [];
+  for (let i = 0; i < 40; i++) crowd.push([3_000_000 + i, { user: { name: `p${i}` } }]);
+  crowd[0] = [3_000_000, { user: { name: 'N'.repeat(500), color: 'red', extra: 'x' } }];
+  sendRaw(viewer, rawAwareness(file, crowd));
+  await until('one of them to arrive', () => owner.provider.awareness!.getStates().has(3_000_000));
+  await new Promise((r) => setTimeout(r, 500));
+  expect(owner.provider.awareness!.getStates().size).toBeLessThanOrEqual(2);
+  expect(owner.provider.awareness!.getStates().get(3_000_000)).toEqual({
+    user: { name: 'N'.repeat(80) },
+  });
+  expect(viewer.state.closed).toBe(0);
+});
+
+test('5,000 cursor updates in a row are dropped, not the connection, and edits are still saved', async () => {
+  const { project, file } = await paper();
+  const a = client(users.second, file);
+  const b = client(users.editor, file);
+  await saved(a, b);
+  const before = await presenceDropped();
+  const awareness = a.provider.awareness!;
+  for (let i = 0; i < 5000; i++) {
+    const at = Y.createRelativePositionFromTypeIndex(a.text, i % 5);
+    awareness.setLocalStateField('cursor', { anchor: at, head: at });
+    awareness.setLocalStateField('tick', i);
+  }
+  a.text.insert(0, 'STILL-SAVED ');
+  await saved(a);
+  expect(a.state.closed).toBe(0);
+  expect(a.state.reasons).toEqual([]);
+  expect(await presenceDropped()).toBeGreaterThan(before);
+  expect(await stored(project)).toContain('STILL-SAVED');
+  await until('the other editor to have the edit', () => b.text.toString().includes('STILL-SAVED'));
+  expect(b.state.closed).toBe(0);
+});
+
+test('people on a file, viewers and reviewers too, still see each other by name and cursor', async () => {
+  const { file } = await paper();
+  const [owner, editor, viewer, reviewer] = [
+    client(users.owner, file),
+    client(users.editor, file),
+    client(users.viewer, file),
+    client(users.reviewer, file),
+  ];
+  await saved(owner, editor, viewer, reviewer);
+  owner.text.insert(0, 'Some text to point at. ');
+  await saved(owner);
+  await until('the text to arrive', () => viewer.text.length > 10 && reviewer.text.length > 10);
+  const who: [Client, string, string][] = [
+    [owner, 'Ada Lovelace', '#aabbcc'],
+    [editor, 'Grace Hopper', '#112233'],
+    [viewer, 'Viewer V', '#445566'],
+    [reviewer, 'Reviewer R', '#778899'],
+  ];
+  for (const [c, name, colour] of who) {
+    // yCollab sends the positions themselves; the visual view their JSON, which leaves out nulls.
+    const from = Y.createRelativePositionFromTypeIndex(c.text, 2);
+    const to = Y.createRelativePositionFromTypeIndex(c.text, 6);
+    const visual = c === editor || c === reviewer;
+    c.provider.awareness!.setLocalStateField('user', {
+      name,
+      color: colour,
+      colorLight: colour + '33',
+    });
+    c.provider.awareness!.setLocalStateField(
+      'cursor',
+      visual
+        ? { anchor: Y.relativePositionToJSON(from), head: Y.relativePositionToJSON(to) }
+        : { anchor: from, head: to },
+    );
+  }
+  for (const [c] of who)
+    for (const [other, name, colour] of who) {
+      if (other === c) continue;
+      await until(`${name} to be seen`, () => {
+        const s = c.provider.awareness!.getStates().get(other.doc.clientID);
+        return s?.user?.name === name && !!s.cursor;
+      });
+      const s = c.provider.awareness!.getStates().get(other.doc.clientID)!;
+      expect(s.user).toEqual({ name, color: colour, colorLight: colour + '33' });
+      const index = (r: unknown) =>
+        Y.createAbsolutePositionFromRelativePosition(Y.createRelativePositionFromJSON(r), c.doc)
+          ?.index;
+      expect([index(s.cursor.anchor), index(s.cursor.head)]).toEqual([2, 6]);
+    }
+  for (const [c] of who) expect(c.state.closed).toBe(0);
+});

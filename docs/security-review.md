@@ -292,6 +292,14 @@ In rough order of how much they matter.
    (`SYNC_EDIT_BURST_BYTES`, `SYNC_EDIT_BYTES_PER_MINUTE`), so one account can no longer add
    2 MB edits without pause. It is kept in the sync server's memory, so it starts afresh
    when that restarts, and it counts bytes sent, not what they add up to once compacted.
+   Presence (names and cursors) over the same connection, which a viewer can send too, was
+   not limited at all, and the library parsed, kept and sent on to everyone on the file whatever
+   it was given. It is now refused above 8 KB before it is parsed (the connection is closed with
+   `presence-too-large`; the library has no way to drop a message from there), cut to one
+   state of at most 4 KB with a name of at most 80 characters, simple colours and a cursor,
+   and charged to a budget of its own for each person (2,000 at once, 1,200 a minute), over which
+   it is dropped and the connection stays open. Counted as `paperweave_sync_presence_dropped_total`.
+   Who may connect, read or write is unchanged.
    Restores and replaced files (by form or by upload), which the web app makes as edits, are
    limited the same way by size, for each person over all their papers: 100 MB an hour, each
    costing the bytes of edits it appends and at least 256 KB (`WEB_EDIT_BYTES_PER_USER_HOUR`),

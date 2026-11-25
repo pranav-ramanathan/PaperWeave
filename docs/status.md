@@ -7480,3 +7480,37 @@ restores of a large paper got round it (`docs/security-review.md`, Open 1).
   and closed N times, nested, is quadratic. `marks` and `skip` in `floats.ts` (what a typed cell
   may hold) take text a person types and were left. The same regexes in other packages
   (`packages/server`) were not looked at.
+
+## Presence is bounded and has a budget
+
+Presence (awareness: names and cursors) went over the sync connection unbounded and uncharged,
+from viewers too. The library parsed each message as JSON, stored every state under whatever
+client IDs the sender named, sent it to everyone on the file and again to everyone who joined.
+Measured in-process with 20 read-only connections: one message of 100,000 states (3.07 MB) cost
+414 ms of synchronous work, 100,000 held states and 61 MB sent; one 3.9 MB name, 78 MB sent.
+
+- **Hooks.** `beforeHandleMessage` sees the raw frame before the library reads it: an awareness
+  message over 8 KB is refused there, from its framing alone (`presenceSize`). The library has no
+  way to drop a message from that hook: throwing is the only refusal, and it closes the
+  connection, with the reason `presence-too-large` (the library sends it with its own code, 1000;
+  the editor goes by the reason). `beforeHandleAwareness` sees
+  the decoded states and the removals, and emptying them drops the message with the connection
+  kept: this is where `cleanPresence` runs and where the budget is charged. `beforeSync` never
+  sees awareness.
+- **What is kept.** At most one state (the first usable), rebuilt from `user` (`name` cut to 80
+  characters, `color` and `colorLight` as `#rgb`, `#rrggbb` or `#rrggbbaa`) and `cursor` (null, or
+  two relative positions, in the shape yCollab sends, with nulls, and the visual view's JSON,
+  without). A state over 4096 bytes of JSON is dropped. At most 64 removals (the editors send
+  their own state and the removals of peers that timed out, nothing else). Roles do not matter:
+  viewers and reviewers show their presence as before.
+- **Budget.** `editBudget({ burst: 2000, perMinute: 1200, floor: 1 })`, apart from the edit
+  budget, a message each, by the user ID in the ticket. Over it the message is dropped and the
+  connection stays open. `paperweave_sync_presence_dropped_total` counts messages refused, cut
+  down or over budget.
+- **Editor.** The status line's "Also here" cuts names to 80 characters, as the visual view does,
+  and the editor sends its own name cut. A close with `presence-too-large` is answered like the
+  over-budget close: the socket is closed and opened again after 10 seconds, without saying
+  edits are paused; nothing the editor sends can be that large.
+- **Held by** `presence.test.ts` and four tests at the end of `sync.sandbox.test.ts`.
+- **Not done.** A connection can still name another person's client ID in its one state. The
+  budget is in memory and starts afresh when the server restarts.
