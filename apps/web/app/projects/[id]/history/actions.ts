@@ -1,7 +1,10 @@
 'use server';
 
 import {
+  deleteVersion,
   nameRevision,
+  renameVersion,
+  startVersion,
   requestBuild,
   restoreRevision,
   revisionOfNow,
@@ -63,5 +66,55 @@ export async function compareHistoryAction(projectId: string, form: FormData) {
     const [from, to] = [text(form, 'from'), text(form, 'to')];
     const end = to === NOW ? (await revisionOfNow(db(), blobs(), user.id, projectId)).id : to;
     return `${back}?from=${encodeURIComponent(from)}&to=${encodeURIComponent(end)}#comparison`;
+  });
+}
+
+/**
+ * Start a version of this paper at a revision (`from`: its id, or the paper as it is now). The
+ * service refuses it when versions are off, to a reviewer or viewer, and past ten versions.
+ */
+export async function startVersionAction(projectId: string, from: string, form: FormData) {
+  const back = at(projectId);
+  const user = await requireUser(back);
+  await act(back, async () => {
+    const revision =
+      from === NOW ? (await revisionOfNow(db(), blobs(), user.id, projectId)).id : from;
+    const made = await startVersion(
+      db(),
+      blobs(),
+      user.id,
+      projectId,
+      revision,
+      text(form, 'version'),
+    );
+    return `${back}?started=${encodeURIComponent(made.name)}&version=${made.id}`;
+  });
+}
+
+/** Give a version another name. `projectId` is the page's paper, where the person goes back to. */
+export async function renameVersionAction(projectId: string, versionId: string, form: FormData) {
+  const back = at(projectId);
+  const user = await requireUser(back);
+  await act(back, async () => {
+    const { name } = await renameVersion(db(), user.id, versionId, text(form, 'version'));
+    return `${back}?renamed=${encodeURIComponent(name)}`;
+  });
+}
+
+/**
+ * Delete a version, for good, when its exact name is typed. Afterwards the person is on `main`'s
+ * history, which is `mainId`, whichever of the family they were looking at.
+ */
+export async function deleteVersionAction(
+  projectId: string,
+  versionId: string,
+  mainId: string,
+  form: FormData,
+) {
+  const back = at(projectId);
+  const user = await requireUser(back);
+  await act(back, async () => {
+    const { name } = await deleteVersion(db(), user.id, versionId, text(form, 'typed'));
+    return `${at(projectId === versionId ? mainId : projectId)}?deleted=${encodeURIComponent(name)}`;
   });
 }

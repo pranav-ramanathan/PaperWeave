@@ -165,6 +165,8 @@ export function RunShow({ count, children }: { count: number; children: ReactNod
 }
 
 type Actions = {
+  /** Start a version at this revision (only with versions on, for those who may). */
+  version?: (form: FormData) => void | Promise<void>;
   restore?: () => void | Promise<void>;
   name?: (form: FormData) => void | Promise<void>;
   build?: () => void | Promise<void>;
@@ -188,10 +190,11 @@ export function RowMenu({
   pdf: string | null;
   actions: Actions;
 }) {
-  const [dialog, setDialog] = useState<'restore' | 'name' | null>(null);
+  const [dialog, setDialog] = useState<'restore' | 'name' | 'version' | null>(null);
   const trigger = useRef<HTMLButtonElement>(null);
   const build = useRef<HTMLFormElement>(null);
-  if (!(actions.restore || actions.name || zip || pdf || actions.build)) return null;
+  if (!(actions.restore || actions.name || actions.version || zip || pdf || actions.build))
+    return null;
   return (
     <>
       <DropdownMenu>
@@ -212,6 +215,11 @@ export function RowMenu({
           )}
           {actions.name && (
             <DropdownMenuItem onSelect={() => setDialog('name')}>Give it a name</DropdownMenuItem>
+          )}
+          {actions.version && (
+            <DropdownMenuItem onSelect={() => setDialog('version')}>
+              Start a version from here
+            </DropdownMenuItem>
           )}
           {zip && (
             <>
@@ -242,6 +250,15 @@ export function RowMenu({
           onOpenChange={(o) => setDialog(o ? 'restore' : null)}
           number={number}
           action={actions.restore}
+          back={trigger}
+        />
+      )}
+      {actions.version && (
+        <StartVersionDialog
+          open={dialog === 'version'}
+          onOpenChange={(o) => setDialog(o ? 'version' : null)}
+          what={`revision ${number}`}
+          action={actions.version}
           back={trigger}
         />
       )}
@@ -351,6 +368,186 @@ export function RestoreButton({
         action={action}
         back={button}
       />
+    </>
+  );
+}
+
+/** The dialog that names a new version: from a revision, or from the paper as it is now. */
+function StartVersionDialog({
+  open,
+  onOpenChange,
+  what,
+  action,
+  back,
+}: {
+  open: boolean;
+  onOpenChange: (open: boolean) => void;
+  /** "revision 41" or "the paper as it is now". */
+  what: string;
+  action: (form: FormData) => void | Promise<void>;
+  back: RefObject<HTMLButtonElement | null>;
+}) {
+  return (
+    <Dialog open={open} onOpenChange={onOpenChange}>
+      <DialogContent
+        onCloseAutoFocus={(e) => {
+          if (back.current) {
+            e.preventDefault();
+            back.current.focus();
+          }
+        }}
+      >
+        <form action={action} className="grid gap-4">
+          <DialogHeader>
+            <DialogTitle>Start a version from {what}</DialogTitle>
+            <DialogDescription>
+              A version is a copy of the paper as it is in {what}, with the same people. It is
+              edited apart from the paper, which is called main. Comments and proposed changes stay
+              with main.
+            </DialogDescription>
+          </DialogHeader>
+          <div className="grid gap-1.5">
+            <Label htmlFor="version-new">Name for the version</Label>
+            <Input
+              id="version-new"
+              name="version"
+              required
+              maxLength={60}
+              placeholder="camera-ready"
+            />
+          </div>
+          <DialogFooter>
+            <Button type="button" variant="outline" onClick={() => onOpenChange(false)}>
+              Cancel
+            </Button>
+            <Once>Start the version</Once>
+          </DialogFooter>
+        </form>
+      </DialogContent>
+    </Dialog>
+  );
+}
+
+/** "Start a version": from the paper as it is now. */
+export function StartVersionButton({
+  action,
+}: {
+  action: (form: FormData) => void | Promise<void>;
+}) {
+  const [open, setOpen] = useState(false);
+  const button = useRef<HTMLButtonElement>(null);
+  return (
+    <>
+      <Button ref={button} type="button" variant="outline" size="sm" onClick={() => setOpen(true)}>
+        Start a version
+      </Button>
+      <StartVersionDialog
+        open={open}
+        onOpenChange={setOpen}
+        what="the paper as it is now"
+        action={action}
+        back={button}
+      />
+    </>
+  );
+}
+
+/** A version's menu: renaming for owner and editors, deleting for the owner alone. */
+export function VersionMenuRow({
+  name,
+  rename,
+  remove,
+}: {
+  name: string;
+  rename?: (form: FormData) => void | Promise<void>;
+  remove?: (form: FormData) => void | Promise<void>;
+}) {
+  const [dialog, setDialog] = useState<'rename' | 'delete' | null>(null);
+  const trigger = useRef<HTMLButtonElement>(null);
+  if (!rename && !remove) return null;
+  const refocus = (e: Event) => {
+    e.preventDefault();
+    trigger.current?.focus();
+  };
+  return (
+    <>
+      <DropdownMenu>
+        <DropdownMenuTrigger asChild>
+          <Button
+            ref={trigger}
+            type="button"
+            variant="ghost"
+            size="icon-sm"
+            aria-label={`More for version ${name}`}
+          >
+            <Ellipsis aria-hidden="true" />
+          </Button>
+        </DropdownMenuTrigger>
+        <DropdownMenuContent align="end">
+          {rename && (
+            <DropdownMenuItem onSelect={() => setDialog('rename')}>Rename</DropdownMenuItem>
+          )}
+          {remove && (
+            <DropdownMenuItem onSelect={() => setDialog('delete')}>Delete</DropdownMenuItem>
+          )}
+        </DropdownMenuContent>
+      </DropdownMenu>
+      {rename && (
+        <Dialog open={dialog === 'rename'} onOpenChange={(o) => setDialog(o ? 'rename' : null)}>
+          <DialogContent onCloseAutoFocus={refocus}>
+            <form action={rename} className="grid gap-4">
+              <DialogHeader>
+                <DialogTitle>Rename the version {name}</DialogTitle>
+                <DialogDescription>
+                  The version keeps its files and its revisions. Only its name changes.
+                </DialogDescription>
+              </DialogHeader>
+              <div className="grid gap-1.5">
+                <Label htmlFor={`rename-${name}`}>New name for {name}</Label>
+                <Input
+                  id={`rename-${name}`}
+                  name="version"
+                  required
+                  maxLength={60}
+                  defaultValue={name}
+                />
+              </div>
+              <DialogFooter>
+                <Button type="button" variant="outline" onClick={() => setDialog(null)}>
+                  Cancel
+                </Button>
+                <Once>Save the name</Once>
+              </DialogFooter>
+            </form>
+          </DialogContent>
+        </Dialog>
+      )}
+      {remove && (
+        <Dialog open={dialog === 'delete'} onOpenChange={(o) => setDialog(o ? 'delete' : null)}>
+          <DialogContent onCloseAutoFocus={refocus}>
+            <form action={remove} className="grid gap-4">
+              <DialogHeader>
+                <DialogTitle>Delete the version {name}?</DialogTitle>
+                <DialogDescription>
+                  This removes the version for everyone: its files, its revisions, its comments and
+                  proposed changes. It cannot be undone. The paper and its other versions are not
+                  touched.
+                </DialogDescription>
+              </DialogHeader>
+              <div className="grid gap-1.5">
+                <Label htmlFor={`typed-${name}`}>Type the name of the version, {name}</Label>
+                <Input id={`typed-${name}`} name="typed" required autoComplete="off" />
+              </div>
+              <DialogFooter>
+                <Button type="button" variant="outline" onClick={() => setDialog(null)}>
+                  Cancel
+                </Button>
+                <Once variant="destructive">Delete the version</Once>
+              </DialogFooter>
+            </form>
+          </DialogContent>
+        </Dialog>
+      )}
     </>
   );
 }
