@@ -1,5 +1,11 @@
 // One output of a build: the PDF or the log.
-import { AppError, buildOutputDigest, contentDisposition, getProject } from '@paperweave/server';
+import {
+  AppError,
+  buildOutputDigest,
+  contentDisposition,
+  getProject,
+  versionOf,
+} from '@paperweave/server';
 import { currentUser, db, sendBlob } from '../../../../../../lib/server';
 
 // Vercel stops the function after this many seconds. Reading one PDF or log from the store.
@@ -27,7 +33,7 @@ export async function GET(
             'content-disposition': contentDisposition(
               (await getProject(db(), user.id, id)).name,
               'pdf',
-              { disposition: 'inline' },
+              { disposition: 'inline', version: await versionOf(db(), id) },
             ),
           }
         : {}),

@@ -16,9 +16,11 @@ import {
   undoAccept,
 } from './proposals.ts';
 import { exportReview, locateQuote, REVIEW_FILE } from './reviewdata.ts';
+import { cutRevision } from './revisions.ts';
 import { editFile, loadUpdates, TEXT } from './sync.ts';
 import { TEST_ENV, testDb } from './testing.ts';
 import { deleteComment, listThreads, reply, setThreadStatus, startThread } from './threads.ts';
+import { startVersion } from './versions.ts';
 
 const store = blobStore(TEST_ENV);
 let t: Awaited<ReturnType<typeof testDb>>;
@@ -457,6 +459,37 @@ test('an item that cannot be read costs only itself', async () => {
     detached: 0,
     missing: ['A thread in the archive could not be read, and was left out.'],
   });
+});
+
+test('the review data of a version says which version, and comes in as an ordinary paper', async () => {
+  // No invitations: this file's papers already use up an hour's worth.
+  const zip = await writeZip([{ path: 'main.tex', bytes: Buffer.from(MAIN) }]);
+  const [project] = await importZip(t.pool, store, users.owner.id, zip, 'Review data');
+  const p = { id: project.id as string };
+  const revision = (await cutRevision(t.pool, store, users.owner.id, p.id)).id;
+  const v = await startVersion(t.pool, store, users.owner.id, p.id, revision, 'camera-ready', {
+    env: { VERSIONS: '1' },
+  });
+  const [vfile] = await listFiles(t.pool, users.owner.id, v.id);
+  await startThread(t.pool, store, users.owner.id, v.id, vfile.id, {
+    ...(await ends(vfile.id, 'below 40 ms')),
+    body: 'Median or tail?',
+  });
+  // The paper's own file has no such field; the version's has the name.
+  const own = await exportReview(t.pool, store, users.owner.id, p.id);
+  expect(own).not.toHaveProperty('version');
+  expect(await exportReview(t.pool, store, users.owner.id, v.id)).toMatchObject({
+    paper: 'Review data',
+    version: 'camera-ready',
+  });
+  // Through a ZIP, the review comes in with the version's thread, on a paper that is no version.
+  const { id, report } = await trip(v.id);
+  expect(report.review).toMatchObject({ threads: 1, proposals: 0, missing: [] });
+  const made = await t.pool.query('select parent_id, version_name from projects where id = $1', [
+    id,
+  ]);
+  expect(made.rows[0]).toEqual({ parent_id: null, version_name: null });
+  expect(await exportReview(t.pool, store, users.importer.id, id)).not.toHaveProperty('version');
 });
 
 test('a review file written before these fields existed still comes in whole', async () => {
