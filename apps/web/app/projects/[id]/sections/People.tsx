@@ -69,7 +69,7 @@ export function People({
                     m.role
                   )}
                 </td>
-                <td>
+                <td className="actions">
                   {m.role !== 'owner' && (owner || m.userId === userId) && (
                     <form action={removeAction.bind(null, id, m.userId)} className="inline">
                       <Once

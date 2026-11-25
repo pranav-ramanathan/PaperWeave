@@ -622,3 +622,44 @@
 }
 
 /* ===== T15: the end (revisions, people, invite, delete) ===== */
+
+/* Revisions and People are tables (the tests read their rows): ruled rows, the actions at the
+   right, quiet. A form that has fields and is the page's way to add something (invite) is a card. */
+:root.paper [aria-label='Table of revisions'] th[scope='row'] {
+  font-family: var(--pw-font-serif), 'Iowan Old Style', Georgia, serif;
+  font-size: 1rem;
+  font-weight: 600;
+}
+:root.paper [aria-label='Table of revisions'] :is(td, th),
+:root.paper [aria-label='Table of people'] :is(td, th) {
+  vertical-align: top;
+}
+:root.paper [aria-label='Table of revisions'] td.actions {
+  white-space: nowrap;
+}
+:root.paper td.actions form.inline {
+  vertical-align: middle;
+}
+:root.paper [aria-label='Table of people'] tbody td {
+  vertical-align: middle;
+}
+:root.paper form.card {
+  padding: 1rem;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-lg);
+  background: var(--card);
+  box-shadow: var(--shadow-rest);
+}
+:root.paper form.card select {
+  min-width: 10rem;
+}
+
+/* Delete this paper: quiet until asked for. The heading is as every other; the link has danger
+   text, and the page it leads to asks before anything goes. */
+:root.paper a.danger {
+  color: var(--destructive);
+  font-weight: 550;
+}
+:root.paper #delete {
+  margin-top: 3rem;
+}

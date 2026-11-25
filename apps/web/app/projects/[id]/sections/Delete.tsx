@@ -8,7 +8,7 @@ export function Delete({ id }: { id: string }) {
       <p>
         Takes the paper away from everyone on it, with its history. You are shown what goes, and
         asked, before anything is deleted.{' '}
-        <Link prefetch={false} href={`/projects/${id}/delete`}>
+        <Link prefetch={false} href={`/projects/${id}/delete`} className="danger">
           Delete this paper…
         </Link>
       </p>

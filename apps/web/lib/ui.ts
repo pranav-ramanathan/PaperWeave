@@ -15,18 +15,18 @@ export type Look = 'classic' | 'next';
 export const UI_COOKIE = 'pw_ui';
 
 /**
- * The pages that have been moved to the new look, by the name each gives `ui()`. None yet: every
- * page is "classic" whatever has been chosen. A page is added here in the change that moves it.
+ * The pages that have been moved to the new look, by the name each gives `ui()`. A page that is not here is
+ * "classic" whatever has been chosen. A page is added here in the change that moves it.
  */
-export const MIGRATED: readonly string[] = [];
+export const MIGRATED: readonly string[] = ['paper'];
 
 /**
  * The pages being built in the new look over several changes, by the name each gives `ui()`. None
- * yet. A page here is "next" only when UI_STAGED=1 on the server and the person's cookie is
+ * now. A page here is "next" only when UI_STAGED=1 on the server and the person's cookie is
  * "next"; for everyone else it is "classic", so a half-moved page is never shown. The last change
  * for a page moves it from here to MIGRATED.
  */
-export const STAGED: readonly string[] = ['paper'];
+export const STAGED: readonly string[] = [];
 
 /**
  * What UI_STAGED says: "1" is on, "0" and not set are off. Anything else stops whoever asks, as

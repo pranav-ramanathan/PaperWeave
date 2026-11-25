@@ -15,7 +15,7 @@ export function PendingInvitations({ id, pending }: { id: string; pending: Pendi
       {pending.length > 0 && (
         <section aria-labelledby="pending-heading">
           <h2 id="pending-heading">Invited, not yet joined</h2>
-          <ul>
+          <ul className="ruled">
             {pending.map((i) =>
               // The text is cut into the same pieces as before the page was split into sections
               // (the HTML keeps a marker between pieces), so it is kept as written.
@@ -46,7 +46,7 @@ export function Invite({ id, invited }: { id: string; invited?: string }) {
         Invite someone
       </h2>
       {invited && <Result>Invitation sent to {invited}.</Result>}
-      <form action={inviteAction.bind(null, id)}>
+      <form action={inviteAction.bind(null, id)} className="stack card">
         <label>
           Their email address
           <input type="email" name="email" required />

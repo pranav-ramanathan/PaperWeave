@@ -37,8 +37,8 @@ test('the choice is kept for a year, site-wide, Lax and for the server only', ()
 
 const moved = ['papers'];
 
-test('no page has been moved yet, so every page is classic whatever is chosen', async () => {
-  expect(MIGRATED).toEqual([]);
+test('a page that has not been moved is classic whatever is chosen', async () => {
+  expect(MIGRATED).toEqual(['paper']);
   for (const cookie of ['next', 'classic', undefined, 'other'])
     for (const fallback of ['next', 'classic'] as const)
       expect(look('papers', cookie, fallback)).toBe('classic');
@@ -65,8 +65,8 @@ test('a page that is not in the list is classic, chosen or not', () => {
   expect(look('sign-in', 'next', 'next', moved)).toBe('classic');
 });
 
-test('the pages being built in the new look', () => {
-  expect(STAGED).toEqual(['paper']);
+test('no page is staged now', () => {
+  expect(STAGED).toEqual([]);
 });
 
 test('a staged page is classic without UI_STAGED, whatever is chosen', () => {

@@ -62,7 +62,7 @@ export function RevisionsSection({
         A revision is the whole paper at one moment. Its ZIP and its PDF always belong together.
       </p>
       {writer && (
-        <form action={saveRevisionAction.bind(null, id)}>
+        <form action={saveRevisionAction.bind(null, id)} className="stack">
           <label>
             Name for the paper as it is now
             <input name="name" required maxLength={200} placeholder="Submitted to the workshop" />
@@ -149,7 +149,7 @@ export function RevisionsSection({
                       )
                     )}
                   </td>
-                  <td>
+                  <td className="actions">
                     {revisions[i + 1] && (
                       <Link
                         prefetch={false}
