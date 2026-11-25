@@ -1,1 +1,74 @@
-/* versions: written by the look tasks that own this area. Empty on purpose; see next.css. */
+/*
+ * Versions (PLAN.md section 14.2): the list on the history page and the switcher in the paper
+ * page's bar. Read next.css first: every selector here is prefixed with :where([data-ui='next']),
+ * and `:root` stands for that element (the <main> of the page). Each rule starts with the page's
+ * own class so it reaches no other page. The switcher itself is drawn with utility classes.
+ */
+
+/* History page: the versions come first in the left column, then the timeline. */
+:root.history .history-side {
+  display: grid;
+  align-content: start;
+  min-width: 0;
+}
+:root.history .history-versions {
+  display: grid;
+  gap: 0.5rem;
+  padding: 1.5rem 1rem 0;
+  min-width: 0;
+  color: var(--muted-foreground);
+  font-size: 0.875rem;
+}
+:root.history .history-versions h2 {
+  color: var(--foreground);
+}
+:root.history .history-versions .history-vlist {
+  display: grid;
+  gap: 0.125rem;
+}
+:root.history .history-vrow {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 0.5rem;
+  padding: 0.25rem 0;
+}
+:root.history .history-vname {
+  display: grid;
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+:root.history .history-vname > a {
+  justify-self: start;
+  font-family: var(--pw-font-serif), 'Iowan Old Style', Georgia, serif;
+  font-size: 1.125rem;
+  font-weight: 650;
+  line-height: 1.25;
+  color: var(--foreground);
+}
+:root.history .history-vname > a[aria-current='page'] {
+  text-decoration: underline;
+  text-underline-offset: 4px;
+}
+:root.history .history-vnote {
+  color: var(--muted-foreground);
+  font-size: 0.8125rem;
+}
+:root.history .history-versions > button {
+  justify-self: start;
+}
+:root.history .history-began {
+  display: flex;
+  align-items: center;
+  gap: 0.25rem;
+}
+:root.history .history-began svg {
+  width: 0.875rem;
+  height: 0.875rem;
+  flex-shrink: 0;
+}
+
+/* Paper page: the switcher sits at the right end of the bar. */
+:root.paper .paper-versions {
+  margin-left: auto;
+}
