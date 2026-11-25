@@ -90,6 +90,33 @@ Where this stands, what holds it there, and what nobody has checked yet.
   - It checks that nothing sticks out. It does not check that what is there is comfortable to
     use at that size; two of the pages were looked at by eye and read well.
 
+- **Text spacing, text size and the narrow window** (`zoom.spec`). One walk through the pages
+  (sign-in, papers, a paper with every part opened, renaming a file and the page that shows what
+  it would change, renaming a label, deleting a file, a data file, a chart, the differences
+  between revisions, the checks before submitting, the editor in both views) and every window
+  over the editor (reference, citation, equation with a long formula, footnote, figure, table
+  with a field left empty, heading, the menu at a place, edit formula), made three times:
+  - **Text spacing (WCAG 1.4.12).** Line height 1.5, a space of 2em after a paragraph, letters
+    0.12em and words 0.16em apart, on every element.
+  - **Resize text (WCAG 1.4.4).** Every piece of text twice its size, the page not zoomed.
+    Chromium has no text-only zoom and most sizes here are in pixels, so the test gives each
+    element twice its own computed size. The invisible words over the PDF are left alone.
+  - **A narrow window (WCAG 1.4.10).** 320 CSS pixels, the page not scrolling sideways, on the
+    same walk, so it now covers renaming and the insert windows too.
+  - What counts as lost: the page scrolls sideways; a box that hides what overflows it holds
+    text that does not fit; two things to press (links, buttons, fields, summaries) cover each
+    other. In an open window or menu only what is in it is compared.
+  - **Found on the app as it was: nothing.** All three pass with no change to the app. The first
+    run of the overlap check did report overlaps on the paper's page: the parts of a closed
+    "Rename" were counted though they are not drawn. That was the check's fault, and it now
+    skips what is not drawn. A test of the check itself (`the checks see what they are for`)
+    shows that a page with a cut-off box, two overlapping buttons and a too-wide line is
+    caught, and that the text is made twice as big once and not twice over.
+  - **Limits.** It looks at one window size (1280 by 720), with the spacing and the size
+    separately, not together. It does not look for text drawn over other text. The names drawn
+    beside other people's carets come from the stylesheet and are not resized. The page's
+    own spacing rules are overridden by the test's, as a user style sheet would.
+
 - **Between the text and the PDF, both ways, with the keyboard** (`synctex.spec`). From the
   text, a button shows the caret's line in the PDF. From the PDF, the pages are scrolled with
   the keyboard until the passage is in the middle of the pane, and a button goes to the text
@@ -310,9 +337,9 @@ client would. The paper was `fixtures/ieee-multifile`, a second person was invit
 - **Browsers other than Chromium.** Firefox and Safari have not been run at all.
 - **Real input methods.** The composition test drives the browser's composition events; no
   Japanese, Chinese or Korean input method has been typed with.
-- **Zoom, beyond the narrow-window test above.** Not checked: text enlarged by itself without
-  the page being zoomed, wider spacing between letters and lines, and a narrow window on the
-  pages the test does not visit (renaming a file, the windows for inserting things).
+- **Zoom, by eye.** The three checks under "Text spacing, text size and the narrow window" are
+  measured by a script. Nobody has looked at those pages with the text spaced or doubled to see
+  whether they are comfortable to use, only that nothing is lost.
 - **Formulas.** The audit checks the page's own text. A formula is drawn in the page's ink
   colour, so it should pass where the text around it does; that has not been measured.
 - **Whether a chart's colours stay apart for colour-blind readers, in people's eyes.** It was
