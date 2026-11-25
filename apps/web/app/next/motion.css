@@ -1,1 +1,111 @@
-/* motion: written by the look tasks that own this area. Empty on purpose; see next.css. */
+/*
+ * Motion in the new look (PLAN.md section 11), CSS only. Read before adding to it:
+ *  - Only `opacity`, and the individual `scale` and `translate` properties (never `transform`,
+ *    which Tailwind and the popper already use on the same elements). Nothing here changes layout,
+ *    the size of a box or where text falls, so a click or a measure made as something opens lands
+ *    where the box will stand: the rise is 4 px at most, and the kit's boxes are already in place.
+ *  - Opening only. Radix keeps an element mounted until its closing animation has ended, and
+ *    focus goes back to the trigger only when it unmounts, so a closing animation would delay
+ *    focus (and a click on what is behind). Things close at once.
+ *  - Nothing on a keystroke, a scroll or a page load. Durations are the tokens in next.css
+ *    (--pw-fast 120 ms, --pw-base 180 ms), which are 0 under prefers-reduced-motion; the block at
+ *    the end turns every animation off there as well, so the end state is what shows.
+ */
+
+@keyframes pw-fade {
+  from {
+    opacity: 0;
+  }
+}
+/*
+ * What opens is never see-through: a window, menu or tooltip arrives at full opacity and only
+ * moves into place, so its text has its full contrast from the first frame (to a reader and to
+ * axe alike). Only the shade behind a dialog fades.
+ */
+@keyframes pw-pop {
+  from {
+    scale: 0.98;
+  }
+}
+@keyframes pw-rise {
+  from {
+    translate: 0 4px;
+  }
+}
+@keyframes pw-drop {
+  from {
+    translate: 0 -4px;
+  }
+}
+/* The line shown in the PDF: its fill and edge arrive once; never fully absent. */
+@keyframes pw-mark {
+  from {
+    opacity: 0.2;
+  }
+}
+@keyframes pw-halo {
+  from {
+    opacity: 0;
+  }
+}
+
+/* Menus and tooltips: a 4 px rise away from the side they open on. */
+[data-slot='dropdown-menu-content'][data-state='open'],
+[data-slot='tooltip-content'][data-state='delayed-open'],
+[data-slot='tooltip-content'][data-state='instant-open'] {
+  animation: pw-rise var(--pw-base) var(--ease-pw) backwards;
+  transform-origin: var(--radix-dropdown-menu-content-transform-origin, center);
+}
+[data-slot='dropdown-menu-content'][data-state='open'][data-side='top'],
+[data-slot='tooltip-content'][data-side='top']:not([data-state='closed']) {
+  animation-name: pw-drop;
+}
+[data-slot='tooltip-content'][data-state='instant-open'] {
+  animation-duration: var(--pw-fast);
+}
+
+/* Dialogs: the shade fades, the window settles from 98 %. Focus is not waited for. */
+[data-slot='dialog-overlay'][data-state='open'] {
+  animation: pw-fade var(--pw-base) var(--ease-pw) backwards;
+}
+[data-slot='dialog-content'][data-state='open'] {
+  animation: pw-pop var(--pw-base) var(--ease-pw) backwards;
+}
+
+/* The small windows are native <dialog>s (Tools.tsx): the same on open. */
+dialog.tool[open] {
+  animation: pw-pop var(--pw-base) var(--ease-pw) backwards;
+}
+dialog.tool[open]::backdrop {
+  animation: pw-fade var(--pw-base) var(--ease-pw) backwards;
+}
+
+/* "Show in PDF": the band is drawn at once; its fill and edge fade in, once, over 600 ms. */
+.build .pdf-mark {
+  animation: pw-mark 600ms var(--ease-pw) backwards;
+}
+
+/*
+ * The card the review panel points at keeps its 3 px outline (it is not animated and tests read
+ * it); a soft halo beside it, the `lift` depth, fades in. A pseudo-element: it takes no room and
+ * no pointer.
+ */
+.review-card[aria-current='true']::after {
+  content: '';
+  position: absolute;
+  inset: 0;
+  border-radius: 0.5rem;
+  box-shadow: var(--shadow-lift, 0 6px 18px rgb(0 0 0 / 12%));
+  pointer-events: none;
+  animation: pw-halo var(--pw-base) var(--ease-pw) backwards;
+}
+
+/* Reduced motion: no animation runs at all (the durations above are 0 too). */
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after,
+  dialog.tool::backdrop {
+    animation: none !important;
+  }
+}
