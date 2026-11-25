@@ -254,6 +254,30 @@ What it found is fixed in the same change, or listed under "Open" with what to d
   with `symlinkSync` in a temp directory and call `readOwn` directly; builds of ordinary papers
   are unchanged.
 
+- **One writer could freeze the sync server with one paragraph.** The parser scanned to the end
+  of the paragraph for a closer, and again from each later token when it found none, so a
+  paragraph of `\cite[` repeated took 9.8 s at 32 KB (twice: the window before and after the
+  edit) and `\lstinline[` repeated never finished. The sync server runs that parse on its one
+  thread for every structural command, so everyone's edits and answers waited: a second person's
+  query on another file waited 13 s. Every look-ahead is now memoized for the length of a parse
+  with the same tree as before (checked against a copy of the old parser on every fixture and
+  on random text), and `containedNear` counts the replacement against its window cap, which it
+  did not (a 300 KB replacement was parsed). Tests failed on the old code: parser timings, the
+  `containedNear` cases and a sandbox test that asks on another file while the command runs.
+  Not covered: text nested thousands deep is still a `RangeError` (refused by `containedNear`).
+
+- **A paper's own text could stall the web server on every page load.** `labelIndex` (run for
+  every paper page), `includeGraph`, `proseEnvs`, `mathMacros` and the bibliography and caption
+  readers scanned to the end of the text for every opener that never closes and went on at the
+  next one: 140 KB of `\label{` took 14 s, about 340 KB of `\includegraphics[` 10 s, so one
+  collaborator's file made the page slow for everyone who opened it, on a thread that serves
+  others. Their look-aheads are memoized as the parser's are (`scan.ts`, an argument for each in
+  a comment) and answer exactly as before, checked against a copy of the old functions on every
+  fixture and on seeded random text. The same change ends a loop that never finished: an
+  unclosed `\cites{` hung `labelIndex` and `citeIndex` for ever. 300 KB of each hostile text is
+  now under 500 ms (the old code was measured at a smaller size and grows with its square: tens
+  of seconds at 300 KB). Not covered: see the status file.
+
 ## Open
 
 In rough order of how much they matter.

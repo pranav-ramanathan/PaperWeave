@@ -105,6 +105,28 @@ test('containedNear refuses, and does not parse, a paragraph past the cap', () =
   expect(containedNear(src, 2, 6, '\\sys{}')).toBe(false);
 });
 
+test('containedNear counts the replacement against the cap, and does not parse one past it', () => {
+  const src = 'Some words \\sys{} here.\n\nAnd more.\n';
+  const from = src.indexOf('\\sys{}');
+  // The text around the edit is tiny: only the replacement is over the cap, and it is hostile.
+  const t = performance.now();
+  expect(containedNear(src, from, 6, '\\cite['.repeat(50_000))).toBe(false);
+  expect(performance.now() - t).toBeLessThan(500);
+  // Just under the cap on its own, with the text around it, over.
+  const rep = 'x'.repeat(WINDOW_CAP - 10);
+  expect(containedNear(src, from, 6, rep)).toBe(false);
+  expect(containedNear(src, from, 6, 'x'.repeat(1000))).toBe(true);
+});
+
+test('containedNear answers a hostile paragraph beside the edit in well under a second', () => {
+  const hostile = '\\cite['.repeat(5400);
+  const src = `Before.\n\n${hostile}\n\nAfter \\sys{} here.\n`;
+  const from = src.indexOf('\\sys{}');
+  const t = performance.now();
+  expect(containedNear(src, from, 6, '\\cite{z}')).toBe(true);
+  expect(performance.now() - t).toBeLessThan(500);
+});
+
 test('containedNear starts no window at a stray \\end{document} or inside the preamble', () => {
   const lone =
     'Throughout, $x$ and ]\\\\end{document} is the length.\n\nSecond \\sys{} paragraph.\n\nThird.';

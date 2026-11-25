@@ -1,4 +1,5 @@
 // Which files a project pulls in, found without running TeX.
+import { commandMatches, finder } from './scan.ts';
 
 export type Include = {
   /**
@@ -24,8 +25,14 @@ export type Include = {
   import?: { dir: string; dirAt: number; file: string; sub: boolean };
 };
 
+// The commands that have an option and a group are read by `commandMatches` (scan.ts), written
+// here as the head and the steps of each: a regex with `(?:\[[^\]]*\])?` in it runs to the end of
+// the text for every `[` that is not closed. Each head stops where the name does (a letter after it
+// would be another command, which the regex could never match either).
+// `\input{f}`, `\includegraphics[opts]{f}`, ...: `\name*[opts]{target}`.
 const CMD =
-  /\\(input|includeonly|include|subfile|bibliography|addbibresource|includegraphics)\*?(?:\[[^\]]*\])?\s*\{([^{}]*)\}/g;
+  /\\(input|includeonly|include|subfile|bibliography|addbibresource|includegraphics)(?![a-zA-Z])\*?/g;
+const CMD_STEPS = ['[', ' ', '{'];
 // The `import` package: `\import{dir}{file}`, `\subimport{dir}{file}`, `\includefrom{dir}{file}`.
 const IMPORT =
   /\\(import|subimport|inputfrom|subinputfrom|includefrom|subincludefrom)\*?\s*\{([^{}]*)\}\s*\{([^{}]*)\}/g;
@@ -33,11 +40,13 @@ const IMPORT =
 const BARE = /\\input\s+([^\s{}%\\#]+)/g;
 // Files of the paper that packages and classes read. Each has the extension TeX adds.
 const SUPPORT_CMD =
-  /\\(usepackage|RequirePackage|documentclass|LoadClass|bibliographystyle|lstinputlisting|verbatiminput|includepdf|pgfplotstableread|csvreader|csvautotabular|includesvg)\*?(?:\[[^\]]*\])?\s*\{([^{}]*)\}/g;
+  /\\(usepackage|RequirePackage|documentclass|LoadClass|bibliographystyle|lstinputlisting|verbatiminput|includepdf|pgfplotstableread|csvreader|csvautotabular|includesvg)(?![a-zA-Z])\*?/g;
 // `\inputminted[opts]{language}{file}`: the file is the second argument.
-const MINTED = /\\inputminted\*?(?:\[[^\]]*\])?\s*\{[^{}]*\}\s*\{([^{}]*)\}/g;
+const MINTED = /\\inputminted(?![a-zA-Z])\*?/g;
+const MINTED_STEPS = ['[', ' ', '{_', ' ', '{'];
 // pgfplots: `\addplot[opts] table[opts] {file}`.
-const PLOT = /\\addplot3?[+*]?\s*(?:\[[^\]]*\])?\s*table\s*(?:\[[^\]]*\])?\s*\{([^{}]*)\}/g;
+const PLOT = /\\addplot3?[+*]?/g;
+const PLOT_STEPS = [' ', '[', ' ', 'table', ' ', '[', ' ', '{'];
 const KIND: Record<string, Include['kind']> = {
   bibliography: 'bib',
   includeonly: 'only',
@@ -70,18 +79,34 @@ const GRAPHICS = ['', '.pdf', '.png', '.jpg', '.jpeg', '.PDF', '.PNG', '.JPG', '
 
 // Comments and verbatim text are blanked, not removed, so that every offset is still an offset
 // into the source. A % is a comment unless an odd number of backslashes come before it.
-export const uncomment = (src: string) =>
-  src
-    .replace(
-      /((?:^|[^\\])(?:\\\\)*)%.*$/gm,
-      (all, before: string) => before + ' '.repeat(all.length - before.length),
-    )
-    .replace(/\\begin\{(verbatim\*?|Verbatim\*?|lstlisting|minted)\}[\s\S]*?\\end\{\1\}/g, (all) =>
-      all.replace(/[^\n]/g, ' '),
-    );
+export function uncomment(src: string): string {
+  const blanked = src.replace(
+    /((?:^|[^\\])(?:\\\\)*)%.*$/gm,
+    (all, before: string) => before + ' '.repeat(all.length - before.length),
+  );
+  // Verbatim text, blanked from its \begin to its \end. The first \end of the same name after the
+  // \begin is where the match ends (lazily), and with none after it, the \begin matches nothing
+  // and none after it does either: so the search is `find`, which answers in constant time once
+  // the last one is past (a text of `\begin{verbatim}` repeated was quadratic).
+  const find = finder(blanked);
+  let out = '';
+  let from = 0;
+  const begin = /\\begin\{(verbatim\*?|Verbatim\*?|lstlisting|minted)\}/g;
+  for (let m = begin.exec(blanked); m; m = begin.exec(blanked)) {
+    const stop = `\\end{${m[1]}}`;
+    const end = find(stop, m.index + m[0].length);
+    if (end < 0) continue;
+    out +=
+      blanked.slice(from, m.index) +
+      blanked.slice(m.index, end + stop.length).replace(/[^\n]/g, ' ');
+    from = begin.lastIndex = end + stop.length;
+  }
+  return from ? out + blanked.slice(from) : blanked;
+}
 
 export function includes(src: string): Include[] {
   const live = uncomment(src);
+  const find = finder(live);
   const out: Include[] = [];
   /** `list` is the text between the braces; `at` is where it starts. */
   const add = (command: string, at: number, list: string, partAt: number, split: boolean) => {
@@ -110,10 +135,10 @@ export function includes(src: string): Include[] {
   // The target is the last group, and has no braces inside it.
   const braced = (m: RegExpExecArray, command: string) =>
     add(command, m.index, m[m.length - 1], m.index + m[0].lastIndexOf('{') + 1, LISTS.has(command));
-  for (const m of live.matchAll(CMD)) braced(m, m[1]);
-  for (const m of live.matchAll(SUPPORT_CMD)) braced(m, m[1]);
-  for (const m of live.matchAll(MINTED)) braced(m, 'verbatiminput');
-  for (const m of live.matchAll(PLOT)) braced(m, 'verbatiminput');
+  for (const m of commandMatches(live, CMD, CMD_STEPS, find)) braced(m, m[1]);
+  for (const m of commandMatches(live, SUPPORT_CMD, CMD_STEPS, find)) braced(m, m[1]);
+  for (const m of commandMatches(live, MINTED, MINTED_STEPS, find)) braced(m, 'verbatiminput');
+  for (const m of commandMatches(live, PLOT, PLOT_STEPS, find)) braced(m, 'verbatiminput');
   for (const m of live.matchAll(IMPORT)) {
     // `target` is the two groups joined, as written. `includeGraph` reads the folder in force
     // from `import.dir`; `nameSplices` reads `target`.

@@ -1,5 +1,6 @@
 // Labels and the references to them: where they are in the source, and what number LaTeX gave
 // each label in a compiled build.
+import { type Find, finder, groupEnds } from './scan.ts';
 
 /** A `\label{key}`. Offsets are into the source text; `keyAt` is where the key itself starts. */
 export type LabelDef = { key: string; at: number; end: number; keyAt: number };
@@ -39,25 +40,73 @@ const VERBATIM = /^\\begin\{(verbatim\*?|lstlisting|minted|Verbatim|comment)\}/;
 
 /** Commands whose first brace group is an address, written as it is. */
 const VERBATIM_ARG = new Set(['url', 'nolinkurl', 'path', 'href']);
-/** Index after the `{...}` group at `at`, braces balanced and nothing else special; 0 if unclosed. */
-function verbatimGroup(src: string, at: number): number {
-  let depth = 0;
-  for (let i = at; i < src.length; i++) {
-    if (src[i] === '{') depth++;
-    else if (src[i] === '}' && --depth === 0) return i + 1;
-  }
-  return 0;
+/**
+ * Index after the `{...}` group at `at` (a `{`), braces balanced and nothing else special; 0 if
+ * unclosed. `groupEnd` is `groupEnds` with no escapes: a group that never closes is paid for once.
+ */
+function verbatimGroup(groupEnd: (at: number) => number, at: number): number {
+  return Math.max(0, groupEnd(at));
 }
 
 /** One key in the braces of a command: `\\ref{key}`, or one of several in `\\cite{a, b}`. */
 type Use = { key: string; command: string; at: number; end: number; keyAt: number };
 
+/** A walk that records every place it stood on only once it is longer than this many steps. */
+const SHORT = 24;
+
+/**
+ * Where the key list that opens at `open` (a `{`) closes: the index of its `}`, or -1.
+ *
+ * Memo, exact: the walk takes the same steps wherever it begins (a `%` to the end of its line, a
+ * backslash and the character after it, or one character) and carries nothing from one step to
+ * the next, so the answer from a position is the same whichever walk stood there. Every walk
+ * records its start with its own answer and, when longer than SHORT steps, every position it stood
+ * on; a later walk that stands on one stops there. A `}` in a comment or after a backslash is
+ * skipped by the same steps as before, so it does not count now either.
+ */
+function keyListEnds(src: string, find: Find): (open: number) => number {
+  const n = src.length;
+  const memo = new Map<number, number>();
+  return (open) => {
+    let k = open + 1;
+    let steps = 0;
+    let trail: number[] | undefined;
+    let r = -1;
+    while (k < n) {
+      const m = memo.get(k);
+      if (m !== undefined) {
+        r = m;
+        break;
+      }
+      if (++steps > SHORT) (trail ??= []).push(k);
+      const c = src[k];
+      if (c === '}') {
+        r = k;
+        break;
+      }
+      if (c === '%') {
+        const nl = find('\n', k);
+        k = nl < 0 ? n : nl + 1;
+      } else k += c === '\\' ? 2 : 1;
+    }
+    memo.set(open + 1, r);
+    if (trail) for (const p of trail) memo.set(p, r);
+    return r;
+  };
+}
+
 /**
  * The key list that opens at `open` (a `{`): where its `}` is, and its text with each comment
  * blanked to spaces, so offsets in it are offsets in the source. A `}` in a comment does not
- * close it. Null if it never closes.
+ * close it. Null if it never closes. `ends` is `keyListEnds`: a list that never closes is paid
+ * for once, and the text is built only for one that does (it is then read, and not again).
  */
-function keyList(src: string, open: number): { close: number; body: string } | null {
+function keyList(
+  src: string,
+  open: number,
+  ends: (open: number) => number,
+): { close: number; body: string } | null {
+  if (ends(open) < 0) return null;
   let body = '';
   for (let i = open + 1; i < src.length; i++) {
     const c = src[i];
@@ -84,7 +133,10 @@ function keyList(src: string, open: number): { close: number; body: string } | n
 function listingLabel(
   src: string,
   open: number,
+  look: { find: Find; groupEnd: (at: number) => number },
 ): { key?: string; keyAt: number; close: number } | null {
+  // The options end at a `]`; with none in the text after the `[` they never end.
+  if (look.find(']', open + 1) < 0) return null;
   let depth = 0;
   let close = -1;
   const items: { from: number; to: number }[] = [];
@@ -116,7 +168,7 @@ function listingLabel(
     let valueAt = a + head[0].length;
     let value = text.slice(head[0].length);
     if (value.startsWith('{')) {
-      const end = verbatimGroup(src, valueAt);
+      const end = verbatimGroup(look.groupEnd, valueAt);
       if (!end || end > b) {
         found = null;
         continue;
@@ -140,6 +192,11 @@ function listingLabel(
  */
 function keyUses(src: string, wanted: (command: string) => boolean): Use[] {
   const out: Use[] = [];
+  // Every look-ahead below is a pure function of `src`, so one that failed is not paid for by the
+  // next opener: see `finder`, `groupEnds` and `keyListEnds` for why each is exact.
+  const find = finder(src);
+  const look = { find, groupEnd: groupEnds(src, { escapes: false }) };
+  const listEnds = keyListEnds(src, find);
   /** After spaces, and one line break if no blank line follows it: where TeX looks next. */
   const skipWs = (k: number) => {
     while (src[k] === ' ' || src[k] === '\t') k++;
@@ -163,7 +220,7 @@ function keyUses(src: string, wanted: (command: string) => boolean): Use[] {
       if (verbatim[1] === 'lstlisting' && wanted('label')) {
         let o = i + verbatim[0].length;
         while (src[o] === ' ' || src[o] === '\t') o++;
-        const opts = src[o] === '[' ? listingLabel(src, o) : null;
+        const opts = src[o] === '[' ? listingLabel(src, o, look) : null;
         if (opts && opts.key !== undefined)
           out.push({
             key: opts.key,
@@ -173,7 +230,7 @@ function keyUses(src: string, wanted: (command: string) => boolean): Use[] {
             keyAt: opts.keyAt,
           });
       }
-      const close = src.indexOf(`\\end{${verbatim[1]}}`, i);
+      const close = find(`\\end{${verbatim[1]}}`, i);
       i = close < 0 ? src.length : close;
       continue;
     }
@@ -185,29 +242,30 @@ function keyUses(src: string, wanted: (command: string) => boolean): Use[] {
     }
     let p = i + name[0].length;
     if (name[1] === 'verb') {
-      const close = src.indexOf(src[p], p + 1);
+      // (At the end of the text `src[p]` is undefined, and indexOf looks for "undefined".)
+      const close = find(String(src[p]), p + 1);
       i = close < 0 ? src.length : close;
       continue;
     }
     if (name[1] === 'lstinline' || name[1] === 'mintinline') {
       // \lstinline[opts]|code|, \lstinline{code}, \mintinline{lang}|code|: no comments, no keys.
-      if (src[p] === '[') p = src.indexOf(']', p) + 1 || src.length;
-      if (name[1] === 'mintinline' && src[p] === '{') p = src.indexOf('}', p) + 1 || src.length;
+      if (src[p] === '[') p = find(']', p) + 1 || src.length;
+      if (name[1] === 'mintinline' && src[p] === '{') p = find('}', p) + 1 || src.length;
       const open = src[p];
       if (open === '{') {
-        i = (verbatimGroup(src, p) || src.length) - 1;
+        i = (verbatimGroup(look.groupEnd, p) || src.length) - 1;
         continue;
       }
       if (open !== undefined && !/[\s\w]/.test(open)) {
-        const close = src.indexOf(open, p + 1);
-        const nl = src.indexOf('\n', p);
+        const close = find(open, p + 1);
+        const nl = find('\n', p);
         i = close >= 0 && (nl < 0 || close < nl) ? close : (nl < 0 ? src.length : nl) - 1;
         continue;
       }
     }
     if (VERBATIM_ARG.has(name[1]) && src[p] === '{') {
       // The address of \url{..} or \href{..}{..} is taken as it is: a % in it is no comment.
-      const end = verbatimGroup(src, p);
+      const end = verbatimGroup(look.groupEnd, p);
       if (end) {
         i = end - 1;
         continue;
@@ -215,7 +273,7 @@ function keyUses(src: string, wanted: (command: string) => boolean): Use[] {
     }
     if (name[1] === 'lstinputlisting' && wanted('label')) {
       const o = skipWs(p);
-      const opts = src[o] === '[' ? listingLabel(src, o) : null;
+      const opts = src[o] === '[' ? listingLabel(src, o, look) : null;
       if (opts) {
         if (opts.key !== undefined)
           out.push({
@@ -236,7 +294,7 @@ function keyUses(src: string, wanted: (command: string) => boolean): Use[] {
     if (name[1] === 'hyperref') {
       // \\hyperref[key]{text}: the key is the optional argument. \\hyperref{url}{..}{..}{text} names none.
       p = skipWs(p);
-      const close = src[p] === '[' ? src.indexOf(']', p) : -1;
+      const close = src[p] === '[' ? find(']', p) : -1;
       if (close > 0) {
         const key = src.slice(p + 1, close).trim();
         if (key && !/[#\\{,]/.test(key))
@@ -256,20 +314,21 @@ function keyUses(src: string, wanted: (command: string) => boolean): Use[] {
     const multi = MULTICITES.has(name[1]);
     const cite = CITES.has(name[1]);
     for (let unit = 0; unit === 0 || multi; unit++) {
+      const before = p;
       let u = p;
       if (multi && unit === 0)
         for (;;) {
           u = skipWs(u);
-          const close = src[u] === '(' ? src.indexOf(')', u) : -1;
+          const close = src[u] === '(' ? find(')', u) : -1;
           if (close < 0) break;
           u = close + 1;
         }
       u = skipWs(u);
-      if (cite && src[u] === '<' && src.indexOf('>', u) > 0) u = src.indexOf('>', u) + 1;
+      if (cite && src[u] === '<' && find('>', u) > 0) u = find('>', u) + 1;
       for (;;) {
         u = skipWs(u);
         if (src[u] !== '[') break;
-        u = src.indexOf(']', u) + 1 || src.length;
+        u = find(']', u) + 1 || src.length;
       }
       // A later unit that is not a whole `[..]{..}` is not part of the citation.
       if (unit > 0 && src[u] !== '{') break;
@@ -277,7 +336,7 @@ function keyUses(src: string, wanted: (command: string) => boolean): Use[] {
       for (let group = 0; group < (name[1].endsWith('range') ? 2 : 1); group++) {
         if (group > 0) u = skipWs(u);
         if (src[u] !== '{') break;
-        const list = keyList(src, u);
+        const list = keyList(src, u, listEnds);
         if (!list) break;
         const { close } = list;
         let keyAt = u + 1;
@@ -291,6 +350,9 @@ function keyUses(src: string, wanted: (command: string) => boolean): Use[] {
         u = close + 1;
       }
       p = u;
+      // A later unit that stands where the one before did asks the same again, for ever: an
+      // unclosed `\cites{` hung this loop. It adds nothing, so it ends here.
+      if (unit > 0 && u === before) break;
     }
     i = p - 1;
   }

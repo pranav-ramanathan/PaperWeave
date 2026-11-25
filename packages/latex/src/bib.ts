@@ -1,5 +1,6 @@
 // A reading of a BibTeX file: its entries, by key, and where each is. The file is never
 // rewritten from this: it is an index, and the bytes stay as their author left them.
+import { commandMatches, finder } from './scan.ts';
 
 export type BibEntry = {
   key: string;
@@ -252,14 +253,23 @@ export function bibItems(src: string): BibItem[] {
   );
   const out: BibItem[] = [];
   const ENV = /\\begin\{thebibliography\}/g;
+  const find = finder(clean);
   for (let env = ENV.exec(clean); env; env = ENV.exec(clean)) {
-    const close = clean.indexOf('\\end{thebibliography}', env.index);
+    const close = find('\\end{thebibliography}', env.index);
     const stop = close < 0 ? clean.length : close;
-    const body = clean.slice(0, stop);
-    const ITEM = /\\bibitem\s*(?:\[[^\]]*\]\s*)?\{([^{}]*)\}/g;
-    ITEM.lastIndex = env.index;
     const found: { key: string; at: number; end: number }[] = [];
-    for (let m = ITEM.exec(body); m; m = ITEM.exec(body))
+    // The items are searched for in `clean` up to `stop`: what `commandMatches` keeps is a match
+    // that ends by `stop`, which is the match the same regex finds in `clean.slice(0, stop)` (it
+    // takes the same steps, and one that needs text past `stop` fails there). An option that
+    // never closes is found out once, by `find`, not once per `\bibitem[`.
+    for (const m of commandMatches(
+      clean,
+      /\\bibitem/g,
+      [' ', '[', ' ', '{'],
+      find,
+      env.index,
+      stop,
+    ))
       if (m[1].trim()) found.push({ key: m[1].trim(), at: m.index, end: m.index + m[0].length });
     found.forEach((item, n) =>
       out.push({
@@ -285,12 +295,33 @@ export function bibItems(src: string): BibItem[] {
 export function bblEntries(text: string): BibItem[] {
   const out: BibItem[] = [...bibItems(text)];
   const ENTRY = /\\entry\{([^{}]+)\}\{[^{}]*\}/g;
+  const find = finder(text);
+  /**
+   * The first `\field{title}{` at or after `q` in the whole text, remembered: no match starts in
+   * [from, at), so the first from any q in [from, at] is the one at `at`, and none from `from` is
+   * none from any q after it. An entry's own text ends before its `\endentry`, and a match of this
+   * pattern cannot reach over one (it has only white space between its `}` and `{`, and an
+   * `\endentry` starts with a backslash), so the first match in the entry is this one when it
+   * starts in the entry, and there is none when it starts after.
+   */
+  const TITLE = /\\field\{title\}\s*\{/g;
+  let titleFrom = -1;
+  let titleHit: { index: number; length: number } | null = null;
+  const nextTitle = (q: number) => {
+    if (titleFrom >= 0 && q >= titleFrom && (!titleHit || q <= titleHit.index)) return titleHit;
+    TITLE.lastIndex = q;
+    const t = TITLE.exec(text);
+    titleFrom = q;
+    titleHit = t ? { index: t.index, length: t[0].length } : null;
+    return titleHit;
+  };
   for (let m = ENTRY.exec(text); m; m = ENTRY.exec(text)) {
     const from = m.index + m[0].length;
-    const stop = text.indexOf('\\endentry', from);
+    const stop = find('\\endentry', from);
     const body = text.slice(from, stop < 0 ? text.length : stop);
-    const title = /\\field\{title\}\s*\{/.exec(body);
-    const open = title ? title.index + title[0].length - 1 : -1;
+    const found = nextTitle(from);
+    const title = found && found.index < from + body.length ? found : null;
+    const open = title ? title.index - from + title.length - 1 : -1;
     out.push({
       key: m[1].trim(),
       text: title

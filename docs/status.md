@@ -7385,3 +7385,98 @@ restores of a large paper got round it (`docs/security-review.md`, Open 1).
 - **Held by** a case in `csv.test.ts` (a line of `MAX_COLUMNS * 100` commas, as the first line
   and as a later one, under 250 ms; 500 columns is still allowed). On the old code the later-row
   half failed; the first-line half passed there too at that size, which is only 50 KB.
+
+### One writer could freeze the sync server with one paragraph
+
+- **A fault found.** `parse` (`packages/latex/src/parse.ts`) scanned forward to the end of the
+  paragraph for a closer (`bracket`, `group`, `rawGroup`, `mathEnd`, `findEnd`, `codeEnd`,
+  `citeUnit`, `limit`) and, when it found none, went on one token later and scanned the same text
+  again. A paragraph of `\cite[` repeated: 16 KB 2.3 s, 32 KB 9.8 s, 64 KB 38.9 s, 300 KB 581 s,
+  and `\lstinline[` repeated never finished (a bracket scan that ran a bracket scan: exponential).
+  The sync server runs `containedNear` on one thread for every structural command, so one writer
+  froze everyone: with a 32 KB hostile paragraph the server did not run for 13 s and a second
+  person's saved-query on another file waited 13.3 s. The web server's import and the browser
+  editor run the same parser.
+- **Now.** Each look-ahead is memoized for the length of one `parseInto`, and the tree is the
+  same. No work meter was needed: every helper is exact under a memo, and each memo has its
+  argument in a comment in `parse.ts`. Which helper got which:
+  - `bracket`: a walk has no state but its position, so every position a long walk stood on, and
+    its start, is recorded with the walk's answer (path memo). A `]` inside a braced group, a
+    comment or a verbatim argument is skipped by the same steps as before.
+  - `group`, `rawGroup` (as `rawEnd`), `findEnd` (a table per environment name) and the new
+    `mathGroup`: a walk carries only its depth, so every nested opener it passes is the start of a
+    walk of its own; each is recorded as it closes, a later walk jumps over a known one or fails
+    with it, and at a stop every open one fails (stack memo). `rawGroup`'s `lim` only cuts a walk
+    short, so it is applied to the memoized end.
+  - `mathEnd`: the first pass (braces counted) is memoized at its start and at the depth-0
+    positions it stood on, a closed brace group is skipped by `mathGroup`, and the second pass
+    (braces as characters) is `firstClose`, a path memo with one table for each closer. Only an
+    unclosed brace needs the second pass.
+  - `codeEnd`, `citeUnit` and the `$$`, `\[` and verbatim-end searches in `block`: `find`
+    remembers the last `indexOf` answer for each needle (valid for every start up to the answer,
+    and any start after a -1); `citeUnit`'s blank-line test uses the same for the regex.
+  - `limit`: the next heading and the next blank line are remembered the same way (`searcher`).
+    `eol`/`lineEnd` too, since one huge line was scanned again by each backslash on it.
+- **Also.** `containedNear` counted the text around the edit against `WINDOW_CAP` but not the
+  replacement (up to 1 MB); it does now, and returns `false` on a `RangeError` (text nested past
+  the stack) as it does for a window past the cap.
+- **Held by** `parse.differential.test.ts` (every fixture, 4000 random token strings, 1000 many-of-
+  one-opener strings and 100 sequences of 30 edits through `reparse`, each compared with
+  `parse.reference.ts`, the old parser copied unchanged; the seed is in the failure message;
+  200 000 seeds also pass; a deliberate off-by-one in `rawGroup` is caught at seed 871),
+  `parse.perf.test.ts` (14 hostile texts and one hostile paragraph in a document, each under 500 ms or 1 s; the old parser took 0.5 to 17 s on
+  each of them or never finished), two cases in `contained.test.ts` (a 300 KB replacement is
+  refused, a 32 KB hostile paragraph beside the edit is answered under 500 ms) and the sandbox
+  test in `sync.sandbox.test.ts` (a second client's question on another file is answered under
+  2 s while a writer's command works on a 32 KB hostile paragraph; old code: 13 262 ms). The
+  existing parser, bridge and fuzz tests pass unchanged.
+- **Not done:** the parser still recurses: `\emph{` or `\lstinline[` nested about 5000 deep is a
+  `RangeError` (the callers that matter, `containedNear`, refuse it). The indexes in the same
+  package had the same pattern; they are fixed in the next section.
+
+### The label, include, macro and bibliography indexes were quadratic too
+
+- **A fault found.** The same pattern as the parser's, in the functions that read a paper's
+  commands: each scanned to the end of the text for an opener that never closes (`{`, `[`, a
+  `\begin{verbatim}` with no `\end`) and began again at the next one. `labelIndex` runs on every
+  paper page load (`apps/web/app/projects/[id]/page.tsx`, via `labelReport`): 140 KB of `\label{`
+  took 14 s, and 20 KB 253 ms. `includes` (so `includeGraph`, `proseEnvs`, `mathMacros`,
+  `textMacros`, `reachesClass`, `projectGraphicsPaths`) did it in its regexes
+  (`\[[^\]]*\]` for every `\includegraphics[`, and `[\s\S]*?` for every `\begin{verbatim}` in
+  `uncomment`); `definitions` in its `group`. Found by grepping the package for the same
+  pattern: `citeIndex` (the same `keyUses`), `bibItems`, `bblEntries`, `declaredSpelling` and the
+  caption, picture and table reading in `floats.ts` had it too, and are fixed.
+- **Now.** `scan.ts` holds the memos, each with its argument for being exact in a comment:
+  `finder` (the last `indexOf` answer for each needle, valid for every start up to the answer and
+  every start after a -1), `groupEnds` (a stack memo for a brace, bracket or parenthesis group:
+  every group a walk passes is recorded as it closes, a later walk jumps over a known one or
+  fails with it, at the end of the text every open one fails) and `commandMatches` (a command and
+  what follows it, read step by step, with `finder` for the `]` of an option: the regexes it
+  replaces are deterministic at each place, so it finds the same matches). `keyListEnds` in
+  `labels.ts` is a path memo (the `}` that ends a key list, recorded at every position a long
+  walk stood on). Output is the same: the old functions are kept in `indexes.reference.ts`.
+- **Timings** (the old code at 20 KB, times 225 for 300 KB, as it is quadratic; the new at
+  300 KB): `labelIndex` on `\label{` 253 ms, about 57 s, now 59 ms; on `\url{` about 47 s, 31 ms;
+  on `\lstinputlisting[` about 17 s, 11 ms; `citeIndex` on `\cite{` about 58 s, 55 ms;
+  `includeGraph` on `\includegraphics[` about 7.9 s, 22 ms; `proseEnvs` on the same about 12 s,
+  20 ms; `mathMacros` on `\newcommand{\a}{` about 12 s, 24 ms; `bibItems` about 2.3 s, 2 ms;
+  `bblEntries` about 3.2 s, 11 ms; `declaredSpelling` about 9 s, 8 ms; `argumentsOf` on
+  `\caption{` about 22 s, 23 ms; `floatParts` on `\includegraphics[` about 17 s, 11 ms.
+- **Also.** An unclosed `\cites{` (or any multicite command with a brace group that never
+  closes) made `keyUses` loop for ever: the second round asked the same of the same place. It
+  ends now when a round makes no progress; every text that ended before gives the same answer.
+  The reference copy has the same two lines, or it could not be run on such text.
+- **Held by** `indexes.differential.test.ts` (every fixture, and 3000 seeded random texts for
+  each of `labelIndex`, `citeIndex`, `includes`, `bibItems`, `bblEntries`, `declaredSpelling`,
+  `floatParts`, `argumentsOf`, and 3000 random projects for each of `includeGraph`, `proseEnvs`,
+  `mathMacros`, `textMacros`, compared with deep equality against `indexes.reference.ts`; the seed
+  is in the failure message; the memos of `scan.ts` are also asked in random order against the
+  plain scans) and `indexes.perf.test.ts` (a hostile text of 300 KB for each function, under
+  500 ms).
+- **Not done:** `listingLabel` (a `\lstinputlisting[` or `\begin{lstlisting}[` whose options have
+  an unbalanced brace before a `]` that is far off) still scans to that `]` for each such opener;
+  an option with no `]` at all is answered at once. `floatParts` still reads the options of each
+  `\includegraphics[` for `alt=` as text of their own, so `\includegraphics[` repeated N times
+  and closed N times, nested, is quadratic. `marks` and `skip` in `floats.ts` (what a typed cell
+  may hold) take text a person types and were left. The same regexes in other packages
+  (`packages/server`) were not looked at.

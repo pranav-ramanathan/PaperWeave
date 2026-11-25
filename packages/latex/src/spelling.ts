@@ -7,6 +7,7 @@
 // grammar-benchmark.sandbox.test.ts puts a sample to the checker each time.
 import { prose } from './prose.ts';
 import { DEFAULT_TRANSPARENT } from './parse.ts';
+import { commandMatches, finder } from './scan.ts';
 
 export type Spelling = 'en-GB' | 'en-US';
 
@@ -69,8 +70,11 @@ const DECLARED: Record<string, Spelling> = {
   australian: 'en-GB',
   newzealand: 'en-GB',
 };
+// `\usepackage[options]{name}`: read by `commandMatches` (scan.ts), as a regex with `\[[^\]]*\]` in
+// it runs to the end of the text for every `[` that is not closed.
 const OPTIONS =
-  /\\(?:usepackage|RequirePackage|documentclass|PassOptionsToPackage|setdefaultlanguage|setmainlanguage)\s*\[([^\]]*)\]\s*\{([^{}]*)\}/g;
+  /\\(?:usepackage|RequirePackage|documentclass|PassOptionsToPackage|setdefaultlanguage|setmainlanguage)/g;
+const OPTION_STEPS = [' ', '[]', ' ', '{'];
 
 /**
  * What a preamble (comments taken out) asks for: an option of babel, of the class (babel reads
@@ -79,7 +83,7 @@ const OPTIONS =
  */
 export function declaredSpelling(preamble: string): Spelling | null {
   let found: Spelling | null = null;
-  for (const m of preamble.matchAll(OPTIONS)) {
+  for (const m of commandMatches(preamble, OPTIONS, OPTION_STEPS, finder(preamble))) {
     if (!/^\\(?:documentclass|set)/.test(m[0]) && !/\bbabel\b/.test(m[2])) continue;
     const options = m[1].split(',').map((o) => o.trim().toLowerCase());
     const main = options.find((o) => /^(?:main|variant)\s*=/.test(o));

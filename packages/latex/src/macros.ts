@@ -4,18 +4,7 @@
 // those words, in the editor and for the grammar checker.
 import { importBase, includes, resolveInclude, rootDir, uncomment } from './graph.ts';
 import { LIGATURES } from './bib.ts';
-
-/** The `{...}` group at `at`, braces balanced: its inside, and where it ends. */
-function group(text: string, at: number): { body: string; end: number } | null {
-  if (text[at] !== '{') return null;
-  let depth = 0;
-  for (let i = at; i < text.length; i++) {
-    if (text[i] === '\\') i++;
-    else if (text[i] === '{') depth++;
-    else if (text[i] === '}' && --depth === 0) return { body: text.slice(at + 1, i), end: i + 1 };
-  }
-  return null;
-}
+import { finder, groupEnds } from './scan.ts';
 
 export type Definition = {
   /** The name, with its backslash. */
@@ -37,6 +26,15 @@ function definitions(src: string): Definition[] {
     (all, before: string) => before + ' '.repeat(all.length - before.length),
   );
   const out: Definition[] = [];
+  // A group or option that never closes is paid for once, however many definitions open one (see
+  // `groupEnds` and `finder` in scan.ts for why each answer is the one the plain scan gives).
+  const find = finder(text);
+  const groupEnd = groupEnds(text, { escapes: true });
+  const group = (t: string, at: number) => {
+    if (t[at] !== '{') return null;
+    const end = groupEnd(at);
+    return end < 0 ? null : { body: t.slice(at + 1, end - 1), end };
+  };
   const COMMAND = /\\(newcommand|renewcommand|providecommand|DeclareMathOperator|def)(\*?)\s*/g;
   for (const m of text.matchAll(COMMAND)) {
     let at = m.index + m[0].length;
@@ -72,7 +70,7 @@ function definitions(src: string): Definition[] {
     // [n] says how many arguments; a second [..] gives the first a default.
     let params = 0;
     if (text[at] === '[') {
-      const close = text.indexOf(']', at);
+      const close = find(']', at);
       params = close < 0 ? NaN : Number(text.slice(at + 1, close));
       at = close + 1 || text.length;
     }

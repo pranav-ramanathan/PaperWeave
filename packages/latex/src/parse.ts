@@ -285,11 +285,67 @@ function parseInto(
     while (isW(src[i])) i++;
     return i;
   };
+  // Every scan below is a pure function of `src` and its arguments, so a repeated look-ahead can
+  // be answered from an earlier one. Each memo carries the argument for why it is exact; the
+  // result is always the one the unmemoized scan would give, only found without scanning again.
+  //
+  // A scan shorter than this is not recorded: recording it would cost more than it saves, and
+  // text that is not hostile never has a longer one.
+  const SHORT = 24;
+  /**
+   * Memo of the last newline search. The newline found at `at` for a search from `from` is the
+   * first one at or after every position in [from, at], so those positions have the same answer.
+   * With no newline, `at` is n, and every position from `from` on has no newline either.
+   */
+  let eolFrom = 0;
+  let eolAt = -1;
+  /** Index of the newline ending the line at i, or n. */
+  const eol = (i: number) => {
+    if (i >= eolFrom && i <= eolAt) return eolAt;
+    const j = src.indexOf('\n', i);
+    eolFrom = i;
+    eolAt = j < 0 ? n : j;
+    return eolAt;
+  };
   /** Index after the newline ending the line at i, or n. */
   const lineEnd = (i: number) => {
-    const j = src.indexOf('\n', i);
-    return j < 0 ? n : j + 1;
+    const j = eol(i);
+    return j < n ? j + 1 : n;
   };
+  /**
+   * `src.indexOf(needle, from)`, remembering the last answer for each needle. By the argument for
+   * `eol`: the first occurrence at or after `from` is also the first at or after any position in
+   * [from, answer], and an answer of -1 holds for every later start.
+   */
+  const found = new Map<string, [number, number]>();
+  const find = (needle: string, from: number) => {
+    const c = found.get(needle);
+    if (c && from >= c[0] && (c[1] < 0 || from <= c[1])) return c[1];
+    const at = src.indexOf(needle, from);
+    found.set(needle, [from, at]);
+    return at;
+  };
+  /**
+   * The first match of the global regex `re` that starts at or after q, with the same memo (one per
+   * searcher): no match starts in [from, at), so the leftmost one from any q in [from, at] is the
+   * one at `at`, of the same length because neither pattern looks behind itself. No match from
+   * `from` is none from any q after it.
+   */
+  const searcher = (re: RegExp) => {
+    let from = -1;
+    let hit: { at: number; end: number } | null = null;
+    return (q: number) => {
+      if (from >= 0 && q >= from && (!hit || q <= hit.at)) return hit;
+      re.lastIndex = q;
+      const m = re.exec(src);
+      from = q;
+      hit = m ? { at: m.index, end: m.index + m[0].length } : null;
+      return hit;
+    };
+  };
+  const nextHard = searcher(HARD);
+  const nextBreak = searcher(BRK);
+  const nextBreakCite = searcher(BRK);
   /** A whitespace run [i, j) holds a blank line, which ends a paragraph. */
   const isBreak = (i: number, j: number) => {
     let nl = 0;
@@ -301,39 +357,62 @@ function parseInto(
     while (isS(src[k])) k++;
     return src[k] === '\n';
   };
-  /** Index of the newline ending the line at i, or n. */
-  const eol = (i: number) => {
-    const j = src.indexOf('\n', i);
-    return j < 0 ? n : j;
-  };
   /** A heading or the end of the document: no inline construct may reach across one. */
   const hardAt = (i: number) =>
     src.slice(i + 1, word(i)) in HEAD || src.startsWith('\\end{document}', i);
   /** Where damage that starts at i must stop: the next blank line or hard boundary. */
   const limit = (i: number, scope: 'para' | 'hard') => {
     let end = n;
-    HARD.lastIndex = i + 1;
-    const h = HARD.exec(src);
-    if (h) end = h.index;
+    const h = nextHard(i + 1);
+    if (h) end = h.at;
     if (scope === 'para') {
-      BRK.lastIndex = i;
-      const b = BRK.exec(src);
-      if (b && b.index < end) end = b.index;
+      const b = nextBreak(i);
+      if (b && b.at < end) end = b.at;
     }
     return end;
   };
   /**
+   * Where the brace group opening at i ends when it is taken as it is (no comments) and stops only
+   * at a blank line or the end of the text: the index after its closing brace, or -1.
+   *
+   * Memo, exact: this walks every character, so what follows a `{` is the same whichever brace
+   * began the walk. The walk from i therefore passes every `{` inside its group as a start of its
+   * own, and a group that is closed by the time the walk reaches its `}` has that `}` as its end.
+   * Each one is recorded as it closes, and when a walk reaches one already known it jumps to its
+   * end (the depth is the same on both sides) or, if it is known to fail, fails too: the blank line
+   * or the end of the text that stopped the inner walk stops the outer one as well. At a stop,
+   * every group still open fails.
+   */
+  const rawEnds = new Map<number, number>();
+  const rawEnd = (i: number) => {
+    const known = rawEnds.get(i);
+    if (known !== undefined) return known;
+    const open = [i];
+    for (let j = i + 1; j < n;) {
+      const c = src[j];
+      if (c === '{') {
+        const m = rawEnds.get(j);
+        if (m === undefined) open.push(j++);
+        else if (m < 0) break;
+        else j = m;
+      } else if (c === '}') {
+        rawEnds.set(open.pop()!, ++j);
+        if (!open.length) return j;
+      } else if (c === '\n' && blankAt(j)) break;
+      else j++;
+    }
+    for (const o of open) rawEnds.set(o, -1);
+    return -1;
+  };
+  /**
    * Index after the brace group opening at i, taken as it is (no comments), or -1. It does not
    * cross a blank line or `lim`, so what it decides never depends on text far past where it is.
+   * `lim` only cuts a walk short: the first closing brace it would reach is the one `rawEnd`
+   * finds, so the group fits in `lim` exactly when that brace is before it.
    */
   const rawGroup = (i: number, lim = n) => {
-    let d = 0;
-    for (let j = i; j < lim; j++) {
-      if (src[j] === '{') d++;
-      else if (src[j] === '}' && --d === 0) return j + 1;
-      else if (src[j] === '\n' && blankAt(j)) return -1;
-    }
-    return -1;
+    const e = rawEnd(i);
+    return e >= 0 && e <= lim ? e : -1;
   };
   /**
    * Index after the argument of \verb, \lstinline or \mintinline whose name ends at j: written
@@ -360,7 +439,7 @@ function parseInto(
     }
     const nl = eol(k);
     const w = cpLen(src, k);
-    const close = k < n ? src.indexOf(src.slice(k, k + w), k + w) : -1;
+    const close = k < n ? find(src.slice(k, k + w), k + w) : -1;
     return close >= 0 && close < nl ? close + w : nl;
   };
   /** End of the control sequence at i, with the verbatim argument of one that has such. */
@@ -377,64 +456,219 @@ function parseInto(
     }
     return j;
   };
-  /** Index after the brace group opening at i, or -1. */
+  /**
+   * Index after the brace group opening at i, or -1.
+   *
+   * Memo, exact: the walk takes the same steps (a command with its verbatim argument, a comment,
+   * a character) wherever it begins, and nothing but the depth carries over from one step to the
+   * next. So the walk from i passes every `{` inside its group as the start of a walk of its own,
+   * and a group that is closed by the time the walk reaches its `}` has that `}` as its end. Each
+   * is recorded as it closes. A walk that reaches a `{` already known jumps to its end (the depth
+   * is the same on both sides) or, if that group is known never to close, never closes either,
+   * since it would first have to close that one. At the end of the text every group still open
+   * fails, and the walk stops at no other place, so those are all the failures.
+   */
+  const groupEnds = new Map<number, number>();
   const group = (i: number) => {
-    let d = 0;
-    let j = i;
-    while (j < n) {
+    const known = groupEnds.get(i);
+    if (known !== undefined) return known;
+    const open = [i];
+    for (let j = i + 1; j < n;) {
       const c = src[j];
       if (c === '\\') j = cmdEnd(j);
       else if (c === '%') j = lineEnd(j);
-      else {
-        if (c === '{') d++;
-        else if (c === '}' && --d === 0) return j + 1;
-        j++;
-      }
+      else if (c === '{') {
+        const m = groupEnds.get(j);
+        if (m === undefined) open.push(j++);
+        else if (m < 0) break;
+        else j = m;
+      } else if (c === '}') {
+        groupEnds.set(open.pop()!, ++j);
+        if (!open.length) return j;
+      } else j++;
     }
+    for (const o of open) groupEnds.set(o, -1);
     return -1;
   };
-  /** Index after the [optional argument] opening at i, or -1 if it is not one. */
+  /**
+   * Index after the [optional argument] opening at i, or -1 if it is not one.
+   *
+   * Memo, exact: the walk has no state but its position (a brace group is skipped whole by
+   * `group`, so no depth is carried), so the answer from a position is the same whichever walk
+   * reached it, including one that began at an earlier `[`. A walk records its start with its own
+   * answer and, when it is longer than SHORT steps, every position it stood on; a later walk that
+   * stands on one stops there. A `]` inside a braced group, a comment or a verbatim argument is skipped by the same
+   * steps as before, so it does not count now either.
+   */
+  const bracketAt = new Map<number, number>();
   const bracket = (i: number) => {
     let j = i + 1;
+    let steps = 0;
+    let trail: number[] | undefined;
+    let r = -1;
     while (j < n) {
+      if (bracketAt.size) {
+        const m = bracketAt.get(j);
+        if (m !== undefined) {
+          r = m;
+          break;
+        }
+      }
+      if (++steps > SHORT) (trail ??= []).push(j);
       const c = src[j];
       if (c === '\\') {
-        if (hardAt(j)) return -1;
+        if (hardAt(j)) break;
         j = cmdEnd(j);
       } else if (c === '%') j = eol(j);
       else if (c === '{') {
         const g = group(j);
-        if (g < 0) return -1;
+        if (g < 0) break;
         j = g;
-      } else if (c === ']') return j + 1;
-      else if (c === '\n' && blankAt(j)) return -1;
+      } else if (c === ']') {
+        r = j + 1;
+        break;
+      } else if (c === '\n' && blankAt(j)) break;
       else j++;
     }
-    return -1;
+    // The start is always recorded, so that a walk that has just asked for the same thing (a
+    // command with a bracket argument inside a bracket) is not asked again.
+    bracketAt.set(i + 1, r);
+    if (trail) for (const p of trail) bracketAt.set(p, r);
+    return r;
   };
   /**
-   * Index where inline math starting before i closes, or -1 if it does not close in time. A
-   * brace group is skipped whole, so the $ in $x \text{ if $y$ holds}$ do not end the formula.
-   * Braces that never balance before the paragraph ends are taken as plain characters.
+   * Inline math: the walk that finds where it closes. It takes the same steps wherever it begins
+   * (a command, a comment to its end of line, a character) and stops at a heading, a blank line or
+   * the end of the text. `dollar` says what closes it: `$`, or `\)`.
    */
-  const mathEnd = (i: number, closes: (q: number) => boolean, braces = true): number => {
+  const closesAt = (k: number, dollar: boolean) =>
+    dollar ? src[k] === '$' : src[k] === '\\' && src[k + 1] === ')';
+  /**
+   * The first place on the walk from i where the math closes, ignoring braces, or -1.
+   *
+   * Memo, exact: the walk has no state but its position, so the answer from a position is the same
+   * whichever walk reached it. A walk records its start with its own answer and, when it is longer
+   * than SHORT steps, every position it stood on (one table for each kind of closer); a later walk
+   * that stands on one stops there.
+   */
+  const firstCloses = [new Map<number, number>(), new Map<number, number>()];
+  const firstClose = (i: number, dollar: boolean) => {
+    const memo = firstCloses[dollar ? 0 : 1];
     let k = i;
-    let d = 0;
+    let steps = 0;
+    let trail: number[] | undefined;
+    let r = -1;
     while (k < n) {
-      if (d === 0 && closes(k)) return k;
+      if (memo.size) {
+        const m = memo.get(k);
+        if (m !== undefined) {
+          r = m;
+          break;
+        }
+      }
+      if (++steps > SHORT) (trail ??= []).push(k);
+      if (closesAt(k, dollar)) {
+        r = k;
+        break;
+      }
       const c = src[k];
       if (c === '\\') {
         if (hardAt(k)) break;
         k = cmdEnd(k);
       } else if (c === '%') k = eol(k);
       else if (c === '\n' && blankAt(k)) break;
-      else {
-        if (braces && c === '{') d++;
-        else if (braces && c === '}' && d > 0) d--;
-        k++;
-      }
+      else k++;
     }
-    return braces && d > 0 ? mathEnd(i, closes, false) : -1;
+    memo.set(i, r);
+    if (trail) for (const p of trail) memo.set(p, r);
+    return r;
+  };
+  /**
+   * Index after the brace group opening at k when the walk of inline math skips it, or -1 if the
+   * walk stops (a heading, a blank line, the end of the text) before the group closes.
+   *
+   * Memo, exact, by the argument for `group` with this walk's steps: the group's end does not
+   * depend on where the walk began, so every group inside is recorded as it closes, a walk that
+   * reaches one known jumps over it or fails with it, and at a stop every open group fails.
+   */
+  const mathGroupEnds = new Map<number, number>();
+  const mathGroup = (k0: number) => {
+    const known = mathGroupEnds.get(k0);
+    if (known !== undefined) return known;
+    const open = [k0];
+    for (let k = k0 + 1; k < n;) {
+      const c = src[k];
+      if (c === '\\') {
+        if (hardAt(k)) break;
+        k = cmdEnd(k);
+      } else if (c === '%') k = eol(k);
+      else if (c === '\n' && blankAt(k)) break;
+      else if (c === '{') {
+        const m = mathGroupEnds.get(k);
+        if (m === undefined) open.push(k++);
+        else if (m < 0) break;
+        else k = m;
+      } else if (c === '}') {
+        mathGroupEnds.set(open.pop()!, ++k);
+        if (!open.length) return k;
+      } else k++;
+    }
+    for (const o of open) mathGroupEnds.set(o, -1);
+    return -1;
+  };
+  /**
+   * Index where inline math starting before i closes, or -1 if it does not close in time. A
+   * brace group is skipped whole, so the $ in $x \text{ if $y$ holds}$ do not end the formula.
+   * Braces that never balance before the paragraph ends are taken as plain characters.
+   *
+   * Memo, exact. The first pass (braces counted) walks at depth 0 until a closer, or until it
+   * meets a `{` that never closes before the walk stops. From a position at depth 0 the rest of
+   * the pass is the same whichever walk stood there, so a pass records what it found (a closer,
+   * none, or the unclosed brace) at its start and, when longer than SHORT steps, at every depth-0
+   * position it stood on, and a later pass that stands on one stops there. A brace group that does close is skipped by
+   * `mathGroup` in one step: inside it the depth is above 0, so no closer there counts and the
+   * pass takes the same steps, in the same order, as before. Only the unclosed brace needs the
+   * second pass (braces taken as characters), which is `firstClose`, from the pass's own start.
+   */
+  const mathPass = [new Map<number, number>(), new Map<number, number>()];
+  const mathEnd = (i: number, dollar: boolean): number => {
+    const memo = mathPass[dollar ? 0 : 1];
+    let k = i;
+    let steps = 0;
+    let trail: number[] | undefined;
+    // A closer, -1 when the pass stops at depth 0 without one, -2 when it stops inside a brace.
+    let r = -1;
+    while (k < n) {
+      if (memo.size) {
+        const m = memo.get(k);
+        if (m !== undefined) {
+          r = m;
+          break;
+        }
+      }
+      if (++steps > SHORT) (trail ??= []).push(k);
+      if (closesAt(k, dollar)) {
+        r = k;
+        break;
+      }
+      const c = src[k];
+      if (c === '\\') {
+        if (hardAt(k)) break;
+        k = cmdEnd(k);
+      } else if (c === '%') k = eol(k);
+      else if (c === '\n' && blankAt(k)) break;
+      else if (c === '{') {
+        const g = mathGroup(k);
+        if (g < 0) {
+          r = -2;
+          break;
+        }
+        k = g;
+      } else k++;
+    }
+    memo.set(i, r);
+    if (trail) for (const p of trail) memo.set(p, r);
+    return r === -2 ? firstClose(i, dollar) : r;
   };
   const envName = (j: number) => {
     ENV.lastIndex = j;
@@ -493,23 +727,44 @@ function parseInto(
     }
     return j;
   };
+  /**
+   * Index after the `\end{name}` that closes an environment whose `\begin{name}` ends at `from`, or
+   * -1. Only `\begin{name}` and `\end{name}` of the same name count; comments are skipped.
+   *
+   * Memo, exact, by the argument for `group`, with `\begin{name}` as the opening and `\end{name}`
+   * as the closing: the walk takes the same steps wherever it begins (a comment, a command with
+   * its verbatim argument cut at the end of its line, a character) and carries only the depth, so
+   * every nested `\begin{name}` the walk passes is a start of a walk of its own, keyed by where it
+   * ends, and each is recorded as it closes. A walk that reaches a known one jumps over it, or
+   * fails with it. At the end of the text every environment still open fails. One table per name.
+   */
+  const envEnds = new Map<string, Map<number, number>>();
   const findEnd = (from: number, name: string) => {
+    let memo = envEnds.get(name);
+    if (!memo) envEnds.set(name, (memo = new Map()));
+    const known = memo.get(from);
+    if (known !== undefined) return known;
     const open = `\\begin{${name}}`;
     const shut = `\\end{${name}}`;
-    let depth = 1;
+    const pending = [from];
     let j = from;
     while (j < n) {
       const c = src[j];
       if (c === '%') j = lineEnd(j);
       else if (c !== '\\') j++;
       else if (src.startsWith(open, j)) {
-        depth++;
         j += open.length;
+        const m = memo.get(j);
+        if (m === undefined) pending.push(j);
+        else if (m < 0) break;
+        else j = m;
       } else if (src.startsWith(shut, j)) {
         j += shut.length;
-        if (--depth === 0) return j;
+        memo.set(pending.pop()!, j);
+        if (!pending.length) return j;
       } else j = cmdEnd(j, eol(j));
     }
+    for (const p of pending) memo.set(p, -1);
     return -1;
   };
 
@@ -528,18 +783,25 @@ function parseInto(
    * multicite, `(pre)(post)` notes, and whitespace between all of them; -1 if it is not whole.
    */
   const citeUnit = (from: number, parens: boolean) => {
+    // Whether a blank line lies wholly inside [q, close): the first one that starts at or after q
+    // is the leftmost in that range too, and it lies inside when it ends by `close`. (Any other
+    // would start after it, so end after it.) `find` and `searcher` are exact by their arguments.
+    const blankBetween = (q: number, close: number) => {
+      const b = nextBreakCite(q);
+      return !!b && b.end <= close;
+    };
     let k = from;
     if (parens)
       for (;;) {
         const q = skipWs(k);
-        const close = src[q] === '(' ? src.indexOf(')', q) : -1;
-        if (close < 0 || /\n[ \t]*\n/.test(src.slice(q, close))) break;
+        const close = src[q] === '(' ? find(')', q) : -1;
+        if (close < 0 || blankBetween(q, close)) break;
         k = close + 1;
       }
     k = skipWs(k);
     if (src[k] === '<') {
-      const close = src.indexOf('>', k);
-      if (close < 0 || /\n[ \t]*\n/.test(src.slice(k, close))) return -1;
+      const close = find('>', k);
+      if (close < 0 || blankBetween(k, close)) return -1;
       k = close + 1;
     }
     for (let b = 0; b < 2; b++) {
@@ -635,7 +897,7 @@ function parseInto(
           // A backslash at the end of a line is the space `\ ` is.
           else if (name === '\n') push('esc', i, j, { ch: ' ' });
           else if (name === '(') {
-            const k = mathEnd(j, (q) => src[q] === '\\' && src[q + 1] === ')');
+            const k = mathEnd(j, false);
             if (k < 0) throw new Unbalanced('para', 'unclosed \\(');
             push('atom', i, k + 2, { type: 'math' });
             i = k + 2;
@@ -790,7 +1052,7 @@ function parseInto(
           stopBlock();
           return i;
         }
-        const k = mathEnd(i + 1, (q) => src[q] === '$');
+        const k = mathEnd(i + 1, true);
         if (k < 0) throw new Unbalanced('para', 'unclosed $');
         push('atom', i, k + 1, { type: 'math' });
         i = k + 1;
@@ -908,7 +1170,7 @@ function parseInto(
       if (k >= n || src[k] === '\n' || blockStartAt(k)) return raw(i, j, 'comment');
     }
     if (c === '$' && src[i + 1] === '$') {
-      const k = src.indexOf('$$', i + 2);
+      const k = find('$$', i + 2);
       if (k < 0 || k >= limit(i, 'para')) throw new Unbalanced('para', 'unclosed $$');
       return { kind: 'math', text: src.slice(i, k + 2) };
     }
@@ -916,7 +1178,7 @@ function parseInto(
       const j = word(i);
       const name = src.slice(i + 1, j);
       if (name === '[') {
-        const k = src.indexOf('\\]', j);
+        const k = find('\\]', j);
         if (k < 0 || k >= limit(i, 'para')) throw new Unbalanced('para', 'unclosed \\[');
         return { kind: 'math', text: src.slice(i, k + 2) };
       }
@@ -953,7 +1215,7 @@ function parseInto(
           return raw(i, k, env);
         }
         if (VERBATIM.has(env)) {
-          const k = src.indexOf(`\\end{${env}}`, end);
+          const k = find(`\\end{${env}}`, end);
           if (k < 0) throw new Unbalanced('hard', `\\begin{${env}} without \\end`);
           return raw(i, k + env.length + 6, env);
         }
