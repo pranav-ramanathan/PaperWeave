@@ -499,7 +499,7 @@
 :root.paper tbody th code {
   font-size: 0.8125rem;
 }
-:root.paper form[enctype='multipart/form-data'] {
+:root.paper form:has(> h3) {
   display: grid;
   grid-template-columns: minmax(0, 1fr);
   align-items: start;
@@ -512,13 +512,113 @@
   background: var(--card);
   box-shadow: var(--shadow-rest);
 }
-:root.paper form[enctype='multipart/form-data'] h3 {
+:root.paper form:has(> h3) h3 {
   margin: 0;
 }
-:root.paper form[enctype='multipart/form-data'] > button {
+:root.paper form:has(> h3) > button {
   justify-self: start;
 }
 
 /* ===== T14: the middle (labels, bibliography, data, review, language, assistance) ===== */
+
+/* Forms that are a column of fields (language, writing assistance, and the ones in the end block). */
+:root.paper form.stack {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr);
+  justify-items: start;
+  gap: 1rem;
+  max-width: 36rem;
+}
+:root.paper form.stack > label {
+  width: 100%;
+}
+:root.paper form.stack textarea {
+  width: 100%;
+}
+
+/* What needs attention (undefined or doubled labels, missing citations): a list with a red edge,
+   each item a sentence that names the place, which is a link. */
+:root.paper .attention {
+  margin: 0.5rem 0 1rem;
+  padding: 0;
+  list-style: none;
+}
+:root.paper .attention li {
+  margin: 0.5rem 0;
+  padding: 0.5rem 0.75rem;
+  border-left: 3px solid var(--finding-line);
+  background: var(--finding-wash);
+  border-radius: 0 var(--radius-md) var(--radius-md) 0;
+}
+
+/* Ruled lists: one item to a rule (data files and charts, what is waiting in review). Items that
+   are a kind of review carry its edge: a proposed change blue, a thread amber. */
+:root.paper .ruled {
+  margin: 0.5rem 0 1rem;
+  padding: 0;
+  list-style: none;
+  border-top: 1px solid var(--border);
+}
+:root.paper .ruled li {
+  max-width: none;
+  margin: 0;
+  padding: 0.625rem 0 0.625rem 0.75rem;
+  border-bottom: 1px solid var(--border);
+  border-left: 3px solid transparent;
+}
+:root.paper .ruled li[data-kind='proposal'] {
+  border-left-color: var(--proposal-line);
+}
+:root.paper .ruled li[data-kind='thread'] {
+  border-left-color: var(--comment-line);
+}
+:root.paper .report strong {
+  color: var(--comment);
+  font-weight: 600;
+}
+:root.paper .report li > a:first-child code,
+:root.paper .report li > code:first-child {
+  font-weight: 500;
+}
+
+/* The bibliography's table: the entry, then what was checked about it, then the claims. */
+:root.paper [aria-label='Table of references'] :is(td, th) {
+  vertical-align: top;
+}
+:root.paper td ul {
+  margin: 0.25rem 0;
+  padding: 0;
+  list-style: none;
+}
+:root.paper td li {
+  margin: 0.375rem 0;
+}
+:root.paper td li + li {
+  padding-top: 0.375rem;
+  border-top: 1px dotted var(--border);
+}
+:root.paper td strong {
+  font-weight: 600;
+}
+:root.paper td > br + .role,
+:root.paper th .role {
+  display: block;
+  margin-top: 0.125rem;
+}
+:root.paper td details[open] > form {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr);
+  justify-items: start;
+  gap: 0.75rem;
+  max-width: 24rem;
+  padding: 0.75rem;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-lg);
+  background: var(--card);
+}
+:root.paper td details[open] > form > label,
+:root.paper td details[open] > form textarea {
+  width: 100%;
+}
 
 /* ===== T15: the end (revisions, people, invite, delete) ===== */

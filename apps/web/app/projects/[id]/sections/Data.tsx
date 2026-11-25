@@ -53,7 +53,7 @@ export function Data({
             A CSV file becomes data once someone has said what its columns hold. Charts are drawn
             only from a file as it was when its description was approved.
           </p>
-          <ul className="report">
+          <ul className="report ruled">
             {dataFiles.map((f) => {
               const d = datasets.find((x) => x.fileId === f.id);
               return (
@@ -99,7 +99,7 @@ export function Data({
           {charts.length > 0 && (
             <>
               <h3>Charts</h3>
-              <ul className="report">
+              <ul className="report ruled">
                 {charts.map((c) => (
                   <li key={c.id}>
                     <Link prefetch={false} href={`/projects/${id}/charts/${c.id}`}>

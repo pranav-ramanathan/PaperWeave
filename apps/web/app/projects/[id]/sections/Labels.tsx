@@ -43,7 +43,7 @@ export function Labels({
               : 'Some need attention:'}
           </p>
           {labels.undefined.length + labels.duplicates.length > 0 && (
-            <ul className="report">
+            <ul className="report attention">
               {labels.undefined.map((r) => (
                 <li key={`${r.fileId}:${r.line}:${r.key}`}>
                   <Link prefetch={false} href={`/projects/${id}/files/${r.fileId}`}>

@@ -28,7 +28,7 @@ export function Assistance({
         this service.
       </p>
       {owner ? (
-        <form action={modelProcessingAction.bind(null, id)}>
+        <form action={modelProcessingAction.bind(null, id)} className="stack">
           <label>
             <input type="checkbox" name="allow" defaultChecked={allowModel} /> Allow passages of
             this paper to be sent to the model provider when someone asks for a review

@@ -28,9 +28,9 @@ export function Review({
           {openThreads.length + openProposals.length === 0 && (
             <p>Every thread is resolved and every proposed change is decided.</p>
           )}
-          <ul className="report">
+          <ul className="report ruled">
             {openProposals.map((p) => (
-              <li key={p.id}>
+              <li key={p.id} data-kind="proposal">
                 <Link prefetch={false} href={`/projects/${id}/files/${p.fileId}#proposals`}>
                   {p.path}
                 </Link>
@@ -48,7 +48,7 @@ export function Review({
               </li>
             ))}
             {openThreads.map((t) => (
-              <li key={t.id}>
+              <li key={t.id} data-kind="thread">
                 <Link prefetch={false} href={`/projects/${id}/files/${t.fileId}#comments`}>
                   {t.path}
                 </Link>
