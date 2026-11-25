@@ -7808,3 +7808,18 @@ pointing to the new page).
     cover the person's address were a few pixels off in a picture of the whole page.
   - The picture run does not compare anything itself: the two folders are compared by a script
     kept outside the repository (it used `sharp`, which the app's dependencies bring).
+
+## Browser tests on more than one slot, and staged pages
+
+- **What.** `playwright.config.ts` reads `E2E_WEB_PORT` and `E2E_SYNC_PORT` (3100 and 4100 unless
+  set) and derives the app's addresses from them; with `DATABASE_URL`, several sets of browser
+  tests can run at once on one machine. The specs take the site's address from `ORIGIN` and
+  `SYNC_SOCKET` in `tests/e2e/helpers.ts` instead of writing 3100 and 4100 out. README.md lists
+  the slots (A 3100/4100, B 3200/4200, C 3300/4300, each with its own database). The local store
+  accepts uploads from 3200 and 3300 once its container is made again.
+- **Staged pages.** `lib/ui.ts` has a `STAGED` list (empty) and `UI_STAGED`: a page there is in
+  the new look only for someone who asked for it on a server started with `UI_STAGED=1`, so a page
+  can be built over several changes before anyone sees it.
+- **Held by** `projects.spec` and `recover.spec` passing on slot B (48 tests); with nothing set,
+  every value is as before. `ui.test.ts` covers staged pages; `docs/settings.md` has the row.
+- **Not done.** `uploading.spec` on slots B and C until the store's container is made again.
