@@ -1,1 +1,204 @@
-/* pdf: written by the look tasks that own this area. Empty on purpose; see next.css. */
+/*
+ * The PDF pane in the new look (T24): a bar with the status as a pill, the compile controls and the
+ * size of the pages, the build notes in quiet text, the lists of what the build said with the
+ * colour and edge of their kind, and the pages on the PDF desk. Written for <section class='build'>
+ * (BuildPane.tsx) and the group and region PdfView.tsx puts in it.
+ *
+ * Where the pane goes in the grid, and its own scroll where the page is as tall as the window, are
+ * in editor.css. The pages' geometry and text layer are in functional.css and are not touched: the
+ * pages are white in both themes (--paper) and the line the editor asks to be shown keeps its
+ * outline.
+ */
+
+.build {
+  display: flex;
+  flex-direction: column;
+  gap: 0.5rem;
+  padding: 0.75rem;
+  background: var(--desk);
+  font-size: 0.875rem;
+}
+.build > * {
+  margin: 0;
+}
+
+/* The bar: the status, then what can be done about it. */
+.build .editor-bar {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 0.375rem 0.75rem;
+  margin: 0;
+  color: var(--muted-foreground);
+}
+.build .editor-bar [role='status'] {
+  display: inline-flex;
+  align-items: baseline;
+  gap: 0.375rem;
+  min-width: 0;
+  padding: 0.125rem 0.625rem;
+  border: 1px solid var(--border);
+  border-radius: 0.875rem;
+  background: var(--secondary);
+  color: var(--secondary-foreground);
+  font-size: 0.8125rem;
+  font-weight: 550;
+  overflow-wrap: anywhere;
+}
+/* The kind is said in the words and by a sign before them, not by the colour alone. */
+.build .editor-bar [role='status']::before {
+  flex: none;
+  content: '\2026' / '';
+}
+.build .editor-bar [role='status'][data-kind='ok'] {
+  border-color: color-mix(in srgb, var(--ok-line) 40%, transparent);
+  background: var(--ok-wash);
+  color: var(--ok);
+}
+.build .editor-bar [role='status'][data-kind='ok']::before {
+  content: '\2713' / '';
+}
+.build .editor-bar [role='status'][data-kind='behind'] {
+  border-color: color-mix(in srgb, var(--comment-line) 40%, transparent);
+  background: var(--comment-wash);
+  color: var(--comment);
+}
+.build .editor-bar [role='status'][data-kind='behind']::before {
+  content: '!' / '';
+}
+.build .editor-bar [role='status'][data-kind='failed'] {
+  border-color: color-mix(in srgb, var(--finding-line) 40%, transparent);
+  background: var(--finding-wash);
+  color: var(--finding);
+}
+.build .editor-bar [role='status'][data-kind='failed']::before {
+  content: '\2715' / '';
+}
+.build .editor-bar label {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.375rem;
+  font-size: 0.8125rem;
+}
+.build .editor-bar input[type='checkbox'] {
+  accent-color: var(--primary);
+}
+
+/* Buttons: quiet, with the first of the bar ("Compile now") the one that is asked for. */
+.build button {
+  min-height: 1.75rem;
+  padding: 0.125rem 0.625rem;
+  border: 1px solid var(--input);
+  border-radius: 6px;
+  background: var(--card);
+  color: var(--foreground);
+  font: inherit;
+  font-size: 0.8125rem;
+  cursor: pointer;
+}
+.build button:hover {
+  background: var(--secondary);
+}
+.build .editor-bar > button {
+  border-color: var(--primary);
+  background: var(--primary);
+  color: var(--primary-foreground);
+  font-weight: 550;
+}
+.build .editor-bar > button:hover {
+  background: color-mix(in srgb, var(--primary) 90%, black);
+}
+.build button:focus-visible,
+.build input:focus-visible,
+.build a:focus-visible,
+.build .pdf:focus-visible {
+  outline: 2px solid var(--ring);
+  outline-offset: 2px;
+}
+
+/* Notes and links under the bar, in quiet text. */
+.build > p:not([role]),
+.build .build-links {
+  color: var(--muted-foreground);
+  font-size: 0.8125rem;
+}
+.build a {
+  color: var(--primary);
+  text-decoration: underline;
+  text-underline-offset: 2px;
+}
+.build .pdf-said {
+  color: var(--foreground);
+}
+
+/* A message the pane has to give: the build failed, or the PDF could not be shown. */
+.build [role='alert'] {
+  padding: 0.375rem 0.625rem;
+  border: 1px solid var(--border);
+  border-left: 4px solid var(--finding-line);
+  border-radius: 6px;
+  background: var(--finding-wash);
+  color: var(--foreground);
+}
+
+/* What the build said, each list in the colour and edge of its kind. */
+.build .diagnostics {
+  margin: 0;
+  padding: 0.5rem 0.75rem 0.5rem 1.75rem;
+  border: 1px solid var(--border);
+  border-left: 4px solid var(--comment-line);
+  border-radius: 6px;
+  background: var(--comment-wash);
+  color: var(--foreground);
+  font-size: 0.8125rem;
+  overflow-wrap: anywhere;
+}
+.build .diagnostics[aria-label='Build errors'] {
+  border-left-color: var(--finding-line);
+  background: var(--finding-wash);
+}
+.build .diagnostics li + li {
+  margin-top: 0.25rem;
+}
+.build .diagnostics code,
+.build .diagnostics .place {
+  font-family: var(--font-mono);
+  font-size: 0.75rem;
+}
+.build .diagnostics .place {
+  min-height: 0;
+  padding: 0;
+  border: 0;
+  background: none;
+  color: var(--primary);
+  text-decoration: underline;
+  text-underline-offset: 2px;
+}
+
+/* The size of the pages. */
+.build .pdf-zoom {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 0.375rem;
+  margin: 0;
+}
+.build .pdf-zoom span {
+  margin-inline-start: 0.25rem;
+  color: var(--muted-foreground);
+  font-size: 0.8125rem;
+}
+
+/* The pages, on the desk. A definite height where the page flows (a phone, 200 % zoom, a short
+   window); the wide and tall block of editor.css lets the pane fill what is left instead. */
+.build .pdf {
+  flex: none;
+  height: 70vh;
+  min-height: 16rem;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  background: var(--desk);
+}
+.build .pdf .pdf-page {
+  box-shadow: var(--shadow-rest);
+}
