@@ -5,8 +5,12 @@ import 'katex/dist/katex.min.css';
 // Today's look (scoped, so that a page in the new look is not touched), then what every look
 // needs, which wins where it is as strong as a look's rule: see the top of functional.css.
 import './legacy.css';
+// The new look (see next.css), every selector prefixed with its scope. Before functional.css, so
+// that what both looks need still wins a tie of strength by coming later.
+import './next.css';
 import './functional.css';
 import { WENT } from '../lib/leaving';
+import { fontClasses } from './fonts';
 import Fresh from './Fresh';
 import Waiting from './Waiting';
 
@@ -51,7 +55,8 @@ export default async function Layout({ children }: { children: ReactNode }) {
   // For the editors, which add style sheets of their own: see lib/nonce.ts.
   const nonce = (await headers()).get('x-nonce') ?? undefined;
   return (
-    <html lang="en">
+    // The classes only declare the new look's font variables (app/fonts); the old look never uses them.
+    <html lang="en" className={fontClasses}>
       <head>
         <meta property="csp-nonce" nonce={nonce} />
       </head>

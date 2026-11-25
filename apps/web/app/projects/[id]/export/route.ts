@@ -1,6 +1,12 @@
 // Download the paper's files as a ZIP. With ?review, its threads and proposed changes go in too,
 // as a file of their own.
-import { AppError, contentDisposition, exportZipStream, getProject } from '@paperweave/server';
+import {
+  AppError,
+  contentDisposition,
+  exportZipStream,
+  getProject,
+  versionOf,
+} from '@paperweave/server';
 import { blobs, currentUser, db, notCrossSite } from '../../../../lib/server';
 
 // Vercel stops the function after this many seconds. Reading every file and zipping it.
@@ -19,7 +25,9 @@ export async function GET(request: Request, { params }: { params: Promise<{ id: 
     return new Response(zip, {
       headers: {
         'content-type': 'application/zip',
-        'content-disposition': contentDisposition(project.name, 'zip'),
+        'content-disposition': contentDisposition(project.name, 'zip', {
+          version: await versionOf(db(), id),
+        }),
         'cache-control': 'no-store',
       },
     });

@@ -12,6 +12,10 @@ export type ProductMetrics = {
   /** Papers at least one person has edited, and those at least two have. */
   edited: number;
   twoAuthors: number;
+  /** Papers that have at least one version (a version is not counted as a paper), and papers or
+   * versions of them that have been merged at least once. */
+  withVersion: number;
+  withMerge: number;
   /** Proposed changes by where they came from and what became of them. */
   proposals: { origin: string; status: string; count: number }[];
   /** What became of the grammar checker's findings, by kind, summed across papers. */
@@ -83,6 +87,15 @@ export async function productMetrics(db: Db): Promise<ProductMetrics> {
        select count(*)::int as edited, count(*) filter (where n >= 2)::int as "twoAuthors" from per`,
     )
   ).rows[0];
+  // By the paper: a merge into main, or one that brings a version up to date, counts for it.
+  const family = (
+    await db.query(
+      `select (select count(distinct parent_id) from projects where parent_id is not null)::int
+                as "withVersion",
+              (select count(distinct coalesce(p.parent_id, p.id))
+               from merges m join projects p on p.id = m.target_id)::int as "withMerge"`,
+    )
+  ).rows[0];
   const proposals = (
     await db.query(
       `select origin, status, count(*)::int as count from proposals group by 1, 2 order by 1, 2`,
@@ -94,5 +107,5 @@ export async function productMetrics(db: Db): Promise<ProductMetrics> {
        group by 1, 2 order by 1, 2`,
     )
   ).rows;
-  return { papers, ...authors, proposals, grammar };
+  return { papers, ...authors, ...family, proposals, grammar };
 }
