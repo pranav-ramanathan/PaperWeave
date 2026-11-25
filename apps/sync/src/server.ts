@@ -35,7 +35,34 @@ type Context = {
   role: string;
   /** Whether the role may write, as last looked up. Who is charged for edits goes by this. */
   canWrite: boolean;
+  /** Which connection this was to its server, in the order they were let past the ticket. */
+  n: number;
 };
+
+/** The most connections one person may hold open: to one file, and to all files together. */
+export type ConnectionCap = { perFile: number; perPerson: number };
+/** A live connection, as `overCap` sees it. */
+export type OpenConnection = { userId: string; fileId: string; n: number };
+
+/**
+ * Whether connection number `n` of a person to a file is over the cap. It counts that person's
+ * live connections that came before it (a lower `n`), to the file and in all: the newest is the
+ * one refused, and tabs already open are left alone. A connection that is not yet among `open`
+ * asks with `Infinity`, which counts them all.
+ */
+export function overCap(
+  open: readonly OpenConnection[],
+  userId: string,
+  fileId: string,
+  n: number,
+  cap: ConnectionCap,
+) {
+  const before = open.filter((c) => c.userId === userId && c.n < n);
+  return (
+    before.length >= cap.perPerson ||
+    before.filter((c) => c.fileId === fileId).length >= cap.perFile
+  );
+}
 
 /** y-protocols sync message types. Step 1 only asks what the server has; 1 and 2 carry edits. */
 const SYNC_STEP_1 = 0;
@@ -49,6 +76,8 @@ export const TOO_LARGE = 'too-large';
 export const OVER_BUDGET = 'over-budget';
 /** Why it closes a connection that sent a presence message too large to be read. Not final. */
 export const PRESENCE_TOO_LARGE = 'presence-too-large';
+/** Why it refuses or closes a connection when its person already has too many open. Not final. */
+export const TOO_MANY = 'too-many';
 
 export async function startSync(opts: {
   pool: pg.Pool;
@@ -70,9 +99,23 @@ export async function startSync(opts: {
    * tests shorten it.
    */
   sessionCheckMs?: number;
+  /** The most connections a person may hold open, to one file and in all. */
+  connectionCap?: ConnectionCap;
 }) {
   const { pool, store, secret, compactEvery = 500, sessionCheckMs = 60_000 } = opts;
+  const cap = opts.connectionCap ?? { perFile: 8, perPerson: 64 };
   const counts = newCounts();
+  /** The last number given to a connection. Only counts up; what is live is asked of the library. */
+  let seq = 0;
+  /** Every live connection, as the library tracks them: it drops one when its socket closes. */
+  const live = (): OpenConnection[] =>
+    [...server.hocuspocus.documents].flatMap(([fileId, document]) =>
+      (document.getConnections() as Connection<Context>[]).map((c) => ({
+        userId: c.context.userId,
+        fileId,
+        n: c.context.n,
+      })),
+    );
   const config = opts.editBudget ?? editBudgetFromEnv();
   const floor = config.floor;
   if (config.burst < MAX_EDIT_BYTES)
@@ -159,6 +202,13 @@ export async function startSync(opts: {
         const ticket = verifyTicket(secret, token, documentName);
         if (!ticket) throw new Error('unauthorized');
         const { userId, sessionId } = ticket;
+        // Before anything is looked up for it. Connections still on their way in are not among
+        // the live ones, so this alone cannot hold a burst: `connected` ranks them again.
+        if (overCap(live(), userId, documentName, Infinity, cap)) {
+          counts.connectionsOverLimit++;
+          throw Object.assign(new Error('too many connections'), { reason: TOO_MANY });
+        }
+        const n = ++seq;
         // Throws for anyone who is not on the paper: the connection is refused.
         const file = await openFile(pool, userId, documentName).catch((err) => {
           if (err instanceof AppError) throw err;
@@ -175,6 +225,7 @@ export async function startSync(opts: {
           sessionId,
           role: file.role,
           canWrite: file.canWrite,
+          n,
         };
       } catch (err) {
         counts.refusedConnections++;
@@ -205,6 +256,12 @@ export async function startSync(opts: {
     // by a connection that is on its way out (see beforeSync). So the first time someone is
     // let in to a freshly read copy, the log is read once more from where the reading began.
     async connected({ documentName, connection, context }) {
+      // Connections that were let in together each saw too few others: ranked now, by the
+      // order they came, among those still live. Before anything is looked up or told.
+      if (overCap(live(), context.userId, documentName, context.n, cap)) {
+        counts.connectionsOverLimit++;
+        return connection.close({ code: 4429, reason: TOO_MANY });
+      }
       // A connection is not known to `recheck` or `signedOut` until the file has been read, which
       // can take a while. Whatever changed meanwhile is looked for here, before it is told or
       // given anything.

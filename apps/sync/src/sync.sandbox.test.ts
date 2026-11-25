@@ -1,5 +1,6 @@
 // Needs the services in infra/compose.yaml. Run: pnpm test:sandbox
 import { type ChildProcess, spawn } from 'node:child_process';
+import { type AddressInfo, createConnection, createServer, type Socket } from 'node:net';
 import { join } from 'node:path';
 import {
   acceptInvitation,
@@ -101,6 +102,9 @@ beforeAll(async () => {
     // Small, so that a test can type its way past it.
     compactEvery: 20,
     metricsToken: METRICS_TOKEN,
+    // High: the clients here close only in afterAll, one person holds ten (three people, thirty
+    // connections) to a file in one test, and all of them hold their connections to the end.
+    connectionCap: { perFile: 100, perPerson: 100_000 },
   });
 });
 afterAll(async () => {
@@ -1633,4 +1637,185 @@ test('people on a file, viewers and reviewers too, still see each other by name 
       expect([index(s.cursor.anchor), index(s.cursor.head)]).toEqual([2, 6]);
     }
   for (const [c] of who) expect(c.state.closed).toBe(0);
+});
+
+// Connections per person: at most two to a file and three in all, on a server of their own.
+/** A server with a small cap on connections, for as long as `run` takes. */
+async function withCap(run: (port: number) => Promise<void>) {
+  const server = await startSync({
+    pool: t.pool,
+    store,
+    secret: SECRET,
+    port: sync.port + 400,
+    databaseUrl: t.url,
+    metricsToken: METRICS_TOKEN,
+    connectionCap: { perFile: 2, perPerson: 3 },
+  });
+  try {
+    await run(server.port);
+  } finally {
+    await server.stop();
+  }
+}
+const metricsOf = async (port: number) => {
+  const res = await fetch(`http://127.0.0.1:${port}/metrics`, {
+    headers: { authorization: `Bearer ${METRICS_TOKEN}` },
+  });
+  const text = await res.text();
+  const number = (name: string) =>
+    Number(new RegExp(`^paperweave_sync_${name} (\\S+)$`, 'm').exec(text)?.[1]);
+  return { text, open: number('connections_open'), over: number('connections_over_limit_total') };
+};
+/** The server was told "too many" for this client, either as a refused ticket or as a close. */
+const crowded = (c: Client) =>
+  c.state.why === 'too-many' || c.state.reasons.some((r) => r.endsWith(':too-many'));
+/** Let in and in step with the file, and never told "too many". */
+const admitted = (c: Client) => c.provider.synced && !crowded(c);
+/**
+ * A relay to the server that can be cut: every socket through it is destroyed at once, with no
+ * close frame, as when a laptop is shut or a network goes. The client in the test cannot do that
+ * itself (Node's WebSocket does not give out its socket).
+ */
+async function relay(target: number) {
+  const sockets = new Set<Socket>();
+  const relayed = createServer((from) => {
+    const to = createConnection({ port: target, host: '127.0.0.1' });
+    for (const s of [from, to]) {
+      sockets.add(s);
+      s.on('error', () => {});
+      s.on('close', () => sockets.delete(s));
+    }
+    from.pipe(to);
+    to.pipe(from);
+  });
+  await new Promise<void>((resolve) => relayed.listen(0, '127.0.0.1', resolve));
+  const cut = () => sockets.forEach((s) => s.destroy());
+  return {
+    port: (relayed.address() as AddressInfo).port,
+    cut,
+    stop: () => {
+      cut();
+      relayed.close();
+    },
+  };
+}
+const settle = (ms = 700) => new Promise((r) => setTimeout(r, ms));
+
+test('a third connection to one file is refused, and the two that were there are left alone', async () => {
+  const { file } = await paper();
+  await withCap(async (port) => {
+    const [a, b] = [client(users.owner, file, port), client(users.owner, file, port)];
+    await saved(a, b);
+    const c = client(users.owner, file, port);
+    await until('the third to be turned away', () => crowded(c));
+    expect(c.state.why).toBe('too-many');
+    expect(c.provider.synced).toBe(false);
+    expect(c.text.toString()).toBe('');
+    // The ones that were there go on, and see each other's edits.
+    a.text.insert(0, '% still here\n');
+    await saved(a, b);
+    await until('the other tab to have it', () => b.text.toString().startsWith('% still here'));
+    expect(a.state.closed + b.state.closed).toBe(0);
+    for (const x of [a, b, c]) x.provider.destroy();
+  });
+});
+
+test('another person still connects when someone has all their connections to a file', async () => {
+  const { file } = await paper();
+  await withCap(async (port) => {
+    const [a, b] = [client(users.owner, file, port), client(users.owner, file, port)];
+    await saved(a, b);
+    const editor = client(users.editor, file, port);
+    await saved(editor);
+    expect(admitted(editor)).toBe(true);
+    expect((await metricsOf(port)).open).toBe(3);
+    for (const x of [a, b, editor]) x.provider.destroy();
+  });
+});
+
+test('a burst of six at once leaves exactly two live', async () => {
+  const { file } = await paper();
+  await withCap(async (port) => {
+    const burst = Array.from({ length: 6 }, () => client(users.owner, file, port));
+    await until('four to be turned away', () => burst.filter(crowded).length === 4);
+    await until('two to be in step', () => burst.filter(admitted).length === 2);
+    // Nothing more happens after that.
+    await settle();
+    expect(burst.filter(crowded).length).toBe(4);
+    expect(burst.filter(admitted).length).toBe(2);
+    expect((await metricsOf(port)).open).toBe(2);
+    for (const x of burst) x.provider.destroy();
+  });
+});
+
+test('closing a connection, or losing its socket, lets the next one in', async () => {
+  const { file } = await paper();
+  await withCap(async (port) => {
+    const [a, b] = [client(users.owner, file, port), client(users.owner, file, port)];
+    await saved(a, b);
+    const refused = client(users.owner, file, port);
+    await until('the third to be turned away', () => crowded(refused));
+    // Closed properly.
+    a.provider.destroy();
+    a.socket.destroy();
+    await until('the server to have one', async () => (await metricsOf(port)).open === 1);
+    const next = client(users.owner, file, port);
+    await saved(next);
+    expect(admitted(next)).toBe(true);
+
+    // The socket dies with no close frame, as a laptop's does. The editor would connect again
+    // by itself; this one is told not to, so that it is the next one that takes the place.
+    const lost = await relay(port);
+    const [x, y] = [client(users.editor, file, port), client(users.editor, file, lost.port)];
+    await saved(x, y);
+    const full = client(users.editor, file, port);
+    await until('the third of the editor to be turned away', () => crowded(full));
+    y.socket.shouldConnect = false;
+    lost.cut();
+    await until('the server to drop it', async () => (await metricsOf(port)).open === 3);
+    const after = client(users.editor, file, port);
+    await saved(after);
+    expect(admitted(after)).toBe(true);
+    for (const c of [b, refused, next, x, y, full, after]) c.provider.destroy();
+    lost.stop();
+  });
+});
+
+test('a fourth connection to a third file is refused, though the file has none', async () => {
+  const { project, file } = await paper();
+  const [second, third] = [
+    await createFile(t.pool, store, users.owner.id, project, 'second.tex', Buffer.from('% 2\n')),
+    await createFile(t.pool, store, users.owner.id, project, 'third.tex', Buffer.from('% 3\n')),
+  ];
+  await withCap(async (port) => {
+    const held = [
+      client(users.owner, file, port),
+      client(users.owner, file, port),
+      client(users.owner, second, port),
+    ];
+    await saved(...held);
+    const fourth = client(users.owner, third, port);
+    await until('the fourth to be turned away', () => crowded(fourth));
+    expect(fourth.state.why).toBe('too-many');
+    expect(fourth.text.toString()).toBe('');
+    // Someone else, on the same file, is not held by it.
+    const editor = client(users.editor, third, port);
+    await saved(editor);
+    for (const c of [...held, fourth, editor]) c.provider.destroy();
+  });
+});
+
+test('the metrics count the connections turned away', async () => {
+  const { file } = await paper();
+  await withCap(async (port) => {
+    const first = await metricsOf(port);
+    expect(first.text).toMatch(/^# TYPE paperweave_sync_connections_over_limit_total counter$/m);
+    expect(first.text).toMatch(/^# HELP paperweave_sync_connections_over_limit_total \S/m);
+    expect(first.over).toBe(0);
+    const burst = Array.from({ length: 5 }, () => client(users.owner, file, port));
+    await until('three to be turned away', () => burst.filter(crowded).length === 3);
+    await settle();
+    expect((await metricsOf(port)).over).toBe(3);
+    for (const x of burst) x.provider.destroy();
+  });
 });
