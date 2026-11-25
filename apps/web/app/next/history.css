@@ -307,3 +307,44 @@
 :root.history .diff del {
   background: var(--removed);
 }
+
+/* Comparing with another version: the same cards as the comparison above it, stacked. */
+:root.history .history-across {
+  display: grid;
+  gap: 1rem;
+  min-width: 0;
+}
+:root.history .history-across h3 {
+  font-family: var(--pw-font-serif), 'Iowan Old Style', Georgia, serif;
+  font-size: 1.25rem;
+  font-weight: 650;
+  line-height: 1.2;
+}
+:root.history .history-across .history-diff h4 {
+  font-family: var(--pw-font-serif), 'Iowan Old Style', Georgia, serif;
+  font-size: 1.125rem;
+  font-weight: 650;
+  line-height: 1.25;
+}
+:root.history .history-across .history-diff h5 {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 0.5rem;
+  font-size: 0.9375rem;
+  font-weight: 600;
+  overflow-wrap: anywhere;
+}
+:root.history .history-across .history-diff h5 code {
+  font-family: var(--pw-font-mono), ui-monospace, Menlo, monospace;
+}
+:root.history .history-across .history-diff .role {
+  padding: 0 0.5rem;
+  border-radius: 999px;
+  background: var(--secondary);
+  font-size: 0.75rem;
+  font-weight: 500;
+}
+:root.history .history-across .history-picker > button {
+  justify-self: start;
+}

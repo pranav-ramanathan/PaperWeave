@@ -361,10 +361,16 @@ test('with two pictures none is chosen for the person, and a float goes after it
   expect(text).toMatch(
     /Text before the figure\.\\begin\{figure\}\[t\]\s*\\centering\s*\\includegraphics\[width=\\linewidth\]\{figures\/dot2\.png\}/,
   );
-  // Blank lines on both sides: the source view shows each as a line of its own.
-  const lines = await source(other).locator('.cm-line').allTextContents();
-  const at = lines.indexOf('Text before the figure.');
-  expect(lines.slice(at, at + 3)).toEqual(['Text before the figure.', '', '\\begin{figure}[t]']);
-  const end = lines.indexOf('\\end{figure}', at);
-  expect(lines.slice(end, end + 3)).toEqual(['\\end{figure}', '', '\\begin{figure}[t]']);
+  // Blank lines on both sides: the source view shows each as a line of its own. The other
+  // person's view takes the change from sync, so its lines are read until they have settled.
+  const around = async () => {
+    const lines = await source(other).locator('.cm-line').allTextContents();
+    const at = lines.indexOf('Text before the figure.');
+    const end = lines.indexOf('\\end{figure}', at);
+    return [lines.slice(at, at + 3), lines.slice(end, end + 3)];
+  };
+  await expect.poll(around).toEqual([
+    ['Text before the figure.', '', '\\begin{figure}[t]'],
+    ['\\end{figure}', '', '\\begin{figure}[t]'],
+  ]);
 });

@@ -18,18 +18,23 @@ export function FileDiffs({
   other,
   rev,
   Heading = 'h2',
+  papers,
 }: {
   id: string;
   diff: Diff;
   other: string;
   rev: string;
-  Heading?: 'h2' | 'h3' | 'h4';
+  Heading?: 'h2' | 'h3' | 'h4' | 'h5';
+  /** When the two revisions are of different papers (versions of one paper): the paper of each. */
+  papers?: { from: string; to: string };
 }) {
   return (
     <>
       {diff.files.map((f) => {
         // The one revision that holds an added or removed file, and its number.
         const [one, number] = f.status === 'removed' ? [other, diff.from] : [rev, diff.to];
+        const [fromPaper, toPaper] = [papers?.from ?? id, papers?.to ?? id];
+        const onePaper = f.status === 'removed' ? fromPaper : toPaper;
         return (
           <section key={f.path} aria-label={f.path}>
             <Heading>
@@ -55,7 +60,7 @@ export function FileDiffs({
                         <>
                           {' '}
                           To read {f.more === 1 ? 'it' : 'them'}, download{' '}
-                          <a href={`/projects/${id}/revisions/${one}/zip`}>
+                          <a href={`/projects/${onePaper}/revisions/${one}/zip`}>
                             the ZIP of revision {number}
                           </a>
                           .
@@ -72,7 +77,7 @@ export function FileDiffs({
                   <>
                     {' '}
                     To read it, download{' '}
-                    <a href={`/projects/${id}/revisions/${one}/zip`}>
+                    <a href={`/projects/${onePaper}/revisions/${one}/zip`}>
                       the ZIP of revision {number}
                     </a>
                     .
@@ -83,11 +88,14 @@ export function FileDiffs({
               <p>
                 Too much of this file changed to show it line by line here. To compare them,
                 download{' '}
-                <a href={`/projects/${id}/revisions/${other}/zip`}>
+                <a href={`/projects/${fromPaper}/revisions/${other}/zip`}>
                   the ZIP of revision {diff.from}
                 </a>{' '}
                 and{' '}
-                <a href={`/projects/${id}/revisions/${rev}/zip`}>the ZIP of revision {diff.to}</a>.
+                <a href={`/projects/${toPaper}/revisions/${rev}/zip`}>
+                  the ZIP of revision {diff.to}
+                </a>
+                .
               </p>
             ) : f.status === 'changed' ? (
               <p>This file changed, but it is not text that can be shown line by line.</p>
