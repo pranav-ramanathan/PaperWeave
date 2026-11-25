@@ -123,7 +123,7 @@ async function putEdited(pool: pg.Pool, store: BlobStore, projectId: string): Pr
 }
 
 /** The same as one step of a larger transaction. */
-async function cut(
+export async function cut(
   db: Db,
   store: BlobStore,
   userId: string | null,
@@ -353,7 +353,7 @@ export async function olderAutoRevisions(
 }
 
 /** A revision of this paper and its files, or `not_found`. */
-async function load(db: Db, projectId: string, revisionId: string) {
+export async function load(db: Db, projectId: string, revisionId: string) {
   const revision = (
     await db.query(
       `select r.id, r.number, r.root, r.compiler, r.created_at, p.name as paper
@@ -537,7 +537,7 @@ export async function revisionTitle(
   return { paper: revision.paper, number: revision.number };
 }
 
-const blob = async (store: BlobStore, digest: string) => {
+export const blob = async (store: BlobStore, digest: string) => {
   const bytes = await store.get(digest);
   if (!bytes) throw new Error(`blob ${digest} is missing`);
   return bytes;

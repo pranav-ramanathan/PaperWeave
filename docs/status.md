@@ -7755,3 +7755,48 @@ pointing to the new page).
   - One window size (1280 by 720), and spacing and size are not tried together.
   - Nobody has looked at the pages in these modes by eye, or in Firefox or Safari, or with the
     browser's own text-size setting.
+
+## Versions of a paper, server side
+
+- **What.** Migration 0039 and `packages/server/src/versions.ts`, behind `VERSIONS` (off by
+  default; `docs/settings.md`). A version is a paper of its own with `parent_id`, started from a
+  revision of main (`startVersion`); `listVersions`, `renameVersion` and `deleteVersion` (owner
+  only, the name typed). Its files get their own ids and keep `origin_id`, the main file they came
+  from. Members, language, glossary, datasets (held data stays held) and charts are copied, and its
+  revision 1 is cut at once, in one transaction. Comments and proposals are not carried. At most
+  10 versions a paper; a version of a version is refused; "main" is not a version's name.
+- **Members.** Accepting an invitation, changing a role, handing the paper on, removing someone
+  and deleting the paper apply to main and all its versions together, with every paper's open
+  editors told. Handing on is refused, and nothing changes, if the new owner is missing from any of
+  them. `authorize` and `openFile` are unchanged: versions use the existing `project.read`,
+  `revision.write` and `project.settings` permissions, so the role-by-action test stays as it was.
+- **Held by** `versions.sandbox.test.ts` (15 tests: the setting, each role, other papers, names,
+  the limit, starting at the revision asked for, held data, the family's members, deleting).
+- **Not done.** Hourly build and model-review limits counted over the family, merging, comparing
+  across versions, product metrics for versions, and any UI. What happens to a deleted version's
+  stored bytes waits on the retention decision.
+
+## Three-way merge of text
+
+- **What.** `merge3(base, ours, theirs)` and `resolveMerge` in `packages/server/src/textdiff.ts`, for
+  merging a version back into main (plan section 14.2). Pure: it merges by lines, then by words
+  inside a clashing stretch, because a LaTeX paragraph is often one line. Each conflict carries the
+  base, ours and theirs text, where it sits in each, and its kind (both changed, deleted against
+  changed, both added, too large). Lines keep their own endings, so CRLF and a missing final
+  newline come out as they went in.
+- **A choice.** Two changes are one stretch when they overlap or start at the same place; a change
+  that only starts where the other ends is merged, not a conflict (Git would call it one).
+- **Held by** `textdiff.test.ts`: a test per rule, and a seeded random check (`FUZZ`, 2,000 seeds;
+  run once at 20,000).
+- **Not done.** Nothing calls it yet. Over the size guards a whole file, or a whole stretch of
+  lines, is one conflict. Binary files and renames are the merge plan's job.
+
+## The history timeline, grouped
+
+- **What.** `timeline()` in `apps/web/lib/timeline.ts`: revisions grouped by day in the viewer's
+  time zone, newest first; runs of automatic revisions folded into one row with their count, times,
+  authors and files; named revisions, restores and merges on rows of their own; a marker where a
+  version began. Pure; it reads no clock.
+- **Held by** `timeline.test.ts`, including midnight and daylight-saving days in five zones.
+- **Not done.** Nothing draws it yet. Files per revision and the merge kind come with later work, so
+  both are optional inputs.
