@@ -1667,3 +1667,32 @@ test('a restore that changes nothing costs the floor', async () => {
   await restoreRevision(t.pool, store, me.id, project, saved.id);
   expect(await webSpent(me.id)).toBe(WEB_EDIT_FLOOR);
 });
+
+test('restores that go back and forth keep the log bounded, and the text is the revision', async () => {
+  const { me, project, main } = await budgetPaper('restore-bounded@example.org');
+  const before = process.env.SYNC_COMPACT_BYTES;
+  process.env.SYNC_COMPACT_BYTES = '5000';
+  try {
+    await editFile(t.pool, store, main, me.id, (text) => text.insert(text.length, '% one\n'));
+    const one = await saveRevision(t.pool, store, me.id, project, 'one');
+    const block = '% a block of text that the other revision has\n'.repeat(80);
+    await editFile(t.pool, store, main, me.id, (text) => text.insert(text.length, block));
+    const two = await saveRevision(t.pool, store, me.id, project, 'two');
+    let most = 0;
+    for (let i = 0; i < 30; i++) {
+      const to = i % 2 ? two : one;
+      await restoreRevision(t.pool, store, me.id, project, to.id);
+      const log = (
+        await t.pool.query('select count(*)::int as n from file_updates where file_id = $1', [main])
+      ).rows[0].n;
+      most = Math.max(most, log);
+      expect((await standing(me, project, main)).text).toBe(
+        i % 2 ? MAIN + '% one\n' + block : MAIN + '% one\n',
+      );
+    }
+    expect(most).toBeLessThan(12);
+  } finally {
+    if (before === undefined) delete process.env.SYNC_COMPACT_BYTES;
+    else process.env.SYNC_COMPACT_BYTES = before;
+  }
+});

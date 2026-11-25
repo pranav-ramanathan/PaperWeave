@@ -22,10 +22,12 @@ import { remembered } from './scope.ts';
 import {
   appendUpdate,
   bytesOfLog,
+  compactIfDue,
   currentBytes,
   loadUpdates,
   MAX_FILE_TEXT,
   readLogs,
+  sizeAfter,
   TEXT,
 } from './sync.ts';
 
@@ -370,6 +372,16 @@ export async function applySplices(
     const seq = await appendUpdate(db, fileId, userId, update);
     if (seq === null) throw new AppError('permission_denied', 'You cannot edit this paper.');
     await db.query("select pg_notify('file_edits', $1)", [`${fileId}:${seq}`]);
+    // The caller holds the files, so this is part of the same transaction.
+    await compactIfDue(
+      db,
+      fileId,
+      {},
+      sizeAfter(
+        rows.map((r) => r.update),
+        update.length,
+      ),
+    );
     places += hits.length;
     appended += update.length;
   }

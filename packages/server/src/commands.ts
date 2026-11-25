@@ -13,7 +13,15 @@ import * as Y from 'yjs';
 import type { BlobStore } from './blobs.ts';
 import { type Db, transaction } from './db.ts';
 import { AppError } from './errors.ts';
-import { appendUpdate, loadUpdates, MAX_FILE_TEXT, openFile, TEXT } from './sync.ts';
+import {
+  appendUpdate,
+  compactIfDue,
+  loadUpdates,
+  MAX_FILE_TEXT,
+  openFile,
+  sizeAfter,
+  TEXT,
+} from './sync.ts';
 
 const MAX_TEXT = 1_000_000;
 const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
@@ -210,6 +218,16 @@ export async function runCommand(
       // Delivered when this transaction commits: people with the file open see the edit at once.
       if (opts.notify ?? true)
         await db.query("select pg_notify('file_edits', $1)", [`${fileId}:${seq}`]);
+      // The file's row is held above: the log is tidied as part of this edit.
+      await compactIfDue(
+        db,
+        fileId,
+        {},
+        sizeAfter(
+          rows.map((r) => r.update),
+          update.length,
+        ),
+      );
     }
     await db.query('insert into file_commands (key, file_id, user_id) values ($1, $2, $3)', [
       c.key,

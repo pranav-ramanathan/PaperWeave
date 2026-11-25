@@ -25,6 +25,7 @@ import * as Y from 'yjs';
 import {
   appendUpdates,
   bytesOfLog,
+  compactIfDue,
   currentBytes,
   editLocked,
   notifyEdits,
@@ -1060,7 +1061,8 @@ export async function restoreRevision(
   const prepared = await prepareRestore(pool, projectId, files, blobs);
   // All or nothing, with every file held from here on, so no edit lands between keeping the paper
   // as it stands and replacing it. Typing waits for the moment this takes.
-  return transaction(pool, async (db) => {
+  let appendedTo: string[] = [];
+  const made = await transaction(pool, async (db) => {
     const locked = new Map<string, { head_seq: string }>(
       (
         await db.query(
@@ -1190,6 +1192,7 @@ export async function restoreRevision(
         [renames.map((r) => r.id), renames.map((r) => r.path)],
       );
     const seqs = await appendUpdates(db, projectId, userId, appends);
+    appendedTo = [...seqs.keys()];
     // Charged with every edit made: over budget, the transaction ends and none of it is kept.
     await chargeRewrite(db, userId, projectId, appended, budget);
     await notifyEdits(db, seqs);
@@ -1231,6 +1234,11 @@ export async function restoreRevision(
     await db.query("select pg_notify('restored', $1)", [`${projectId}:${made.number}`]);
     return made;
   });
+  // The files made ahead of time were appended to while held, which did not read their logs (that
+  // would add a read to everything typing waits for). Each log is looked at now, once the restore
+  // has committed; a file that is not due costs one count. The restore stands whatever this does.
+  for (const fileId of appendedTo) await compactIfDue(pool, fileId).catch(() => undefined);
+  return made;
 }
 
 /**

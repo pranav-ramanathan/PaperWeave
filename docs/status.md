@@ -92,9 +92,9 @@ Read this first. Update it in every pull request.
   - A command carries a key chosen by the client. Sent again with the same key it is not applied
     again. Keys are kept for a day (`file_commands`).
   - Editors ask for one over the live connection (see C7). There is no HTTP route for it.
-  - `compactFile` rewrites a file's log as one entry holding the same document. The sync server
-    does it each time a file's log has grown by 500 edits. Who typed each edit is not kept past
-    a compaction.
+  - `compactFile` rewrites a file's log as one entry holding the same document. It is done when
+    a log is due (see "Compaction no longer waits for typing" below). Who typed each edit is not
+    kept past a compaction.
 - **C7: the visual editor in the app.** A .tex file opens in the visual view, or in the source
   view if that was the last one chosen in this browser, with a switch between them. Both are views of the same text (`FileEditor.tsx`, `apps/web/lib/visual.ts`,
   which `/spike` now shares).
@@ -7639,3 +7639,44 @@ two queries in `connected` and multiplies every broadcast on its file.
     page and asks the document for each page's size one by one). This is unmeasured.
   - A single macro with a body of several thousand characters still allows 100 expansions of it
     (the floor), which is more than `MATH_MAX` characters; not measured.
+
+## Compaction no longer waits for typing
+
+A file's log (`file_updates`) was rewritten only by the sync server, when a typed edit landed on
+a multiple of 500. Restores, replaced files, commands and label renames never did it, an edit
+from them landing on a multiple skipped that round, and bytes were not counted: 499 edits of
+2 MB were never due. Every open, restore and command reads the whole log.
+
+- **Now.** `compactionDue(entries, bytesAfterFirst, opts)` (`packages/server/src/sync.ts`, pure)
+  is true at 500 entries or 16 MB after the first entry (`SYNC_COMPACT_BYTES`). `compactFile` is
+  `compactLocked` (the caller holds the file's row) inside a transaction. `compactIfDue` asks
+  `count(*), sum(octet_length(update))` once and compacts if due; given a transaction it joins
+  it, given the pool it takes the lock itself. It is called at the end of `editLocked` (replaced
+  files, and restores of files typed in since they were read), `runCommand` and label renames
+  (`applySplices`), in the same transaction and lock as the edit. Those three have just read the
+  log, so they pass its size (`sizeAfter`) and nothing more is asked of the database. A restore's
+  edits made ahead of time go in through `appendUpdates`, which does not look: `restoreRevision`
+  asks `compactIfDue` of each of those files once the restore has committed (reading every log
+  while the files are held would lengthen what typing waits for, and the existing tests that
+  count statements and reads under the lock hold it to that).
+- **Sync server.** The modulus is gone. It tallies entries and bytes saved to each file since it
+  last looked, in memory, and calls `compactIfDue` on a file's first edit after start and
+  whenever the tally passes `compactEvery` or `compactBytes`; the tally is then reset. A restart
+  loses the tally, which the first edit makes up for.
+- **Attribution (read before changing).** Compaction drops `file_updates.user_id`. What reads it:
+  `metrics.ts` (papers with two or more writers: `file_updates` union `project_authors`) and
+  `compactFile`, which copies the authors into `project_authors` first. Nothing else reads it:
+  `threads.ts` and `proposals.ts` (`textOf`, the `logged` paths) apply the whole log to a
+  document, anchored by Yjs relative positions that survive compaction; revisions, restore and
+  comparison read the log whole or by `head_seq`, which compaction keeps (the one entry takes the
+  newest entry's `seq`); `catchUp` reads `seq >=`, which the one entry still satisfies. There is
+  no "who wrote what" in the product. Compaction at 500 entries already existed, so earlier
+  compaction changes when, not whether. Nothing needed weakening.
+- **Held by.** `sync.test.ts` (boundaries; a large first entry alone is not due), and sandbox
+  cases: 600 `editFile` calls leave at most 500 rows (601 before); ten 300 KB insert-and-delete
+  pairs at a 1 MB threshold leave under 1.5 MB (3.0 MB before); a server-side edit on the
+  sync server's threshold no longer skips the round (the log was never compacted before); thirty
+  alternating restores keep the log under 12 rows (33 before).
+- **Not done.** A single edit of up to 2 MB can still be saved before a compaction is looked
+  for; a log may be 16 MB plus one tally's worth past it. Compaction rewrites the whole log in
+  one transaction, so a log of 16 MB holds the row lock for as long as that takes.
