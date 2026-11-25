@@ -60,6 +60,23 @@ store on your machine directly, and need nothing from outside.
   major version. Write `sslmode=verify-full` so it does not.
   A self-signed certificate will be refused. Not tried against a server with TLS.
 
+### Behind NAT, with no port forwarding
+
+Some machines cannot be reached from outside at all, for example on a university or office
+network (addresses like `10.x.x.x`). Vercel's functions cannot reach a Postgres there, and a
+tunnel does not help for the reason above. Options:
+
+- **A hosted Postgres that is reachable over TLS.** It must offer two addresses: a pooled one in
+  transaction mode for the web app, and a direct one for the sync server, the workers and
+  `migrate`, which need `listen` and advisory locks (see "The pooler"). If the provider offers
+  only one of the two, it will not work. Which providers do is not covered here.
+- **The Railway plan** in `docs/deploy-railway.md`, which has Postgres on Railway.
+- **For local testing only**, run the web app on the same machine instead of Vercel. Then
+  everything reaches Postgres at `localhost`.
+
+The tunnels for the S3 store, LanguageTool and the sync server still work behind NAT. They only
+make outbound connections.
+
 ## The pooler
 
 Every function instance opens its own connections. Vercel's page on connection pooling says
