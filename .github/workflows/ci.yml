@@ -26,16 +26,18 @@ jobs:
       - run: pnpm typecheck
       - run: pnpm test
 
+  # The sandbox, browser and sandbox-and-browser jobs together are what one job used to be:
+  # about 23 minutes in a row (TeX image 3.4, compose 0.5, sandbox tests 5.0, browser tests 13.5
+  # with the build). The first two now run side by side, and the last one only reports their
+  # result under the name that branch protection requires.
+
   # Tests that need Docker: the TeX image, Postgres and the object store.
-  sandbox-and-browser:
+  sandbox:
     runs-on: ubuntu-latest
-    # Took about 35 minutes with the browser tests one at a time (27.5 of them measured on a
-    # fast machine, 15.6 with two at a time, 11.5 with three). Two run now: with three, the one
-    # build worker's queue made a test wait too long for a build. building.spec.ts alone is about
-    # 7 minutes, so it bounds what more workers could save.
-    # 60 leaves room for a slow runner. A run that hangs is still stopped here rather than
+    # About 10 minutes: image 3.4, compose 0.5, tests 5.0, and the install.
+    # 25 leaves room for a slow runner. A run that hangs is still stopped here rather than
     # after the six hours GitHub allows.
-    timeout-minutes: 60
+    timeout-minutes: 25
     steps:
       - uses: actions/checkout@v4
       - uses: pnpm/action-setup@v4
@@ -49,8 +51,39 @@ jobs:
       - run: docker build -t paperweave-tex infra/tex
       - run: docker compose -f infra/compose.yaml up -d --wait || (docker compose -f infra/compose.yaml logs --tail 60; exit 1)
       - run: pnpm test:sandbox
+
+  # The browser tests, in two shards that run side by side, each with its own containers.
+  browser:
+    runs-on: ubuntu-latest
+    strategy:
+      # A failure in one shard does not hide the other's result.
+      fail-fast: false
+      matrix:
+        shard: [1, 2]
+    # Took about 35 minutes with the browser tests one at a time (27.5 of them measured on a
+    # fast machine, 15.6 with two at a time, 11.5 with three). Two run now: with three, the one
+    # build worker's queue made a test wait too long for a build. building.spec.ts alone is about
+    # 7 minutes, so it bounds what more workers or shards could save. The files are split by
+    # file, not by test, so one shard can end up with more of the long ones.
+    # Each shard needs the TeX image too, so it pays for the image (3.4) and compose (0.5) again;
+    # with half of the 13.5 minutes of tests that is about 12 minutes.
+    # mail-down.spec.ts depends on the other tests having run (it pauses the mail container).
+    # Playwright runs a shard's share of that dependency first, and the file is in one shard
+    # only, so it still runs alone at the end of that shard against that shard's own mail container.
+    # 45 leaves room for a slow runner.
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@v4
+      - uses: pnpm/action-setup@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: pnpm
+      - run: pnpm install --frozen-lockfile
+      - run: docker build -t paperweave-tex infra/tex
+      - run: docker compose -f infra/compose.yaml up -d --wait || (docker compose -f infra/compose.yaml logs --tail 60; exit 1)
       - run: pnpm exec playwright install --with-deps chromium
-      - run: pnpm e2e
+      - run: pnpm e2e --shard=${{ matrix.shard }}/2
         env:
           E2E_WORKERS: 2
       # What each failed browser test's page looked like, kept for a week. The log alone says
@@ -58,7 +91,20 @@ jobs:
       - if: failure()
         uses: actions/upload-artifact@v4
         with:
-          name: browser-test-results
+          name: browser-test-results-${{ matrix.shard }}
           path: test-results/
           if-no-files-found: ignore
           retention-days: 7
+
+  # The name branch protection requires. It runs whatever the other two did (a skipped or
+  # cancelled job would otherwise leave this one skipped, which counts as passing) and fails
+  # unless both succeeded.
+  sandbox-and-browser:
+    needs: [sandbox, browser]
+    if: always()
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - run: |
+          echo "sandbox: ${{ needs.sandbox.result }}, browser: ${{ needs.browser.result }}"
+          test "${{ needs.sandbox.result }}" = success && test "${{ needs.browser.result }}" = success
