@@ -5,7 +5,7 @@ import type pg from 'pg';
 import { authorize } from './authz.ts';
 import { type BlobStore, sha256 } from './blobs.ts';
 import { type Column, datasetTable } from './data.ts';
-import type { Db } from './db.ts';
+import { type Db, transaction } from './db.ts';
 import { AppError } from './errors.ts';
 import { id } from './projects.ts';
 import { currentBytes } from './sync.ts';
@@ -268,6 +268,11 @@ export function vegaLite(spec: ChartSpec, table: Table) {
 /**
  * Make a chart, or change one (`input.id`), and queue it to be drawn. A chart is only ever made
  * from a data file whose description is approved and current.
+ *
+ * Beyond the paper's own limit, one person may have only `CHARTS_WAITING_PER_USER` charts waiting
+ * and ask for `CHART_DRAWS_PER_USER_HOUR` an hour, over all their papers, as for builds: the
+ * worker is shared. Asking again for a chart already waiting is not another one waiting. The
+ * count is taken under a lock for the person.
  */
 export async function saveChart(
   pool: pg.Pool,
@@ -276,7 +281,12 @@ export async function saveChart(
   projectId: string,
   input: Record<string, unknown>,
   perHour = CHART_DRAWS_PER_HOUR,
+  limits: ChartLimits = {},
 ): Promise<string> {
+  const waitingMax =
+    limits.waitingPerUser ?? envCount('CHARTS_WAITING_PER_USER', CHARTS_WAITING_PER_USER);
+  const hourMax =
+    limits.perUserHour ?? envCount('CHART_DRAWS_PER_USER_HOUR', CHART_DRAWS_PER_USER_HOUR);
   await authorize(pool, userId, id(projectId), 'file.write');
   // Each drawing runs a sandbox, as a build does, and is held to the same number.
   const drawn = await pool.query(
@@ -318,46 +328,84 @@ export async function saveChart(
   // Left empty, or left as we wrote it for the chart as it was: our own sentence for this chart.
   const ours = existing && describeChart(existing.spec, table.columns);
   const alt = !given || given === ours ? describeChart(spec, table.columns) : given;
-  // Counted from here: this one will be drawn.
-  await pool.query(
-    `with old as (
-       delete from chart_requests where project_id = $1 and created_at < now() - interval '1 day'
-     ) insert into chart_requests (project_id) values ($1)`,
-    [projectId],
-  );
-  if (existing) {
-    await pool.query(
-      `update charts set spec = $2, caption = $3, alt = $4, status = 'queued', problem = null
-       where id = $1`,
-      [existing.id, JSON.stringify(spec), caption, alt],
+  // The person's limits are read and the chart queued under a lock for them, so that two
+  // requests at once cannot both pass.
+  const made = await transaction(pool, async (db) => {
+    await db.query('select pg_advisory_xact_lock(hashtext($1))', [`charts:${userId}`]);
+    // Waiting charts are counted over all the person's papers. The one asked for again is not
+    // another: it is already counted if it is theirs, and takes the place of one if it is not.
+    const mine = (
+      await db.query(
+        `select (select count(*)::int from charts
+                  where requested_by = $1 and status = 'queued' and id is distinct from $2) as waiting,
+                (select count(*)::int from chart_requests
+                  where user_id = $1 and created_at > now() - interval '1 hour') as hour`,
+        [userId, existing?.id ?? null],
+      )
+    ).rows[0];
+    if (mine.waiting >= waitingMax)
+      throw new AppError(
+        'conflict',
+        `You have ${mine.waiting} charts waiting already. Wait for one to be drawn.`,
+      );
+    if (mine.hour >= hourMax)
+      throw new AppError(
+        'conflict',
+        `You have asked for ${hourMax} charts in the last hour, over all your papers. Try again in a little while.`,
+      );
+    if (!existing) {
+      // The chart's files must not take the place of files someone put there.
+      const taken = await db.query('select 1 from files where project_id = $1 and path = any($2)', [
+        projectId,
+        [chartPath(name, 'pdf'), chartPath(name, 'png')],
+      ]);
+      if (taken.rowCount)
+        throw new AppError('conflict', `The paper already has a file charts/${name}.`);
+    }
+    // Counted from here: this one will be drawn.
+    await db.query(
+      `with old as (
+         delete from chart_requests where project_id = $1 and created_at < now() - interval '1 day'
+       ) insert into chart_requests (project_id, user_id) values ($1, $2)`,
+      [projectId, userId],
     );
-  } else {
-    // The chart's files must not take the place of files someone put there.
-    const taken = await pool.query('select 1 from files where project_id = $1 and path = any($2)', [
-      projectId,
-      [chartPath(name, 'pdf'), chartPath(name, 'png')],
-    ]);
-    if (taken.rowCount)
-      throw new AppError('conflict', `The paper already has a file charts/${name}.`);
-  }
-  const made = existing
-    ? existing
-    : (
-        await pool
-          .query(
-            `insert into charts (project_id, name, dataset_file_id, spec, created_by, caption, alt)
-             values ($1, $2, $3, $4, $5, $6, $7) returning id`,
-            [projectId, name, dataset, JSON.stringify(spec), userId, caption, alt],
-          )
-          .catch((err) => {
-            if (err.code === '23505')
-              throw new AppError('conflict', 'Another chart already has that name.');
-            throw err;
-          })
+    if (existing) {
+      await db.query(
+        `update charts set spec = $2, caption = $3, alt = $4, status = 'queued', problem = null,
+           requested_by = $5, asked_at = now()
+         where id = $1`,
+        [existing.id, JSON.stringify(spec), caption, alt, userId],
+      );
+      return existing;
+    }
+    try {
+      return (
+        await db.query(
+          `insert into charts (project_id, name, dataset_file_id, spec, created_by, caption, alt,
+                               requested_by, asked_at)
+           values ($1, $2, $3, $4, $5, $6, $7, $5, now()) returning id`,
+          [projectId, name, dataset, JSON.stringify(spec), userId, caption, alt],
+        )
       ).rows[0];
+    } catch (err) {
+      if ((err as { code?: string }).code === '23505')
+        throw new AppError('conflict', 'Another chart already has that name.');
+      throw err;
+    }
+  });
   await pool.query("select pg_notify('charts', $1)", [made.id]);
   return made.id;
 }
+
+/** Charts one person may have waiting to be drawn, across all their papers. */
+export const CHARTS_WAITING_PER_USER = 3;
+/** Charts one person may ask for in an hour, across all their papers. */
+export const CHART_DRAWS_PER_USER_HOUR = 120;
+export type ChartLimits = { waitingPerUser?: number; perUserHour?: number };
+const envCount = (name: string, fallback: number) => {
+  const n = Number(process.env[name]);
+  return Number.isInteger(n) && n > 0 ? n : fallback;
+};
 
 /** Every chart of a paper, and whether its data has changed since it was drawn. */
 export async function listCharts(

@@ -57,6 +57,15 @@ What it found is fixed in the same change, or listed under "Open" with what to d
   and are spaced once half the hour is used, so they cannot use up what people press for.
   Service tests hold each and failed on the old code. Still true: accounts share one worker in
   proportion, and a build may run 60 s; more workers are a deployment decision.
+- **One account could fill the chart queue, as it could the build queue.** Charts were limited
+  per paper (120 an hour, no user column) and drawn oldest first by the chart's creation, so a
+  chart saved again jumped ahead of newer people's; one author with many papers could queue
+  thousands of draws (a 200 000-point scatter: 3.3 s of the worker, a 53 MB SVG). Now one person
+  may have 3 charts waiting and ask for 120 an hour over all papers (`CHARTS_WAITING_PER_USER`,
+  `CHART_DRAWS_PER_USER_HOUR`), counted under a lock for the person, and the worker draws the
+  chart of whoever has had the fewest drawn in the last hour, then the one asked for longest ago.
+  Service tests hold each and the order cases failed on the old code. Still true: one worker
+  is shared, and a chart's size is bounded only by the data file.
 - **Sign-in limits could be turned against people and walked around.** Four faults, shown with
   the real handler in production mode. (1) Ten sign-in requests for an address, from any
   clients, refused the owner's own request for most of the hour, because ten per hour were

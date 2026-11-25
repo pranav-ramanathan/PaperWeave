@@ -682,6 +682,32 @@ Read this first. Update it in every pull request.
 - **Not done:** a second PUT to an address before the take replaces the object (same length);
   concurrent requests may pass the count together by a few.
 
+## One account cannot fill the chart queue
+
+- **Found by** reading the build fix against charts: builds were made fair, charts were not.
+  `saveChart` counted `chart_requests` per paper only (no user column), `drawNext` took the
+  oldest chart row by `created_at` (so a chart saved again jumped ahead of newer people's), and
+  `takeTurns` puts one draw between builds. One author with many papers could queue thousands of
+  draws; a 200 000-point scatter takes 3.3 s of the worker and makes a 53 MB SVG.
+- **Now** `saveChart` takes a per-person advisory lock and refuses with `conflict` when the
+  person has `CHARTS_WAITING_PER_USER` (3) charts queued over all papers or has asked for
+  `CHART_DRAWS_PER_USER_HOUR` (120) in the last hour, in a sentence like the build refusal. Asking
+  again for a chart already waiting is not another one waiting. It sets `charts.requested_by` and
+  `charts.asked_at` on insert and on re-queue (migration 0038). `drawNext` takes the queued chart
+  whose requester has had the fewest charts done in the last hour (not queued, asked in the last
+  hour), then the oldest `asked_at`. Charts from before have no requester and are one group.
+  The paper's 120 an hour and the `file.write` check are as before. A refused request is not
+  counted, and the request, its count and the chart row are one transaction.
+- **Bulk redraw:** none exists. The only web caller is `saveChartAction`, one chart at a time
+  from the chart's own page. If one is added, count a bulk re-queue of one paper's stale charts
+  once, not by chart, or it will hit the cap of 3.
+- **Held by** cases in `apps/workers/src/charts.sandbox.test.ts` (a fourth chart over two papers,
+  the hourly limit with a small injected limit, another person unaffected, B's chart drawn second,
+  an old chart saved again not jumping ahead); the two order cases and the fourth-chart case
+  failed on the old code.
+- **Not done:** the count of drawn charts is of chart rows, not draws, so a chart drawn again
+  is one row; a chart that is queued again leaves the count. Charts still share one worker.
+
 ## One account cannot fill the build queue
 
 - **Found by** the planner: one account started 100 papers and queued 100 builds in under a
@@ -1128,6 +1154,10 @@ Figure~, ...`, with no warning and `check()` passing.
 - **Chart drawings: 120 an hour for a paper**, the same as builds (`CHART_DRAWS_PER_HOUR`).
   Counted in `chart_requests` (migration 0022), not `chart_draws`: a drawing that gives the
   same files as before is not recorded there again, so it could not be counted from there.
+- **Chart drawings: 3 waiting and 120 an hour for one person**, over all their papers
+  (`CHARTS_WAITING_PER_USER`, `CHART_DRAWS_PER_USER_HOUR`; `chart_requests.user_id` and
+  `charts.requested_by`, migration 0038), beside the paper's 120. See "One account cannot fill
+  the chart queue".
 - **Invitations: 30 an hour for one person**, over all their papers
   (`INVITATIONS_PER_HOUR` in `packages/server/src/projects.ts`). Each is an email to an
   address its sender chose; before this, anyone with an account could have the service write

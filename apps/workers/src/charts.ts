@@ -58,8 +58,12 @@ export async function render(vl: object): Promise<{ pdf: Uint8Array; png: Uint8A
 }
 
 /**
- * Draw the oldest queued chart, if there is one. Returns whether there was. The row stays locked
- * while it is drawn: if this process dies, the lock goes and another worker takes it.
+ * Draw the queued chart to do next, if there is one. Returns whether there was. Not the oldest:
+ * the one whose requester has had the fewest charts done in the last hour, then the one asked for
+ * longest ago (`asked_at`, not when the chart was made), as `takeBuild` does for builds. Charts
+ * from before requesters were recorded are one group of their own. A chart is counted once it is
+ * done: while it is drawn it is locked and stays queued. The row stays locked while it is drawn:
+ * if this process dies, the lock goes and another worker takes it.
  */
 export function drawNext(pool: pg.Pool, store: BlobStore, image: string): Promise<boolean> {
   // The row is taken `skip locked`, so nobody waits on it, and this worker is next to the
@@ -67,8 +71,13 @@ export function drawNext(pool: pg.Pool, store: BlobStore, image: string): Promis
   const run = async (db: Db) => {
     const job = (
       await db.query(
-        `select id, project_id, name, dataset_file_id, spec from charts
-         where status = 'queued' order by created_at for update skip locked limit 1`,
+        `select c.id, c.project_id, c.name, c.dataset_file_id, c.spec from charts c
+         where c.status = 'queued'
+         order by (select count(*) from charts d
+                   where d.requested_by is not distinct from c.requested_by and d.status <> 'queued'
+                     and d.asked_at > now() - interval '1 hour'),
+                  c.asked_at
+         for update of c skip locked limit 1`,
       )
     ).rows[0];
     if (!job) return false;

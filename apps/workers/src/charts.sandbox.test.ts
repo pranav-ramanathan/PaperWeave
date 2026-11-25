@@ -541,3 +541,119 @@ test('a grouped bar over a year column is drawn, and drawn again to the same byt
   for (const path of ['charts/years.pdf', 'charts/years.png'])
     expect(bytes(second, path)).toEqual(bytes(first, path));
 }, 120_000);
+
+// One account must not fill the chart queue: charts are counted, and taken in turn, by who asked.
+let people = 0;
+/** A person of their own, so that what others left queued does not count against them. */
+async function person() {
+  const email = `chartfair${++people}-${Date.now()}@example.org`;
+  return t.signIn(email);
+}
+/** A paper of this person's with its data approved. */
+async function paperOf(who: { id: string }) {
+  const zip = await writeZip([
+    { path: 'main.tex', bytes: Buffer.from(MAIN) },
+    { path: 'data/latency.csv', bytes: Buffer.from(CSV) },
+  ]);
+  const [project] = await importZip(t.pool, store, who.id, zip, 'Charts');
+  const csv = (await listFiles(t.pool, who.id, project.id)).find((f) =>
+    f.path.endsWith('.csv'),
+  )!.id;
+  const { version } = await import('@paperweave/server').then((s) =>
+    s.datasetProposal(t.pool, store, who.id, project.id, csv),
+  );
+  await approveDataset(t.pool, store, who.id, project.id, csv, {
+    version,
+    columns: COLUMNS,
+    missing: ['NA'],
+    exported: true,
+  });
+  return { id: project.id, csv };
+}
+const chartOf = (who: { id: string }, p: { id: string; csv: string }, name: string, more = {}) =>
+  saveChart(t.pool, store, who.id, p.id, { ...LINE, name, dataset: p.csv, ...more });
+const statusOf = async (who: { id: string }, p: { id: string }, name: string) =>
+  (await listCharts(t.pool, store, who.id, p.id)).find((c) => c.name === name)?.status;
+
+test('one person may have three charts waiting over all their papers, and another is not held back', async () => {
+  const [a, b] = [await person(), await person()];
+  const [p1, p2] = [await paperOf(a), await paperOf(a)];
+  const ids = [
+    await chartOf(a, p1, 'one'),
+    await chartOf(a, p1, 'two'),
+    await chartOf(a, p2, 'one'),
+  ];
+  // The fourth, on another paper, is refused, and says why.
+  await expect(chartOf(a, p2, 'two')).rejects.toMatchObject({
+    code: 'conflict',
+    message: expect.stringContaining('3 charts waiting'),
+  });
+  expect(await listCharts(t.pool, store, a.id, p2.id)).toHaveLength(1);
+  // Asking again for one that is already waiting is not another one waiting.
+  await saveChart(t.pool, store, a.id, p1.id, { ...LINE, id: ids[0], title: 'Again' });
+  // Someone else is not held back by it.
+  await chartOf(b, await paperOf(b), 'one');
+  // Once one is drawn there is room again.
+  while (await drawNext(t.pool, store, image));
+  await chartOf(a, p2, 'two');
+  while (await drawNext(t.pool, store, image));
+}, 180_000);
+
+test('one person may ask for only so many drawings in an hour, over all their papers', async () => {
+  const [a, b] = [await person(), await person()];
+  const [p1, p2] = [await paperOf(a), await paperOf(a)];
+  const mine = { waitingPerUser: 100, perUserHour: 2 };
+  const make = (p: { id: string; csv: string }, name: string) =>
+    saveChart(t.pool, store, a.id, p.id, { ...LINE, name, dataset: p.csv }, undefined, mine);
+  await make(p1, 'one');
+  await make(p2, 'one');
+  await expect(make(p1, 'two')).rejects.toMatchObject({
+    code: 'conflict',
+    message: expect.stringContaining('2 charts in the last hour'),
+  });
+  // Refused, so nothing was queued or counted.
+  expect(await statusOf(a, p1, 'two')).toBeUndefined();
+  // Another person has an hour of their own.
+  const pb = await paperOf(b);
+  await saveChart(
+    t.pool,
+    store,
+    b.id,
+    pb.id,
+    { ...LINE, name: 'one', dataset: pb.csv },
+    undefined,
+    mine,
+  );
+  while (await drawNext(t.pool, store, image));
+}, 180_000);
+
+test('the worker draws the chart of whoever has had the fewest drawn, not the oldest', async () => {
+  while (await drawNext(t.pool, store, image));
+  const [a, b] = [await person(), await person()];
+  const [pa, pb] = [await paperOf(a), await paperOf(b)];
+  for (const name of ['one', 'two', 'three']) await chartOf(a, pa, name);
+  await chartOf(b, pb, 'one');
+  expect(await drawNext(t.pool, store, image)).toBe(true);
+  expect(await statusOf(a, pa, 'one')).toBe('drawn');
+  // B's chart is second, not fourth.
+  expect(await drawNext(t.pool, store, image)).toBe(true);
+  expect(await statusOf(b, pb, 'one')).toBe('drawn');
+  expect(await statusOf(a, pa, 'two')).toBe('queued');
+  expect(await statusOf(a, pa, 'three')).toBe('queued');
+  while (await drawNext(t.pool, store, image));
+}, 180_000);
+
+test("a chart asked for again does not jump ahead of a newer person's", async () => {
+  while (await drawNext(t.pool, store, image));
+  const [a, b] = [await person(), await person()];
+  const [pa, pb] = [await paperOf(a), await paperOf(b)];
+  const old = await chartOf(a, pa, 'old');
+  expect(await drawNext(t.pool, store, image)).toBe(true);
+  await chartOf(b, pb, 'new');
+  // A asks for the old chart again, after B's chart was asked for.
+  await saveChart(t.pool, store, a.id, pa.id, { ...LINE, id: old, title: 'Redrawn' });
+  expect(await drawNext(t.pool, store, image)).toBe(true);
+  expect(await statusOf(b, pb, 'new')).toBe('drawn');
+  expect(await statusOf(a, pa, 'old')).toBe('queued');
+  while (await drawNext(t.pool, store, image));
+}, 180_000);
