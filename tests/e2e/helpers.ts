@@ -185,6 +185,17 @@ export async function person(browser: Browser, who: string) {
         path: '/',
       },
     ]);
+  // E2E_THEME=dark (or light): the person has chosen the colours (apps/web/lib/theme.ts), as the
+  // control in the app bar sets them. Only the new look reads it.
+  if (process.env.E2E_THEME === 'dark' || process.env.E2E_THEME === 'light')
+    await context.addCookies([
+      {
+        name: 'pw_theme',
+        value: process.env.E2E_THEME,
+        domain: new URL(test.info().project.use.baseURL ?? ORIGIN).hostname,
+        path: '/',
+      },
+    ]);
   refusals(context);
   opened.push(context);
   slowDown(context);

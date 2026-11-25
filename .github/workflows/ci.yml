@@ -144,6 +144,38 @@ jobs:
           if-no-files-found: ignore
           retention-days: 7
 
+  # The new look in dark: the pages that are in it, with every person starting with the cookie
+  # `pw_theme=dark` (E2E_THEME, tests/e2e/helpers.ts), so that `audit` (axe: contrast above all)
+  # runs on each of them in dark. A small job, not the whole suite: the specs below are the ones
+  # that open a page of the new look and audit it (the editor is not here: its dark theme is
+  # not built yet, and it is not shown without UI_STAGED). Not a required check.
+  browser-dark:
+    runs-on: ubuntu-latest
+    timeout-minutes: 40
+    steps:
+      - uses: actions/checkout@v4
+      - uses: pnpm/action-setup@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: pnpm
+      - run: pnpm install --frozen-lockfile
+      - run: docker build -t paperweave-tex infra/tex
+      - run: docker compose -f infra/compose.yaml up -d --wait || (docker compose -f infra/compose.yaml logs --tail 60; exit 1)
+      - run: pnpm exec playwright install --with-deps chromium
+      - run: pnpm e2e --project=e2e tests/e2e/theme.spec.ts tests/e2e/a11y.spec.ts tests/e2e/projects.spec.ts tests/e2e/look.spec.ts tests/e2e/zoom.spec.ts tests/e2e/titles.spec.ts tests/e2e/history.spec.ts tests/e2e/charts.spec.ts tests/e2e/submit.spec.ts tests/e2e/revisions.spec.ts tests/e2e/paper-look.spec.ts tests/e2e/labels.spec.ts tests/e2e/data.spec.ts
+        env:
+          E2E_WORKERS: 2
+          E2E_UI: next
+          E2E_THEME: dark
+      - if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: browser-dark-test-results
+          path: test-results/
+          if-no-files-found: ignore
+          retention-days: 7
+
   # The name branch protection requires. It runs whatever the other two did (a skipped or
   # cancelled job would otherwise leave this one skipped, which counts as passing) and fails
   # unless both succeeded.
