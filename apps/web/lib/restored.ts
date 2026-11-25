@@ -70,3 +70,13 @@ export function goneWords(left: Left, me: string, time: string): string {
 /** The page that shows what the restore took out and put back, if the paper before it was kept. */
 export const restoreChanges = (projectId: string, r: RestoreNote) =>
   r.kept ? comparison(projectId, r.kept.id, r.id) : null;
+
+/**
+ * The history page with the restore's comparison open in place: the paper as it was just before
+ * beside the restore. The page of `restoreChanges` stays as it is; this is its way on to the rest
+ * of the paper's history.
+ */
+export const restoreHistory = (projectId: string, r: RestoreNote) =>
+  r.kept
+    ? `/projects/${projectId}/history?from=${r.kept.id}&to=${r.id}`
+    : `/projects/${projectId}/history`;

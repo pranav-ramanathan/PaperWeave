@@ -1215,6 +1215,10 @@ test('a restore made while a file is open is said in its editor: who, to what, a
   // The person who restored it is told in their own words.
   await expect(notice(watch)).toContainText('You restored this paper to revision 1 (Good) at ');
   await audit(editor.page, 'an editor told of a restore');
+  // And so is the paper's history, opened on that comparison.
+  await expect(
+    notice(editor.page).getByRole('link', { name: /^History of this paper/ }),
+  ).toHaveAttribute('href', /\/history\?from=[0-9a-f-]{36}&to=[0-9a-f-]{36}$/);
 
   // What went is one press away: the comparison of the paper as it was with the restore.
   const [changes] = await Promise.all([
