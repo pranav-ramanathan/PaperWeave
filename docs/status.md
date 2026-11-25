@@ -7514,3 +7514,45 @@ Measured in-process with 20 read-only connections: one message of 100,000 states
 - **Held by** `presence.test.ts` and four tests at the end of `sync.sandbox.test.ts`.
 - **Not done.** A connection can still name another person's client ID in its one state. The
   budget is in memory and starts afresh when the server restarts.
+
+## Connections are capped for each person
+
+Nothing capped how many sync connections one person could hold, to one file or in all. Each costs
+two queries in `connected` and multiplies every broadcast on its file.
+
+- **Cap.** `connectionCap`, default `{ perFile: 8, perPerson: 64 }`, by the user ID in the ticket.
+  The newest connection is refused; tabs already open are left alone. `overCap` (exported, pure)
+  counts that person's live connections with a lower sequence number `n`, on the file and in all.
+- **Two checks, both needed.** `onAuthenticate` (after `verifyTicket`, before `openFile`) refuses
+  with the reason `too-many` if the person is already at the cap, otherwise stamps `n = ++seq` on
+  the context. That alone does not hold a burst: the library lists a connection on its file only
+  after `onAuthenticate` has passed, so a burst of 12 against a cap of 4 saw 0 live connections in
+  every `onAuthenticate`. `connected` (first line) ranks again among those then live and closes
+  the ones over with `too-many` (code 4429). Only the second check made a planner's burst of 12
+  keep exactly 4.
+- **Live only.** What is counted is `Document.getConnections()` over `hocuspocus.documents`: the
+  library takes a connection out when its socket closes (a close frame, a dead socket found by its
+  idle check) and nothing is stored here but the counter `seq`.
+- **Metric.** `paperweave_sync_connections_over_limit_total`: connections refused or closed. A
+  refusal at `onAuthenticate` is also in `refused_connections_total`.
+- **Editor.** `too-many` is never final, as an unknown authentication failure used to be ("you no
+  longer have access"). Both as a failed authentication and as a close it says "This file is open
+  in too many of your windows. Close one and this one will connect by itself.", closes the socket
+  (the library leaves it open) and connects again every `PAUSE_MS` (10 s), as for over-budget;
+  unsaved edits stay. The status stays on that line across the retries, and is taken down once a
+  connection has stayed in step for two seconds (one that came too late can be synced and closed
+  a moment after).
+- **Tests.** The shared sandbox server is given `{ perFile: 100, perPerson: 100000 }`: its clients
+  close in `afterAll`, and one test holds ten of a person's on one file. `cap.test.ts` holds
+  `overCap`; the sandbox cases run on a server with `{ perFile: 2, perPerson: 3 }`.
+- **PR notes.**
+  - **Deploy order: the web app first, then the sync server.** A page loaded before the web app
+    is deployed treats an authentication failure it does not know as "you no longer have access",
+    which is final, and would lock the editor of someone who is over the cap.
+  - **Not done, needs an owner decision:** a cap on a file's connections across all its members.
+    Each person is capped, but a paper with many members can still add up to many times the
+    per-file cap on one file. What it should be, and who is refused at it, is not decided.
+  - **Not done:** a connection still on its way in (past `onAuthenticate`, not yet listed) is not
+    counted by one ranked ahead of it that arrives first, so a person's burst can briefly hold more
+    than the cap if the lower-numbered ones are slow to be let in; the next connection or the
+    next burst is counted against what is live. The cap is not settable from the environment.

@@ -11,6 +11,7 @@ export const newCounts = () => ({
   connections: 0,
   disconnections: 0,
   refusedConnections: 0,
+  connectionsOverLimit: 0,
   editsSaved: 0,
   editsRejected: 0,
   editsTooLarge: 0,
@@ -27,6 +28,8 @@ const HELP: Record<keyof Counts, string> = {
   connections: 'Connections to a file that were let in. A reconnect counts again.',
   disconnections: 'Connections to a file that ended.',
   refusedConnections: 'Connections refused: bad ticket, or not on the paper.',
+  connectionsOverLimit:
+    'Connections refused or closed because their person already had too many open, to one file or in all.',
   editsSaved: 'Edits appended to a file log.',
   editsRejected: 'Edits refused because their author may not write to the file.',
   editsTooLarge: 'Edits refused for their size, or for the size they would make the file.',

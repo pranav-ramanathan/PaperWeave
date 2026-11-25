@@ -300,6 +300,15 @@ In rough order of how much they matter.
    and charged to a budget of its own for each person (2,000 at once, 1,200 a minute), over which
    it is dropped and the connection stays open. Counted as `paperweave_sync_presence_dropped_total`.
    Who may connect, read or write is unchanged.
+   Connections were not limited either: one person could open any number to a file and to all,
+   each costing two queries and multiplying every broadcast. Each person now holds at most 8
+   to a file and 64 in all (`connectionCap`); the newest is refused with `too-many` and
+   tabs already open are left alone. It is checked when the ticket is read and again once the
+   connection is live, by rank, as a burst is not seen by the first check. The editor waits ten
+   seconds and tries again, never treating it as lost access. Counted as
+   `paperweave_sync_connections_over_limit_total`. What a paper's members add up to on one file
+   is not capped: that is an owner decision. Ticket replay was looked at and is not a problem
+   (whoever can replay a ticket can mint new ones).
    Restores and replaced files (by form or by upload), which the web app makes as edits, are
    limited the same way by size, for each person over all their papers: 100 MB an hour, each
    costing the bytes of edits it appends and at least 256 KB (`WEB_EDIT_BYTES_PER_USER_HOUR`),

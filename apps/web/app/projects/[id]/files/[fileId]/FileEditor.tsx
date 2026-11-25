@@ -108,6 +108,8 @@ const TOO_LARGE = 'too-large';
 const OVER_BUDGET = 'over-budget';
 /** Its word for closing a connection that sent more presence (names, cursors) than it reads. */
 const PRESENCE_TOO_LARGE = 'presence-too-large';
+/** Its word for a person who has this file open in too many windows already. Not final. */
+const TOO_MANY = 'too-many';
 /** The longest name shown, and sent: the sync server keeps no more of one. */
 const NAME_MAX = 80;
 /** How long to wait before connecting again after that: the budget is given back as time goes. */
@@ -133,6 +135,8 @@ type Sync = {
   tooLarge: boolean;
   /** The server is not taking edits from them for a moment, for how many they have sent. Kept. */
   paused: boolean;
+  /** The server turned this window away: the person has the file open in too many. Kept until a connection holds. */
+  crowded: boolean;
   /** Their sign-in has ended. The page waits for them to sign in again. */
   signedOut: boolean;
   /** Their role on the paper, if it is no longer the one this page was made for, and whether
@@ -373,6 +377,7 @@ export default function FileEditor(props: {
     held: false,
     tooLarge: false,
     paused: false,
+    crowded: false,
     signedOut: false,
     role: null,
   });
@@ -482,6 +487,16 @@ export default function FileEditor(props: {
         // Synced with nothing unsent: a pause that was for the reconnect's own payload (what an
         // idle tab sends when it connects) is over. With edits unsent, the saved-check ends it.
         setSync((s) => ({ ...s, loaded: true, paused: s.unsaved ? s.paused : false }));
+        // Let in. The server may still close a connection that came too late, a moment after
+        // it has synced, so "too many windows" is taken down only once this one has held.
+        if (admitting) clearTimeout(admitting);
+        const held = setTimeout(() => {
+          admitting = null;
+          pending.delete(held);
+          setSync((s) => (s.crowded ? { ...s, crowded: false } : s));
+        }, 2000);
+        admitting = held;
+        pending.add(held);
         // Arrived from a place in the PDF: go to the line it named, once, now that there is text.
         const line = Number(new URLSearchParams(location.search).get('line'));
         if (line && !arrived) {
@@ -500,6 +515,8 @@ export default function FileEditor(props: {
       },
       onAuthenticationFailed: ({ reason }) => {
         if (restoreHeld !== null || oversized) return;
+        // Too many windows: not a refusal of the person, which is final. Tried again later.
+        if (reason === TOO_MANY) return crowd();
         // "Try again" is the server saying it could not find out yet whether this person may
         // open the file, not that they may not: its database did not answer.
         if (!stumbled && reason !== TRY_AGAIN) return refuse();
@@ -551,17 +568,11 @@ export default function FileEditor(props: {
         // not retried at once, and edits are not said to be paused.
         if (event.reason === OVER_BUDGET || event.reason === PRESENCE_TOO_LARGE) {
           if (event.reason === OVER_BUDGET) update({ paused: true });
-          provider.configuration.websocketProvider.disconnect();
-          if (pausing) clearTimeout(pausing);
-          const wait = setTimeout(() => {
-            pausing = null;
-            pending.delete(wait);
-            if (wantOpen) void provider.configuration.websocketProvider.connect();
-          }, PAUSE_MS);
-          pausing = wait;
-          pending.add(wait);
+          connectLater();
           return;
         }
+        // Closed after it was let in, because other windows of this person came first.
+        if (event.reason === TOO_MANY) return crowd();
         if (event.reason !== TOO_LARGE && event.code !== 1009) return;
         oversized = true;
         update({ tooLarge: true });
@@ -622,6 +633,26 @@ export default function FileEditor(props: {
     let oversized = false;
     /** The wait, if any, before connecting again after "too many edits". */
     let pausing: ReturnType<typeof setTimeout> | null = null;
+    /** Close the socket, which the library leaves open, and connect again after PAUSE_MS. */
+    const connectLater = () => {
+      provider.configuration.websocketProvider.disconnect();
+      if (pausing) clearTimeout(pausing);
+      const wait = setTimeout(() => {
+        pausing = null;
+        pending.delete(wait);
+        if (wantOpen) void provider.configuration.websocketProvider.connect();
+      }, PAUSE_MS);
+      pausing = wait;
+      pending.add(wait);
+    };
+    /** The wait before it is known whether this window can connect. Said once, not on each try. */
+    let admitting: ReturnType<typeof setTimeout> | null = null;
+    const crowd = () => {
+      // A connection that was let in and synced before it was closed must not clear this.
+      if (admitting) clearTimeout(admitting);
+      update({ crowded: true });
+      connectLater();
+    };
     const awareness = provider.awareness!;
     awareness.setLocalStateField('user', {
       name: user.slice(0, NAME_MAX),
@@ -1168,17 +1199,19 @@ export default function FileEditor(props: {
           ? `You are signed out. Sign in again in another tab and this page will carry on. ${sync.unsaved ? 'Your edits are kept here until then.' : ''}`.trim()
           : sync.role
             ? `You are now ${/^[aeiou]/.test(sync.role.now) ? 'an' : 'a'} ${sync.role.now} on this paper${sync.role.lost ? ` and can no longer edit. ${sync.unsaved ? 'What you typed last was not saved. ' : ''}` : '. '}Reload the page to carry on.`
-            : sync.paused
-              ? 'Saving is paused for a moment: too many edits at once. Your edits are kept and will be saved.'
-              : !sync.loaded
-                ? 'Opening…'
-                : !sync.connected
-                  ? `Offline. ${sync.unsaved ? 'Your edits are waiting to be saved.' : 'Nothing is waiting to be saved.'}`
-                  : !canWrite
-                    ? 'Read only. You can read along but not edit.'
-                    : sync.unsaved
-                      ? 'Saving your edits…'
-                      : 'All edits saved.';
+            : sync.crowded
+              ? 'This file is open in too many of your windows. Close one and this one will connect by itself.'
+              : sync.paused
+                ? 'Saving is paused for a moment: too many edits at once. Your edits are kept and will be saved.'
+                : !sync.loaded
+                  ? 'Opening…'
+                  : !sync.connected
+                    ? `Offline. ${sync.unsaved ? 'Your edits are waiting to be saved.' : 'Nothing is waiting to be saved.'}`
+                    : !canWrite
+                      ? 'Read only. You can read along but not edit.'
+                      : sync.unsaved
+                        ? 'Saving your edits…'
+                        : 'All edits saved.';
   // The restore a note is about: the one that took this file out, or the one made under it.
   const about = left ? (left.why === 'restore' ? left.restore : null) : restore;
   const changes = about && restoreChanges(projectId, about);
