@@ -176,3 +176,67 @@
 :root .diff ins {
   background: color-mix(in srgb, var(--added), var(--ok) 28%);
 }
+
+/* ===== T17: data file, chart, checks before submitting, two revisions ===== */
+
+/* Lists of what was found or how a chart was made. */
+:root .form-sheet .report {
+  margin: 0;
+  padding-left: 1.25rem;
+  list-style: disc;
+}
+:root .form-sheet ol.report {
+  list-style: decimal;
+}
+:root .form-sheet .report li {
+  max-width: 46rem;
+  margin: 0.375rem 0;
+  overflow-wrap: anywhere;
+}
+
+/* The table of a data file's columns: the region around it scrolls (functional.css .wide). */
+:root .form-sheet .wide {
+  border: 1px solid var(--border);
+  border-radius: var(--radius-md);
+}
+:root .form-sheet table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 0.875rem;
+}
+:root .form-sheet th,
+:root .form-sheet td {
+  padding: 0.5rem 0.75rem;
+  border-bottom: 1px solid var(--border);
+  text-align: left;
+  vertical-align: top;
+}
+:root .form-sheet thead th {
+  font-size: 0.8125rem;
+  font-weight: 600;
+  color: var(--muted-foreground);
+  white-space: nowrap;
+}
+:root .form-sheet tbody tr:last-child > * {
+  border-bottom: 0;
+}
+:root .form-sheet td input,
+:root .form-sheet td select {
+  width: auto;
+  min-width: 6rem;
+}
+
+/* The chart: drawn on white in both themes (PLAN.md section 3), and never wider than the sheet. */
+:root .form-sheet img.chart {
+  display: block;
+  max-width: 100%;
+  height: auto;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-md);
+  background: #fff;
+}
+
+/* A sentence of links (the downloads of a checked paper). */
+:root .form-sheet p > a + a {
+  margin-left: 0.75rem;
+}

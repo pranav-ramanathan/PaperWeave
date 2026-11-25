@@ -20,6 +20,8 @@ export const UI_COOKIE = 'pw_ui';
  * entry per line, in alphabetical order.
  */
 export const MIGRATED: readonly string[] = [
+  'chart',
+  'data-file',
   'file-delete',
   'file-rename',
   'invitation',
@@ -29,8 +31,10 @@ export const MIGRATED: readonly string[] = [
   'paper',
   'paper-delete',
   'papers',
+  'revisions-diff',
   'sign-in',
   'sign-in-confirm',
+  'submit',
 ];
 
 /**
