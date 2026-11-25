@@ -8,6 +8,8 @@ import {
   diffLinesFar,
   diffWords,
   FAR_EDITS,
+  merge3,
+  resolveMerge,
   wholeFile,
 } from './textdiff.ts';
 
@@ -542,4 +544,238 @@ test('the lines of a whole file go through diffHunks as one hunk of changed rows
   expect(hunks).toHaveLength(1);
   expect(hunks[0]).toMatchObject({ skipped: 0, line: 1 });
   expect(hunks[0].rows.map((r) => r.op + r.text)).toEqual(['-a', '-b', '-c']);
+});
+
+// merge3: one test for each row of the text rules in section 14.2 of the plan.
+const clean = (b: string, o: string, t: string) => {
+  const m = merge3(b, o, t);
+  expect(m.conflicts).toEqual([]);
+  return m.text;
+};
+
+test('merge3: a run of lines changed on one side only is taken', () => {
+  const b = 'a\nb\nc\nd\n';
+  expect(clean(b, 'a\nB\nc\nd\n', b)).toBe('a\nB\nc\nd\n');
+  expect(clean(b, b, 'a\nb\nc\nD\n')).toBe('a\nb\nc\nD\n');
+  expect(clean(b, 'a\nd\n', b)).toBe('a\nd\n');
+  expect(clean(b, b, 'a\nb\nx\ny\nc\nd\n')).toBe('a\nb\nx\ny\nc\nd\n');
+});
+
+test('merge3: changes in different places of both sides are all kept', () => {
+  expect(clean('a\nb\nc\nd\ne\n', 'A\nb\nc\nd\ne\n', 'a\nb\nc\nd\nE\n')).toBe('A\nb\nc\nd\nE\n');
+  expect(clean('a\nb\nc\nd\ne\n', 'a\nb\nc\nd\ne\nf\n', 'z\na\nb\nc\nd\ne\n')).toBe(
+    'z\na\nb\nc\nd\ne\nf\n',
+  );
+  expect(clean('a\nb\nc\nd\ne\n', 'a\nc\nd\ne\n', 'a\nb\nc\nd\nE\n')).toBe('a\nc\nd\nE\n');
+});
+
+test('merge3: the same change on both sides is taken once, not doubled or in conflict', () => {
+  const b = 'a\nb\nc\n';
+  expect(clean(b, 'a\nX\nc\n', 'a\nX\nc\n')).toBe('a\nX\nc\n');
+  expect(clean(b, 'a\nc\n', 'a\nc\n')).toBe('a\nc\n');
+  // The same line added at one place by both, with different edits elsewhere.
+  expect(clean('a\nb\nc\n', 'a\nnew\nb\nc\n', 'a\nnew\nb\nC\n')).toBe('a\nnew\nb\nC\n');
+});
+
+test('merge3: two sentences of one long line, changed one on each side, merge by words', () => {
+  const b = 'First we measure the tail. Then we fit a model. Finally we compare both.\n';
+  const o = 'First we measure the tail latency. Then we fit a model. Finally we compare both.\n';
+  const t = 'First we measure the tail. Then we fit a simpler model. Finally we compare both.\n';
+  expect(clean(b, o, t)).toBe(
+    'First we measure the tail latency. Then we fit a simpler model. Finally we compare both.\n',
+  );
+  // And with more lines around, one of which only one side changed.
+  expect(clean(`x\n${b}y\n`, `X\n${o}y\n`, `x\n${t}y\n`)).toBe(
+    'X\nFirst we measure the tail latency. Then we fit a simpler model. Finally we compare both.\ny\n',
+  );
+});
+
+test('merge3: neighbouring lines edited in different words merge', () => {
+  expect(clean('one two\nthree four\n', 'ONE two\nthree four\n', 'one two\nthree FOUR\n')).toBe(
+    'ONE two\nthree FOUR\n',
+  );
+});
+
+test('merge3: the same words changed differently on both sides are one small conflict', () => {
+  const b = 'The cache holds 64 entries and evicts the oldest.\n';
+  const o = 'The cache holds 128 entries and evicts the oldest.\n';
+  const t = 'The cache holds 256 entries and evicts the newest.\n';
+  const m = merge3(b, o, t);
+  // Only the number conflicts; "oldest" changed on one side only is taken.
+  expect(m.conflicts.map((c) => [c.kind, c.base, c.ours, c.theirs])).toEqual([
+    ['both-changed', '64', '128', '256'],
+  ]);
+  expect(m.text).toBe('The cache holds 128 entries and evicts the newest.\n');
+  expect(resolveMerge(m, ['theirs'])).toBe('The cache holds 256 entries and evicts the newest.\n');
+});
+
+test('merge3: a conflict says what each side had and where it sits', () => {
+  const b = 'a\nthe cat sat\nz\n';
+  const o = 'a\nthe dog sat\nz\n';
+  const t = 'a\nthe fox sat\nz\n';
+  const m = merge3(b, o, t);
+  expect(m.text).toBe(o);
+  expect(m.conflicts).toHaveLength(1);
+  const [c] = m.conflicts;
+  expect([c.base, c.ours, c.theirs]).toEqual(['cat', 'dog', 'fox']);
+  expect(b.slice(c.baseStart, c.baseEnd)).toBe('cat');
+  expect(o.slice(c.oursStart, c.oursEnd)).toBe('dog');
+  expect(t.slice(c.theirsStart, c.theirsEnd)).toBe('fox');
+  expect(m.text.slice(c.textStart, c.textStart + c.ours.length)).toBe('dog');
+  expect(c.line).toBe(2);
+  expect(m.chunks).toEqual(['a\nthe ', c, ' sat\nz\n']);
+});
+
+test('merge3: removed on one side and changed on the other is a conflict', () => {
+  const b = 'a\nb\nc\n';
+  const m = merge3(b, 'a\nc\n', 'a\nB\nc\n');
+  expect(m.conflicts).toHaveLength(1);
+  expect(m.conflicts[0]).toMatchObject({ kind: 'deleted-vs-changed', base: 'b\n', ours: '' });
+  expect(m.conflicts[0].theirs).toBe('B\n');
+  const n = merge3(b, 'a\nb2\nc\n', 'a\nc\n');
+  expect(n.conflicts[0]).toMatchObject({ kind: 'deleted-vs-changed', theirs: '' });
+  // Both removing the same line is no conflict.
+  expect(clean(b, 'a\nc\n', 'a\nc\n')).toBe('a\nc\n');
+});
+
+test('merge3: different text added at the same place by both is a conflict; both kept on choice', () => {
+  const m = merge3('a\nc\n', 'a\nX\nc\n', 'a\nY\nc\n');
+  expect(m.conflicts).toHaveLength(1);
+  expect(m.conflicts[0]).toMatchObject({
+    kind: 'both-added',
+    base: '',
+    ours: 'X\n',
+    theirs: 'Y\n',
+  });
+  expect(resolveMerge(m, ['both'])).toBe('a\nX\nY\nc\n');
+  expect(resolveMerge(m, ['theirs'])).toBe('a\nY\nc\n');
+  expect(resolveMerge(m, ['base'])).toBe('a\nc\n');
+  expect(resolveMerge(m, [{ text: 'mine\n' }])).toBe('a\nmine\nc\n');
+  expect(() => resolveMerge(m, [])).toThrow(/No choice/);
+});
+
+test('merge3: past the size guard the whole text is one conflict, ours in the text', () => {
+  const b = numbered(30);
+  const o = numbered(30, { 5: 'ours', 25: 'ours too' });
+  const t = numbered(30, { 5: 'theirs', 25: 'theirs too' });
+  const m = merge3(b, o, t, { maxCells: 1 });
+  // diffLinesFar still finds the answer by Myers; only past FAR_EDITS does it give up.
+  expect(m.conflicts.length).toBeGreaterThan(0);
+  const many = (tag: string) =>
+    Array.from({ length: FAR_EDITS + 5 }, (_, i) => `${tag}${i}`).join('\n');
+  const big = merge3(many('b'), many('o'), many('t'));
+  expect(big.conflicts).toHaveLength(1);
+  expect(big.conflicts[0]).toMatchObject({ kind: 'too-large', base: many('b'), theirs: many('t') });
+  expect(big.text).toBe(many('o'));
+  expect(resolveMerge(big, ['theirs'])).toBe(many('t'));
+  // Words of one stretch too far apart for the word table: that stretch of lines is the conflict.
+  const w = merge3('one two three\n', 'one 2 three\n', 'one two 3\n', { wordCells: 0 });
+  expect(w.conflicts).toHaveLength(1);
+  expect(w.conflicts[0]).toMatchObject({ kind: 'both-changed', ours: 'one 2 three\n' });
+  expect(clean('one two three\n', 'one 2 three\n', 'one two 3\n')).toBe('one 2 3\n');
+});
+
+test('merge3: bytes outside the changes are kept: CRLF, no final newline, empty texts', () => {
+  expect(clean('a\r\nb\r\nc', 'a\r\nB\r\nc', 'a\r\nb\r\nC')).toBe('a\r\nB\r\nC');
+  expect(clean('a\nb', 'a\nb\n', 'A\nb')).toBe('A\nb\n');
+  expect(clean('a\nb\n', 'a\nb', 'A\nb\n')).toBe('A\nb');
+  expect(clean('', 'x\n', '')).toBe('x\n');
+  expect(clean('x\n', '', 'x\n')).toBe('');
+  expect(clean('  a \t\n\n\n b\n', '  a \t\n\n\n B\n', '  A \t\n\n\n b\n')).toBe(
+    '  A \t\n\n\n B\n',
+  );
+  // One side adds a final newline where the other changes the last line: both are kept.
+  expect(clean('a\nb', 'a\nb\n', 'a\nB')).toBe('a\nB\n');
+  expect(merge3('', 'x', 'y').conflicts[0].kind).toBe('both-added');
+});
+
+test('merge3: nothing changed on one side gives the other side; equal sides give that side', () => {
+  const b = 'a\nb\nc';
+  expect(merge3(b, b, b)).toEqual({ text: b, conflicts: [], chunks: [b] });
+  expect(merge3(b, 'x', b).text).toBe('x');
+  expect(merge3(b, b, 'y\n').text).toBe('y\n');
+  expect(merge3(b, 'z', 'z')).toEqual({ text: 'z', conflicts: [], chunks: ['z'] });
+});
+
+test('merge3: seeded random texts keep every change and every byte', () => {
+  const N = Number(process.env.FUZZ ?? 2000);
+  const vocab = ['the', 'cache', '0.05', '\\cite{a}', 'x-y', 'é', 'and', 'a', '$x^2$'];
+  for (let seed = 1; seed <= N; seed++) {
+    let s = seed;
+    const next = (n: number) => {
+      s = (Math.imul(s, 1664525) + 1013904223) >>> 0;
+      return (s >>> 8) % n;
+    };
+    const eol = next(4) === 0 ? '\r\n' : '\n';
+    const sentence = () =>
+      Array.from({ length: 1 + next(14) }, () => vocab[next(vocab.length)]).join(' ');
+    // A few unique lines (a long one among them) so that the edits below land where intended.
+    const rows = Array.from({ length: next(10) }, (_, i) => `r${i} ${sentence()}`);
+    const join = (r: string[]) => r.join(eol) + (r.length && next(3) ? eol : '');
+    const base = join(rows);
+    const edit = (r: string[], tag: string, only: (i: number) => boolean) =>
+      r.map((x, i) => {
+        if (!only(i)) return x;
+        const k = next(4);
+        return k === 0 ? x : k === 1 ? `${tag}${i} ${x}` : k === 2 ? `${x} ${tag}` : `${tag} ${i}`;
+      });
+    const fail = (why: string, more: unknown = '') =>
+      new Error(`seed ${seed}: ${why} ${JSON.stringify([base, more])}`);
+
+    // 1 and 2: one side unchanged, or both the same.
+    const x = join(edit(rows, 'X', () => next(2) === 0));
+    for (const m of [merge3(base, base, x), merge3(base, x, base), merge3(base, x, x)])
+      if (m.text !== x || m.conflicts.length) throw fail('one side or both equal', x);
+
+    // 3: edits on different lines (not neighbours) are all kept, without conflicts.
+    const oddEven = (p: number) => (i: number) => i % 2 === p;
+    const o = edit(rows, 'O', oddEven(0));
+    const t = edit(rows, 'T', oddEven(1));
+    const end = next(3) ? eol : '';
+    const [bo, bt] = [o.join(eol) + end, t.join(eol) + end];
+    const baseEnd = rows.join(eol) + end;
+    const disjoint = merge3(baseEnd, bo, bt);
+    const want = rows.map((r, i) => (i % 2 === 0 ? o[i] : t[i])).join(eol) + end;
+    if (disjoint.conflicts.length || disjoint.text !== want) throw fail('disjoint edits', [bo, bt]);
+
+    // 4: whatever the edits, ours chosen everywhere gives the text; the offsets say where.
+    const oo = join(edit(rows, 'A', () => next(2) === 0));
+    const tt = join(edit(rows, 'B', () => next(2) === 0));
+    const m = merge3(base, oo, tt);
+    if (
+      resolveMerge(
+        m,
+        m.conflicts.map(() => 'ours'),
+      ) !== m.text
+    )
+      throw fail('ours', [oo, tt]);
+    if (m.chunks.filter((c) => typeof c !== 'string').length !== m.conflicts.length)
+      throw fail('chunks', [oo, tt]);
+    for (const c of m.conflicts) {
+      const ok =
+        base.slice(c.baseStart, c.baseEnd) === c.base &&
+        oo.slice(c.oursStart, c.oursEnd) === c.ours &&
+        tt.slice(c.theirsStart, c.theirsEnd) === c.theirs &&
+        m.text.slice(c.textStart, c.textStart + c.ours.length) === c.ours;
+      if (!ok) throw fail('offsets', [oo, tt, c]);
+    }
+    // 5: taking theirs everywhere is what merging the other way round with ours gives.
+    const back = merge3(base, tt, oo);
+    if (
+      back.conflicts.length !== m.conflicts.length ||
+      resolveMerge(
+        back,
+        back.conflicts.map(() => 'ours'),
+      ) !==
+        resolveMerge(
+          m,
+          m.conflicts.map(() => 'theirs'),
+        )
+    )
+      throw fail('symmetry', [oo, tt]);
+    // 6: with no conflicts, a side that changed nothing in the merge is the other side's text.
+    if (!m.conflicts.length && (oo === base || tt === base)) {
+      if (m.text !== (oo === base ? tt : oo)) throw fail('no conflicts, one side unchanged');
+    }
+  }
 });
