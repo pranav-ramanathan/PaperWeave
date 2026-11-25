@@ -16,6 +16,7 @@ export const newCounts = () => ({
   editsTooLarge: 0,
   editsOverBudget: 0,
   editsOffTheOpenCopy: 0,
+  presenceDropped: 0,
   commandsApplied: 0,
   commandsNotApplied: 0,
   compactions: 0,
@@ -33,6 +34,8 @@ const HELP: Record<keyof Counts, string> = {
     'Edits and structural edits refused because their author had made too many lately.',
   editsOffTheOpenCopy:
     'Edits saved from a connection no longer on the open copy of its file, and passed on to it.',
+  presenceDropped:
+    'Presence messages (cursors, names) refused or cut down: too large, too many lately, or with more than one person in them.',
   commandsApplied: 'Structural edits applied.',
   commandsNotApplied: 'Structural edits not applied: stale, repeated, refused or malformed.',
   compactions: 'File logs rewritten as one entry.',

@@ -106,6 +106,10 @@ const NO_ACCESS = 'no-access';
 const TOO_LARGE = 'too-large';
 /** Its word for closing a connection whose person has sent too many edits lately. */
 const OVER_BUDGET = 'over-budget';
+/** Its word for closing a connection that sent more presence (names, cursors) than it reads. */
+const PRESENCE_TOO_LARGE = 'presence-too-large';
+/** The longest name shown, and sent: the sync server keeps no more of one. */
+const NAME_MAX = 80;
 /** How long to wait before connecting again after that: the budget is given back as time goes. */
 const PAUSE_MS = 10_000;
 /** Its word, when a connection is turned away, for "not now" as against "no". */
@@ -543,8 +547,10 @@ export default function FileEditor(props: {
         // Too many edits lately: not final. What was typed is kept and sent again, but not at
         // once, which would be refused again. The library leaves the socket open after a close
         // message and does not connect again by itself: this closes it and connects later.
-        if (event.reason === OVER_BUDGET) {
-          update({ paused: true });
+        // The same wait after presence that was too large: nothing here sends that, so it is
+        // not retried at once, and edits are not said to be paused.
+        if (event.reason === OVER_BUDGET || event.reason === PRESENCE_TOO_LARGE) {
+          if (event.reason === OVER_BUDGET) update({ paused: true });
           provider.configuration.websocketProvider.disconnect();
           if (pausing) clearTimeout(pausing);
           const wait = setTimeout(() => {
@@ -618,7 +624,7 @@ export default function FileEditor(props: {
     let pausing: ReturnType<typeof setTimeout> | null = null;
     const awareness = provider.awareness!;
     awareness.setLocalStateField('user', {
-      name: user,
+      name: user.slice(0, NAME_MAX),
       color: colourFor(user),
       colorLight: colourFor(user) + '33',
     });
@@ -627,7 +633,9 @@ export default function FileEditor(props: {
         [...awareness.getStates()]
           .filter(([id]) => id !== doc.clientID)
           .map(([, s]) => s.user?.name)
-          .filter((n): n is string => typeof n === 'string'),
+          .filter((n): n is string => typeof n === 'string')
+          // From other people's browsers: cut, as in the visual view's carets.
+          .map((n) => n.slice(0, NAME_MAX)),
       );
     awareness.on('change', () => {
       seen();
@@ -840,7 +848,7 @@ export default function FileEditor(props: {
                 const [a, h] = [at(s.cursor.anchor), at(s.cursor.head)];
                 if (a == null || h == null) return [];
                 // Names and colours come from the other person's browser: unverified.
-                const name = typeof s.user?.name === 'string' ? s.user.name.slice(0, 80) : '';
+                const name = typeof s.user?.name === 'string' ? s.user.name.slice(0, NAME_MAX) : '';
                 const color =
                   typeof s.user?.color === 'string' && /^#[0-9a-f]{6}$/i.test(s.user.color)
                     ? s.user.color
