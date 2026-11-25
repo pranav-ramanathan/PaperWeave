@@ -11,6 +11,7 @@ import type { BlobStore } from './blobs.ts';
 import { type Db, transaction } from './db.ts';
 import { remembered } from './scope.ts';
 import { AppError } from './errors.ts';
+import { envCount } from './limits.ts';
 import { id } from './projects.ts';
 
 /** The name of the one shared text inside each file's Yjs document. */
@@ -172,6 +173,8 @@ export async function appendUpdates(
   for (const r of rows) seqs.set(r.file_id, Number(r.seq));
   if (seqs.size !== new Set(items.map((i) => i.fileId)).size)
     throw new AppError('permission_denied', 'You cannot edit this file.');
+  // Not tidied here: the rows are held and reading every log would lengthen what typing waits
+  // for. The caller asks `compactIfDue` of each, once its transaction has ended.
   return seqs;
 }
 
@@ -257,7 +260,8 @@ export async function editLocked(
   change: (text: Y.Text) => void,
 ): Promise<number> {
   const doc = new Y.Doc();
-  for (const update of await lockedUpdates(db, store, fileId)) Y.applyUpdate(doc, update);
+  const log = await lockedUpdates(db, store, fileId);
+  for (const update of log) Y.applyUpdate(doc, update);
   const before = Y.encodeStateVector(doc);
   change(doc.getText(TEXT));
   const update = Y.encodeStateAsUpdate(doc, before);
@@ -266,6 +270,9 @@ export async function editLocked(
   const seq = await appendUpdate(db, fileId, userId, update);
   if (seq === null) throw new AppError('permission_denied', 'You cannot edit this file.');
   await db.query("select pg_notify('file_edits', $1)", [`${fileId}:${seq}`]);
+  // The row is held, so this is part of the edit: a server-side edit tidies the log as typing does.
+  // The log was just read, so its size is known without asking.
+  await compactIfDue(db, fileId, {}, sizeAfter(log, update.length));
   return update.length;
 }
 
@@ -275,41 +282,99 @@ export async function editLocked(
  * the one entry keeps every edit's identity, only not the text that was deleted.
  * Who made each edit is not kept past this point.
  */
-export async function compactFile(pool: pg.Pool, fileId: string): Promise<number> {
-  return transaction(pool, async (db) => {
-    const file = (await db.query('select head_seq from files where id = $1 for update', [fileId]))
-      .rows[0];
-    if (!file) return 0;
+export function compactFile(pool: pg.Pool, fileId: string): Promise<number> {
+  return transaction(pool, (db) => compactLocked(db, fileId));
+}
+
+/**
+ * The same inside a transaction: for a caller that holds the file's row lock already (it takes the
+ * lock again, which costs nothing), so that the compaction is part of the edit's own commit.
+ */
+export async function compactLocked(db: Db, fileId: string): Promise<number> {
+  const file = (await db.query('select head_seq from files where id = $1 for update', [fileId]))
+    .rows[0];
+  if (!file) return 0;
+  const { rows } = await db.query(
+    'select update from file_updates where file_id = $1 order by seq',
+    [fileId],
+  );
+  if (rows.length < 2) return 0;
+  const doc = new Y.Doc();
+  for (const r of rows) Y.applyUpdate(doc, new Uint8Array(r.update));
+  // Who wrote the edits is not kept past this point; that they wrote to this paper is.
+  await db.query(
+    `insert into project_authors (project_id, user_id)
+     select distinct f.project_id, u.user_id from file_updates u
+     join all_files f on f.id = u.file_id where u.file_id = $1 and u.user_id is not null
+     on conflict do nothing`,
+    [fileId],
+  );
+  await db.query('delete from file_updates where file_id = $1', [fileId]);
+  // It takes the place of the newest entry, so the file's place in its history does not move.
+  await db.query('insert into file_updates (file_id, seq, update) values ($1, $2, $3)', [
+    fileId,
+    file.head_seq,
+    Buffer.from(Y.encodeStateAsUpdate(doc)),
+  ]);
+  // shortcut: a command's key is remembered for a day, so a retry later than that could apply
+  // twice if the text still matched. Keep keys longer if clients ever retry across days.
+  await db.query(
+    "delete from file_commands where file_id = $1 and created_at < now() - interval '1 day'",
+    [fileId],
+  );
+  return rows.length - 1;
+}
+
+/** How long a log may grow before it is rewritten: in entries, and in bytes past the first. */
+export const COMPACT_ENTRIES = 500;
+export const COMPACT_BYTES = 16_000_000;
+export type CompactLimits = { entries?: number; bytes?: number };
+
+/**
+ * Whether a log is due to be rewritten: it holds `entries` edits, or `bytes` of them past the
+ * first (which is the file as it was imported, and which a rewrite does not make smaller). The
+ * limits are the settings (`SYNC_COMPACT_BYTES`) unless given. Pure.
+ */
+export function compactionDue(entries: number, bytesAfterFirst: number, opts: CompactLimits = {}) {
+  const maxEntries = opts.entries ?? COMPACT_ENTRIES;
+  const maxBytes = opts.bytes ?? envCount('SYNC_COMPACT_BYTES', COMPACT_BYTES);
+  return entries >= maxEntries || bytesAfterFirst >= maxBytes;
+}
+
+/**
+ * The size of a log that was just read, with one more entry of `added` bytes on its end: what
+ * `compactIfDue` would count, for a caller that holds the log and so need not ask the database.
+ */
+export function sizeAfter(log: ArrayLike<{ length: number }>, added: number) {
+  let bytesAfterFirst = added;
+  for (let i = 1; i < log.length; i++) bytesAfterFirst += log[i].length;
+  return { entries: log.length + 1, bytesAfterFirst };
+}
+
+/**
+ * Rewrite a file's log if it is due (see `compactionDue`). Given a connection in a transaction
+ * that holds the file's row, it is part of that transaction; given the pool, it takes the lock
+ * itself. Returns how many entries went.
+ */
+export async function compactIfDue(
+  db: Db,
+  fileId: string,
+  opts: CompactLimits = {},
+  known?: { entries: number; bytesAfterFirst: number },
+) {
+  let { entries, bytesAfterFirst } = known ?? { entries: 0, bytesAfterFirst: 0 };
+  if (!known) {
     const { rows } = await db.query(
-      'select update from file_updates where file_id = $1 order by seq',
+      `with first as (select min(seq) as seq from file_updates where file_id = $1)
+       select count(*)::int as n,
+         coalesce(sum(octet_length(update)) filter (where seq > (select seq from first)), 0)::float8 as bytes
+       from file_updates where file_id = $1`,
       [fileId],
     );
-    if (rows.length < 2) return 0;
-    const doc = new Y.Doc();
-    for (const r of rows) Y.applyUpdate(doc, new Uint8Array(r.update));
-    // Who wrote the edits is not kept past this point; that they wrote to this paper is.
-    await db.query(
-      `insert into project_authors (project_id, user_id)
-       select distinct f.project_id, u.user_id from file_updates u
-       join all_files f on f.id = u.file_id where u.file_id = $1 and u.user_id is not null
-       on conflict do nothing`,
-      [fileId],
-    );
-    await db.query('delete from file_updates where file_id = $1', [fileId]);
-    // It takes the place of the newest entry, so the file's place in its history does not move.
-    await db.query('insert into file_updates (file_id, seq, update) values ($1, $2, $3)', [
-      fileId,
-      file.head_seq,
-      Buffer.from(Y.encodeStateAsUpdate(doc)),
-    ]);
-    // shortcut: a command's key is remembered for a day, so a retry later than that could apply
-    // twice if the text still matched. Keep keys longer if clients ever retry across days.
-    await db.query(
-      "delete from file_commands where file_id = $1 and created_at < now() - interval '1 day'",
-      [fileId],
-    );
-    return rows.length - 1;
-  });
+    ({ n: entries, bytes: bytesAfterFirst } = rows[0]);
+  }
+  if (!compactionDue(entries, bytesAfterFirst, opts)) return 0;
+  return 'release' in db ? compactLocked(db, fileId) : compactFile(db as pg.Pool, fileId);
 }
 
 /**

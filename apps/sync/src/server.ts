@@ -5,9 +5,12 @@ import {
   AppError,
   appendUpdate,
   type BlobStore,
-  compactFile,
+  COMPACT_BYTES,
+  COMPACT_ENTRIES,
+  compactIfDue,
   type EditBudgetConfig,
   editBudget,
+  envCount,
   editBudgetFromEnv,
   cleanPresence,
   holds,
@@ -92,8 +95,10 @@ export async function startSync(opts: {
   secret: string;
   port: number;
   databaseUrl: string;
-  /** A file's log is rewritten as one entry each time it has grown by this many edits. */
+  /** A file's log is rewritten as one entry once it holds this many edits... */
   compactEvery?: number;
+  /** ...or this many bytes past its first entry (`SYNC_COMPACT_BYTES`). */
+  compactBytes?: number;
   /** Whoever sends this token may read /metrics. Without one there is no such page. */
   metricsToken?: string;
   /** The longest a file's text may be made by editing. The default is what could be imported. */
@@ -109,7 +114,8 @@ export async function startSync(opts: {
   /** The most connections a person may hold open, to one file and in all. */
   connectionCap?: ConnectionCap;
 }) {
-  const { pool, store, secret, compactEvery = 500, sessionCheckMs = 60_000 } = opts;
+  const { pool, store, secret, compactEvery = COMPACT_ENTRIES, sessionCheckMs = 60_000 } = opts;
+  const compactBytes = opts.compactBytes ?? envCount('SYNC_COMPACT_BYTES', COMPACT_BYTES);
   const cap = opts.connectionCap ?? { perFile: 8, perPerson: 64 };
   const counts = newCounts();
   /** The last number given to a connection. Only counts up; what is live is asked of the library. */
@@ -145,6 +151,26 @@ export async function startSync(opts: {
   const BUDGET_MESSAGE = 'Too many edits at once. Try again in a moment.';
   /** For a file being read from its log: where the log stood when the reading began. */
   const loadedAt = new Map<string, number>();
+  /**
+   * What this server has saved to each file since it last looked at whether its log is due to be
+   * rewritten. Edits made elsewhere (restores, commands) look after the log themselves; the
+   * database is asked only on a file's first edit after start and when this passes a threshold.
+   */
+  const tally = new Map<string, { entries: number; bytes: number }>();
+  const due = { entries: compactEvery, bytes: compactBytes };
+  const tidy = (fileId: string, bytes: number) => {
+    const t = tally.get(fileId);
+    if (t) {
+      t.entries++;
+      t.bytes += bytes;
+      if (t.entries < due.entries && t.bytes < due.bytes) return;
+    }
+    tally.set(fileId, { entries: 0, bytes: 0 });
+    compactIfDue(pool, fileId, due).then(
+      (gone) => void (gone > 0 && counts.compactions++),
+      (err) => console.error(`compacting ${fileId} failed:`, (err as Error).message),
+    );
+  };
   /**
    * Bring the open copy of a file up to its log, from a place in the log on. That entry and
    * any after it: if the log was rewritten as one entry since, the edit is in a later one.
@@ -473,12 +499,8 @@ export async function startSync(opts: {
         counts.editsOffTheOpenCopy++;
         await catchUp(documentName, seq);
       }
-      if (seq % compactEvery === 0)
-        // Not waited for: the edit is saved already, and this only tidies the log behind it.
-        compactFile(pool, documentName).then(
-          () => void counts.compactions++,
-          (err) => console.error(`compacting ${documentName} failed:`, (err as Error).message),
-        );
+      // Not waited for: the edit is saved already, and this only tidies the log behind it.
+      tidy(documentName, payload.length);
     },
   });
 

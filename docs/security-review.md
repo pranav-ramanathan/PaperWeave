@@ -316,6 +316,10 @@ In rough order of how much they matter.
    (`SYNC_EDIT_BURST_BYTES`, `SYNC_EDIT_BYTES_PER_MINUTE`), so one account can no longer add
    2 MB edits without pause. It is kept in the sync server's memory, so it starts afresh
    when that restarts, and it counts bytes sent, not what they add up to once compacted.
+   A log is now also rewritten once the edits after its first entry reach 16 MB
+   (`SYNC_COMPACT_BYTES`), and by restores, replaced files, commands and label renames as well
+   as by typing, so edits that insert and delete large text no longer pile up in `file_updates`
+   for every open, restore and command to read.
    Presence (names and cursors) over the same connection, which a viewer can send too, was
    not limited at all, and the library parsed, kept and sent on to everyone on the file whatever
    it was given. It is now refused above 8 KB before it is parsed (the connection is closed with

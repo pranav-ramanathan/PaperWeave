@@ -1926,3 +1926,43 @@ test('the metrics count the connections turned away', async () => {
     for (const x of burst) x.provider.destroy();
   });
 });
+
+test('a server-side edit that lands on the threshold does not skip the round', async () => {
+  const { project, file } = await paper();
+  const THRESHOLD = 20;
+  const own = await startSync({
+    pool: t.pool,
+    store,
+    secret: SECRET,
+    port: sync.port + 200,
+    databaseUrl: t.url,
+    compactEvery: THRESHOLD,
+  });
+  try {
+    const owner = client(users.owner, file, own.port);
+    await saved(owner);
+    // The file's first entry, then 18 typed edits: the log holds 19.
+    for (let i = 0; i < 18; i++) {
+      owner.text.insert(owner.text.length, `live ${i}\n`);
+      await saved(owner);
+    }
+    expect(await logRows(file)).toBe(19);
+    // The 20th entry is the server's own.
+    await editFile(t.pool, store, file, users.owner.id, (text) => text.insert(0, '% server\n'));
+    await until('the open copy to have it', () => owner.text.toString().startsWith('% server\n'));
+    for (let i = 0; i < 10; i++) {
+      owner.text.insert(owner.text.length, `more ${i}\n`);
+      await saved(owner);
+    }
+    await until('the log to be compacted', async () => (await logRows(file)) < THRESHOLD, 5000);
+    expect(await logRows(file)).toBeLessThan(THRESHOLD);
+    // Nothing was lost to it.
+    const text = owner.text.toString();
+    expect(text.startsWith('% server\n')).toBe(true);
+    expect(text.match(/live \d+\n/g)).toHaveLength(18);
+    expect(text.match(/more \d+\n/g)).toHaveLength(10);
+    expect(await stored(project)).toBe(text.replaceAll('\n', '\r\n'));
+  } finally {
+    await own.stop();
+  }
+}, 60_000);

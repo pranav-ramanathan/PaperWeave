@@ -223,6 +223,41 @@ test('compacting leaves one log entry, the same text, and old copies still merge
   expect(await stored(p.id)).toBe(before.replace('gamma', 'GAMMA'));
 });
 
+test('600 server-side edits with no sync server leave a log of at most 500 entries, and the same text', async () => {
+  const p = await paper();
+  for (let i = 0; i < 600; i++)
+    await editFile(t.pool, store, p.main, owner.id, (text) => text.insert(text.length, `${i}\n`));
+  expect(await rows(p.main)).toBeLessThanOrEqual(500);
+  const lines = (await open(p.main)).toString().split('\n');
+  expect(lines.slice(-601, -1)).toEqual(Array.from({ length: 600 }, (_, i) => `${i}`));
+}, 180_000);
+
+test('edits that insert and delete large text do not leave a log of megabytes', async () => {
+  const p = await paper();
+  const before = process.env.SYNC_COMPACT_BYTES;
+  process.env.SYNC_COMPACT_BYTES = '1000000';
+  try {
+    const big = 'abcdefghi\n'.repeat(30_000);
+    for (let i = 0; i < 10; i++) {
+      await editFile(t.pool, store, p.main, owner.id, (text) => text.insert(text.length, big));
+      await editFile(t.pool, store, p.main, owner.id, (text) =>
+        text.delete(text.length - big.length, big.length),
+      );
+    }
+  } finally {
+    if (before === undefined) delete process.env.SYNC_COMPACT_BYTES;
+    else process.env.SYNC_COMPACT_BYTES = before;
+  }
+  const { bytes } = (
+    await t.pool.query(
+      'select sum(octet_length(update))::float8 as bytes from file_updates where file_id = $1',
+      [p.main],
+    )
+  ).rows[0];
+  expect(bytes).toBeLessThan(1_500_000);
+  expect((await open(p.main)).toString()).toBe(MAIN.replaceAll('\r\n', '\n'));
+}, 120_000);
+
 test('with exactPlace, an insertion whose anchors were deleted is refused; without it, it applies', async () => {
   const p = await paper();
   const text = await open(p.main);
