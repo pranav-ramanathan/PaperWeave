@@ -53,6 +53,7 @@ import {
   isNews,
   type Left,
   restoreChanges,
+  restoreHistory,
   restoredWords,
   whyGone,
 } from '../../../../../lib/restored';
@@ -1459,6 +1460,11 @@ export default function FileEditor(props: {
             {changes && (
               <a href={changes} target="_blank" rel="noreferrer">
                 Show what the restore changed (opens a new tab)
+              </a>
+            )}
+            {about && (
+              <a href={restoreHistory(projectId, about)} target="_blank" rel="noreferrer">
+                History of this paper (opens a new tab)
               </a>
             )}
             <button

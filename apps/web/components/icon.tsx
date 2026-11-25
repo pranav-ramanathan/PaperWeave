@@ -6,10 +6,12 @@ import { cn } from '../lib/utils';
 // that this list is the one place to see which are in use.
 export {
   Check,
+  ChevronDown,
   ChevronRight,
   CircleCheck,
   Ellipsis,
   Flag,
+  GitBranch,
   GitMerge,
   RotateCcw,
   FileText,
@@ -19,6 +21,7 @@ export {
   Sparkles,
   TriangleAlert,
   MessageSquare,
+  Monitor,
   Moon,
   Sun,
   X,

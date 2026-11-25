@@ -34,3 +34,4 @@ export * from './limits.ts';
 export * from './presence.ts';
 export * from './download.ts';
 export * from './uploads.ts';
+export * from './versions.ts';

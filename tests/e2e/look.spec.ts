@@ -24,7 +24,7 @@ const appearance = (page: import('@playwright/test').Page) =>
       // The links and buttons, in the page's order, but the switch: the same in both looks.
       names: [
         ...document.querySelectorAll(
-          'main a[href], main button:not(form[aria-label="Look of the pages"] button)',
+          'main a[href], main button:not(form[aria-label="Look of the pages"] button, form[aria-label="Theme"] button)',
         ),
       ].map((el) => el.textContent),
     };

@@ -3,6 +3,7 @@ import { afterAll, beforeAll, expect, test } from 'vitest';
 import { writeZip } from './archive.ts';
 import { blobStore } from './blobs.ts';
 import { approveDataset, datasetProposal } from './data.ts';
+import { createFile, deleteFile } from './files.ts';
 import { importZip, listFiles } from './import.ts';
 import { productMetrics } from './metrics.ts';
 import {
@@ -23,6 +24,7 @@ import {
   listVersions,
   MAX_VERSIONS,
   renameVersion,
+  sameFileIn,
   startVersion,
   versionsEnabled,
 } from './versions.ts';
@@ -550,4 +552,45 @@ test('a version starts without the paper’s comments and proposals, and its fil
       (await t.pool.query('select head_seq from files where id = $1', [body.id])).rows[0].head_seq,
     ),
   ).toBeGreaterThan(0);
+});
+
+test('sameFileIn finds a file in the other papers of the family by origin, and by role', async () => {
+  const p = await paper();
+  const v = await startVersion(t.pool, store, users.owner.id, p.id, p.revision, 'same-file', {
+    env: ON,
+  });
+  const inVersion = Object.fromEntries((await filesOf(v.id)).map((f) => [f.path, f.id]));
+  // Main to the version, and the version to main: each maps the family, itself included.
+  const fromMain = await sameFileIn(t.pool, users.owner.id, p.id, p.files['body.tex']);
+  expect(Object.fromEntries(fromMain)).toEqual({
+    [p.id]: p.files['body.tex'],
+    [v.id]: inVersion['body.tex'],
+  });
+  const fromVersion = await sameFileIn(t.pool, users.owner.id, v.id, inVersion['body.tex']);
+  expect(Object.fromEntries(fromVersion)).toEqual(Object.fromEntries(fromMain));
+
+  // A file made in the version has no match in main; one made in main after the version has none
+  // in the version.
+  const mine = await createFile(t.pool, store, users.owner.id, v.id, 'only-here.tex');
+  expect([...(await sameFileIn(t.pool, users.owner.id, v.id, mine)).keys()]).toEqual([v.id]);
+  const later = await createFile(t.pool, store, users.owner.id, p.id, 'later.tex');
+  expect([...(await sameFileIn(t.pool, users.owner.id, p.id, later)).keys()]).toEqual([p.id]);
+
+  // A deleted file is not matched, from either side.
+  await deleteFile(t.pool, store, users.owner.id, v.id, inVersion['body.tex']);
+  const afterDelete = await sameFileIn(t.pool, users.owner.id, p.id, p.files['body.tex']);
+  expect([...afterDelete.keys()]).toEqual([p.id]);
+  expect((await sameFileIn(t.pool, users.owner.id, v.id, inVersion['body.tex'])).size).toBe(0);
+
+  // A file of another paper is not found under this paper's address.
+  expect((await sameFileIn(t.pool, users.owner.id, v.id, p.files['data.csv'])).size).toBe(0);
+
+  // Everyone on the paper may ask (project.read); a stranger is told there is no such paper.
+  for (const role of ['owner', 'editor', 'reviewer', 'viewer'] as const)
+    expect(await code(sameFileIn(t.pool, users[role].id, p.id, p.files['main.tex'])), role).toBe(
+      'ok',
+    );
+  expect(await code(sameFileIn(t.pool, users.outsider.id, p.id, p.files['main.tex']))).toBe(
+    'not_found',
+  );
 });
