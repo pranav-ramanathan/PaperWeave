@@ -26,6 +26,8 @@ import {
   renameFile,
   lastRestore,
   lastRestoreNote,
+  nameRevision,
+  revisionStats,
   restoreEdits,
   cutRevision,
   restoreNote,
@@ -1695,4 +1697,170 @@ test('restores that go back and forth keep the log bounded, and the text is the 
     if (before === undefined) delete process.env.SYNC_COMPACT_BYTES;
     else process.env.SYNC_COMPACT_BYTES = before;
   }
+});
+
+test('a revision says how many words and files changed against the one before it', async () => {
+  const p = await paper();
+  await exportZip(t.pool, store, owner.id, p.id);
+  const stats = async () =>
+    new Map((await listRevisions(t.pool, owner.id, p.id)).map((r) => [r.number, r.stat]));
+  // The first revision is counted against nothing: all three files are new. The picture is not text.
+  const first = (await stats()).get(1)!;
+  expect(first.files).toBe(3);
+  expect(first.removed).toBe(0);
+  expect(first.added).toBeGreaterThan(10);
+  expect(first.partial).toBeUndefined();
+
+  await replace(p.main, 'Hello.', 'Hello, world.');
+  await exportZip(t.pool, store, owner.id, p.id);
+  expect((await stats()).get(2)).toEqual({ files: 1, added: 1, removed: 0 });
+
+  await replace(p.main, 'Second line.', 'One.');
+  await exportZip(t.pool, store, owner.id, p.id);
+  expect((await stats()).get(3)).toEqual({ files: 1, added: 1, removed: 2 });
+
+  // A picture that changed is a changed file and no words.
+  await replaceFile(
+    t.pool,
+    store,
+    owner.id,
+    p.id,
+    'fig.png',
+    Buffer.from([0x89, 0x50, 0x4e, 0x47, 9]),
+  );
+  await exportZip(t.pool, store, owner.id, p.id);
+  expect((await stats()).get(4)).toEqual({ files: 1, added: 0, removed: 0 });
+
+  // A rename is a changed file; a file added is counted by its words.
+  await renameFile(t.pool, owner.id, p.id, p.body, 'preamble.tex');
+  await createFile(t.pool, store, owner.id, p.id, 'more.tex', Buffer.from('four five\n'));
+  await exportZip(t.pool, store, owner.id, p.id);
+  expect((await stats()).get(5)).toEqual({ files: 2, added: 2, removed: 0 });
+
+  // A file removed is counted by its words.
+  const more = (await listFiles(t.pool, owner.id, p.id)).find((f) => f.path === 'more.tex')!;
+  await deleteFile(t.pool, store, owner.id, p.id, more.id);
+  await exportZip(t.pool, store, owner.id, p.id);
+  expect((await stats()).get(6)).toEqual({ files: 1, added: 0, removed: 2 });
+
+  // Nothing changed: the same revision again, not a new count.
+  await exportZip(t.pool, store, owner.id, p.id);
+  expect((await stats()).size).toBe(6);
+});
+
+test('a text too large to compare is a changed file, and the count says it is partial', async () => {
+  const p = await paper();
+  const words = (prefix: string) =>
+    Array.from({ length: 1000 }, (_, i) => `${prefix}${i}`).join(' ') + '\n';
+  await replaceFile(t.pool, store, owner.id, p.id, 'a.tex', Buffer.from(words('a')));
+  await exportZip(t.pool, store, owner.id, p.id);
+  // Every word different on one line: too many to compare word by word.
+  await replaceFile(t.pool, store, owner.id, p.id, 'a.tex', Buffer.from(words('b')));
+  await exportZip(t.pool, store, owner.id, p.id);
+  // Larger than a comparison reads at all.
+  await replaceFile(t.pool, store, owner.id, p.id, 'big.tex', Buffer.from('word '.repeat(300_000)));
+  await exportZip(t.pool, store, owner.id, p.id);
+  const revs = new Map(
+    (await listRevisions(t.pool, owner.id, p.id)).map((r) => [r.number, r.stat]),
+  );
+  expect(revs.get(2)).toEqual({ files: 1, added: 0, removed: 0, partial: true });
+  expect(revs.get(3)).toEqual({ files: 1, added: 0, removed: 0, partial: true });
+});
+
+test('revisions not counted yet are counted when asked for, and kept', async () => {
+  const p = await paper();
+  await exportZip(t.pool, store, owner.id, p.id);
+  await replace(p.main, 'Hello.', 'Hello, world.');
+  await exportZip(t.pool, store, owner.id, p.id);
+  // As a revision from before counts were kept.
+  await t.pool.query('update revisions set stat = null where project_id = $1', [p.id]);
+  const listed = await listRevisions(t.pool, owner.id, p.id);
+  expect(listed.map((r) => r.stat)).toEqual([null, null]);
+  const got = await revisionStats(
+    t.pool,
+    store,
+    viewer.id,
+    p.id,
+    listed.map((r) => r.id),
+  );
+  expect(got.get(listed[0].id)).toEqual({ files: 1, added: 1, removed: 0 });
+  expect(got.get(listed[1].id)?.files).toBe(3);
+  expect((await listRevisions(t.pool, owner.id, p.id)).map((r) => r.stat?.files)).toEqual([1, 3]);
+  // Kept: the stored count is what a later call answers.
+  await t.pool.query(
+    `update revisions set stat = '{"files":9,"added":9,"removed":9}' where id = $1`,
+    [listed[0].id],
+  );
+  const again = await revisionStats(t.pool, store, owner.id, p.id, [listed[0].id]);
+  expect(again.get(listed[0].id)).toEqual({ files: 9, added: 9, removed: 9 });
+  expect(await code(revisionStats(t.pool, store, outsider.id, p.id, [listed[0].id]))).toBe(
+    'not_found',
+  );
+});
+
+test('a revision that exists can be given a name, by those who may save one', async () => {
+  // Its own owner: the shared one has sent many invitations by now.
+  const boss = await t.signIn('namer-owner@example.org');
+  const editor = await t.signIn('namer-editor@example.org');
+  const reviewer = await t.signIn('namer-reviewer@example.org');
+  const zip = await writeZip([{ path: 'main.tex', bytes: Buffer.from(MAIN) }]);
+  const [project] = await importZip(t.pool, store, boss.id, zip, 'Naming');
+  const p = { id: project.id, main: (await listFiles(t.pool, boss.id, project.id))[0].id };
+  for (const [who, role] of [
+    [editor, 'editor'],
+    [reviewer, 'reviewer'],
+    [viewer, 'viewer'],
+  ] as const) {
+    const { token } = await invite(t.pool, boss.id, p.id, who.email, role);
+    await acceptInvitation(t.pool, who.id, token);
+  }
+  const owner = boss;
+  await exportZip(t.pool, store, owner.id, p.id);
+  const auto = (await listRevisions(t.pool, owner.id, p.id))[0];
+  expect(auto.kind).toBe('auto');
+
+  expect(await nameRevision(t.pool, owner.id, p.id, auto.id, '  First draft ')).toMatchObject({
+    id: auto.id,
+    number: 1,
+    name: 'First draft',
+    kind: 'named',
+  });
+  expect((await listRevisions(t.pool, owner.id, p.id))[0]).toMatchObject({
+    id: auto.id,
+    name: 'First draft',
+    kind: 'named',
+  });
+  // Named again, by an editor.
+  expect((await nameRevision(t.pool, editor.id, p.id, auto.id, 'Draft 1')).name).toBe('Draft 1');
+
+  expect(await code(nameRevision(t.pool, viewer.id, p.id, auto.id, 'x'))).toBe('permission_denied');
+  expect(await code(nameRevision(t.pool, reviewer.id, p.id, auto.id, 'x'))).toBe(
+    'permission_denied',
+  );
+  expect(await code(nameRevision(t.pool, outsider.id, p.id, auto.id, 'x'))).toBe('not_found');
+  // The rules of a saved name: something, and at most 200 characters.
+  for (const bad of ['', '   ', 'x'.repeat(201), null, 7])
+    expect(await code(nameRevision(t.pool, owner.id, p.id, auto.id, bad))).toBe('invalid_input');
+  expect((await nameRevision(t.pool, owner.id, p.id, auto.id, 'y'.repeat(200))).name).toHaveLength(
+    200,
+  );
+
+  // Another paper's revision cannot be named through this one.
+  const [other] = await importZip(t.pool, store, owner.id, zip, 'Naming, another');
+  await exportZip(t.pool, store, owner.id, other.id);
+  const theirs = (await listRevisions(t.pool, owner.id, other.id))[0];
+  expect(await code(nameRevision(t.pool, owner.id, p.id, theirs.id, 'mine'))).toBe('not_found');
+  expect(await code(nameRevision(t.pool, owner.id, p.id, 'not-an-id', 'mine'))).toBe('not_found');
+  expect((await listRevisions(t.pool, owner.id, other.id))[0].name).toBeNull();
+
+  // A restore stays a restore, with its name.
+  await editFile(t.pool, store, p.main, owner.id, (text) => {
+    text.delete(text.toString().indexOf('Hello.'), 6);
+    text.insert(text.toString().indexOf('Second'), 'Hi.\n');
+  });
+  const back = await restoreRevision(t.pool, store, owner.id, p.id, auto.id);
+  expect(await nameRevision(t.pool, owner.id, p.id, back.id, 'Back to the draft')).toMatchObject({
+    kind: 'restore',
+    name: 'Back to the draft',
+  });
 });
