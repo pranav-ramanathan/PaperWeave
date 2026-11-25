@@ -105,7 +105,7 @@ export default function Proposals(props: {
   canReview: boolean;
   /** The stretch selected in the editor now; with nothing selected, the place of the caret. */
   selection(): Stretch | null;
-  show(from: string, to: string): boolean;
+  show(from: string, to: string): Promise<boolean>;
   /** Where a stretch stands in the editor's text now, or null if nothing is there. */
   standing(from: string, to: string): Stretch | null;
   /** Told the proposals each time they are read, so that the editor can mark them in the text. */
@@ -375,11 +375,11 @@ export default function Proposals(props: {
             {p.status !== 'rejected' && p.status !== 'dismissed' && (
               <button
                 type="button"
-                onClick={() =>
+                onClick={async () =>
                   setNote(
                     gone(p)
                       ? 'Those words are no longer in the file.'
-                      : props.show(p.from, p.to)
+                      : (await props.show(p.from, p.to))
                         ? ''
                         : 'That place is no longer in the file.',
                   )
