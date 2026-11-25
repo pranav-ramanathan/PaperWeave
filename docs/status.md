@@ -7809,23 +7809,25 @@ pointing to the new page).
   - The picture run does not compare anything itself: the two folders are compared by a script
     kept outside the repository (it used `sharp`, which the app's dependencies bring).
 
-## Tailwind and the new look's tokens, with nothing shown yet
+## Versions of a paper, server side
 
-- **What.** Tailwind v4 through PostCSS, and every package the new look needs (`tailwindcss`,
-  `@tailwindcss/postcss`, `postcss-prefix-selector`, `clsx`, `tailwind-merge`,
-  `class-variance-authority`, `lucide-react`, `radix-ui`), added once so no later change touches
-  the lockfile. `app/next.css` holds the tokens (light, and dark ready for an attribute) and an
-  empty file per area under `app/next/`. Every selector it produces is prefixed with
-  `:where([data-ui='next'])`, so it matches nothing until a page's `<main>` asks for the new look;
-  `:root`, `html` and `body` in it land on that `<main>`. `components.json` and `lib/utils.ts`
-  (`cn`) are ready for the components; `tsconfig.json` gains the `@/*` alias they import by.
-- **Cost.** 9.6 KB of CSS on every page (2.1 KB gzipped), mostly Tailwind's reset copy and the
-  tokens.
-- **Held by** `lib/nextcss.test.ts`: it runs the real pipeline and fails on any selector outside
-  the scope, a bare `:root`, or a change to `legacy.css`, `functional.css` or KaTeX's CSS. The old
-  look's built CSS is byte-for-byte as before; screenshots and computed styles match. `next dev`
-  serves the same scoped CSS.
-- **Not done.** Fonts, components, the dark attribute.
+- **What.** Migration 0039 and `packages/server/src/versions.ts`, behind `VERSIONS` (off by
+  default; `docs/settings.md`). A version is a paper of its own with `parent_id`, started from a
+  revision of main (`startVersion`); `listVersions`, `renameVersion` and `deleteVersion` (owner
+  only, the name typed). Its files get their own ids and keep `origin_id`, the main file they came
+  from. Members, language, glossary, datasets (held data stays held) and charts are copied, and its
+  revision 1 is cut at once, in one transaction. Comments and proposals are not carried. At most
+  10 versions a paper; a version of a version is refused; "main" is not a version's name.
+- **Members.** Accepting an invitation, changing a role, handing the paper on, removing someone
+  and deleting the paper apply to main and all its versions together, with every paper's open
+  editors told. Handing on is refused, and nothing changes, if the new owner is missing from any of
+  them. `authorize` and `openFile` are unchanged: versions use the existing `project.read`,
+  `revision.write` and `project.settings` permissions, so the role-by-action test stays as it was.
+- **Held by** `versions.sandbox.test.ts` (15 tests: the setting, each role, other papers, names,
+  the limit, starting at the revision asked for, held data, the family's members, deleting).
+- **Not done.** Hourly build and model-review limits counted over the family, merging, comparing
+  across versions, product metrics for versions, and any UI. What happens to a deleted version's
+  stored bytes waits on the retention decision.
 
 ## Three-way merge of text
 
