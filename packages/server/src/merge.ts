@@ -29,10 +29,10 @@ import {
   resolveMerge,
 } from './textdiff.ts';
 
-type Family = { id: string; parent: string | null };
+export type Family = { id: string; parent: string | null };
 
 /** The papers' family rows, after each has been authorized for `action`: `not_found` for outsiders. */
-async function members(
+export async function members(
   db: Db,
   userId: string,
   papers: string[],
@@ -51,6 +51,26 @@ async function members(
 }
 
 const root = (p: Family) => p.parent ?? p.id;
+
+/** Of two papers to merge, the one that is a version of the other; anything else is refused. */
+export function versionOf(target: Family, source: Family): Family {
+  if (target.id === source.id)
+    throw new AppError('invalid_input', 'A paper cannot be merged into itself.');
+  const version =
+    target.parent === source.id ? target : source.parent === target.id ? source : null;
+  if (!version)
+    throw new AppError(
+      'invalid_input',
+      'Only a version and the paper it was started from can be merged.',
+    );
+  return version;
+}
+
+export const noBase = () =>
+  new AppError(
+    'conflict',
+    'The revision this version began at is gone, so there is nothing to merge from.',
+  );
 
 /** A file of a revision with the identity it has across versions. */
 type Entry = { key: string; fileId: string; path: string; digest: string; seq: string };
@@ -611,23 +631,11 @@ export async function planMerge(
     [targetPaper, sourcePaper],
     'revision.write',
   );
-  if (target.id === source.id)
-    throw new AppError('invalid_input', 'A paper cannot be merged into itself.');
-  const version =
-    target.parent === source.id ? target : source.parent === target.id ? source : null;
-  if (!version)
-    throw new AppError(
-      'invalid_input',
-      'Only a version and the paper it was started from can be merged.',
-    );
+  const version = versionOf(target, source);
   const baseRow = (
     await pool.query('select base_revision_id from projects where id = $1', [version.id])
   ).rows[0];
-  if (!baseRow?.base_revision_id)
-    throw new AppError(
-      'conflict',
-      'The revision this version began at is gone, so there is nothing to merge from.',
-    );
+  if (!baseRow?.base_revision_id) throw noBase();
   const ours = await cutRevision(pool, store, userId, target.id);
   const theirs = await cutRevision(pool, store, userId, source.id);
   return planFromRevisions(pool, store, {
