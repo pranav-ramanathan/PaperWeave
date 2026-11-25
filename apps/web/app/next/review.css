@@ -181,7 +181,8 @@
   position: relative;
   list-style: none;
 }
-.review-card[aria-current='true'] {
+.review-card[aria-current='true'],
+.threads article.review-card[aria-current='true'] {
   outline: 3px solid var(--ring);
   outline-offset: 2px;
 }
