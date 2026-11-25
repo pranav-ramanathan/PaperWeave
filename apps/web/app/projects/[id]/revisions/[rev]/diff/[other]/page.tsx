@@ -3,6 +3,8 @@ import Link from '../../../../../../Go';
 import { Fragment } from 'react';
 import { notFound } from 'next/navigation';
 import { blobs, db, requireUser } from '../../../../../../../lib/server';
+import { FormPage } from '../../../../../../../components/form-page';
+import { ui } from '../../../../../../../lib/ui';
 
 export const dynamic = 'force-dynamic';
 const WHAT = { added: 'Added', removed: 'Removed', changed: 'Changed', renamed: 'Renamed' };
@@ -33,16 +35,22 @@ export default async function Diff({
     if (err instanceof AppError && err.code === 'not_found') notFound();
     throw err;
   });
+  const look = await ui('revisions-diff');
   return (
-    <main className="page">
-      <header className="bar">
-        <h1>
+    <FormPage
+      look={look}
+      wide
+      title={
+        <>
           Revision {diff.from} to revision {diff.to}
-        </h1>
+        </>
+      }
+      back={
         <Link prefetch={false} href={`/projects/${id}`}>
           Paper overview
         </Link>
-      </header>
+      }
+    >
       {diff.files.length === 0 && <p>Nothing differs between these two revisions.</p>}
       {diff.files.map((f) => {
         // The one revision that holds an added or removed file, and its number.
@@ -116,7 +124,7 @@ export default async function Diff({
           </section>
         );
       })}
-    </main>
+    </FormPage>
   );
 }
 

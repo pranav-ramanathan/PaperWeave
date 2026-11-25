@@ -4,6 +4,8 @@ import Link from '../../../Go';
 import Once from '../../../Once';
 import Result from '../../../Result';
 import { db, requireUser } from '../../../../lib/server';
+import { FormPage, Say } from '../../../../components/form-page';
+import { ui } from '../../../../lib/ui';
 import { deletePaperAction } from '../../actions';
 
 export const dynamic = 'force-dynamic';
@@ -27,6 +29,7 @@ export default async function DeletePaper({
     if (err.code === 'not_found') notFound();
     return null;
   });
+  const look = await ui('paper-delete');
   const back = (
     <Link prefetch={false} href={`/projects/${id}`}>
       Back to the paper
@@ -34,20 +37,14 @@ export default async function DeletePaper({
   );
   if (!holds)
     return (
-      <main className="page">
-        <header className="bar">
-          <h1>Delete a paper</h1>
-          {back}
-        </header>
-        <p role="alert">Only the owner of a paper can delete it.</p>
-      </main>
+      <FormPage look={look} title="Delete a paper" back={back}>
+        <Say look={look} role="alert">
+          Only the owner of a paper can delete it.
+        </Say>
+      </FormPage>
     );
   return (
-    <main className="page">
-      <header className="bar">
-        <h1>Delete “{holds.name}”</h1>
-        {back}
-      </header>
+    <FormPage look={look} danger title={<>Delete “{holds.name}”</>} back={back}>
       {error && <Result alert>{error}</Result>}
       <p>
         Deleting this paper takes it away from everyone on it, at once and for good:{' '}
@@ -73,6 +70,6 @@ export default async function DeletePaper({
         </label>
         <Once type="submit">Delete this paper for everyone</Once>
       </form>
-    </main>
+    </FormPage>
   );
 }
