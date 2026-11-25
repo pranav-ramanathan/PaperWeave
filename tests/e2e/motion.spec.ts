@@ -1,4 +1,5 @@
-// Motion in the new look (apps/web/app/next/motion.css): a dialog and a menu fade in, and under
+// Motion in the new look (apps/web/app/next/motion.css): a dialog settles into place, at full
+// opacity throughout so its contrast is whole from the first frame, while its shade fades; under
 // prefers-reduced-motion nothing animates at all. Uses the overlays specimen (behind SPIKE); no
 // sign-in. Only meaningful in the new look, where the specimen is the new look's.
 import { expect, test, type Page } from '@playwright/test';
@@ -18,12 +19,21 @@ async function open(page: Page) {
   ).toBeVisible();
 }
 
-test('with motion, the dialog fades in and takes focus at once', async ({ page }) => {
+test('with motion, the dialog settles in opaque and takes focus at once', async ({ page }) => {
   await page.emulateMedia({ reducedMotion: 'no-preference' });
   await open(page);
   await page.getByRole('button', { name: 'Insert a caption', exact: true }).click();
   await expect(page.getByRole('textbox', { name: 'Caption', exact: true })).toBeFocused();
-  expect(await running(page)).toContain('pw-pop');
+  // Read in one go, while the window is still settling: it is never see-through.
+  const now = await page.evaluate(() => ({
+    running: document
+      .getAnimations()
+      .map((a) => (a as CSSAnimation).animationName)
+      .filter((n) => n && n.startsWith('pw-')),
+    opacity: getComputedStyle(document.querySelector('[data-slot="dialog-content"]')!).opacity,
+  }));
+  expect(now.running).toContain('pw-pop');
+  expect(now.opacity).toBe('1');
 });
 
 test('with reduced motion, no animation runs and the dialog is whole at once', async ({ page }) => {

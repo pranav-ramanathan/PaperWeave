@@ -17,21 +17,23 @@
     opacity: 0;
   }
 }
+/*
+ * What opens is never see-through: a window, menu or tooltip arrives at full opacity and only
+ * moves into place, so its text has its full contrast from the first frame (to a reader and to
+ * axe alike). Only the shade behind a dialog fades.
+ */
 @keyframes pw-pop {
   from {
-    opacity: 0;
     scale: 0.98;
   }
 }
 @keyframes pw-rise {
   from {
-    opacity: 0;
     translate: 0 4px;
   }
 }
 @keyframes pw-drop {
   from {
-    opacity: 0;
     translate: 0 -4px;
   }
 }
@@ -47,7 +49,7 @@
   }
 }
 
-/* Menus and tooltips: a fade with a 4 px rise away from the side they open on. */
+/* Menus and tooltips: a 4 px rise away from the side they open on. */
 [data-slot='dropdown-menu-content'][data-state='open'],
 [data-slot='tooltip-content'][data-state='delayed-open'],
 [data-slot='tooltip-content'][data-state='instant-open'] {
@@ -62,7 +64,7 @@
   animation-duration: var(--pw-fast);
 }
 
-/* Dialogs: the shade fades, the window fades and settles from 98 %. Focus is not waited for. */
+/* Dialogs: the shade fades, the window settles from 98 %. Focus is not waited for. */
 [data-slot='dialog-overlay'][data-state='open'] {
   animation: pw-fade var(--pw-base) var(--ease-pw) backwards;
 }
