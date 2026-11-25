@@ -2,7 +2,10 @@ import { headers } from 'next/headers';
 import { connection } from 'next/server';
 import type { ReactNode } from 'react';
 import 'katex/dist/katex.min.css';
-import './globals.css';
+// Today's look (scoped, so that a page in the new look is not touched), then what every look
+// needs, which wins where it is as strong as a look's rule: see the top of functional.css.
+import './legacy.css';
+import './functional.css';
 import { WENT } from '../lib/leaving';
 import Fresh from './Fresh';
 import Waiting from './Waiting';
