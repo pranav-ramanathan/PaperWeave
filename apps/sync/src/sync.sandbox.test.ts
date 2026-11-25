@@ -1076,6 +1076,8 @@ test('the metrics page gives counts to whoever holds the token, and nothing to a
   expect(after('paperweave_papers{origin="imported"}')).toBeGreaterThanOrEqual(1);
   expect(after('paperweave_papers_edited')).toBeGreaterThanOrEqual(1);
   expect(after.text).toMatch(/^# TYPE paperweave_papers_two_authors gauge$/m);
+  expect(after.text).toMatch(/^# TYPE paperweave_papers_with_version gauge$/m);
+  expect(after.text).toMatch(/^# TYPE paperweave_papers_with_merge gauge$/m);
   // What became of the grammar checker's findings: a count by kind and outcome.
   expect(after.text).toMatch(/^# TYPE paperweave_grammar_suggestions gauge$/m);
   expect(after('paperweave_grammar_suggestions{kind="grammar",outcome="rule_off"}')).toBe(1);

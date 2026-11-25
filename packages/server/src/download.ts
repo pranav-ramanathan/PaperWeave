@@ -10,13 +10,22 @@
 export function contentDisposition(
   name: string,
   ext: string,
-  /** `suffix` (` r3`) is added after the name is cut to 80 characters. */
-  opts: { disposition?: 'attachment' | 'inline'; suffix?: string } = {},
+  /**
+   * `suffix` (` r3`) is added after the name is cut to 80 characters. `version` is the name of
+   * the version of the paper (at most 60 characters), put after the name and before the suffix:
+   * "Tail latency (camera-ready) r3.zip". Nothing for the paper itself.
+   */
+  opts: { disposition?: 'attachment' | 'inline'; suffix?: string; version?: string | null } = {},
 ): string {
-  const { disposition = 'attachment', suffix = '' } = opts;
+  const { disposition = 'attachment', suffix: after = '', version } = opts;
   const clipped = [...name].slice(0, 80).join('');
+  const named = version ? [...version].slice(0, 60).join('') : '';
   const plain = clipped.replace(/[^\w .-]+/g, '_');
-  const ascii = (/[\p{L}\p{N}]/u.test(plain) ? plain : 'paper') + suffix;
+  const ascii =
+    (/[\p{L}\p{N}]/u.test(plain) ? plain : 'paper') +
+    (named ? ` (${named.replace(/[^\w .-]+/g, '_')})` : '') +
+    after;
+  const suffix = (named ? ` (${named})` : '') + after;
   // encodeURIComponent leaves ' ( ) * alone, which RFC 8187 does not allow in a value.
   const encoded = encodeURIComponent(`${clipped || 'paper'}${suffix}.${ext}`).replace(
     /['()*]/g,
