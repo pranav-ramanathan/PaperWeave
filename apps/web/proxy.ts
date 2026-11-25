@@ -36,9 +36,13 @@ export function proxy(request: NextRequest) {
   const nonce = Buffer.from(crypto.randomUUID()).toString('base64');
   const sync = new URL(process.env.SYNC_URL ?? 'ws://localhost:4100').origin;
   // Where the browser reaches the object store. Named only if it is not this site itself.
-  const storeOrigin = new URL(
+  const storeAt = new URL(
     process.env.S3_PUBLIC_ENDPOINT || process.env.S3_ENDPOINT || 'http://localhost:8333',
-  ).origin;
+  );
+  // With `S3_PATH_STYLE=false` the store is at the bucket's own name (`blobStore`).
+  if (process.env.S3_PATH_STYLE === 'false' && process.env.S3_BUCKET)
+    storeAt.hostname = `${process.env.S3_BUCKET}.${storeAt.hostname}`;
+  const storeOrigin = storeAt.origin;
   const own = process.env.BETTER_AUTH_URL ? new URL(process.env.BETTER_AUTH_URL).origin : '';
   const policy = pagePolicy(
     nonce,

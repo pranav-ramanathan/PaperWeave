@@ -1,5 +1,7 @@
 # Deploying on Vercel
 
+An alternative, with the sync server, Postgres and the store on Railway, is in `docs/deploy-railway.md`.
+
 The web app runs on Vercel. Everything else runs on one machine you own, and Vercel reaches it
 over the internet. Every setting is in `docs/settings.md`; this page says where each goes.
 

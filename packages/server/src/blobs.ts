@@ -57,9 +57,21 @@ export function blobStore(env: Record<string, string | undefined> = process.env)
     region: env.S3_REGION ?? 'us-east-1',
     service: 's3',
   });
-  const bucket = `${need('S3_ENDPOINT').replace(/\/$/, '')}/${need('S3_BUCKET')}`;
+  // Path style (the default): https://host/bucket/key. Virtual-hosted style, for a store that
+  // wants it (`S3_PATH_STYLE=false`): https://bucket.host/key.
+  const pathStyle = env.S3_PATH_STYLE ?? 'true';
+  if (pathStyle !== 'true' && pathStyle !== 'false')
+    throw new Error('S3_PATH_STYLE must be true or false');
+  const bucketAt = (endpoint: string) => {
+    const name = need('S3_BUCKET');
+    if (pathStyle === 'true') return `${endpoint.replace(/\/$/, '')}/${name}`;
+    const u = new URL(endpoint);
+    u.hostname = `${name}.${u.hostname}`;
+    return u.origin;
+  };
+  const bucket = bucketAt(need('S3_ENDPOINT'));
   // The address browsers use for the store, if it is not the one this process uses.
-  const publicBucket = `${(env.S3_PUBLIC_ENDPOINT || need('S3_ENDPOINT')).replace(/\/$/, '')}/${need('S3_BUCKET')}`;
+  const publicBucket = bucketAt(env.S3_PUBLIC_ENDPOINT || need('S3_ENDPOINT'));
   const path = (digest: string) => {
     // A digest is the only thing that may become part of a storage key.
     if (!/^[0-9a-f]{64}$/.test(digest)) throw new Error('not a sha256 digest');
