@@ -278,6 +278,21 @@ What it found is fixed in the same change, or listed under "Open" with what to d
   now under 500 ms (the old code was measured at a smaller size and grows with its square: tens
   of seconds at 300 KB). Not covered: see the status file.
 
+- **One pasted formula froze every open tab on the file.** The visual editor gave KaTeX a formula
+  of any length (and creates the visual editor for every `.tex` file, even with Source showing),
+  and KaTeX is quadratic: 64 000 letters 4.5 s, 128 000 letters 13 s, 256 000 letters 50 s, and a
+  2 KB formula calling a 60-letter macro 999 times 4.0 s. Every other tab redrew it on arrival,
+  on each keystroke inside it, and on every load. A formula is now drawn only if it is at most
+  10 000 characters after its delimiters and labels are taken off (`MATH_MAX`), with at most
+  `min(1000, 10000 / longest macro body)` expansions (never fewer than 100) and `maxSize` 100
+  (`mathPlan`, `apps/web/lib/mathlimit.ts`). Over the cap KaTeX is not called: the view shows the
+  first 200 characters and says it is in the PDF; the same in the formula box. The atom and the
+  text keep the whole formula. 128 000 letters and the macro case are each under 500 ms (the old
+  code: 13 s and 4.0 s). Not done: thousands of formulas just under the cap still add up on
+  load (drawing them lazily needs a separate PR); the PDF view has no page cap (`PdfView.tsx`,
+  about lines 204-226), unmeasured; a macro with a body of thousands of characters still allows
+  100 expansions of it.
+
 ## Open
 
 In rough order of how much they matter.

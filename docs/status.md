@@ -7570,3 +7570,42 @@ two queries in `connected` and multiplies every broadcast on its file.
     counted by one ranked ahead of it that arrives first, so a person's burst can briefly hold more
     than the cap if the lower-numbered ones are slow to be let in; the next connection or the
     next burst is counted against what is live. The cap is not settable from the environment.
+
+## A formula too long to draw no longer freezes every tab on the file
+
+- **A fault found.** `renderMath` (`apps/web/lib/visual.ts`) gave KaTeX the whole formula with no
+  length cap, `maxExpand` or `maxSize`; the `math` node view calls it synchronously, and
+  `FileEditor.tsx` creates the visual editor for every `.tex` file, even while Source shows. The
+  parser makes `$` + 1 000 000 `a` + `$` one atom. KaTeX 0.19.1 is quadratic: `a` x 64 000 4.5 s,
+  x 128 000 13 s (13.1 s measured again), x 256 000 50 s; `\x` x 999 (2 KB) with `\x` a macro of 60
+  `a`s 4.0 s. One writer's paste froze every other tab on the file, again on each keystroke in
+  the formula, and on every load.
+- **Now.** `mathPlan(tex, macros)` (`apps/web/lib/mathlimit.ts`, pure) returns the options to add
+  to what `renderMath` already passed, or `null`:
+  - `MATH_MAX` = 10 000 characters, counted after `tex()` (delimiters and labels off).
+  - `maxExpand` = `min(1000, floor(10 000 / longest macro body))`, never below 100: built-in
+    macros such as `\le` and `\dots` count as expansions too. A 60-letter macro gives 166.
+  - `maxSize` = 100.
+- **`renderMath`** throws `TooLong` for `null` and does not call KaTeX. The `math` node view then
+  makes no second attempt (it used to retry without numbers) and shows the first 200 characters
+  and "… too long to draw here; it is in the PDF." in the plain (`pw-raw`) style, titled "Too long
+  to draw here". A formula over `maxExpand` is a KaTeX `ParseError` and goes the way other
+  errors do (its source, plain), after 166 expansions, not a second of them. The formula box's
+  preview (`Tools.tsx`) says the same. The bridge, the atom (it keeps its whole `src`) and the
+  round trip to the source are untouched.
+- **Timings (Node).** 128 000 letters: 13 053 ms before, under 500 ms now (refused without
+  calling KaTeX). The 2 KB macro formula: 3 975 ms before, under 500 ms now (a `ParseError`).
+  Old times were measured with the old options through `renderToString` directly, not from a
+  stash.
+- **Held by** `apps/web/lib/mathlimit.test.ts` (10 001 characters give `null`; 166 for a 60-letter
+  macro; the renderer is not called over the cap; the two timings; a 9 KB `aligned` still draws;
+  six ordinary formulas are byte for byte what KaTeX gave without the plan) and a case in
+  `bridge.test.ts` (a 1 000 000-letter inline formula and a display one are each one atom with
+  the whole `src`, and the text is unchanged).
+- **Not done.**
+  - Thousands of formulas just under the cap still add up on load; drawing them lazily (as they
+    scroll into view) would need a separate PR.
+  - The PDF view has no page cap (`PdfView.tsx`, about lines 204-226, creates a holder for every
+    page and asks the document for each page's size one by one). This is unmeasured.
+  - A single macro with a body of several thousand characters still allows 100 expansions of it
+    (the floor), which is more than `MATH_MAX` characters; not measured.

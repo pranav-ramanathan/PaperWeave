@@ -6,6 +6,7 @@ import type { CommandResult } from '@paperweave/bridge';
 import { captionText, cellText, footnoteBody, stray, strayAdvice } from '@paperweave/latex';
 import { type RefObject, useEffect, useLayoutEffect, useRef, useState } from 'react';
 import { numbers } from '../../../../../lib/numbers';
+import { tooLongText, TooLong } from '../../../../../lib/mathlimit';
 import { renderMath } from '../../../../../lib/visual';
 
 type Apply = (latex: string) => Promise<CommandResult | 'spills' | { problem: string }>;
@@ -70,6 +71,11 @@ export function FormulaBox(props: {
       renderMath(preview.current, latex, { macros });
       setUndrawable('');
     } catch (err) {
+      if (err instanceof TooLong) {
+        preview.current.textContent = tooLongText(latex);
+        setUndrawable('');
+        return;
+      }
       preview.current.textContent = '';
       setUndrawable((err as Error).message);
     }
