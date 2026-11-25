@@ -5,25 +5,31 @@ import {
   heldInRevisions,
   heldLine,
   listRevisions,
+  listVersions,
+  MAX_VERSIONS,
   olderAutoRevisions,
   REVISIONS_SHOWN,
   revisionStats,
+  versionOf,
   withScope,
   type Revision,
   type RevisionStat,
+  type Version,
 } from '@paperweave/server';
 import { notFound } from 'next/navigation';
 import type { ReactNode } from 'react';
 import { AppBar } from '../../../../components/app-bar';
 import { FileDiffs } from '../../../../components/file-diffs';
-import { Flag, GitMerge, Icon, Pencil, RotateCcw } from '../../../../components/icon';
+import { Flag, GitBranch, GitMerge, Icon, Pencil, RotateCcw } from '../../../../components/icon';
 import { LookProvider } from '../../../../components/look';
+import { VersionMenu } from '../../../../components/version-menu';
 import { buttonVariants } from '../../../../components/ui/button';
 import { Input } from '../../../../components/ui/input';
 import { Label } from '../../../../components/ui/label';
 import { OverlayRoot } from '../../../../components/ui/overlay-root';
 import { called, NOW, since } from '../../../../lib/compare';
 import { blobs, db, forTitle, paperOf, requireUser } from '../../../../lib/server';
+import { switcherOf, versionPowers, versionsOn } from '../../../../lib/versions';
 import { timeline, type TimelineRevision, type TimelineRow } from '../../../../lib/timeline';
 import Link from '../../../Go';
 import Once from '../../../Once';
@@ -31,9 +37,12 @@ import Result from '../../../Result';
 import {
   buildHistoryAction,
   compareHistoryAction,
+  deleteVersionAction,
   nameRevisionAction,
+  renameVersionAction,
   restoreHistoryAction,
   saveNamedAction,
+  startVersionAction,
 } from './actions';
 import {
   CompareProvider,
@@ -42,6 +51,8 @@ import {
   RestoreButton,
   RowMenu,
   RunShow,
+  StartVersionButton,
+  VersionMenuRow,
 } from './Client';
 
 export const dynamic = 'force-dynamic';
@@ -84,6 +95,10 @@ type Query = {
   before?: string;
   from?: string;
   to?: string;
+  started?: string;
+  version?: string;
+  renamed?: string;
+  deleted?: string;
 };
 
 async function History({
@@ -109,6 +124,13 @@ async function History({
   const writer = can(project.role, 'revision.write');
   const exporter = can(project.role, 'project.export');
   const builder = can(project.role, 'build.run');
+  // Versions: only with the setting on. Off, none of these is asked and nothing of them is drawn.
+  const versionsShown = versionsOn();
+  const powers = versionPowers(project.role);
+  const versions: Version[] = versionsShown ? await listVersions(db(), user.id, id) : [];
+  const here = versionsShown ? await versionOf(db(), id) : null;
+  const mainId = here ? (versions[0]?.paper ?? id) : id;
+  const beganAt = (revisionId: string) => versions.filter((v) => v.base?.id === revisionId);
   const ids = listed.map((r) => r.id);
   const stats = await revisionStats(db(), blobs(), user.id, id, ids);
   const revisions: Revision[] = listed.map((r) => ({ ...r, stat: stats.get(r.id) ?? r.stat }));
@@ -140,7 +162,21 @@ async function History({
     restore: writer ? restoreHistoryAction.bind(null, id, r.id) : undefined,
     name: writer ? nameRevisionAction.bind(null, id, r.id) : undefined,
     build: !r.hasPdf && builder ? buildHistoryAction.bind(null, id, r.id) : undefined,
+    // One level: a version is not itself the start of versions.
+    version:
+      versionsShown && powers.start && !here ? startVersionAction.bind(null, id, r.id) : undefined,
   });
+  /** "camera-ready began here": the versions that were started at this revision. */
+  const began = (r: Revision) =>
+    beganAt(r.id).map((v) => (
+      <small key={v.id} className="history-note history-began">
+        <Icon icon={GitBranch} /> The version{' '}
+        <Link prefetch={false} href={`/projects/${v.id}/history`}>
+          {v.name}
+        </Link>{' '}
+        began here
+      </small>
+    ));
   const menu = (r: Revision) => (
     <RowMenu
       number={r.number}
@@ -189,6 +225,7 @@ async function History({
           {statLine(r.stat) && <p>{statLine(r.stat)}</p>}
           {r.hasPdf && <p>PDF built.</p>}
           {heldOf(r)}
+          {began(r)}
         </div>
         <div className="history-acts">
           {comparable && <CompareToggle id={r.id} number={r.number} />}
@@ -227,6 +264,7 @@ async function History({
                 <p>{made(r)}</p>
                 {statLine(r.stat) && <p>{statLine(r.stat)}</p>}
                 {heldOf(r)}
+                {began(r)}
               </div>
               <div className="history-acts">
                 {comparable && <CompareToggle id={r.id} number={r.number} />}
@@ -254,6 +292,21 @@ async function History({
     );
   if (query.saved) said.push(<Result key="s">Saved as revision {query.saved}.</Result>);
   if (query.named) said.push(<Result key="n">Revision {query.named} has a name now.</Result>);
+  if (versionsShown && query.started)
+    said.push(
+      <Result key="v">
+        Started the version “{query.started}”.{' '}
+        {query.version && UUID.test(query.version) && (
+          <Link prefetch={false} href={`/projects/${query.version}`}>
+            Open the version
+          </Link>
+        )}
+      </Result>,
+    );
+  if (versionsShown && query.renamed)
+    said.push(<Result key="rn">The version is now called “{query.renamed}”.</Result>);
+  if (versionsShown && query.deleted)
+    said.push(<Result key="d">Deleted the version “{query.deleted}”.</Result>);
   if (query.restored)
     said.push(<Result key="t">Restored. The paper is now revision {query.restored}.</Result>);
   if (query.building)
@@ -286,6 +339,13 @@ async function History({
               { id: 'history', label: 'History', heading: true },
             ]}
           >
+            {versionsShown && (
+              <VersionMenu
+                choices={switcherOf(mainId, versions, id)}
+                page="/history"
+                paper={mainId}
+              />
+            )}
             <Link
               prefetch={false}
               href={`/projects/${id}`}
@@ -296,61 +356,132 @@ async function History({
           </AppBar>
           <CompareProvider>
             <div className="history-grid">
-              <section aria-labelledby="history-timeline" className="history-line">
-                <h2 id="history-timeline">Revisions</h2>
-                {said.length > 0 && <div className="history-said">{said}</div>}
-                {revisions.length === 0 ? (
-                  <div className="history-empty">
+              <div className="history-side">
+                {versionsShown && (
+                  <section
+                    id="versions"
+                    aria-labelledby="history-versions"
+                    className="history-versions"
+                  >
+                    <h2 id="history-versions">Versions</h2>
                     <p>
-                      No revisions yet. One is made each time the PDF is built. Save one under a
-                      name to find it again.
+                      A version is a copy of the paper that is edited apart. The paper itself is
+                      called main.
                     </p>
-                    {saveForm}
-                  </div>
-                ) : (
-                  <>
-                    {saveForm}
-                    {writer && (
-                      <p className="history-now">
-                        <Icon icon={Pencil} /> The paper as it is now. The newest revision is
-                        revision {revisions[0].number}.
-                      </p>
-                    )}
-                    <ol className="history-days">
-                      {days.map((d) => (
-                        <li key={d.day} className="history-day">
-                          <h3>{dayName(d.day, today)}</h3>
-                          <ol>
-                            {d.rows.map((row) => (row.type === 'run' ? run(row) : named(row)))}
-                          </ol>
-                        </li>
-                      ))}
-                    </ol>
-                    {(olderAutos > 0 || olderThan) && (
-                      <p className="history-more">
-                        {olderThan
-                          ? `These are revisions from before revision ${olderThan}. `
-                          : `Every revision that was named or restored is listed, and the newest ${REVISIONS_SHOWN} made automatically. `}
-                        {olderAutos > 0 && (
+                    <ul className="history-vlist">
+                      <li className="history-vrow">
+                        <span className="history-vname">
                           <Link
                             prefetch={false}
-                            href={`/projects/${id}/history?before=${oldestAuto}`}
+                            href={`/projects/${mainId}/history`}
+                            aria-current={here ? undefined : 'page'}
                           >
-                            {olderAutos === 1
-                              ? 'One older automatic revision'
-                              : `${olderAutos} older automatic revisions`}
+                            main
                           </Link>
-                        )}{' '}
-                        {olderThan && (
-                          <Link prefetch={false} href={`/projects/${id}/history`}>
-                            Back to the newest
-                          </Link>
-                        )}
-                      </p>
+                          {!here && (
+                            <span className="history-vnote"> You are looking at this one.</span>
+                          )}
+                        </span>
+                      </li>
+                      {versions.map((v) => (
+                        <li key={v.id} className="history-vrow">
+                          <span className="history-vname">
+                            <Link
+                              prefetch={false}
+                              href={`/projects/${v.id}/history`}
+                              aria-current={v.id === id ? 'page' : undefined}
+                            >
+                              {v.name}
+                            </Link>
+                            {v.id === id && (
+                              <span className="history-vnote"> You are looking at this one.</span>
+                            )}
+                            <small className="history-vnote">
+                              {v.base
+                                ? `Began at revision ${v.base.number}`
+                                : 'Began at an early revision'}
+                              {v.createdBy ? `, by ${v.createdBy}` : ''}, {v.createdAt.slice(0, 10)}
+                            </small>
+                          </span>
+                          <VersionMenuRow
+                            name={v.name}
+                            rename={
+                              powers.rename ? renameVersionAction.bind(null, id, v.id) : undefined
+                            }
+                            remove={
+                              powers.delete
+                                ? deleteVersionAction.bind(null, id, v.id, mainId)
+                                : undefined
+                            }
+                          />
+                        </li>
+                      ))}
+                    </ul>
+                    {versions.length === 0 && <p>This paper has no versions yet.</p>}
+                    <p className="history-vnote">
+                      {plural(versions.length, 'version')} of at most {MAX_VERSIONS}.
+                    </p>
+                    {powers.start && !here && (
+                      <StartVersionButton action={startVersionAction.bind(null, id, NOW)} />
                     )}
-                  </>
+                  </section>
                 )}
-              </section>
+                <section aria-labelledby="history-timeline" className="history-line">
+                  <h2 id="history-timeline">Revisions</h2>
+                  {said.length > 0 && <div className="history-said">{said}</div>}
+                  {revisions.length === 0 ? (
+                    <div className="history-empty">
+                      <p>
+                        No revisions yet. One is made each time the PDF is built. Save one under a
+                        name to find it again.
+                      </p>
+                      {saveForm}
+                    </div>
+                  ) : (
+                    <>
+                      {saveForm}
+                      {writer && (
+                        <p className="history-now">
+                          <Icon icon={Pencil} /> The paper as it is now. The newest revision is
+                          revision {revisions[0].number}.
+                        </p>
+                      )}
+                      <ol className="history-days">
+                        {days.map((d) => (
+                          <li key={d.day} className="history-day">
+                            <h3>{dayName(d.day, today)}</h3>
+                            <ol>
+                              {d.rows.map((row) => (row.type === 'run' ? run(row) : named(row)))}
+                            </ol>
+                          </li>
+                        ))}
+                      </ol>
+                      {(olderAutos > 0 || olderThan) && (
+                        <p className="history-more">
+                          {olderThan
+                            ? `These are revisions from before revision ${olderThan}. `
+                            : `Every revision that was named or restored is listed, and the newest ${REVISIONS_SHOWN} made automatically. `}
+                          {olderAutos > 0 && (
+                            <Link
+                              prefetch={false}
+                              href={`/projects/${id}/history?before=${oldestAuto}`}
+                            >
+                              {olderAutos === 1
+                                ? 'One older automatic revision'
+                                : `${olderAutos} older automatic revisions`}
+                            </Link>
+                          )}{' '}
+                          {olderThan && (
+                            <Link prefetch={false} href={`/projects/${id}/history`}>
+                              Back to the newest
+                            </Link>
+                          )}
+                        </p>
+                      )}
+                    </>
+                  )}
+                </section>
+              </div>
               <section id="comparison" aria-labelledby="history-compare" className="history-sheet">
                 <h2 id="history-compare">Comparison</h2>
                 {comparable ? (
