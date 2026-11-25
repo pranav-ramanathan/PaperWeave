@@ -75,11 +75,11 @@ export default function NextPapers(props: {
                       <Link
                         prefetch={false}
                         href={`/projects/${p.id}`}
-                        className="rounded-sm font-heading text-xl [overflow-wrap:anywhere] leading-snug font-semibold underline-offset-4 hover:underline"
+                        className="rounded-sm font-heading text-[1.375rem] [overflow-wrap:anywhere] leading-snug font-semibold underline-offset-4 hover:underline"
                       >
                         {p.name}
                       </Link>
-                      <Badge variant="secondary" className="role sm:justify-self-end">
+                      <Badge variant="secondary" className="role self-start sm:justify-self-end">
                         {p.role}
                       </Badge>
                       {reviewWaiting(p) && (
@@ -97,7 +97,7 @@ export default function NextPapers(props: {
                 </ul>
               ) : (
                 <section aria-labelledby="welcome" className="mt-6 grid gap-3">
-                  <h2 id="welcome" className="font-heading text-xl font-semibold">
+                  <h2 id="welcome" className="font-heading text-[1.375rem] font-semibold">
                     Start your first paper
                   </h2>
                   <p>
@@ -127,7 +127,7 @@ export default function NextPapers(props: {
             <div className="grid content-start gap-6">
               <form
                 action={createAction}
-                className="grid gap-4 rounded-xl border bg-card p-5 shadow-rest"
+                className="grid gap-4 rounded-xl border bg-card p-6 shadow-rest"
               >
                 <h2 className="font-heading text-lg font-semibold">New paper</h2>
                 <div className="grid gap-1.5">
@@ -160,7 +160,7 @@ export default function NextPapers(props: {
                 action="/api/projects/import"
                 kind="zip"
                 field="zip"
-                className="grid gap-3 rounded-xl border border-dashed border-line-strong p-5"
+                className="grid gap-3 rounded-xl border border-dashed border-line-strong p-6"
               >
                 <h2 className="font-heading text-lg font-semibold">Import a project</h2>
                 <Label htmlFor="zip" className="leading-snug font-normal text-muted-foreground">
