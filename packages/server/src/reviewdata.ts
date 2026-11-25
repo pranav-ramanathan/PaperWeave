@@ -112,7 +112,7 @@ export type ReviewImport = {
 };
 
 /** A file's saved text as a document, by path. */
-async function texts(pool: Db, store: BlobStore, projectId: string) {
+export async function texts(pool: Db, store: BlobStore, projectId: string) {
   const { rows } = await pool.query(
     'select id, path from files where project_id = $1 and eol is not null',
     [projectId],
