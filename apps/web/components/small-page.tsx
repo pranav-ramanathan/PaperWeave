@@ -49,9 +49,15 @@ export function SmallPage({
           <Card
             className={(wide ? 'max-w-3xl' : 'max-w-md') + ' w-full [--card-spacing:--spacing(6)]'}
           >
+            {/* One column no wider than the sheet, and text that breaks inside a word that does
+                not fit (a paper's name, an email address). An `auto` column takes the width of
+                the longest word, and the heading's `break-word` does not narrow that: at twice
+                the text size, the last word of "Join “Dark mwwom4frw0”" made the column 421 px
+                where the sheet has 398, and the sheet hides what sticks out (how much went by the
+                letters of the name). */}
             <CardContent
               className={
-                'grid gap-4 [&_a]:text-primary [&_a]:underline [&_a]:underline-offset-4 [&_a:hover]:no-underline [&_h1]:font-heading [&_h1]:text-[1.375rem] sm:[&_h1]:text-[1.75rem] [&_h1]:leading-tight [&_h1]:font-semibold [&_h1]:tracking-tight [&_h1]:text-balance' +
+                'grid grid-cols-[minmax(0,1fr)] gap-4 [overflow-wrap:break-word] [&_a]:text-primary [&_a]:underline [&_a]:underline-offset-4 [&_a:hover]:no-underline [&_h1]:font-heading [&_h1]:text-[1.375rem] sm:[&_h1]:text-[1.75rem] [&_h1]:leading-tight [&_h1]:font-semibold [&_h1]:tracking-tight [&_h1]:text-balance' +
                 (className ? ` ${className}` : '')
               }
             >

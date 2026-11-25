@@ -200,6 +200,75 @@ export async function compareAcross(
   };
 }
 
+// ----- The record of merges ----------------------------------------------------------------------
+
+/** One merge into a paper, as the history page draws it. Counts and names only; no text. */
+export type MergeRecord = {
+  id: string;
+  /** The merge revision it made, in the paper it was merged into. */
+  result: { id: string; number: number } | null;
+  /** The paper as it stood before the merge (the "kept" revision), if it still exists. */
+  kept: { id: string; number: number } | null;
+  /** What was merged in: a version's name, or "main"; null when that paper is gone or the reader may not see it. */
+  from: string | null;
+  /** The paper merged into, named the same way. */
+  into: string;
+  files: number;
+  conflicts: number;
+  by: string | null;
+  at: string;
+};
+
+/**
+ * The merges made into a paper, newest first, for anyone who may read it. The other paper of each
+ * merge is named only to someone who may read that one too; for anyone else its name is left out.
+ */
+export async function listMerges(db: Db, userId: string, paper: string): Promise<MergeRecord[]> {
+  await authorize(db, userId, id(paper), 'project.read');
+  const { rows } = await db.query(
+    `select m.id, m.files, m.conflicts, m.at, u.email as by,
+            res.id as "resultId", res.number as "resultNumber",
+            kept.id as "keptId", kept.number as "keptNumber",
+            m.source_id as "sourceId", sp.parent_id as "sourceParent", sp.version_name as "sourceName",
+            tp.parent_id as "targetParent", tp.version_name as "targetName"
+     from merges m
+     join projects tp on tp.id = m.target_id
+     left join projects sp on sp.id = m.source_id
+     left join revisions res on res.id = m.result_revision
+     left join revisions kept on kept.id = m.kept_revision
+     left join "user" u on u.id = m.by
+     where m.target_id = $1 order by m.at desc, m.id`,
+    [paper],
+  );
+  const mayRead = new Map<string, boolean>();
+  const readable = async (p: string | null) => {
+    if (!p) return false;
+    if (!mayRead.has(p))
+      mayRead.set(
+        p,
+        await authorize(db, userId, id(p), 'project.read').then(
+          () => true,
+          () => false,
+        ),
+      );
+    return mayRead.get(p)!;
+  };
+  const out: MergeRecord[] = [];
+  for (const r of rows)
+    out.push({
+      id: r.id,
+      result: r.resultId ? { id: r.resultId, number: r.resultNumber } : null,
+      kept: r.keptId ? { id: r.keptId, number: r.keptNumber } : null,
+      from: (await readable(r.sourceId)) ? (r.sourceParent ? r.sourceName : 'main') : null,
+      into: r.targetParent ? r.targetName : 'main',
+      files: r.files,
+      conflicts: r.conflicts,
+      by: r.by,
+      at: new Date(r.at).toISOString(),
+    });
+  return out;
+}
+
 // ----- The plan ----------------------------------------------------------------------------------
 
 /**

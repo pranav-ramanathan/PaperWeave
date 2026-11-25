@@ -52,6 +52,7 @@ import {
   goneWords,
   isNews,
   type Left,
+  eventName,
   restoreChanges,
   restoreHistory,
   restoredWords,
@@ -1457,10 +1458,13 @@ export default function FileEditor(props: {
             : restore && restoredWords(restore, user, clock(restore.at), sync.held)}
         </span>
         {(restore || left) && (
-          <span role="group" aria-label={left ? 'About this file' : 'About the restore'}>
+          <span
+            role="group"
+            aria-label={left ? 'About this file' : `About the ${eventName(restore!)}`}
+          >
             {changes && (
               <a href={changes} target="_blank" rel="noreferrer">
-                Show what the restore changed (opens a new tab)
+                Show what the {about ? eventName(about) : 'restore'} changed (opens a new tab)
               </a>
             )}
             {about && (

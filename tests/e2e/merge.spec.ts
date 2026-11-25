@@ -494,6 +494,85 @@ if (ON) {
     await owner.page.getByRole('menuitem', { name: 'Merge into main' }).click();
     await expect(owner.page).toHaveURL(at);
   });
+  // What an open editor says of a merge, as it does of a restore (T42): who merged what into
+  // which paper, the way to the comparison and to the history, Dismiss, and the same after an
+  // offline spell. A reload is not told again.
+  test('a merge is said in the editor of the paper it changed', async ({ browser }) => {
+    test.setTimeout(600_000);
+    const owner = await person(browser, 'merge-told-owner');
+    const editor = await person(browser, 'merge-told-editor');
+    const paper = await newPaper(owner);
+    await invite(owner, paper, editor, 'editor');
+    const version = await startVersion(owner.page, paper);
+    const notice = (page: Page) => page.locator('.editor-notice');
+    const open = async (page: Page, where: string) => {
+      await page.goto(where);
+      await page.getByRole('link', { name: 'main.tex' }).first().click();
+      await showSource(page);
+      await expect(editorStatus(page)).toHaveText('All edits saved.');
+      await expect(source(page)).toHaveAttribute('contenteditable', 'true');
+    };
+
+    // Main is open; a version that changed the file is merged into it by someone else.
+    await open(editor.page, paper);
+    await expect(notice(editor.page)).toHaveCount(0);
+    await typeIn(owner.page, version, '% a note on the version\n', 'end');
+    await owner.page.goto(mergeAt(paper, version));
+    await into(owner.page).click();
+    await expect(said(owner.page)).toContainText('Merged: main is now revision');
+    await expect(source(editor.page)).toContainText('% a note on the version');
+    const words = notice(editor.page).locator('[aria-live]');
+    await expect(words).toContainText(`${owner.email} merged ${OF} into this paper at `);
+    const text = (await words.textContent()) ?? '';
+    const now = Number(/It is now revision (\d+)\./.exec(text)?.[1]);
+    expect(text).toContain(`The paper as it was is revision ${now - 1}.`);
+    expect(text).not.toContain('restored');
+    await expect(notice(editor.page)).toBeInViewport();
+    await expect(notice(editor.page).getByRole('group', { name: 'About the merge' })).toBeVisible();
+    await audit(editor.page, 'an editor told of a merge');
+    // Its history is the paper's history, opened on the merge's comparison.
+    await expect(
+      notice(editor.page).getByRole('link', { name: /^History of this paper/ }),
+    ).toHaveAttribute('href', /\/history\?from=[0-9a-f-]{36}&to=[0-9a-f-]{36}$/);
+    const [changes] = await Promise.all([
+      editor.page.context().waitForEvent('page'),
+      notice(editor.page)
+        .getByRole('link', { name: /^Show what the merge changed/ })
+        .click(),
+    ]);
+    await expect(
+      changes.getByRole('heading', { level: 1, name: `Revision ${now - 1} to revision ${now}` }),
+    ).toBeVisible();
+    await expect(changes.getByText('% a note on the version')).toBeVisible();
+    await changes.close();
+    // Dismissed, it is gone and the keyboard is back in the text.
+    await notice(editor.page).getByRole('button', { name: 'Dismiss' }).click();
+    await expect(notice(editor.page)).toHaveCount(0);
+    await expect(source(editor.page)).toBeFocused();
+    // The owner, who made it, is told in their own words; a reload is told nothing.
+    await editor.page.reload();
+    await expect(editorStatus(editor.page)).toHaveText('All edits saved.');
+    await expect(notice(editor.page)).toHaveCount(0);
+
+    // Offline with nothing unsent while main is brought into the version: on return the text has
+    // changed and the editor says so, once.
+    await typeIn(owner.page, paper, '% main again\n', 'start');
+    await open(editor.page, version);
+    await editor.page.context().setOffline(true);
+    await expect(editorStatus(editor.page)).toContainText('Offline.');
+    await owner.page.goto(mergeAt(paper, version, true));
+    await upToDate(owner.page).click();
+    await expect(said(owner.page)).toContainText('Merged');
+    await editor.page.context().setOffline(false);
+    await expect(editorStatus(editor.page)).toHaveText('All edits saved.', { timeout: 30_000 });
+    await expect(source(editor.page)).toContainText('% main again');
+    await expect(notice(editor.page).locator('[aria-live]')).toContainText(
+      `${owner.email} merged the main paper into this version at `,
+    );
+    await expect(notice(editor.page)).toHaveCount(1);
+    await notice(editor.page).getByRole('button', { name: 'Dismiss' }).click();
+    await expect(notice(editor.page)).toHaveCount(0);
+  });
 } else {
   test('with VERSIONS off there is no merge page', async ({ browser }) => {
     test.setTimeout(120_000);

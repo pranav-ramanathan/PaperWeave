@@ -38,7 +38,7 @@ export function FormPage({
       look={look}
       wide={wide}
       classic="page"
-      className={`form-sheet grid-cols-[minmax(0,1fr)]${danger ? ' danger' : ''}`}
+      className={`form-sheet${danger ? ' danger' : ''}`}
     >
       {before}
       <header className={next ? 'bar flex flex-wrap items-baseline gap-x-4 gap-y-1' : 'bar'}>
