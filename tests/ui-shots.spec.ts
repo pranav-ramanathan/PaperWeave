@@ -145,7 +145,9 @@ test.describe('screenshots', () => {
 
       let n = 0;
       const shot = async (name: string, full = false) => {
-        // Layout and fonts settled; nothing is changing while the picture is taken.
+        // The pointer out of the way, so that nothing is in its hover state in one run and not
+        // in another; layout and fonts settled; nothing is changing while the picture is taken.
+        await page.mouse.move(size.width - 2, 2);
         await page.evaluate(() => document.fonts.ready);
         await page.waitForTimeout(400);
         const file = `${size.prefix}-${String(++n).padStart(2, '0')}-${name}`;
@@ -276,7 +278,9 @@ test.describe('screenshots', () => {
       await expect(page.locator(`${VISUAL} .proposal-mark`)).toHaveText('high');
       await page.evaluate(() => (document.activeElement as HTMLElement | null)?.blur());
       await page.evaluate(() => scrollTo(0, 0));
-      await both('editor-visual');
+      // Not the whole page: with the review lists below the text, the boxes that cover the
+      // person's address are put a few pixels off in a picture of the whole of this page.
+      await shot('editor-visual-viewport');
       await page.getByRole('region', { name: 'Comments' }).scrollIntoViewIfNeeded();
       await shot('editor-review');
 
@@ -324,6 +328,7 @@ test.describe('screenshots', () => {
       await showSource(page);
       await expect(page.locator('.editor .cm-content')).toContainText('forty');
       await page.evaluate(() => (document.activeElement as HTMLElement | null)?.blur());
+      await expect(page.locator('.editor .cm-focused')).toHaveCount(0);
       await page.evaluate(() => scrollTo(0, 0));
       await both('editor-source');
 
