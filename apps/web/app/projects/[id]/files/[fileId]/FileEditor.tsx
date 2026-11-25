@@ -59,9 +59,27 @@ import {
 import { setTyping } from '../../../../../lib/typing';
 import { createVisual, type Visual } from '../../../../../lib/visual';
 import type { LanguageFinding, Proposal, RestoreNote, Thread } from '@paperweave/server';
+import { ReviewPanel } from '../../../../../components/review-card';
 import Language from './Language';
 import Proposals from './Proposals';
-import Toolbar from './Toolbar';
+import {
+  Bold,
+  FileSearch,
+  Heading,
+  Image as ImageIcon,
+  Italic,
+  Link2,
+  List,
+  ListOrdered,
+  MessageSquareText,
+  Quote,
+  Redo2,
+  Search,
+  Sigma,
+  Table2,
+  Undo2,
+} from 'lucide-react';
+import Toolbar, { Tool } from './Toolbar';
 import Threads, { type Member, type Stretch } from './Threads';
 import {
   CitationPicker,
@@ -1331,75 +1349,88 @@ export default function FileEditor(props: {
           </span>
           {mode === 'visual' && canWrite && !sync.refused && (
             <span role="group" aria-label="Edit">
-              <button type="button" onClick={() => live.current?.visual?.emph()}>
-                Emphasise
-              </button>
-              <button
-                type="button"
+              <Tool name="Emphasise" icon={Italic} onClick={() => live.current?.visual?.emph()} />
+              <Tool
+                name="Bold"
+                icon={Bold}
                 onClick={() => live.current?.visual?.bold()}
-                aria-keyshortcuts="Control+B Meta+B"
-                title="Ctrl+B"
-              >
-                Bold
-              </button>
-              <button type="button" onClick={() => live.current?.undo.undo()}>
-                Undo
-              </button>
-              <button type="button" onClick={() => live.current?.undo.redo()}>
-                Redo
-              </button>
-              <button type="button" onClick={askReference} aria-keyshortcuts="Alt+R" title="Alt+R">
-                Reference
-              </button>
-              <button type="button" onClick={askCitation} aria-keyshortcuts="Alt+C" title="Alt+C">
-                Citation
-              </button>
-              <button type="button" onClick={askEquation} aria-keyshortcuts="Alt+=" title="Alt+=">
-                Equation
-              </button>
-              <button type="button" onClick={askFootnote} aria-keyshortcuts="Alt+O" title="Alt+O">
-                Footnote
-              </button>
-              <button type="button" onClick={askFigure} aria-keyshortcuts="Alt+G" title="Alt+G">
-                Figure
-              </button>
-              <button type="button" onClick={askTable} aria-keyshortcuts="Alt+T" title="Alt+T">
-                Table
-              </button>
-              <button type="button" onClick={askHeading} aria-keyshortcuts="Alt+H" title="Alt+H">
-                Heading
-              </button>
-              <button
-                type="button"
+                keys="Control+B Meta+B"
+                shortcut="Ctrl+B"
+              />
+              <Tool name="Undo" icon={Undo2} onClick={() => live.current?.undo.undo()} />
+              <Tool name="Redo" icon={Redo2} onClick={() => live.current?.undo.redo()} />
+              <Tool
+                name="Reference"
+                icon={Link2}
+                onClick={askReference}
+                keys="Alt+R"
+                shortcut="Alt+R"
+              />
+              <Tool
+                name="Citation"
+                icon={Quote}
+                onClick={askCitation}
+                keys="Alt+C"
+                shortcut="Alt+C"
+              />
+              <Tool
+                name="Equation"
+                icon={Sigma}
+                onClick={askEquation}
+                keys="Alt+="
+                shortcut="Alt+="
+              />
+              <Tool
+                name="Footnote"
+                icon={MessageSquareText}
+                onClick={askFootnote}
+                keys="Alt+O"
+                shortcut="Alt+O"
+              />
+              <Tool
+                name="Figure"
+                icon={ImageIcon}
+                onClick={askFigure}
+                keys="Alt+G"
+                shortcut="Alt+G"
+              />
+              <Tool name="Table" icon={Table2} onClick={askTable} keys="Alt+T" shortcut="Alt+T" />
+              <Tool
+                name="Heading"
+                icon={Heading}
+                onClick={askHeading}
+                keys="Alt+H"
+                shortcut="Alt+H"
+              />
+              <Tool
+                name="Bulleted list"
+                icon={List}
                 onClick={() => askList(false)}
-                aria-keyshortcuts="Alt+L"
-                title="Alt+L"
-              >
-                Bulleted list
-              </button>
-              <button
-                type="button"
+                keys="Alt+L"
+                shortcut="Alt+L"
+              />
+              <Tool
+                name="Numbered list"
+                icon={ListOrdered}
                 onClick={() => askList(true)}
-                aria-keyshortcuts="Alt+N"
-                title="Alt+N"
-              >
-                Numbered list
-              </button>
+                keys="Alt+N"
+                shortcut="Alt+N"
+              />
             </span>
           )}
           <span role="group" aria-label="Go to">
             {mode === 'source' && (
-              <button
-                type="button"
+              <Tool
+                name="Find and replace"
+                icon={Search}
                 onClick={() => live.current && openSearchPanel(live.current.view)}
-                aria-keyshortcuts="Control+F Meta+F"
-                title="Ctrl+F"
-              >
-                Find and replace
-              </button>
+                keys="Control+F Meta+F"
+                shortcut="Ctrl+F"
+              />
             )}
-            <button
-              type="button"
+            <Tool
+              name="Show in PDF"
+              icon={FileSearch}
               onClick={() =>
                 setNote(
                   showInPdf({ fileId, ...placeNow.current() })
@@ -1407,9 +1438,7 @@ export default function FileEditor(props: {
                     : 'There is no PDF to show it in yet.',
                 )
               }
-            >
-              Show in PDF
-            </button>
+            />
           </span>
           <span className="note" aria-live="polite">
             {note}
@@ -1479,52 +1508,54 @@ export default function FileEditor(props: {
         />
         <div className="source" ref={host} hidden={mode !== 'source'} />
       </div>
-      <Proposals
-        projectId={projectId}
-        fileId={fileId}
-        canPropose={props.canComment}
-        canDecide={canWrite}
-        canReview={props.canReview}
-        selection={() => stretch.current(true)}
-        show={show}
-        standing={(from, to) => standing.current(from, to)}
-        onProposals={(list) => {
-          proposalsNow.current = list;
-          markThreads.current();
-        }}
-      />
-      <Threads
-        projectId={projectId}
-        fileId={fileId}
-        canComment={props.canComment}
-        members={props.members}
-        selection={() => stretch.current()}
-        standing={(from, to) => standing.current(from, to)}
-        onThreads={(list) => {
-          threadsNow.current = list;
-          markThreads.current();
-        }}
-        show={show}
-      />
-      {/* Last, and on purpose: the findings of a real file run to several screens, and what people
-          say to each other must not lie under them. */}
-      {props.visual && (
-        <Language
+      <ReviewPanel>
+        <Proposals
           projectId={projectId}
           fileId={fileId}
-          canWrite={canWrite && !sync.refused}
           canPropose={props.canComment}
-          unsaved={!sync.loaded || sync.unsaved}
-          change={(from, to, expected, replacement) =>
-            changeText.current(from, to, expected, replacement)
-          }
+          canDecide={canWrite}
+          canReview={props.canReview}
+          selection={() => stretch.current(true)}
           show={show}
-          onFindings={(list) => {
-            findingsNow.current = list;
+          standing={(from, to) => standing.current(from, to)}
+          onProposals={(list) => {
+            proposalsNow.current = list;
             markThreads.current();
           }}
         />
-      )}
+        <Threads
+          projectId={projectId}
+          fileId={fileId}
+          canComment={props.canComment}
+          members={props.members}
+          selection={() => stretch.current()}
+          standing={(from, to) => standing.current(from, to)}
+          onThreads={(list) => {
+            threadsNow.current = list;
+            markThreads.current();
+          }}
+          show={show}
+        />
+        {/* Last, and on purpose: the findings of a real file run to several screens, and what people
+          say to each other must not lie under them. */}
+        {props.visual && (
+          <Language
+            projectId={projectId}
+            fileId={fileId}
+            canWrite={canWrite && !sync.refused}
+            canPropose={props.canComment}
+            unsaved={!sync.loaded || sync.unsaved}
+            change={(from, to, expected, replacement) =>
+              changeText.current(from, to, expected, replacement)
+            }
+            show={show}
+            onFindings={(list) => {
+              findingsNow.current = list;
+              markThreads.current();
+            }}
+          />
+        )}
+      </ReviewPanel>
     </section>
   );
 }
