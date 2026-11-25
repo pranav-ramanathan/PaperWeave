@@ -1,0 +1,237 @@
+/*
+ * The new look: Tailwind v4, shadcn's variables, PaperWeave's tokens. Read PLAN.md section 8.
+ *
+ * Every selector that comes out of this file is prefixed with :where([data-ui='next']) by
+ * postcss-prefix-selector (postcss.config.mjs, this file only), so on a page that is not in the
+ * new look nothing here matches anything, and :where adds no specificity. Consequences when
+ * writing here:
+ *  - Write plain selectors. `:root` (and html, body) stand for the scope element itself, which is
+ *    the <main data-ui='next'> of a page: `:root { --x: 1 }` declares --x on it.
+ *  - The variables are declared on that element, not on the real :root: the old look has its own
+ *    --accent and --muted with other meanings.
+ *  - @keyframes and @property are not prefixed (they are global names); give a keyframe a name
+ *    that starts with pw-.
+ *  - One @import per area below, and a file per area in next/. A task writes in its own area
+ *    file; nobody else edits this file or the tokens (dark: T46 and T47; last: T52).
+ */
+@import 'tailwindcss' source(none);
+@source '../app';
+@source '../components';
+@source '../lib';
+
+@import './next/pages.css';
+@import './next/paper.css';
+@import './next/editor.css';
+@import './next/toolbar.css';
+@import './next/text.css';
+@import './next/source.css';
+@import './next/review.css';
+@import './next/pdf.css';
+@import './next/windows.css';
+@import './next/history.css';
+@import './next/versions.css';
+@import './next/motion.css';
+
+/* Dark is on the scope element or on any element above it (<html data-theme='dark'>). */
+@custom-variant dark (&:where([data-theme='dark'], [data-theme='dark'] *));
+
+@theme inline {
+  --font-sans: 'Atkinson Hyperlegible Next', system-ui, sans-serif;
+  --font-heading: 'Literata', 'Iowan Old Style', Georgia, serif;
+  --font-serif: 'Literata', 'Iowan Old Style', Georgia, serif;
+  --font-mono: 'Atkinson Hyperlegible Mono', ui-monospace, Menlo, monospace;
+  --color-sidebar-ring: var(--sidebar-ring);
+  --color-sidebar-border: var(--sidebar-border);
+  --color-sidebar-accent-foreground: var(--sidebar-accent-foreground);
+  --color-sidebar-accent: var(--sidebar-accent);
+  --color-sidebar-primary-foreground: var(--sidebar-primary-foreground);
+  --color-sidebar-primary: var(--sidebar-primary);
+  --color-sidebar-foreground: var(--sidebar-foreground);
+  --color-sidebar: var(--sidebar);
+  --color-ring: var(--ring);
+  --color-input: var(--input);
+  --color-border: var(--border);
+  --color-destructive: var(--destructive);
+  --color-accent-foreground: var(--accent-foreground);
+  --color-accent: var(--accent);
+  --color-muted-foreground: var(--muted-foreground);
+  --color-muted: var(--muted);
+  --color-secondary-foreground: var(--secondary-foreground);
+  --color-secondary: var(--secondary);
+  --color-primary-foreground: var(--primary-foreground);
+  --color-primary: var(--primary);
+  --color-popover-foreground: var(--popover-foreground);
+  --color-popover: var(--popover);
+  --color-card-foreground: var(--card-foreground);
+  --color-card: var(--card);
+  --color-foreground: var(--foreground);
+  --color-background: var(--background);
+  /* PaperWeave's own: the four kinds of review, success, the PDF desk, the diff. */
+  --color-comment: var(--comment);
+  --color-comment-line: var(--comment-line);
+  --color-comment-wash: var(--comment-wash);
+  --color-proposal: var(--proposal);
+  --color-proposal-line: var(--proposal-line);
+  --color-proposal-wash: var(--proposal-wash);
+  --color-finding: var(--finding);
+  --color-finding-line: var(--finding-line);
+  --color-finding-wash: var(--finding-wash);
+  --color-model: var(--model);
+  --color-model-line: var(--model-line);
+  --color-model-wash: var(--model-wash);
+  --color-ok: var(--ok);
+  --color-ok-line: var(--ok-line);
+  --color-ok-wash: var(--ok-wash);
+  --color-added: var(--added);
+  --color-removed: var(--removed);
+  --color-desk: var(--desk);
+  --color-line-strong: var(--line-strong);
+  /* Controls 6 px, cards 8 px, dialogs 11 px; the paper itself has square corners. */
+  --radius-sm: calc(var(--radius) * 0.6);
+  --radius-md: calc(var(--radius) * 0.8);
+  --radius-lg: var(--radius);
+  --radius-xl: calc(var(--radius) * 1.4);
+  --radius-2xl: calc(var(--radius) * 1.8);
+  /* rest: sheets and cards. lift: menus, dialogs, the current card. Nothing else casts a shadow. */
+  --shadow-rest: 0 1px 2px rgb(22 29 26 / 0.07), 0 0 0 1px rgb(22 29 26 / 0.03);
+  --shadow-lift: 0 6px 18px rgb(22 29 26 / 0.12);
+  /* Motion: 120 ms for hover and press, 180 ms for menus, dialogs and cards. */
+  --ease-pw: cubic-bezier(0.2, 0, 0, 1);
+}
+
+/* Light. Values: PLAN.md section 3. */
+:root {
+  --background: #eef1ef;
+  --foreground: #161d1a;
+  --card: #ffffff;
+  --card-foreground: #161d1a;
+  --popover: #ffffff;
+  --popover-foreground: #161d1a;
+  --primary: #3b46c4;
+  --primary-foreground: #ffffff;
+  --secondary: #e3e8e4;
+  --secondary-foreground: #161d1a;
+  --muted: #e3e8e4;
+  --muted-foreground: #55605a;
+  --accent: #eceefb;
+  --accent-foreground: #2a3296;
+  --destructive: #b3261e;
+  --border: #d3d9d5;
+  --line-strong: #7b857f;
+  --input: #7b857f;
+  --ring: #3b46c4;
+  --radius: 0.5rem;
+  --sidebar: #eef1ef;
+  --sidebar-foreground: #161d1a;
+  --sidebar-primary: #3b46c4;
+  --sidebar-primary-foreground: #ffffff;
+  --sidebar-accent: #eceefb;
+  --sidebar-accent-foreground: #2a3296;
+  --sidebar-border: #d3d9d5;
+  --sidebar-ring: #3b46c4;
+  --comment: #8a4b00;
+  --comment-line: #b86e00;
+  --comment-wash: #fff3dc;
+  --proposal: #3b46c4;
+  --proposal-line: #5a66d8;
+  --proposal-wash: #eceefb;
+  --finding: #a8321f;
+  --finding-line: #cf4a33;
+  --finding-wash: #fdece8;
+  --model: #6d3aa8;
+  --model-line: #8f58cf;
+  --model-wash: #f3ecfb;
+  --ok: #1b6e45;
+  --ok-line: #2b8f5b;
+  --ok-wash: #e4f4ea;
+  --added: #d5f0dc;
+  --removed: #fbdcd8;
+  --desk: #dfe4e1;
+  --pw-fast: 120ms;
+  --pw-base: 180ms;
+}
+
+/*
+ * Dark: prepared here, switched on by T46 (a data-theme='dark' on the scope element or above it).
+ * `:root:is(...)` comes out as :where([data-ui='next']):is(...), which beats the light block above.
+ */
+:root:is([data-theme='dark'], [data-theme='dark'] *) {
+  --background: #121614;
+  --foreground: #e8ece9;
+  --card: #1a1f1c;
+  --card-foreground: #e8ece9;
+  --popover: #202622;
+  --popover-foreground: #e8ece9;
+  --primary: #9aa2f5;
+  --primary-foreground: #12142e;
+  --secondary: #252c28;
+  --secondary-foreground: #e8ece9;
+  --muted: #252c28;
+  --muted-foreground: #a3ada7;
+  --accent: #25284d;
+  --accent-foreground: #c9cefb;
+  --destructive: #f28b82;
+  --border: #333b36;
+  --line-strong: #77837c;
+  --input: #77837c;
+  --ring: #9aa2f5;
+  --sidebar: #121614;
+  --sidebar-foreground: #e8ece9;
+  --sidebar-primary: #9aa2f5;
+  --sidebar-primary-foreground: #12142e;
+  --sidebar-accent: #25284d;
+  --sidebar-accent-foreground: #c9cefb;
+  --sidebar-border: #333b36;
+  --sidebar-ring: #9aa2f5;
+  --comment: #f0b95b;
+  --comment-line: #c98f2c;
+  --comment-wash: #33270f;
+  --proposal: #aab1f7;
+  --proposal-line: #7f88e6;
+  --proposal-wash: #25284d;
+  --finding: #f49a85;
+  --finding-line: #d9705a;
+  --finding-wash: #3a1f1a;
+  --model: #c9a6f2;
+  --model-line: #a47fd6;
+  --model-wash: #2c2140;
+  --ok: #7bd3a3;
+  --ok-line: #4fae7c;
+  --ok-wash: #173024;
+  --added: #1d4a2e;
+  --removed: #5a2520;
+  --desk: #0c0f0d;
+}
+
+/* Under prefers-reduced-motion every duration is nothing. */
+@media (prefers-reduced-motion: reduce) {
+  :root {
+    --pw-fast: 0ms;
+    --pw-base: 0ms;
+  }
+}
+
+@layer base {
+  * {
+    @apply border-border;
+  }
+  /* The scope element is the page's <html> and <body> in one. */
+  html {
+    @apply bg-background font-sans text-foreground;
+    font-size: 0.875rem;
+    line-height: 1.5;
+  }
+  /* A solid focus outline everywhere, as the app has today: stronger than the kit's soft ring. */
+  :focus-visible {
+    outline: 2px solid var(--ring);
+    outline-offset: 2px;
+  }
+  @media (prefers-reduced-motion: reduce) {
+    *,
+    *::before,
+    *::after {
+      animation-duration: 0.01ms !important;
+      transition-duration: 0.01ms !important;
+    }
+  }
+}
