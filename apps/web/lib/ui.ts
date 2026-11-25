@@ -22,6 +22,7 @@ export const UI_COOKIE = 'pw_ui';
 export const MIGRATED: readonly string[] = [
   'invitation',
   'not-found',
+  'paper',
   'papers',
   'sign-in',
   'sign-in-confirm',
@@ -29,7 +30,7 @@ export const MIGRATED: readonly string[] = [
 
 /**
  * The pages being built in the new look over several changes, by the name each gives `ui()`. None
- * yet. A page here is "next" only when UI_STAGED=1 on the server and the person's cookie is
+ * now. A page here is "next" only when UI_STAGED=1 on the server and the person's cookie is
  * "next"; for everyone else it is "classic", so a half-moved page is never shown. The last change
  * for a page moves it from here to MIGRATED.
  */

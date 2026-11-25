@@ -1,1 +1,665 @@
-/* paper: written by the look tasks that own this area. Empty on purpose; see next.css. */
+/*
+ * The paper page in the new look (app/projects/[id]/page.tsx and its sections). Three blocks, one
+ * per task, so that they do not collide: T13 the top and what every section shares, T14 the
+ * middle, T15 the end. Read next.css first: this file is part of it, so every selector here is
+ * prefixed with :where([data-ui='next']) and `:root` stands for that element, which on this page
+ * is <main class='page paper'>. Every rule starts with `:root.paper`, so that nothing reaches
+ * another page in the new look.
+ *
+ * The page's DOM is the same in both looks (apart from the top and a grid around the sections),
+ * and the old look's rules do not reach it, so what a section is, is told here by its element and
+ * by a few classes the markup carries for the purpose (.danger, .files-meta, data-done).
+ */
+
+/* ===== T13: the page, the top, and what every section shares ===== */
+
+:root.paper {
+  min-height: 100vh;
+  padding-bottom: 4rem;
+}
+
+/* The bar: mark and word, then where the person is. It is a <header> inside <main>, so not a
+   banner, and not a link: see Header.tsx. */
+:root.paper .paper-bar {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 0.25rem 0.75rem;
+  min-height: 3rem;
+  padding: 0.375rem 1rem;
+  background: var(--card);
+  border-bottom: 1px solid var(--border);
+}
+:root.paper .paper-brand {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.5rem;
+  font-family: var(--pw-font-serif), 'Iowan Old Style', Georgia, serif;
+  font-size: 1.0625rem;
+  font-weight: 600;
+  letter-spacing: -0.01em;
+}
+:root.paper .paper-bar ol {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 0.25rem;
+}
+:root.paper .paper-bar li {
+  display: flex;
+  align-items: center;
+  gap: 0.25rem;
+  color: var(--muted-foreground);
+}
+:root.paper .paper-bar svg {
+  width: 0.875rem;
+  height: 0.875rem;
+  flex-shrink: 0;
+}
+
+/* The title and who the reader is. */
+:root.paper .paper-title,
+:root.paper .paper-grid {
+  max-width: 72rem;
+  margin-inline: auto;
+  padding-inline: 1rem;
+}
+:root.paper .paper-title {
+  padding-top: 2rem;
+  padding-bottom: 1.5rem;
+}
+:root.paper h1 {
+  font-family: var(--pw-font-serif), 'Iowan Old Style', Georgia, serif;
+  font-size: clamp(1.75rem, 1.3rem + 1.6vw, 2.25rem);
+  font-weight: 650;
+  line-height: 1.15;
+  letter-spacing: -0.015em;
+  text-wrap: balance;
+}
+:root.paper .paper-title span {
+  display: block;
+  margin-top: 0.5rem;
+  color: var(--muted-foreground);
+}
+
+/* The sections beside the list of them, from 64rem; one under the other below that. */
+:root.paper .paper-grid {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr);
+  gap: 1.25rem 2.5rem;
+}
+:root.paper .paper-flow {
+  min-width: 0;
+}
+@media (min-width: 64rem) {
+  :root.paper .paper-grid {
+    grid-template-columns: 11.5rem minmax(0, 1fr);
+    align-items: start;
+  }
+  :root.paper nav[aria-label='On this page'] {
+    position: sticky;
+    top: 1.5rem;
+    flex-direction: column;
+    gap: 0.125rem;
+  }
+}
+
+/* On this page: pills in a row on a narrow window, a list down the side on a wide one. */
+:root.paper nav[aria-label='On this page'] {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.375rem;
+}
+:root.paper nav[aria-label='On this page'] a {
+  display: block;
+  padding: 0.25rem 0.75rem;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  color: var(--muted-foreground);
+  text-decoration: none;
+  transition: background-color var(--pw-fast) var(--ease-pw);
+}
+:root.paper nav[aria-label='On this page'] a:hover {
+  background: var(--secondary);
+  color: var(--foreground);
+}
+@media (min-width: 64rem) {
+  :root.paper nav[aria-label='On this page'] a {
+    border-color: transparent;
+  }
+}
+
+/* Sections are ruled headings, not cards. */
+:root.paper h2 {
+  margin: 2.5rem 0 0.75rem;
+  padding-bottom: 0.5rem;
+  border-bottom: 1px solid color-mix(in srgb, var(--foreground) 80%, transparent);
+  font-family: var(--pw-font-serif), 'Iowan Old Style', Georgia, serif;
+  font-size: 1.25rem;
+  font-weight: 650;
+  line-height: 1.3;
+  scroll-margin-top: 1.5rem;
+}
+:root.paper h3 {
+  margin: 1.25rem 0 0.5rem;
+  font-family: var(--pw-font-serif), 'Iowan Old Style', Georgia, serif;
+  font-size: 1.0625rem;
+  font-weight: 650;
+}
+:root.paper .paper-flow > :first-child {
+  margin-top: 0;
+}
+
+/* Words. */
+:root.paper p {
+  margin: 0.5rem 0;
+  max-width: 46rem;
+}
+:root.paper a {
+  color: var(--primary);
+  text-decoration: underline;
+  text-decoration-thickness: 1px;
+  text-underline-offset: 3px;
+}
+:root.paper a:hover {
+  text-decoration-thickness: 2px;
+}
+:root.paper nav a,
+:root.paper .paper-bar a {
+  text-decoration: none;
+}
+:root.paper .paper-bar a {
+  color: var(--muted-foreground);
+}
+:root.paper .paper-bar a:hover {
+  color: var(--foreground);
+  text-decoration: underline;
+}
+:root.paper code {
+  font-family: var(--pw-font-mono), ui-monospace, Menlo, monospace;
+  font-size: 0.8125rem;
+}
+:root.paper small,
+:root.paper .role {
+  font-size: 0.8125rem;
+  color: var(--muted-foreground);
+}
+:root.paper .report {
+  margin: 0.5rem 0;
+  padding-left: 1.25rem;
+  list-style: disc;
+}
+:root.paper .report li {
+  margin: 0.375rem 0;
+  max-width: 46rem;
+}
+:root.paper q {
+  font-style: italic;
+}
+
+/* What a form said: a notice with a coloured edge, and always words ("Problem: " is put before an
+   alert by functional.css). */
+:root.paper [role='status'],
+:root.paper [role='alert'] {
+  margin: 0.75rem 0;
+  padding: 0.5rem 0.75rem;
+  border: 1px solid var(--border);
+  border-left-width: 4px;
+  border-radius: var(--radius-md);
+  background: var(--card);
+  box-shadow: var(--shadow-rest);
+  overflow-wrap: anywhere;
+}
+:root.paper [role='status'] {
+  border-left-color: var(--ok-line);
+}
+:root.paper [role='alert'] {
+  border-left-color: var(--finding-line);
+  background: var(--finding-wash);
+}
+
+/* Forms: fields with their labels above, then the one action. */
+:root.paper form {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: flex-end;
+  gap: 0.75rem;
+  margin: 0.75rem 0;
+}
+:root.paper form.inline {
+  display: inline-flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 0.375rem;
+  margin: 0;
+}
+:root.paper label {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr);
+  gap: 0.25rem;
+  min-width: 0;
+  max-width: 100%;
+  font-weight: 550;
+}
+:root.paper label:has(> input[type='checkbox']) {
+  display: flex;
+  align-items: flex-start;
+  gap: 0.5rem;
+  font-weight: 400;
+}
+:root.paper form.inline label {
+  display: inline-flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 0.25rem 0.5rem;
+}
+:root.paper form.inline input:not([type='checkbox']):not([type='radio']):not([type='file']) {
+  min-width: 0;
+  width: 12rem;
+}
+:root.paper input:not([type='checkbox']):not([type='radio']),
+:root.paper select,
+:root.paper textarea {
+  min-height: 2rem;
+  max-width: 100%;
+  padding: 0.25rem 0.625rem;
+  border: 1px solid var(--input);
+  border-radius: 6px;
+  background: var(--card);
+  color: var(--foreground);
+  font: inherit;
+  font-weight: 400;
+}
+:root.paper input:not([type='checkbox']):not([type='radio']):not([type='file']),
+:root.paper textarea {
+  min-width: min(16rem, 100%);
+}
+:root.paper textarea {
+  width: min(34rem, 100%);
+}
+:root.paper input[type='checkbox'] {
+  flex-shrink: 0;
+  width: 1rem;
+  height: 1rem;
+  margin-top: 0.1875rem;
+  accent-color: var(--primary);
+}
+:root.paper input[type='file'] {
+  padding: 0.1875rem;
+}
+:root.paper input[type='file']::file-selector-button {
+  margin-right: 0.625rem;
+  padding: 0.125rem 0.625rem;
+  border: 1px solid var(--border);
+  border-radius: 4px;
+  background: var(--secondary);
+  color: var(--foreground);
+  font: inherit;
+  font-size: 0.8125rem;
+  font-weight: 550;
+  cursor: pointer;
+}
+:root.paper ::placeholder {
+  color: var(--muted-foreground);
+}
+:root.paper :disabled {
+  opacity: 0.6;
+}
+:root.paper fieldset {
+  display: grid;
+  gap: 0.375rem;
+  margin: 0.75rem 0;
+  padding: 0.75rem 1rem;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-lg);
+}
+:root.paper legend {
+  padding-inline: 0.25rem;
+  font-weight: 550;
+}
+
+/* Buttons: quiet by default (sheet colour, hairline); the action of a form that has fields is the
+   one solid button; a button in a table row is quieter still; a destructive one has danger text
+   and is solid on no page of this one. */
+:root.paper button {
+  min-height: 2rem;
+  padding: 0.125rem 0.875rem;
+  border: 1px solid var(--input);
+  border-radius: 6px;
+  background: var(--card);
+  color: var(--foreground);
+  font: inherit;
+  font-size: 0.8125rem;
+  font-weight: 550;
+  cursor: pointer;
+  transition: background-color var(--pw-fast) var(--ease-pw);
+}
+:root.paper button:hover {
+  background: var(--muted);
+}
+:root.paper form:not(.inline) > button[type='submit'] {
+  border-color: transparent;
+  background: var(--primary);
+  color: var(--primary-foreground);
+}
+:root.paper form:not(.inline) > button[type='submit']:hover {
+  background: color-mix(in srgb, var(--primary) 90%, transparent);
+}
+:root.paper form.inline button,
+:root.paper td button {
+  min-height: 1.75rem;
+  padding-inline: 0.625rem;
+  border-color: transparent;
+  background: transparent;
+  color: var(--muted-foreground);
+}
+:root.paper form.inline button:hover,
+:root.paper td button:hover {
+  background: var(--muted);
+  color: var(--foreground);
+}
+:root.paper button.danger,
+:root.paper td button.danger {
+  color: var(--destructive);
+}
+:root.paper button.danger:hover,
+:root.paper td button.danger:hover {
+  background: color-mix(in srgb, var(--destructive) 10%, transparent);
+  color: var(--destructive);
+}
+@media (pointer: coarse) {
+  :root.paper button,
+  :root.paper input:not([type='checkbox']):not([type='radio']),
+  :root.paper select {
+    min-height: 2.5rem;
+  }
+}
+
+/* A table scrolls inside its own box (functional.css); its rows are ruled, its heads are quiet. */
+:root.paper .wide {
+  margin: 0.5rem 0;
+}
+:root.paper table {
+  width: 100%;
+  border-collapse: collapse;
+  text-align: left;
+}
+:root.paper th,
+:root.paper td {
+  padding: 0.5rem 1rem 0.5rem 0;
+  border-top: 1px solid var(--border);
+  text-align: left;
+  font-weight: 400;
+  vertical-align: middle;
+}
+:root.paper thead th {
+  border-top: 0;
+  border-bottom: 1px solid var(--line-strong);
+  color: var(--muted-foreground);
+  font-size: 0.8125rem;
+  font-weight: 600;
+  white-space: nowrap;
+}
+:root.paper tbody th {
+  font-weight: 500;
+}
+:root.paper td.actions {
+  padding-right: 0;
+  text-align: right;
+}
+
+/* A fold (a <details> with a <summary>): the summary looks like a quiet button. */
+:root.paper summary {
+  display: inline-flex;
+  align-items: center;
+  min-height: 1.75rem;
+  padding: 0.125rem 0.625rem;
+  border-radius: 6px;
+  color: var(--muted-foreground);
+  font-size: 0.8125rem;
+  font-weight: 550;
+  cursor: pointer;
+  list-style: none;
+}
+:root.paper summary::-webkit-details-marker {
+  display: none;
+}
+:root.paper summary:hover {
+  background: var(--muted);
+  color: var(--foreground);
+}
+:root.paper .paper-flow > details {
+  margin: 0 0 1rem;
+}
+:root.paper .paper-flow > details > summary {
+  border: 1px solid var(--input);
+  background: var(--card);
+  color: var(--foreground);
+}
+:root.paper details[open] > summary {
+  background: var(--muted);
+}
+:root.paper details > form {
+  margin: 0.5rem 0;
+  text-align: left;
+}
+:root.paper td details {
+  display: inline-block;
+  vertical-align: middle;
+}
+
+/* First steps: the owner's list, as a row of five marks, green when done. */
+:root.paper section[aria-labelledby='first-steps'] {
+  padding: 1rem 1.25rem;
+  border-radius: var(--radius-xl);
+  background: color-mix(in srgb, var(--accent) 70%, transparent);
+}
+:root.paper section[aria-labelledby='first-steps'] h2 {
+  margin: 0;
+  padding: 0;
+  border: 0;
+  font-size: 1.125rem;
+}
+:root.paper .first-steps {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(9.5rem, 1fr));
+  gap: 0.75rem;
+  margin: 0.75rem 0 0;
+  padding: 0;
+  list-style: none;
+}
+:root.paper .first-steps li {
+  max-width: none;
+  margin: 0;
+  padding-top: 0.5rem;
+  border-top: 3px solid var(--line-strong);
+  font-size: 0.8125rem;
+  line-height: 1.4;
+}
+:root.paper .first-steps li[data-done='true'] {
+  border-top-color: var(--ok-line);
+}
+:root.paper .first-steps strong {
+  display: block;
+  font-weight: 650;
+}
+:root.paper .first-steps li[data-done='true'] strong {
+  color: var(--ok);
+}
+
+/* Files: what the root and compiler are, the table, and the form that adds one. */
+:root.paper .files-meta {
+  color: var(--muted-foreground);
+  max-width: none;
+}
+:root.paper .files-meta small {
+  display: inline-block;
+  margin-top: 0.25rem;
+}
+:root.paper tbody th code {
+  font-size: 0.8125rem;
+}
+:root.paper form:has(> h3) {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr);
+  align-items: start;
+  gap: 0.75rem;
+  max-width: 36rem;
+  margin: 1.5rem 0;
+  padding: 1rem;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-lg);
+  background: var(--card);
+  box-shadow: var(--shadow-rest);
+}
+:root.paper form:has(> h3) h3 {
+  margin: 0;
+}
+:root.paper form:has(> h3) > button {
+  justify-self: start;
+}
+
+/* ===== T14: the middle (labels, bibliography, data, review, language, assistance) ===== */
+
+/* Forms that are a column of fields (language, writing assistance, and the ones in the end block). */
+:root.paper form.stack {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr);
+  justify-items: start;
+  gap: 1rem;
+  max-width: 36rem;
+}
+:root.paper form.stack > label {
+  width: 100%;
+}
+:root.paper form.stack textarea {
+  width: 100%;
+}
+
+/* What needs attention (undefined or doubled labels, missing citations): a list with a red edge,
+   each item a sentence that names the place, which is a link. */
+:root.paper .attention {
+  margin: 0.5rem 0 1rem;
+  padding: 0;
+  list-style: none;
+}
+:root.paper .attention li {
+  margin: 0.5rem 0;
+  padding: 0.5rem 0.75rem;
+  border-left: 3px solid var(--finding-line);
+  background: var(--finding-wash);
+  border-radius: 0 var(--radius-md) var(--radius-md) 0;
+}
+
+/* Ruled lists: one item to a rule (data files and charts, what is waiting in review). Items that
+   are a kind of review carry its edge: a proposed change blue, a thread amber. */
+:root.paper .ruled {
+  margin: 0.5rem 0 1rem;
+  padding: 0;
+  list-style: none;
+  border-top: 1px solid var(--border);
+}
+:root.paper .ruled li {
+  max-width: none;
+  margin: 0;
+  padding: 0.625rem 0 0.625rem 0.75rem;
+  border-bottom: 1px solid var(--border);
+  border-left: 3px solid transparent;
+}
+:root.paper .ruled li[data-kind='proposal'] {
+  border-left-color: var(--proposal-line);
+}
+:root.paper .ruled li[data-kind='thread'] {
+  border-left-color: var(--comment-line);
+}
+:root.paper .report strong {
+  color: var(--comment);
+  font-weight: 600;
+}
+:root.paper .report li > a:first-child code,
+:root.paper .report li > code:first-child {
+  font-weight: 500;
+}
+
+/* The bibliography's table: the entry, then what was checked about it, then the claims. */
+:root.paper [aria-label='Table of references'] :is(td, th) {
+  vertical-align: top;
+}
+:root.paper td ul {
+  margin: 0.25rem 0;
+  padding: 0;
+  list-style: none;
+}
+:root.paper td li {
+  margin: 0.375rem 0;
+}
+:root.paper td li + li {
+  padding-top: 0.375rem;
+  border-top: 1px dotted var(--border);
+}
+:root.paper td strong {
+  font-weight: 600;
+}
+:root.paper td > br + .role,
+:root.paper th .role {
+  display: block;
+  margin-top: 0.125rem;
+}
+:root.paper td details[open] > form {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr);
+  justify-items: start;
+  gap: 0.75rem;
+  max-width: 24rem;
+  padding: 0.75rem;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-lg);
+  background: var(--card);
+}
+:root.paper td details[open] > form > label,
+:root.paper td details[open] > form textarea {
+  width: 100%;
+}
+
+/* ===== T15: the end (revisions, people, invite, delete) ===== */
+
+/* Revisions and People are tables (the tests read their rows): ruled rows, the actions at the
+   right, quiet. A form that has fields and is the page's way to add something (invite) is a card. */
+:root.paper [aria-label='Table of revisions'] th[scope='row'] {
+  font-family: var(--pw-font-serif), 'Iowan Old Style', Georgia, serif;
+  font-size: 1rem;
+  font-weight: 600;
+}
+:root.paper [aria-label='Table of revisions'] :is(td, th),
+:root.paper [aria-label='Table of people'] :is(td, th) {
+  vertical-align: top;
+}
+:root.paper [aria-label='Table of revisions'] td.actions {
+  white-space: nowrap;
+}
+:root.paper td.actions form.inline {
+  vertical-align: middle;
+}
+:root.paper [aria-label='Table of people'] tbody td {
+  vertical-align: middle;
+}
+:root.paper form.card {
+  padding: 1rem;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-lg);
+  background: var(--card);
+  box-shadow: var(--shadow-rest);
+}
+:root.paper form.card select {
+  min-width: 10rem;
+}
+
+/* Delete this paper: quiet until asked for. The heading is as every other; the link has danger
+   text, and the page it leads to asks before anything goes. */
+:root.paper a.danger {
+  color: var(--destructive);
+  font-weight: 550;
+}
+:root.paper #delete {
+  margin-top: 3rem;
+}

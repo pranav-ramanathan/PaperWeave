@@ -66,7 +66,7 @@ test('a page that is not in the list is classic, chosen or not', () => {
   expect(look('sign-in', 'next', 'next', moved)).toBe('classic');
 });
 
-test('no page is staged yet', () => {
+test('no page is staged now', () => {
   expect(STAGED).toEqual([]);
 });
 

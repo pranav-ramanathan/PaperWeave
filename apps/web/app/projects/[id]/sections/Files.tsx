@@ -111,7 +111,7 @@ export function Files({
       </h2>
       {files.length > 0 && (
         <>
-          <p>
+          <p className="files-meta">
             Root file: <code>{project.root ?? 'none'}</code>. Compiler:{' '}
             <code>{project.compiler}</code>.{' '}
             {can(project.role, 'project.export') && (
@@ -178,7 +178,7 @@ export function Files({
                     </th>
                     <td>{f.size < 1024 ? `${f.size} B` : `${Math.round(f.size / 1024)} KB`}</td>
                     <td>{note(f.path, f.readonly)}</td>
-                    <td>
+                    <td className="actions">
                       {f.path === project.root && 'Root file '}
                       {canWrite && f.path !== project.root && !f.readonly && TEX.test(f.path) && (
                         <form action={rootAction.bind(null, id, f.id)} className="inline">
@@ -189,7 +189,7 @@ export function Files({
                       )}{' '}
                       {canWrite && f.path !== project.root && (
                         <form action={deleteFileAction.bind(null, id, f.id)} className="inline">
-                          <Once type="submit" aria-label={`Delete ${f.path}`}>
+                          <Once type="submit" className="danger" aria-label={`Delete ${f.path}`}>
                             Delete
                           </Once>
                         </form>
