@@ -1187,6 +1187,8 @@ test('a restore made while a file is open is said in its editor: who, to what, a
   await showSource(watch);
   await editor.page.getByRole('link', { name: 'main.tex' }).click();
   await showSource(editor.page);
+  // Shut until connected: a space typed before then would scroll the window past the notice.
+  await expect(source(editor.page)).toHaveAttribute('contenteditable', 'true');
   await typeAtStart(editor.page, '% regretted\n');
   await expect(status(editor.page)).toHaveText('All edits saved.');
   await expect(source(watch)).toContainText('% regretted');
@@ -1383,6 +1385,9 @@ test('a file the restore takes out says so in its editor, and the list of files 
   await page.goto(paper);
   await page.getByRole('link', { name: 'notes.tex' }).click();
   await showSource(page);
+  // The editor is shut until it has connected. A space typed into it before then is not text
+  // but the browser's "page down": it scrolls the window past the notice that comes later.
+  await expect(source(page)).toHaveAttribute('contenteditable', 'true');
   await typeAtStart(page, '% written in the new file\n');
   await expect(status(page)).toHaveText('All edits saved.');
 

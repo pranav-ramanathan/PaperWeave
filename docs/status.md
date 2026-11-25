@@ -7690,8 +7690,7 @@ pointing to the new page).
 - **Layout.** Sync server (one instance), Postgres, a Bucket and LanguageTool on Railway; the web
   app on either; the workers off Railway on a machine with Docker, reaching Postgres through
   Railway's TCP proxy and the bucket outbound. Removes the tunnel and the Postgres port on your own
-  machine. The deploy-order note (web app first, then the sync server) is carried over.
-- **Why the workers are off.** Ordinary Railway services have no Docker (community threads, not an
+  machine. The deploy-order note (web app first, then the sync server) is carried over.- **Why the workers are off.** Ordinary Railway services have no Docker (community threads, not an
   official page). Sandboxes have Docker, untested here. Sandboxing without Docker is not advised.
 - **Code: `S3_PATH_STYLE`.** The S3 client built every address path-style, always. The new setting
   defaults to that, so nothing changes; `false` gives `https://bucket.host/key`, and the pages'
@@ -7736,3 +7735,23 @@ pointing to the new page).
   chart test, which fail on the old code (finished 1.9 s before the end of a 2.6 s test build;
   `drawn_at` at the start of the drawing).
 - **Not done.** Old rows were not corrected; the real time is not recoverable.
+
+## Text spacing, text size and a narrow window were not checked
+
+- **What was wrong.** `docs/accessibility.md` listed three things as not checked: WCAG 1.4.12 text
+  spacing, 1.4.4 text enlarged by itself, and a 320-pixel window on the pages the narrow test
+  did not visit (renaming a file, the windows for inserting things).
+- **Now.** `tests/e2e/zoom.spec.ts` walks the main pages and every window over the editor
+  three times: with line height 1.5, 2em after a paragraph, letter spacing 0.12em and word
+  spacing 0.16em; with all text twice its size (each element gets twice its computed size, as
+  most sizes are in pixels); and at 320 pixels wide. Lost means the page scrolls sideways, a
+  hidden-overflow box cuts off its text, or two controls overlap.
+- **Found.** Nothing in the app; no app file changed. The first run of the overlap check reported
+  overlaps in the paper's file list. They were the parts of a closed "Rename", which have a box
+  but are not drawn; the check now skips what is not drawn. A test of the check itself builds a
+  page with each fault and expects them found.
+- **Not done.**
+  - Text drawn over other text is not looked for.
+  - One window size (1280 by 720), and spacing and size are not tried together.
+  - Nobody has looked at the pages in these modes by eye, or in Firefox or Safari, or with the
+    browser's own text-size setting.
