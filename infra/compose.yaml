@@ -17,9 +17,13 @@ services:
   # An S3-compatible object store. Production uses a real bucket through the same client.
   # Browsers put uploads in it and fetch large PDFs from it (docs/deploy.md), so it answers
   # cross-origin requests from the web app's addresses only (3000 is `next dev`, 3100 is `pnpm e2e`, 3200 to 3500 are its other test slots, README.md).
+  # Volumes of 1 GB, and room for 100 of them: left to itself the store sizes volumes at 30 GB and
+  # works out how many it may make from the free disk when it first starts, so on a machine with
+  # little free disk it made a handful, gave them all to its default collection and then refused
+  # every write ("No writable volumes"). An empty volume takes almost no space.
   s3:
     image: chrislusf/seaweedfs@sha256:4b42c212543a0acd4c0e675215ecdcaf62a186ef98def76c7e12701871222d15
-    command: server -s3 -s3.allowedOrigins=http://localhost:3000,http://localhost:3100,http://localhost:3200,http://localhost:3300,http://localhost:3400,http://localhost:3500 -dir=/data
+    command: server -s3 -s3.allowedOrigins=http://localhost:3000,http://localhost:3100,http://localhost:3200,http://localhost:3300,http://localhost:3400,http://localhost:3500 -master.volumeSizeLimitMB=1024 -volume.max=100 -dir=/data
     ports: ['127.0.0.1:8333:8333']
     healthcheck:
       test: ['CMD-SHELL', 'wget -q -O /dev/null http://127.0.0.1:8333/ || exit 1']
