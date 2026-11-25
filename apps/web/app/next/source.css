@@ -1,10 +1,25 @@
-/* The source view (T21). The CodeMirror theme itself is in FileEditor.tsx (nextTheme); this
-   gives it the three token colours. Variables, so the dark theme (T47) changes them here.
-   Contrast on the white sheet: command 7.3, comment 6.5, math 6.8 (all above 4.5). */
+/* The source view (T21, T47). The CodeMirror theme itself is in FileEditor.tsx (nextTheme); this
+   gives it the three token colours and the active line. Variables, so the dark theme changes them
+   here (the two dark lists are one list, as in next.css). Text, gutter, caret and selection come
+   from the page tokens, which switch by themselves.
+   Contrast, light on the sheet: command 7.3, comment 6.5, math 6.8. Dark on the sheet #1a1f1c:
+   command #9aa2f5 7.1, comment #a3ada7 7.2, math #f0b95b 9.4; the active line is a 7% wash of the
+   ink, over which the quiet text of the gutter still passes 4.5 (axe, in theme.spec). */
 :root {
   --src-command: var(--primary);
   --src-comment: var(--muted-foreground);
   --src-math: var(--comment);
+  --src-active-line: transparent;
+}
+:root:is([data-theme='dark'], [data-theme='dark'] *) {
+  --src-active-line: color-mix(in srgb, var(--foreground) 7%, transparent);
+}
+@media (prefers-color-scheme: dark) {
+  :root:not(
+    :is([data-theme='light'], [data-theme='light'] *, [data-theme='dark'], [data-theme='dark'] *)
+  ) {
+    --src-active-line: color-mix(in srgb, var(--foreground) 7%, transparent);
+  }
 }
 .cm-editor .pw-src-command {
   color: var(--src-command);

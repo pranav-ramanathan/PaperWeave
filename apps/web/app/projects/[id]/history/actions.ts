@@ -70,6 +70,25 @@ export async function compareHistoryAction(projectId: string, form: FormData) {
 }
 
 /**
+ * Show what changed between a revision of this paper and a revision of another paper of the same
+ * family (a version or main), in place. "The paper as it is now" is an end only for those who may
+ * make revisions of that paper (`revisionOfNow` refuses the rest). Both papers are checked by the
+ * service when the page asks for the comparison.
+ */
+export async function compareAcrossAction(projectId: string, form: FormData) {
+  const back = at(projectId);
+  const user = await requireUser(back);
+  await act(back, async () => {
+    const other = text(form, 'across');
+    const end = async (paper: string, value: string) =>
+      value === NOW ? (await revisionOfNow(db(), blobs(), user.id, paper)).id : value;
+    const mine = await end(projectId, text(form, 'mine'));
+    const theirs = await end(other, text(form, 'theirs'));
+    return `${back}?across=${encodeURIComponent(other)}&mine=${encodeURIComponent(mine)}&theirs=${encodeURIComponent(theirs)}#across`;
+  });
+}
+
+/**
  * Start a version of this paper at a revision (`from`: its id, or the paper as it is now). The
  * service refuses it when versions are off, to a reviewer or viewer, and past ten versions.
  */

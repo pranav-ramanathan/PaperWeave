@@ -2,14 +2,25 @@
 // `pw_theme`, the page being drawn in the choice from its first byte, the device's own colours when
 // nothing is chosen, the classic look that ignores all of it, and every page of the new look
 // outside the editor in dark: axe (contrast above all), 320 px wide, spaced text, text twice as
-// big. Only in a run with the new look chosen (E2E_UI=next); the editor is not here, its dark
-// theme is a later task.
+// big, and the editor in both views with its marks, an open window and the menu at the caret.
+// Only in a run with the new look chosen (E2E_UI=next).
 import { expect, type Page, test } from '@playwright/test';
 import { mkdtempSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { writeZip } from '../../packages/server/src/archive';
-import { audit, confirmSignIn, emailedLink, person, run, signIn, sticksOut } from './helpers';
+import {
+  audit,
+  clickAfter,
+  confirmSignIn,
+  emailedLink,
+  person,
+  run,
+  selectWord,
+  showSource,
+  signIn,
+  sticksOut,
+} from './helpers';
 import { enlarged, lost, spaced } from './look';
 
 test.skip(process.env.E2E_UI !== 'next', 'the new look is chosen with E2E_UI=next');
@@ -284,4 +295,120 @@ test('every page of the new look outside the editor, in dark: axe, 320 px, space
   await confirmSignIn(guest.page, link);
   await guest.page.goto(await emailedLink(guest.email, '/invitations/'));
   await checks(guest.page, 'invitation');
+});
+
+test('the editor in dark: axe over both views with a thread and a proposal in the text, an open window and the menu at the caret', async ({
+  browser,
+}) => {
+  test.setTimeout(240_000);
+  const owner = await person(browser, 'theme-editor');
+  const reviewer = await person(browser, 'theme-editor-reviewer');
+  for (const p of [owner.page, reviewer.page]) {
+    await p.goto('/sign-in');
+    await choose(p, 'dark');
+  }
+  const zip = join(mkdtempSync(join(tmpdir(), 'paperweave-e2e-')), `Dark editor ${run}.zip`);
+  writeFileSync(zip, await writeZip([{ path: 'main.tex', bytes: Buffer.from(MAIN) }]));
+  await signIn(owner.page, owner.email);
+  await owner.page.getByLabel('Or import a ZIP of a LaTeX project').setInputFiles(zip);
+  await owner.page.getByRole('button', { name: 'Import ZIP' }).click();
+  await owner.page.getByLabel('Their email address').fill(reviewer.email);
+  await owner.page.getByLabel('Their role').selectOption('reviewer');
+  await owner.page.getByRole('button', { name: 'Send invitation' }).click();
+  await expect(owner.page.getByRole('status')).toContainText(reviewer.email);
+  await reviewer.page.goto(await emailedLink(reviewer.email, '/invitations/'));
+  await signIn(reviewer.page, reviewer.email);
+  await reviewer.page.getByRole('button', { name: 'Join this paper' }).click();
+
+  const VISUAL = '.editor .visual .ProseMirror';
+  const shots = process.env.THEME_SHOTS;
+  const shot = async (page: Page, name: string) => {
+    if (!shots) return;
+    for (const [w, h] of [
+      [1440, 900],
+      [390, 844],
+    ]) {
+      await page.setViewportSize({ width: w, height: h });
+      await page.waitForTimeout(400);
+      await page.screenshot({ path: join(shots, `${name}-${w}.png`), animations: 'disabled' });
+    }
+    await page.setViewportSize({ width: 1440, height: 900 });
+  };
+
+  // The reviewer marks two stretches: a comment and a proposal.
+  await reviewer.page.getByRole('link', { name: 'main.tex' }).first().click();
+  await expect(reviewer.page.locator('html')).toHaveAttribute('data-theme', 'dark');
+  await selectWord(reviewer.page, VISUAL, 'Latency');
+  const threads = reviewer.page.getByRole('region', { name: 'Comments' });
+  await threads.getByRole('button', { name: 'Comment on the selected text' }).click();
+  await threads.getByLabel('Comment', { exact: true }).fill('Is that the median?');
+  await threads.getByRole('button', { name: 'Start thread' }).click();
+  await selectWord(reviewer.page, VISUAL, 'forty');
+  const proposals = reviewer.page.getByRole('region', { name: 'Proposed changes' });
+  await proposals.getByRole('button', { name: 'Propose a change here' }).click();
+  await proposals.getByLabel('Replace it with').fill('thirty');
+  await proposals.getByRole('button', { name: 'Propose', exact: true }).click();
+  await expect(reviewer.page.locator(`${VISUAL} .proposal-mark`)).toHaveText('forty');
+
+  // The owner's editor: the marks in the text, the PDF pane, the cards.
+  const page = owner.page;
+  await page.getByRole('link', { name: 'main.tex' }).first().click();
+  await expect(page.locator('html')).toHaveAttribute('data-theme', 'dark');
+  await expect(page.locator(`${VISUAL} .thread-mark`)).toHaveText('Latency', { timeout: 20_000 });
+  await expect(page.locator(`${VISUAL} .proposal-mark`)).toHaveText('forty');
+  await expect(page.locator('.build').getByRole('status')).toHaveText('The PDF is up to date.', {
+    timeout: 90_000,
+  });
+  expect(
+    await page.locator(VISUAL).evaluate((e) => getComputedStyle(e).backgroundColor),
+    'the sheet is dark',
+  ).toBe('rgb(26, 31, 28)');
+  await audit(page, 'editor, visual view, marks, in dark');
+  await shot(page, 'editor-visual');
+
+  // A thread selected: "Show in the text".
+  await page
+    .getByRole('article', { name: /Latency/ })
+    .getByRole('button', { name: 'Show in the text' })
+    .click();
+  await audit(page, 'editor, a thread selected, in dark');
+  await shot(page, 'editor-thread');
+
+  // An open window, and the menu at the caret.
+  await clickAfter(page, VISUAL, 'forty');
+  await page.keyboard.press('Alt+=');
+  const equation = page.getByRole('dialog', { name: 'Insert an equation' });
+  await equation.getByLabel('LaTeX').fill('\\frac{a}{b} + \\sqrt{x}');
+  await expect(equation.locator('.preview .katex')).toBeVisible();
+  await audit(page, 'insert window, in dark');
+  await shot(page, 'editor-insert');
+  await equation.getByRole('button', { name: 'Cancel' }).click();
+  await expect(equation).toBeHidden();
+  await clickAfter(page, VISUAL, 'milliseconds');
+  await page.keyboard.press('Shift+F10');
+  await expect(page.getByRole('menu', { name: 'At this place' })).toBeVisible();
+  await audit(page, 'menu at the caret, in dark');
+  await shot(page, 'editor-menu');
+  await page.keyboard.press('Escape');
+
+  // The source view, the marks in it.
+  await showSource(page);
+  await expect(page.locator('.editor .cm-content .thread-mark')).toHaveText('Latency');
+  expect(
+    await page.locator('.editor .cm-editor').evaluate((e) => getComputedStyle(e).backgroundColor),
+    'the source view is dark',
+  ).toBe('rgb(26, 31, 28)');
+  await audit(page, 'editor, source view, in dark');
+  await shot(page, 'editor-source');
+
+  // 320 px wide, and text twice as big.
+  const url = page.url();
+  await page.setViewportSize({ width: 320, height: 640 });
+  await page.goto(url);
+  expect(await sticksOut(page), 'editor at 320 px').toEqual([]);
+  await audit(page, 'editor in dark at 320 px');
+  await page.setViewportSize({ width: 1440, height: 900 });
+  await page.goto(url);
+  await enlarged(page);
+  expect(await lost(page), 'editor with text twice as big').toEqual([]);
 });

@@ -104,6 +104,40 @@ test('the words for a file that is gone say what took it and where it still is',
   );
 });
 
+test('a merge is said in its own words: who merged which version into which paper', () => {
+  const merged = (more: Partial<RestoreNote> = {}) =>
+    note({
+      from: null,
+      fromName: null,
+      merge: { paper: 'v1', version: 'camera-ready', revision: 4 },
+      ...more,
+    });
+  expect(restoredWords(merged(), 'ben@example.org', '14:02')).toBe(
+    'ana@example.org merged the version “camera-ready” into this paper at 14:02. It is now revision 9. The paper as it was is revision 8. Anything typed after that moment is still in the text.',
+  );
+  expect(restoredWords(merged(), 'ana@example.org', '14:02')).toMatch(/^You merged the version /);
+  // The main paper brought into a version.
+  expect(
+    restoredWords(
+      merged({ merge: { paper: 'p0', version: null, revision: 7 } }),
+      'ben@example.org',
+      '14:02',
+      true,
+    ),
+  ).toBe(
+    'ana@example.org merged the main paper into this version at 14:02. It is now revision 9. The paper as it was is revision 8.',
+  );
+  expect(restoredWords(merged({ by: null }), 'ben@example.org', '14:02')).toMatch(
+    /^The version “camera-ready” was merged into this paper at 14:02\./,
+  );
+  // The comparison links are the restore's: the paper as it was beside the merge.
+  expect(restoreHistory('p1', merged())).toBe('/projects/p1/history?from=id-8&to=id-9');
+  // A file the merge took out of the paper.
+  expect(goneWords({ why: 'restore', restore: merged() }, 'ben@example.org', '14:02')).toBe(
+    'ana@example.org merged the version “camera-ready” into this paper at 14:02. This file was taken out by the merge, so it is no longer in the paper. The paper as it was just before, with this file, is kept as revision 8.',
+  );
+});
+
 test('the history page opens on the restore, or on the timeline if the paper before was not kept', () => {
   expect(restoreHistory('p1', note())).toBe('/projects/p1/history?from=id-8&to=id-9');
   expect(restoreHistory('p1', note({ kept: null }))).toBe('/projects/p1/history');

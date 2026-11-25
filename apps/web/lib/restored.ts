@@ -20,8 +20,19 @@ export const isNews = (number: number, seen: number | null) => seen !== null && 
  * is whether their own edits are waiting on their decision (they were offline with them), in
  * which case the status line beside this says what becomes of those.
  */
-/** Who restored the paper, to what and when: the sentence both notes begin with. */
+/**
+ * Who restored the paper, to what and when: the sentence both notes begin with. A merge says who
+ * merged which version into this paper (or the main paper into this version) instead.
+ */
 function first(r: RestoreNote, me: string, time: string) {
+  if (r.merge) {
+    const of = r.merge.version === null ? 'the main paper' : `the version “${r.merge.version}”`;
+    const into = r.merge.version === null ? 'this version' : 'this paper';
+    const who = r.by === me ? 'You merged' : r.by ? `${r.by} merged` : null;
+    return who
+      ? `${who} ${of} into ${into} at ${time}.`
+      : `${of[0]!.toUpperCase()}${of.slice(1)} was merged into ${into} at ${time}.`;
+  }
   const name = r.fromName
     ? ` (${r.fromName.length > NAME_SHOWN ? `${r.fromName.slice(0, NAME_SHOWN)}…` : r.fromName})`
     : '';
@@ -30,9 +41,14 @@ function first(r: RestoreNote, me: string, time: string) {
   return who ? `${who} to ${to} at ${time}.` : `This paper was restored to ${to} at ${time}.`;
 }
 
+/** What the notice calls the event: "restore" or "merge". */
+export const eventName = (r: RestoreNote) => (r.merge ? 'merge' : 'restore');
+
 export function restoredWords(r: RestoreNote, me: string, time: string, held = false): string {
   const kept = r.kept
-    ? ` The paper as it was just before, with everything saved until then, is kept as revision ${r.kept.number}.`
+    ? r.merge
+      ? ` The paper as it was is revision ${r.kept.number}.`
+      : ` The paper as it was just before, with everything saved until then, is kept as revision ${r.kept.number}.`
     : '';
   const after = held ? '' : ' Anything typed after that moment is still in the text.';
   return `${first(r, me, time)} It is now revision ${r.number}.${kept}${after}`;
@@ -64,7 +80,10 @@ export function goneWords(left: Left, me: string, time: string): string {
   const kept = left.restore.kept
     ? ` The paper as it was just before, with this file, is kept as revision ${left.restore.kept.number}.`
     : '';
-  return `${first(left.restore, me, time)} This file is not in that revision, so it is no longer in the paper.${kept}`;
+  const why = left.restore.merge
+    ? 'This file was taken out by the merge, so it is no longer in the paper.'
+    : 'This file is not in that revision, so it is no longer in the paper.';
+  return `${first(left.restore, me, time)} ${why}${kept}`;
 }
 
 /** The page that shows what the restore took out and put back, if the paper before it was kept. */

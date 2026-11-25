@@ -14,14 +14,17 @@ import {
 } from '@paperweave/server';
 import Link from '../../../../Go';
 import { notFound } from 'next/navigation';
+import { Fragment } from 'react';
 import { blobs, db, filesOf, forTitle, paperOf, requireUser } from '../../../../../lib/server';
 import { rootDir } from '@paperweave/latex';
 import BuildPane from './BuildPane';
 import FileEditor from './FileEditor';
 import Files, { FileName } from './Files';
+import { ThemeSwitch } from '../../../../../components/theme-switch';
 import { AppBar } from '../../../../../components/app-bar';
 import { LookProvider } from '../../../../../components/look';
 import { buttonVariants } from '../../../../../components/ui/button';
+import { OverlayRoot } from '../../../../../components/ui/overlay-root';
 import { VersionMenu } from '../../../../../components/version-menu';
 import { ui } from '../../../../../lib/ui';
 import { switcherOf, versionsOn } from '../../../../../lib/versions';
@@ -78,78 +81,86 @@ async function FilePage({
     };
   }
   const tree = files.map((f) => ({ id: f.id, path: f.path, readonly: f.readonly }));
+  // The new look's menus (the version switcher) mount in the overlay root, inside <main>, where
+  // its rules and colours are; without it they would go to <body>, outside both.
+  const Overlays = look === 'next' ? OverlayRoot : Fragment;
   return (
     <main className="editor" data-ui={look}>
       <LookProvider look={look}>
-        <a className="skip" href="#text">
-          Skip to the text
-        </a>
-        {look === 'next' ? (
-          // The new look: the app bar holds the paper's name (the h1), the link to its page and
-          // the link to its history, after the mark, the paper and the file being the way there.
-          <AppBar
-            home="/projects"
-            crumbs={[
-              { label: project.name, heading: true },
-              {
-                id: 'file',
-                label: <FileName projectId={id} fileId={fileId} files={tree} path={file.path} />,
-              },
-            ]}
-          >
-            <Link
-              prefetch={false}
-              href={`/projects/${id}`}
-              className={buttonVariants({ variant: 'outline', size: 'sm' })}
+        <Overlays>
+          <a className="skip" href="#text">
+            Skip to the text
+          </a>
+          {look === 'next' ? (
+            // The new look: the app bar holds the paper's name (the h1), the link to its page and
+            // the link to its history, after the mark, the paper and the file being the way there.
+            <AppBar
+              home="/projects"
+              crumbs={[
+                { label: project.name, heading: true },
+                {
+                  id: 'file',
+                  label: <FileName projectId={id} fileId={fileId} files={tree} path={file.path} />,
+                },
+              ]}
             >
-              Paper overview
-            </Link>
-            <Link
-              prefetch={false}
-              href={`/projects/${id}/history`}
-              className={buttonVariants({ variant: 'outline', size: 'sm' })}
-            >
-              History
-            </Link>
-            {switcher && <VersionMenu choices={switcher.choices} page="" paper={switcher.paper} />}
-          </AppBar>
-        ) : (
-          <header className="bar">
-            <h1>{project.name}</h1>
-            <Link prefetch={false} href={`/projects/${id}`}>
-              Paper overview
-            </Link>
-          </header>
-        )}
-        <div className="workspace">
-          <Files projectId={id} fileId={fileId} files={tree} root={report?.root} />
-          <FileEditor
-            key={fileId}
-            projectId={id}
-            fileId={fileId}
-            visual={/\.(tex|ltx)$/i.test(file.path)}
-            macros={macros}
-            prose={prose}
-            words={words}
-            sourceOnly={!!report?.files.find((f) => f.path === file.path)?.sourceOnly}
-            path={file.path}
-            canWrite={file.canWrite}
-            role={project.role}
-            canComment={can(project.role, 'comment.write')}
-            canReview={canReview}
-            members={members
-              .filter((m) => m.userId !== user.id)
-              .map((m) => ({ userId: m.userId, email: m.email }))}
-            user={user.email}
-            syncUrl={process.env.SYNC_URL ?? 'ws://localhost:4100'}
-          />
-          <BuildPane
-            projectId={id}
-            canBuild={can(project.role, 'build.run')}
-            files={files.map((f) => ({ id: f.id, path: f.path, readonly: f.readonly }))}
-            rootDir={rootDir(report?.root ?? '')}
-          />
-        </div>
+              <Link
+                prefetch={false}
+                href={`/projects/${id}`}
+                className={buttonVariants({ variant: 'outline', size: 'sm' })}
+              >
+                Paper overview
+              </Link>
+              <Link
+                prefetch={false}
+                href={`/projects/${id}/history`}
+                className={buttonVariants({ variant: 'outline', size: 'sm' })}
+              >
+                History
+              </Link>
+              {switcher && (
+                <VersionMenu choices={switcher.choices} page="" paper={switcher.paper} />
+              )}
+              <ThemeSwitch />
+            </AppBar>
+          ) : (
+            <header className="bar">
+              <h1>{project.name}</h1>
+              <Link prefetch={false} href={`/projects/${id}`}>
+                Paper overview
+              </Link>
+            </header>
+          )}
+          <div className="workspace">
+            <Files projectId={id} fileId={fileId} files={tree} root={report?.root} />
+            <FileEditor
+              key={fileId}
+              projectId={id}
+              fileId={fileId}
+              visual={/\.(tex|ltx)$/i.test(file.path)}
+              macros={macros}
+              prose={prose}
+              words={words}
+              sourceOnly={!!report?.files.find((f) => f.path === file.path)?.sourceOnly}
+              path={file.path}
+              canWrite={file.canWrite}
+              role={project.role}
+              canComment={can(project.role, 'comment.write')}
+              canReview={canReview}
+              members={members
+                .filter((m) => m.userId !== user.id)
+                .map((m) => ({ userId: m.userId, email: m.email }))}
+              user={user.email}
+              syncUrl={process.env.SYNC_URL ?? 'ws://localhost:4100'}
+            />
+            <BuildPane
+              projectId={id}
+              canBuild={can(project.role, 'build.run')}
+              files={files.map((f) => ({ id: f.id, path: f.path, readonly: f.readonly }))}
+              rootDir={rootDir(report?.root ?? '')}
+            />
+          </div>
+        </Overlays>
       </LookProvider>
     </main>
   );
