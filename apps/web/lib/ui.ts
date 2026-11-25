@@ -21,6 +21,24 @@ export const UI_COOKIE = 'pw_ui';
 export const MIGRATED: readonly string[] = [];
 
 /**
+ * The pages being built in the new look over several changes, by the name each gives `ui()`. None
+ * yet. A page here is "next" only when UI_STAGED=1 on the server and the person's cookie is
+ * "next"; for everyone else it is "classic", so a half-moved page is never shown. The last change
+ * for a page moves it from here to MIGRATED.
+ */
+export const STAGED: readonly string[] = [];
+
+/**
+ * What UI_STAGED says: "1" is on, "0" and not set are off. Anything else stops whoever asks, as
+ * UI_DEFAULT does.
+ */
+export function uiStaged(value: string | undefined = process.env.UI_STAGED): boolean {
+  if (value === undefined || value === '' || value === '0') return false;
+  if (value === '1') return true;
+  throw new Error(`UI_STAGED is "${value}": it must be "1" or "0" (or not set)`);
+}
+
+/**
  * What UI_DEFAULT says: "classic" or "next", and "classic" when it is not set. Anything else
  * stops whoever asks (the service's first request, and so every one after it) with a message that
  * says what to set it to, rather than quietly showing the old look to everyone.
@@ -40,15 +58,57 @@ export function look(
   cookie: string | undefined,
   fallback: Look,
   migrated: readonly string[] = MIGRATED,
+  staged: readonly string[] = STAGED,
+  stagedOn = false,
 ): Look {
+  // A staged page is unfinished: it is "next" only for a person who asked for it by cookie, on a
+  // server that has UI_STAGED=1. UI_DEFAULT does not reach it.
+  if (staged.includes(page)) return stagedOn && cookie === 'next' ? 'next' : 'classic';
   if (!migrated.includes(page)) return 'classic';
   // A cookie that is neither is not a choice: it is as if there were none.
   return cookie === 'next' || cookie === 'classic' ? cookie : fallback;
 }
 
+/**
+ * What the person has chosen, whether or not any page has been moved yet: the cookie when it is a
+ * choice, else the setting. This is what the switch on the papers page shows; `look` is what a
+ * page is drawn in.
+ */
+export function chosen(cookie: string | undefined, fallback: Look): Look {
+  return cookie === 'next' || cookie === 'classic' ? cookie : fallback;
+}
+
+/** The choice of the person asking (see `chosen`). */
+export async function chosenLook(): Promise<Look> {
+  return chosen((await cookies()).get(UI_COOKIE)?.value, uiDefault());
+}
+
+/**
+ * The value the switch's form sends: "next" or "classic" and nothing else, so that a forged post
+ * cannot put anything else in the cookie.
+ */
+export function asLook(value: unknown): Look {
+  if (value === 'next' || value === 'classic') return value;
+  throw new Error('The look must be "next" or "classic"');
+}
+
+/**
+ * How the choice is kept. A year, for the whole site, and not sent with a request from another
+ * site (Lax). Only the server reads it, so scripts need not (httpOnly). It is a preference, not a
+ * credential, so it is not Secure-only: it must also work on the plain-http address the tests
+ * and local work use.
+ */
+export const UI_COOKIE_OPTIONS = {
+  httpOnly: true,
+  sameSite: 'lax',
+  path: '/',
+  maxAge: 60 * 60 * 24 * 365,
+} as const;
+
 /** The look of a page for the person asking. `page` is the name the page is listed under. */
 export async function ui(page: string): Promise<Look> {
   // The setting is read even for a page that is not moved, so that a wrong one is found at once.
   const fallback = uiDefault();
-  return look(page, (await cookies()).get(UI_COOKIE)?.value, fallback);
+  const stagedOn = uiStaged();
+  return look(page, (await cookies()).get(UI_COOKIE)?.value, fallback, MIGRATED, STAGED, stagedOn);
 }

@@ -9,6 +9,7 @@ import {
   audit,
   caretLine,
   emailedLink,
+  ORIGIN,
   person,
   run,
   showSource,
@@ -105,7 +106,7 @@ test('the PDF builds by itself, a broken edit says where, and the last good PDF 
   expect(
     (
       await viewer.page.request.post(`${paper}/builds`, {
-        headers: { origin: 'http://localhost:3100' },
+        headers: { origin: ORIGIN },
       })
     ).status(),
   ).toBe(403);
