@@ -10,7 +10,7 @@ import { join } from 'node:path';
 import { readZip, writeZip } from '../../packages/server/src/archive';
 import { blobStore } from '../../packages/server/src/blobs';
 import { connect } from '../../packages/server/src/db';
-import { clickAfter, person, run, showVisual, signIn } from './helpers';
+import { clickAfter, ORIGIN, person, run, showVisual, signIn } from './helpers';
 
 const FUNCTION_LIMIT = 4_500_000;
 const STORE = process.env.S3_ENDPOINT ?? 'http://localhost:8333';
@@ -40,7 +40,7 @@ function watch(page: Page) {
   page.on('request', (r) => {
     const url = new URL(r.url());
     if (url.origin === STORE && r.method() === 'PUT') toStore.push(r.url());
-    else if (url.origin === new URL(page.url() || 'http://localhost:3100').origin)
+    else if (url.origin === new URL(page.url() || ORIGIN).origin)
       toApp.push({ url: r.url(), bytes: r.postDataBuffer()?.length ?? 0 });
   });
   return { toApp, toStore };

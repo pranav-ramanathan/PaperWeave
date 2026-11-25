@@ -13,6 +13,11 @@ import {
   test,
 } from '@playwright/test';
 
+// Where the web server and the sync server are: slot A's ports unless E2E_WEB_PORT and
+// E2E_SYNC_PORT say otherwise (playwright.config.ts reads the same two; see README.md).
+export const ORIGIN = `http://localhost:${process.env.E2E_WEB_PORT || 3100}`;
+/** Matches the address of the sync server's socket, for `routeWebSocket`. */
+export const SYNC_SOCKET = new RegExp(`:${process.env.E2E_SYNC_PORT || 4100}`);
 export const MAIL = process.env.MAILPIT_URL ?? 'http://localhost:8025';
 // Each worker process loads this file itself. The worker's number keeps two workers that start
 // in the same millisecond from sharing addresses and names.
@@ -166,7 +171,7 @@ export async function person(browser: Browser, who: string) {
       {
         name: 'pw_ui',
         value: 'next',
-        domain: new URL(test.info().project.use.baseURL ?? 'http://localhost:3100').hostname,
+        domain: new URL(test.info().project.use.baseURL ?? ORIGIN).hostname,
         path: '/',
       },
     ]);
@@ -454,7 +459,7 @@ export async function slowLine(page: Page, each = 0) {
       });
     };
   };
-  await page.routeWebSocket(/:4100/, (socket) => {
+  await page.routeWebSocket(SYNC_SOCKET, (socket) => {
     const server = socket.connectToServer();
     socket.onMessage(lane((m) => server.send(m)));
     server.onMessage(lane((m) => socket.send(m)));

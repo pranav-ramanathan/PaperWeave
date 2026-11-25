@@ -11,6 +11,7 @@ import {
   confirmSignIn,
   emailedLink,
   MAIL,
+  ORIGIN,
   person,
   run,
   scriptsHeld,
@@ -251,7 +252,7 @@ test('sign-in never sends people to another site', async ({ browser }) => {
   const visitor = await person(browser, 'redirect');
   await visitor.page.goto('/sign-in?next=//evil.example/steal');
   await signIn(visitor.page, visitor.email);
-  await expect(visitor.page).toHaveURL(/^http:\/\/localhost:3100\/projects$/);
+  await expect(visitor.page).toHaveURL(`${ORIGIN}/projects`);
 });
 
 test('a tab between the slashes does not lead off the site, signed in or from the emailed page', async ({
@@ -275,7 +276,7 @@ test('a tab between the slashes does not lead off the site, signed in or from th
   const link = new URL(await emailedLink(other.email, '/sign-in/confirm'));
   link.searchParams.set('next', '/\t/evil.example/x');
   await confirmSignIn(other.page, link.href);
-  await expect(other.page).toHaveURL(/^http:\/\/localhost:3100\/projects$/);
+  await expect(other.page).toHaveURL(`${ORIGIN}/projects`);
 });
 
 test('every answer says how it may be used: not in a frame, not guessed at, not posted elsewhere', async ({
@@ -326,7 +327,7 @@ test('a form posted to the site is answered with a path, not with an address', a
   // its own: behind a proxy that is the machine's inner address, which no browser can reach,
   // and which the pages' own policy forbids a form to lead to. A path is right wherever the
   // service is reached from.
-  const form = { headers: { origin: 'http://localhost:3100' }, maxRedirects: 0 };
+  const form = { headers: { origin: ORIGIN }, maxRedirects: 0 };
   const paper = '/projects/00000000-0000-4000-8000-000000000000';
   for (const [to, sent, next] of [
     ['/api/projects/import', { zip: 'x' }, '/sign-in?next=%2Fprojects'],
