@@ -61,11 +61,6 @@ export function RevisionsSection({
       <p>
         A revision is the whole paper at one moment. Its ZIP and its PDF always belong together.
       </p>
-      <p>
-        <Link prefetch={false} href={`/projects/${id}/history`}>
-          History and versions
-        </Link>
-      </p>
       {writer && (
         <form action={saveRevisionAction.bind(null, id)} className="stack">
           <label>
@@ -196,6 +191,12 @@ export function RevisionsSection({
           )}
         </p>
       )}
+      {/* Last in the section: the save form stays the first stop after the heading. */}
+      <p>
+        <Link prefetch={false} href={`/projects/${id}/history`}>
+          History and versions
+        </Link>
+      </p>
     </>
   );
 }
