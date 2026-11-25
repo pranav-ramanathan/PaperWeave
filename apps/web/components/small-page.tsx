@@ -1,0 +1,56 @@
+import type { ReactNode } from 'react';
+import type { Look } from '../lib/ui';
+import { LookProvider } from './look';
+import { Mark } from './mark';
+import { Card, CardContent } from './ui/card';
+
+/**
+ * The frame of a one-form page: sign-in, the page the emailed link leads to, an invitation, "nothing
+ * here". Classic: the <main> it has always had. New look: the page's own <main data-ui='next'>, the
+ * word and mark centred above a sheet that holds the page's content (PLAN.md sections 2 and 4).
+ *
+ * The word and mark are not a link and not read out (the heading says where this is): a link here
+ * would be a tab stop before the page's own, and the tests press Tab from the top of the page.
+ * `className` is for the sheet's content.
+ */
+export function SmallPage({
+  look,
+  children,
+  className,
+  bare = false,
+}: {
+  look: Look;
+  children: ReactNode;
+  className?: string;
+  /** Classic only: a <main> with no class at all, as "nothing here" has always had. */
+  bare?: boolean;
+}) {
+  if (look !== 'next') return <main className={bare ? undefined : 'page narrow'}>{children}</main>;
+  return (
+    // `page` keeps the "Problem: " that functional.css puts before an alert.
+    // The utilities need an element inside the scope element: they do not match the <main> itself.
+    <main data-ui="next" className="page">
+      <LookProvider look="next">
+        <div className="flex min-h-dvh flex-col items-center gap-6 px-4 py-10 sm:justify-center">
+          <p
+            aria-hidden="true"
+            className="flex items-center gap-2 font-heading text-[1.375rem] font-semibold tracking-tight"
+          >
+            <Mark />
+            PaperWeave
+          </p>
+          <Card className="w-full max-w-md [--card-spacing:--spacing(6)]">
+            <CardContent
+              className={
+                'grid gap-4 [&_a]:text-primary [&_a]:underline [&_a]:underline-offset-4 [&_a:hover]:no-underline [&_h1]:font-heading [&_h1]:text-[1.75rem] [&_h1]:leading-tight [&_h1]:font-semibold [&_h1]:tracking-tight [&_h1]:text-balance' +
+                (className ? ` ${className}` : '')
+              }
+            >
+              {children}
+            </CardContent>
+          </Card>
+        </div>
+      </LookProvider>
+    </main>
+  );
+}

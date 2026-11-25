@@ -37,11 +37,12 @@ test('the choice is kept for a year, site-wide, Lax and for the server only', ()
 
 const moved = ['papers'];
 
-test('no page has been moved yet, so every page is classic whatever is chosen', async () => {
-  expect(MIGRATED).toEqual([]);
+test('a page that has not been moved is classic whatever is chosen; the list is in order', async () => {
+  expect([...MIGRATED].sort()).toEqual(MIGRATED);
+  expect(MIGRATED).not.toContain('not-yet-moved');
   for (const cookie of ['next', 'classic', undefined, 'other'])
     for (const fallback of ['next', 'classic'] as const)
-      expect(look('papers', cookie, fallback)).toBe('classic');
+      expect(look('not-yet-moved', cookie, fallback)).toBe('classic');
 });
 
 test('a moved page is next when the person chose it, or when they chose nothing and the default is', () => {

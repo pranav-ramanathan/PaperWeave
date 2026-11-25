@@ -15,10 +15,16 @@ export type Look = 'classic' | 'next';
 export const UI_COOKIE = 'pw_ui';
 
 /**
- * The pages that have been moved to the new look, by the name each gives `ui()`. None yet: every
- * page is "classic" whatever has been chosen. A page is added here in the change that moves it.
+ * The pages that have been moved to the new look, by the name each gives `ui()`. A page not here
+ * is "classic" whatever has been chosen. A page is added here in the change that moves it; one
+ * entry per line, in alphabetical order.
  */
-export const MIGRATED: readonly string[] = [];
+export const MIGRATED: readonly string[] = [
+  'invitation',
+  'not-found',
+  'sign-in',
+  'sign-in-confirm',
+];
 
 /**
  * The pages being built in the new look over several changes, by the name each gives `ui()`. None

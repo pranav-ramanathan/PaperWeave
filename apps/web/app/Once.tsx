@@ -1,14 +1,25 @@
 'use client';
 import { type ButtonHTMLAttributes, useEffect, useRef } from 'react';
 import { useFormStatus } from 'react-dom';
+import { useLook } from '../components/look';
+import { buttonVariants } from '../components/ui/button';
+import { cn } from '../lib/utils';
 import { waiting } from '../lib/waiting';
 
 /**
  * A submit button whose form is sent once per press. A second submit while the first is on
  * its way is dropped: at once (a ref), since state would only be seen after the next draw.
  */
-export default function Once(props: ButtonHTMLAttributes<HTMLButtonElement>) {
+export default function Once({
+  variant,
+  className,
+  ...props
+}: ButtonHTMLAttributes<HTMLButtonElement> & {
+  /** In the new look: which button it is drawn as (the primary one by default). */
+  variant?: 'default' | 'outline' | 'destructive';
+}) {
   const { pending } = useFormStatus();
+  const next = useLook() === 'next';
   const going = useRef(false);
   const button = useRef<HTMLButtonElement>(null);
   // A form with a server action: free again when the action has answered, which is also when
@@ -40,5 +51,15 @@ export default function Once(props: ButtonHTMLAttributes<HTMLButtonElement>) {
       window.removeEventListener('pageshow', back);
     };
   }, []);
-  return <button type="submit" {...props} ref={button} aria-disabled={pending || undefined} />;
+  return (
+    <button
+      type="submit"
+      {...props}
+      className={
+        next ? cn(buttonVariants({ variant: variant ?? 'default' }), className) : className
+      }
+      ref={button}
+      aria-disabled={pending || undefined}
+    />
+  );
 }
