@@ -3,6 +3,15 @@
 import type { Thread } from '@paperweave/server';
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { whenMarked } from '../../../../../lib/builds';
+import {
+  CardKindMark,
+  cardActions,
+  cardButton,
+  cardClass,
+  cardForm,
+  quoteClass,
+  useReviewCount,
+} from '../../../../../components/review-card';
 
 export type Member = { userId: string; email: string };
 /** A stretch of the file as the editor holds it: its two ends, and the words between them. */
@@ -37,6 +46,7 @@ function Say(props: {
   const [begun, setBegun] = useState(false);
   return (
     <form
+      className={cardForm}
       onFocus={() => setBegun(true)}
       onSubmit={async (e) => {
         e.preventDefault();
@@ -91,14 +101,16 @@ function Say(props: {
         </fieldset>
       )}
       {problem && <p role="alert">{problem}</p>}
-      <button type="submit" aria-disabled={busy || undefined}>
-        {props.button}
-      </button>
-      {props.onCancel && (
-        <button type="button" onClick={props.onCancel}>
-          Cancel
+      <span className={cardActions}>
+        <button type="submit" className={cardButton('primary')} aria-disabled={busy || undefined}>
+          {props.button}
         </button>
-      )}
+        {props.onCancel && (
+          <button type="button" className={cardButton()} onClick={props.onCancel}>
+            Cancel
+          </button>
+        )}
+      </span>
     </form>
   );
 }
@@ -116,7 +128,7 @@ export default function Threads(props: {
   /** The stretch selected in the editor now, or null if nothing is. */
   selection(): Stretch | null;
   /** Select a stretch in the editor. False if it is no longer there. */
-  show(from: string, to: string): boolean;
+  show(from: string, to: string): Promise<boolean>;
   /** Where a stretch stands in the editor's text now, or null if nothing is there. */
   standing(from: string, to: string): Stretch | null;
   /** Told the threads each time they are read, so that the editor can mark them in the text. */
@@ -269,8 +281,10 @@ export default function Threads(props: {
         id={`thread-${t.id}`}
         aria-label={`Thread on “${short(t.excerpt, 40)}”`}
         aria-current={t.id === named ? 'true' : undefined}
+        className={cardClass('comment')}
       >
-        <blockquote>{short(t.excerpt)}</blockquote>
+        <CardKindMark kind="comment" />
+        <blockquote className={quoteClass('comment')}>{short(t.excerpt)}</blockquote>
         {t.state === 'changed' && (
           <p className="note">
             Changed since. It now reads: <q>{short(t.now)}</q>
@@ -313,6 +327,7 @@ export default function Threads(props: {
               {canComment && c.yours && editing?.comment !== c.id && (
                 <button
                   type="button"
+                  className={cardButton()}
                   data-change={c.id}
                   onClick={() => setEditing({ thread: t.id, comment: c.id })}
                 >
@@ -320,7 +335,12 @@ export default function Threads(props: {
                 </button>
               )}
               {c.removable && removing !== c.id && (
-                <button type="button" data-delete={c.id} onClick={() => setRemoving(c.id)}>
+                <button
+                  type="button"
+                  className={cardButton()}
+                  data-delete={c.id}
+                  onClick={() => setRemoving(c.id)}
+                >
                   Delete
                 </button>
               )}
@@ -329,6 +349,7 @@ export default function Threads(props: {
                   Delete this comment for everyone?{' '}
                   <button
                     type="button"
+                    className={cardButton('secondary')}
                     onClick={async () => {
                       const wrong = await post(
                         `${url}/${t.id}`,
@@ -341,7 +362,7 @@ export default function Threads(props: {
                   >
                     Delete it
                   </button>
-                  <button type="button" onClick={() => setRemoving(null)}>
+                  <button type="button" className={cardButton()} onClick={() => setRemoving(null)}>
                     Keep it
                   </button>
                 </span>
@@ -349,12 +370,15 @@ export default function Threads(props: {
             </li>
           ))}
         </ol>
-        <p>
+        <p className={cardActions}>
           {t.state !== 'detached' && (
             <button
               type="button"
-              onClick={() =>
-                setNote(props.show(t.from, t.to) ? '' : 'That text is no longer in the file.')
+              className={cardButton()}
+              onClick={async () =>
+                setNote(
+                  (await props.show(t.from, t.to)) ? '' : 'That text is no longer in the file.',
+                )
               }
             >
               Show in the text
@@ -363,6 +387,7 @@ export default function Threads(props: {
           {canComment && t.state === 'detached' && (
             <button
               type="button"
+              className={cardButton('secondary')}
               onClick={async () => {
                 const wrong = await post(`${url}/${t.id}`, { attach: true });
                 if (wrong) return setNote(wrong);
@@ -377,6 +402,7 @@ export default function Threads(props: {
           {canComment && (
             <button
               type="button"
+              className={cardButton('secondary')}
               onClick={async () => {
                 const resolving = t.status === 'open';
                 const wrong = await post(
@@ -433,6 +459,7 @@ export default function Threads(props: {
   );
   const open = threads?.filter((t) => t.status === 'open' || held(t)) ?? [];
   const resolved = threads?.filter((t) => t.status === 'resolved' && !held(t)) ?? [];
+  useReviewCount('comments', threads ? open.length : null);
   return (
     <section className="threads" id="comments" aria-label="Comments" ref={section}>
       <h2 ref={heading} tabIndex={-1}>
@@ -441,6 +468,7 @@ export default function Threads(props: {
       {canComment && !starting && (
         <button
           type="button"
+          className={cardButton('secondary')}
           ref={opener}
           onClick={() => {
             const picked = props.selection();
@@ -453,7 +481,7 @@ export default function Threads(props: {
       )}
       {starting && (
         <>
-          <blockquote>{short(starting.words)}</blockquote>
+          <blockquote className={quoteClass('comment')}>{short(starting.words)}</blockquote>
           <Say
             label="Comment"
             button="Start thread"

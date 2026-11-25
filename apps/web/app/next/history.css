@@ -1,1 +1,309 @@
-/* history: written by the look tasks that own this area. Empty on purpose; see next.css. */
+/*
+ * The history page (app/projects/[id]/history), drawn in the new look for everyone who reaches it:
+ * it has no classic version. Read next.css first: every selector here is prefixed with
+ * :where([data-ui='next']), and `:root` stands for that element, which on this page is
+ * <main class='page history'>. Every rule starts with `:root.history` so that it reaches no other
+ * page. Two parts side by side on a wide window, the timeline and the sheet that holds the
+ * comparison; stacked on a narrow one, in that order (the versions list of PLAN.md section 14.1
+ * is not built yet and would go before them).
+ */
+
+:root.history {
+  min-height: 100vh;
+  background: var(--background);
+}
+
+:root.history .history-grid {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr);
+  align-items: start;
+  max-width: 90rem;
+  margin-inline: auto;
+}
+@media (min-width: 64rem) {
+  :root.history .history-grid {
+    grid-template-columns: minmax(22rem, 28rem) minmax(0, 1fr);
+  }
+}
+
+:root.history h2 {
+  font-family: var(--pw-font-serif), 'Iowan Old Style', Georgia, serif;
+  font-size: 1.5rem;
+  font-weight: 650;
+  letter-spacing: -0.01em;
+  line-height: 1.2;
+}
+
+/* The timeline, on the desk colour. */
+:root.history .history-line {
+  display: grid;
+  align-content: start;
+  gap: 1rem;
+  padding: 1.5rem 1rem 3rem;
+  min-width: 0;
+}
+:root.history .history-said {
+  display: grid;
+  gap: 0.5rem;
+}
+:root.history .history-save {
+  display: grid;
+  gap: 0.375rem;
+}
+:root.history .history-save > div {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.5rem;
+}
+:root.history .history-save input {
+  flex: 1 1 12rem;
+}
+:root.history .history-empty {
+  display: grid;
+  gap: 1rem;
+  color: var(--muted-foreground);
+}
+:root.history .history-now {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  color: var(--muted-foreground);
+  font-size: 0.875rem;
+}
+:root.history .history-days {
+  display: grid;
+  gap: 1.5rem;
+}
+:root.history .history-day h3 {
+  margin-bottom: 0.5rem;
+  color: var(--muted-foreground);
+  font-size: 0.875rem;
+  font-weight: 600;
+}
+:root.history .history-day > ol {
+  position: relative;
+  display: grid;
+}
+/* The rule the dots hang on. */
+:root.history .history-day > ol::before {
+  content: '';
+  position: absolute;
+  top: 0.75rem;
+  bottom: 0.75rem;
+  left: 0.875rem;
+  width: 1px;
+  background: var(--border);
+}
+:root.history .history-row {
+  position: relative;
+  display: grid;
+  grid-template-columns: 1.75rem minmax(0, 1fr) auto;
+  gap: 0 0.75rem;
+  padding: 0.5rem 0;
+}
+:root.history .history-body {
+  min-width: 0;
+  font-size: 0.875rem;
+  color: var(--muted-foreground);
+  overflow-wrap: anywhere;
+}
+:root.history .history-title {
+  color: var(--foreground);
+}
+:root.history .history-named .history-name,
+:root.history .history-merge .history-name {
+  font-family: var(--pw-font-serif), 'Iowan Old Style', Georgia, serif;
+  font-size: 1.125rem;
+  font-weight: 650;
+  line-height: 1.25;
+}
+:root.history .history-restore .history-name {
+  font-weight: 600;
+}
+:root.history .history-number {
+  color: var(--muted-foreground);
+  font-size: 0.875rem;
+  font-weight: 400;
+}
+:root.history .history-note {
+  display: block;
+}
+:root.history .history-dot {
+  position: relative;
+  z-index: 1;
+  display: grid;
+  place-items: center;
+  align-self: start;
+  width: 1.75rem;
+  height: 1.75rem;
+  border-radius: 999px;
+  background: var(--background);
+  border: 1px solid var(--line-strong);
+  color: var(--foreground);
+}
+:root.history .history-named .history-dot {
+  background: var(--primary);
+  border-color: var(--primary);
+  color: var(--primary-foreground);
+}
+:root.history .history-restore .history-dot {
+  border-color: var(--comment-line);
+  color: var(--comment);
+}
+:root.history .history-merge .history-dot {
+  border-color: var(--proposal-line);
+  color: var(--proposal);
+}
+:root.history .history-run > .history-dot {
+  width: 0.625rem;
+  height: 0.625rem;
+  margin: 0.4rem 0 0 0.6875rem;
+  background: var(--line-strong);
+  border: 0;
+}
+:root.history .history-dot svg {
+  width: 0.875rem;
+  height: 0.875rem;
+}
+:root.history .history-acts {
+  display: flex;
+  align-items: flex-start;
+  gap: 0.125rem;
+}
+/* Revisions of a run, once it is open: under the run, in the same column as its text. */
+:root.history .history-run-rows {
+  grid-column: 2 / -1;
+  display: grid;
+  margin-top: 0.25rem;
+  padding-left: 0.75rem;
+  border-left: 1px solid var(--border);
+}
+:root.history .history-run {
+  grid-template-columns: 1.75rem minmax(0, 1fr) auto;
+}
+:root.history .history-auto {
+  grid-template-columns: minmax(0, 1fr) auto;
+}
+:root.history .history-more {
+  color: var(--muted-foreground);
+  font-size: 0.875rem;
+}
+
+/* The sheet: the comparison, on the PDF desk colour. */
+:root.history .history-sheet {
+  display: grid;
+  align-content: start;
+  gap: 1rem;
+  padding: 1.5rem 1rem 3rem;
+  min-width: 0;
+  background: var(--desk);
+  border-top: 1px solid var(--border);
+  min-height: 20rem;
+}
+@media (min-width: 64rem) {
+  :root.history .history-sheet {
+    min-height: calc(100vh - 3rem);
+    border-top: 0;
+    border-left: 1px solid var(--border);
+    padding-inline: 1.5rem;
+  }
+}
+:root.history .history-picker,
+:root.history .history-diff {
+  display: grid;
+  gap: 1rem;
+  padding: 1.25rem;
+  background: var(--card);
+  border-radius: var(--radius-lg);
+  box-shadow: var(--shadow-rest);
+}
+:root.history .history-says {
+  min-height: 1.25rem;
+  color: var(--muted-foreground);
+  font-size: 0.875rem;
+}
+:root.history .history-says:empty {
+  display: none;
+}
+:root.history .history-lists {
+  display: grid;
+  gap: 0.75rem;
+}
+@media (min-width: 40rem) {
+  :root.history .history-lists {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+}
+:root.history .history-lists label {
+  margin-bottom: 0.25rem;
+}
+:root.history .history-picker > button {
+  justify-self: start;
+}
+:root.history .history-diff h3 {
+  font-family: var(--pw-font-serif), 'Iowan Old Style', Georgia, serif;
+  font-size: 1.375rem;
+  font-weight: 650;
+  line-height: 1.2;
+}
+:root.history .history-diff section {
+  display: grid;
+  gap: 0.5rem;
+}
+:root.history .history-diff h4 {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 0.5rem;
+  font-size: 0.9375rem;
+  font-weight: 600;
+  overflow-wrap: anywhere;
+}
+:root.history .history-diff h4 code {
+  font-family: var(--pw-font-mono), ui-monospace, Menlo, monospace;
+}
+:root.history .history-diff .role {
+  padding: 0 0.5rem;
+  border-radius: 999px;
+  background: var(--secondary);
+  font-size: 0.75rem;
+  font-weight: 500;
+}
+:root.history .history-diff button {
+  justify-self: start;
+}
+:root.history .diff {
+  border: 1px solid var(--border);
+  border-radius: var(--radius-md);
+  background: var(--card);
+  overflow-x: auto;
+  padding: 0.25rem 0;
+  font-family: var(--pw-font-mono), ui-monospace, Menlo, monospace;
+  font-size: 0.8125rem;
+  line-height: 1.55;
+}
+:root.history .diff > span {
+  display: block;
+  /* A wrapped line hangs under its text, not under the + or -. */
+  padding: 0 0.75rem 0 calc(0.75rem + 2ch);
+  text-indent: -2ch;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+:root.history .diff .gap {
+  padding-left: 0.75rem;
+  text-indent: 0;
+  color: var(--muted-foreground);
+}
+:root.history .diff .added {
+  background: color-mix(in oklch, var(--added) 45%, transparent);
+}
+:root.history .diff .removed {
+  background: color-mix(in oklch, var(--removed) 45%, transparent);
+}
+:root.history .diff ins {
+  background: var(--added);
+}
+:root.history .diff del {
+  background: var(--removed);
+}

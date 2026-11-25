@@ -65,13 +65,13 @@ jobs:
     # three, the one build worker's queue made a test wait too long for a build. building.spec.ts
     # alone is about 7 minutes, so it bounds what more workers or shards could save. The files are
     # split by file, not by test, so one shard can end up with more of the long ones.
-    # First run with two shards: shard 1 took about 18 minutes and shard 2 about 4.7 (sandbox was
-    # about 12 and check about 3), because shard 1 got building.spec.ts and most of the other
-    # long files. Three shards spread them out.
+    # mail-down.spec.ts pauses the mail container, so its project depends on the e2e project and
+    # runs after it. Sharding with that dependency kept the whole chain in one group: shard 1 ran
+    # all 265 tests and the others ran none (it took about 18 minutes either way). So each shard
+    # runs its share of the e2e project, and the last one then runs mail-down alone (--no-deps),
+    # after its own share and against its own mail container. Split this way the shards hold
+    # 100, 81 and 82 tests.
     # Each shard needs the TeX image too, so it pays for the image (3.4) and compose (0.5) again.
-    # mail-down.spec.ts depends on the other tests having run (it pauses the mail container).
-    # Playwright runs a shard's share of that dependency first, and the file is in one shard
-    # only, so it still runs alone at the end of that shard against that shard's own mail container.
     # 45 leaves room for a slow runner.
     timeout-minutes: 45
     steps:
@@ -85,9 +85,11 @@ jobs:
       - run: docker build -t paperweave-tex infra/tex
       - run: docker compose -f infra/compose.yaml up -d --wait || (docker compose -f infra/compose.yaml logs --tail 60; exit 1)
       - run: pnpm exec playwright install --with-deps chromium
-      - run: pnpm e2e --shard=${{ matrix.shard }}/3
+      - run: pnpm e2e --project=e2e --shard=${{ matrix.shard }}/3
         env:
           E2E_WORKERS: 2
+      - if: matrix.shard == 3
+        run: pnpm e2e --project=mail-down --no-deps
       # What each failed browser test's page looked like, kept for a week. The log alone says
       # which line failed, not what was on the screen.
       - if: failure()
