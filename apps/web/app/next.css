@@ -36,10 +36,11 @@
 @custom-variant dark (&:where([data-theme='dark'], [data-theme='dark'] *));
 
 @theme inline {
-  --font-sans: 'Atkinson Hyperlegible Next', system-ui, sans-serif;
-  --font-heading: 'Literata', 'Iowan Old Style', Georgia, serif;
-  --font-serif: 'Literata', 'Iowan Old Style', Georgia, serif;
-  --font-mono: 'Atkinson Hyperlegible Mono', ui-monospace, Menlo, monospace;
+  /* The families are self-hosted by next/font (app/fonts); layout.tsx declares --pw-font-* on <html>. */
+  --font-sans: var(--pw-font-sans), system-ui, sans-serif;
+  --font-heading: var(--pw-font-serif), 'Iowan Old Style', Georgia, serif;
+  --font-serif: var(--pw-font-serif), 'Iowan Old Style', Georgia, serif;
+  --font-mono: var(--pw-font-mono), ui-monospace, Menlo, monospace;
   --color-sidebar-ring: var(--sidebar-ring);
   --color-sidebar-border: var(--sidebar-border);
   --color-sidebar-accent-foreground: var(--sidebar-accent-foreground);
