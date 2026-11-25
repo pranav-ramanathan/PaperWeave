@@ -54,6 +54,26 @@ test('typing becomes the smallest splice', () => {
   expect(typed('one\ntwo\n', 4, ' ')).toBe('one \ntwo\n');
 });
 
+test('a formula too long to draw is still one atom with its whole source', () => {
+  const inline = `$${'a'.repeat(1_000_000)}$`;
+  const display = `\\begin{align}\n${'a &= b \\\\\n'.repeat(2000)}c\n\\end{align}`;
+  for (const [src, type] of [
+    [inline, 'math_inline'],
+    [display, 'math_block'],
+  ] as const) {
+    const text = `Before.\n\n${type === 'math_inline' ? `See ${src} here.` : src}\n\nAfter.\n`;
+    const r = replica(text);
+    const found: { type: string; src: unknown }[] = [];
+    r.state.doc.descendants((node) => {
+      if (node.type.name === type) found.push({ type: node.type.name, src: node.attrs.src });
+    });
+    expect(found.length, type).toBe(1);
+    expect(found[0].src === src, type).toBe(true);
+    expect(r.src === text, type).toBe(true);
+    r.check();
+  }
+});
+
 /** Type `text` at display offset `off` of text block `k` (deleting `del`); returns the source. */
 function typedIn(src: string, k: number, off: number, text: string, del = 0) {
   const r = replica(src);

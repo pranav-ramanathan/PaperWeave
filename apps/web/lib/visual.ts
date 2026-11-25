@@ -40,6 +40,7 @@ import { commentText } from './comment';
 import { footnoteText } from './footnote';
 import { pageNonce } from './nonce';
 import { labelKey, markerOf } from './marker';
+import { mathPlan, TOO_LONG_TITLE, tooLongText, TooLong } from './mathlimit';
 import { numbers, onNumbers } from './numbers';
 
 const CAPTION_PROBLEM =
@@ -84,18 +85,23 @@ export const isDisplay = (src: string) => /^(\\begin\{|\\\[|\$\$)/.test(src.trim
 
 /**
  * Draw a formula into an element. `macros` are the paper's own; `numberOf` gives the number a
- * label has in the PDF. Throws what the renderer throws if the source cannot be drawn.
+ * label has in the PDF. Throws what the renderer throws if the source cannot be drawn, and
+ * `TooLong` (without calling the renderer) if it is too long to try.
  */
 export function renderMath(
   dom: HTMLElement,
   src: string,
   opts: { macros?: Record<string, string>; numberOf?: (key: string) => string | undefined } = {},
 ) {
-  katex.render(tex(src.trim(), opts.numberOf), dom, {
+  const source = tex(src.trim(), opts.numberOf);
+  const plan = mathPlan(source, opts.macros);
+  if (!plan) throw new TooLong();
+  katex.render(source, dom, {
     displayMode: isDisplay(src),
     throwOnError: true,
     // A copy: the renderer writes into what it is given.
     macros: { ...opts.macros },
+    ...plan,
   });
 }
 
@@ -368,19 +374,28 @@ export function createVisual(opts: {
           numberOf: numbered ? (key) => n.labels[key]?.number : undefined,
         });
       dom.classList.remove('pw-raw');
+      let long = false;
       try {
         // With the numbers from the PDF if there are any; without, if that does not render.
         try {
           attempt(labelled && n.known);
-        } catch {
+        } catch (err) {
+          // Too long to try is too long either way: no second attempt.
+          if (err instanceof TooLong) throw err;
           attempt(false);
         }
-      } catch {
-        // Something the in-browser renderer does not know: show the source as it is.
-        dom.textContent = src;
+      } catch (err) {
+        if (err instanceof TooLong) {
+          long = true;
+          dom.textContent = tooLongText(src);
+        } else {
+          // Something the in-browser renderer does not know: show the source as it is.
+          dom.textContent = src;
+        }
         dom.classList.add('pw-raw');
       }
-      if (labelled) age(dom, src);
+      if (long) dom.title = TOO_LONG_TITLE;
+      else if (labelled) age(dom, src);
       else dom.title = src;
     };
     draw();
