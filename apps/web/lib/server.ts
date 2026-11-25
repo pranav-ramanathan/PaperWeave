@@ -20,6 +20,7 @@ import { cookies, headers } from 'next/headers';
 import { createHash } from 'node:crypto';
 import { notFound, redirect } from 'next/navigation';
 import nodemailer from 'nodemailer';
+import { uiDefault } from './ui';
 
 // Kept on globalThis so a dev-server reload does not open a second pool.
 const g = globalThis as { __paperweave?: { pool: ReturnType<typeof connect>; auth: Auth } };
@@ -45,6 +46,8 @@ export async function sendEmail(to: string, subject: string, text: string) {
 
 function services() {
   if (g.__paperweave) return g.__paperweave;
+  // A wrong look setting stops the service here, like a wrong pool size does in `connect`.
+  uiDefault();
   need('BETTER_AUTH_SECRET');
   need('BETTER_AUTH_URL');
   const pool = connect();

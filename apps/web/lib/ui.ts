@@ -1,0 +1,54 @@
+// Which look a page is drawn in: the one the app has had ("classic") or the new one ("next").
+// A page is "next" only when the person has chosen it AND the page has been moved to it. So this
+// can be switched on for everyone while pages are moved one at a time, and a page not yet moved
+// is the same for a person who has chosen the new look as for one who has not.
+//
+// The choice is the person's cookie `pw_ui` ("next" or "classic"). With no cookie, the setting
+// UI_DEFAULT is the answer (docs/settings.md); with neither, "classic". A page puts the answer on
+// its own <main data-ui="...">, not on <html>: the layout is not drawn again when a person moves
+// from page to page, and an attribute there would be wrong after the first move.
+import { cookies } from 'next/headers';
+
+export type Look = 'classic' | 'next';
+
+/** The cookie that holds a person's choice. */
+export const UI_COOKIE = 'pw_ui';
+
+/**
+ * The pages that have been moved to the new look, by the name each gives `ui()`. None yet: every
+ * page is "classic" whatever has been chosen. A page is added here in the change that moves it.
+ */
+export const MIGRATED: readonly string[] = [];
+
+/**
+ * What UI_DEFAULT says: "classic" or "next", and "classic" when it is not set. Anything else
+ * stops whoever asks (the service's first request, and so every one after it) with a message that
+ * says what to set it to, rather than quietly showing the old look to everyone.
+ */
+export function uiDefault(value: string | undefined = process.env.UI_DEFAULT): Look {
+  if (value === undefined || value === '') return 'classic';
+  if (value === 'classic' || value === 'next') return value;
+  throw new Error(`UI_DEFAULT is "${value}": it must be "classic" or "next" (or not set)`);
+}
+
+/**
+ * The look of a page, given what is known: the cookie's value, the setting's, and the pages that
+ * have been moved. Separate from `ui` so that it can be tested without a request.
+ */
+export function look(
+  page: string,
+  cookie: string | undefined,
+  fallback: Look,
+  migrated: readonly string[] = MIGRATED,
+): Look {
+  if (!migrated.includes(page)) return 'classic';
+  // A cookie that is neither is not a choice: it is as if there were none.
+  return cookie === 'next' || cookie === 'classic' ? cookie : fallback;
+}
+
+/** The look of a page for the person asking. `page` is the name the page is listed under. */
+export async function ui(page: string): Promise<Look> {
+  // The setting is read even for a page that is not moved, so that a wrong one is found at once.
+  const fallback = uiDefault();
+  return look(page, (await cookies()).get(UI_COOKIE)?.value, fallback);
+}
