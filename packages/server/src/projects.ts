@@ -103,12 +103,28 @@ export const openProposalsSql = (paper: string) =>
   `(select count(*)::int from proposals rp join files rf on rf.id = rp.file_id
      where rp.project_id = ${paper} and rp.status = 'open')`;
 
+/**
+ * A paper and its versions, as SQL for their ids: the paper `paper` (SQL for an id, a parameter
+ * or a column) is, or is a version of. The people of a version are the people of its paper, so
+ * a change of members is made to every paper of the family. A paper with no versions is a
+ * family of one. Never anything a person typed.
+ */
+export const familySql = (paper: string) =>
+  `(select f.id from projects me
+    join projects f on f.id = coalesce(me.parent_id, me.id) or f.parent_id = coalesce(me.parent_id, me.id)
+    where me.id = ${paper})`;
+
+/** Tell the open editors of every paper of the family that who is on it changed. */
+const aclFamily = (db: Db, projectId: string) =>
+  db.query(`select pg_notify('acl', f.id::text) from ${familySql('$1')} as f(id)`, [projectId]);
+
 export async function listProjects(db: Db, userId: string): Promise<ListedProject[]> {
+  // Versions are listed with their paper (`listVersions`), not as papers.
   const { rows } = await db.query(
     `select p.id, p.name, m.role, ${openThreadsSql('p.id')} as threads,
             ${openProposalsSql('p.id')} as proposals
      from projects p join project_members m on m.project_id = p.id
-     where m.user_id = $1 order by p.created_at desc`,
+     where m.user_id = $1 and p.parent_id is null order by p.created_at desc`,
     [userId],
   );
   return rows;
@@ -217,24 +233,35 @@ export async function deleteProject(
   try {
     return await transaction(pool, async (db) => {
       await db.query(`set local lock_timeout = ${Math.floor(waitsMs)}`);
+      // The paper's versions go with it, through the foreign key; their editors are told too.
+      const family = (
+        await db.query('select id from projects where id = $1 or parent_id = $1', [projectId])
+      ).rows.map((r) => r.id as string);
       // Whether the person is the owner is asked again by the statement that deletes.
       const { rows } = await db.query(
         `delete from projects p using project_members m
          where p.id = $1 and m.project_id = p.id and m.user_id = $2 and m.role = 'owner'
-           and p.name = $3
+           and p.name = $3 and p.parent_id is null
          returning p.name`,
         [projectId, userId, typedName],
       );
       if (!rows[0]) {
-        const there = await db.query('select 1 from projects where id = $1', [projectId]);
+        const there = await db.query('select parent_id from projects where id = $1', [projectId]);
         if (!there.rows[0]) throw new AppError('not_found', 'No such project.');
+        // A version is deleted as a version (`deleteVersion`), never as a paper.
+        if (there.rows[0].parent_id)
+          throw new AppError(
+            'invalid_input',
+            'This is a version of a paper, not a paper. Delete it from the paper’s versions.',
+          );
         throw new AppError(
           'invalid_input',
           'The name typed is not the name of this paper. Nothing was deleted.',
         );
       }
       // Heard when this commits: open editors are looked at again, and closed.
-      await db.query("select pg_notify('acl', $1)", [projectId]);
+      for (const gone of family.length ? family : [projectId])
+        await db.query("select pg_notify('acl', $1)", [gone]);
       return { name: rows[0].name as string };
     });
   } catch (err) {
@@ -478,8 +505,10 @@ export async function acceptInvitation(
         'This invitation was sent to a different email address.',
       );
     // Someone already in the project keeps their role: a link made before they joined never raises, lowers or replaces it.
+    // On every version of it too: the people of a version are the people of its paper.
     await db.query(
-      'insert into project_members (project_id, user_id, role) values ($1, $2, $3) on conflict do nothing',
+      `insert into project_members (project_id, user_id, role)
+       select f.id, $2::uuid, $3::text from ${familySql('$1')} as f(id) on conflict do nothing`,
       [inv.project_id, userId, inv.role],
     );
     await db.query('update invitations set accepted_at = now() where id = $1', [inv.id]);
@@ -504,13 +533,14 @@ export async function setRole(
   if (role === 'owner' || !ROLES.includes(role as Role))
     throw new AppError('invalid_input', 'Choose editor, reviewer or viewer.');
   const { rowCount } = await db.query(
-    "update project_members set role = $3 where project_id = $1 and user_id = $2 and role <> 'owner'",
+    `update project_members set role = $3
+     where project_id in ${familySql('$1')} and user_id = $2 and role <> 'owner'`,
     [projectId, id(memberId), role],
   );
   if (!rowCount)
     throw new AppError('invalid_input', 'That person is the owner or is not in the project.');
   // Live connections are re-checked at once rather than at their next edit.
-  await db.query("select pg_notify('acl', $1)", [projectId]);
+  await aclFamily(db, projectId);
 }
 
 /**
@@ -535,20 +565,24 @@ export async function transferOwnership(
   if (memberId === userId)
     throw new AppError('invalid_input', 'You are the owner already. Choose someone else.');
   const email = await transaction(pool, async (db) => {
+    // The paper and every version of it change hands together.
     const lowered = await db.query(
-      "update project_members set role = 'editor' where project_id = $1 and user_id = $2 and role = 'owner'",
+      `update project_members set role = 'editor'
+       where project_id in ${familySql('$1')} and user_id = $2 and role = 'owner'`,
       [projectId, userId],
     );
     if (!lowered.rowCount)
       throw new AppError('permission_denied', 'Only the owner can hand the paper to someone.');
     const raised = await db.query(
-      "update project_members set role = 'owner' where project_id = $1 and user_id = $2 and role <> 'owner'",
+      `update project_members set role = 'owner'
+       where project_id in ${familySql('$1')} and user_id = $2 and role <> 'owner'`,
       [projectId, memberId],
     );
-    if (!raised.rowCount)
+    // Someone missing from a version would leave it without an owner: nothing is changed.
+    if (!raised.rowCount || raised.rowCount !== lowered.rowCount)
       throw new AppError('invalid_input', 'That person is not on this paper. Nothing was changed.');
     // Open editors are looked at again when this commits.
-    await db.query("select pg_notify('acl', $1)", [projectId]);
+    await aclFamily(db, projectId);
     const { rows } = await db.query('select email from "user" where id = $1', [memberId]);
     return rows[0].email as string;
   });
@@ -564,22 +598,24 @@ export async function removeMember(db: Db, userId: string, projectId: string, me
   // Otherwise a spare link they still hold would let them back in with nobody's say-so.
   const { rows } = await db.query(
     `with gone as (
-       delete from project_members where project_id = $1 and user_id = $2 and role <> 'owner'
+       delete from project_members
+       where project_id in ${familySql('$1')} and user_id = $2 and role <> 'owner'
        returning user_id
      ), ended as (
        update invitations i set expires_at = now()
        from "user" u, gone
-       where u.id = gone.user_id and i.project_id = $1 and lower(i.email) = lower(u.email)
+       where u.id = gone.user_id and i.project_id in ${familySql('$1')}
+         and lower(i.email) = lower(u.email)
          and i.accepted_at is null and i.expires_at > now()
      )
-     select u.email, (select name from projects where id = $1) as name
+     select distinct u.email, (select name from projects where id = $1) as name
      from gone join "user" u on u.id = gone.user_id`,
     [projectId, id(memberId)],
   );
   if (!rows[0])
     throw new AppError('invalid_input', 'That person is the owner or is not in the project.');
   // Live connections are re-checked at once rather than at their next edit.
-  await db.query("select pg_notify('acl', $1)", [projectId]);
+  await aclFamily(db, projectId);
   // Said back so a page can name who was removed, and from what paper, not whoever a form claimed.
   return { email: rows[0].email as string, name: rows[0].name as string };
 }

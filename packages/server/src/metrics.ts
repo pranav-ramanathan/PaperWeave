@@ -64,6 +64,7 @@ export async function productMetrics(db: Db): Promise<ProductMetrics> {
                 select 1 from downloads d where d.project_id = p.id and d.kind = 'pdf'))::int
                 as "downloadedPdf"
        from projects p left join import_reports r on r.project_id = p.id
+       where p.parent_id is null
        group by 1 order by 1`,
     )
   ).rows;
@@ -74,7 +75,11 @@ export async function productMetrics(db: Db): Promise<ProductMetrics> {
          select f.project_id, u.user_id from file_updates u join all_files f on f.id = u.file_id
          where u.user_id is not null
          union select project_id, user_id from project_authors
-       ), per as (select project_id, count(distinct user_id) as n from wrote group by 1)
+       ), per as (
+         -- Papers, not their versions.
+         select w.project_id, count(distinct w.user_id) as n
+         from wrote w join projects p on p.id = w.project_id and p.parent_id is null group by 1
+       )
        select count(*)::int as edited, count(*) filter (where n >= 2)::int as "twoAuthors" from per`,
     )
   ).rows[0];
