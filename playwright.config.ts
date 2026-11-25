@@ -24,10 +24,17 @@ export default defineConfig({
   testDir: 'tests/e2e',
   globalSetup: './tests/e2e-global-setup.ts',
   timeout: 90_000,
-  // One at a time so the timing test is not competing with the others for the CPU.
-  workers: 1,
+  // One at a time unless E2E_WORKERS says otherwise, so that the timing tests are not competing
+  // with the others for the CPU. CI sets 2: measured on one machine, 3 let the single build
+  // worker's queue make a test wait longer than its five seconds for a build.
+  workers: Number(process.env.E2E_WORKERS) || 1,
   reporter: 'list',
   use: { baseURL: 'http://localhost:3100', trace: 'off' },
+  projects: [
+    { name: 'e2e', testIgnore: /mail-down\.spec\.ts/ },
+    // Pauses the one mail container for everyone, so it runs when nothing else is running.
+    { name: 'mail-down', testMatch: /mail-down\.spec\.ts/, dependencies: ['e2e'] },
+  ],
   webServer: [
     {
       // A production build: the dev server reloads the page whenever a file in the repo
