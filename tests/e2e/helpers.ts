@@ -247,7 +247,34 @@ export async function selectWord(page: Page, within: string, word: string) {
 /** Put the caret just after a word in an editor, with one click at the word's end. */
 export async function clickAfter(page: Page, within: string, word: string) {
   await expect(page.locator(within)).toContainText(word);
-  const at = await page.evaluate(
+  // Measured, then pressed, and what is under the point is looked at between the two. In the
+  // visual view the lines around a short paragraph are buttons ("Edit in source" on the preamble
+  // above, on the end of the document below), a few lines away. Text moved by something drawn
+  // above it a moment later put the press on one of them: the editor switched to the source view
+  // and the visual view's tools were gone (a chart test waited for "Figure" there until its
+  // timeout). So the press is made only where the word's own line still is, else measured again.
+  for (let attempt = 1; ; attempt++) {
+    const at = await measureAfter(page, within, word);
+    if (!at) throw new Error(`"${word}" is not shown in ${within}`);
+    await page.mouse.move(at.x, at.y);
+    const there = await page.evaluate(
+      ([sel, x, y]) => {
+        const el = document.elementFromPoint(x as number, y as number);
+        return !!el && !!el.closest(sel as string) && !el.closest('button');
+      },
+      [within, at.x, at.y] as const,
+    );
+    if (there) {
+      await page.mouse.click(at.x, at.y);
+      return;
+    }
+    if (attempt === 5) throw new Error(`"${word}" in ${within} kept moving from under the pointer`);
+    await page.waitForTimeout(200);
+  }
+}
+
+async function measureAfter(page: Page, within: string, word: string) {
+  return page.evaluate(
     ([sel, w]) => {
       const walker = document.createTreeWalker(document.querySelector(sel)!, NodeFilter.SHOW_TEXT);
       for (let n = walker.nextNode(); n; n = walker.nextNode()) {
@@ -293,8 +320,6 @@ export async function clickAfter(page: Page, within: string, word: string) {
     },
     [within, word] as const,
   );
-  if (!at) throw new Error(`"${word}" is not shown in ${within}`);
-  await page.mouse.click(at.x, at.y);
 }
 
 /** Everything axe can check against WCAG 2.1 A and AA on the page as it stands. */
