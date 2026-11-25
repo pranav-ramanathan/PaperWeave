@@ -32,8 +32,23 @@
 @import './next/versions.css';
 @import './next/motion.css';
 
-/* Dark is on the scope element or on any element above it (<html data-theme='dark'>). */
-@custom-variant dark (&:where([data-theme='dark'], [data-theme='dark'] *));
+/*
+ * Dark is on the scope element or on any element above it (<html data-theme='dark'>, which the
+ * layout sets from the cookie pw_theme: lib/theme.ts), or, where nothing is chosen, when the device
+ * asks for it. A chosen "light" is never dark.
+ */
+@custom-variant dark {
+  &:where([data-theme='dark'], [data-theme='dark'] *) {
+    @slot;
+  }
+  @media (prefers-color-scheme: dark) {
+    &:where(
+      :not([data-theme='light'], [data-theme='light'] *, [data-theme='dark'], [data-theme='dark'] *)
+    ) {
+      @slot;
+    }
+  }
+}
 
 @theme inline {
   /* The families are self-hosted by next/font (app/fonts); layout.tsx declares --pw-font-* on <html>. */
@@ -153,10 +168,16 @@
 }
 
 /*
- * Dark: prepared here, switched on by T46 (a data-theme='dark' on the scope element or above it).
- * `:root:is(...)` comes out as :where([data-ui='next']):is(...), which beats the light block above.
+ * Dark. The tokens of PLAN.md section 3, on the scope element when it is, or is under, an element
+ * with data-theme='dark' (the layout puts the person's choice on <html>). `:root:is(...)` comes out
+ * as :where([data-ui='next']):is(...), which beats the light block above.
+ *
+ * Where the person has chosen nothing (no data-theme at all), the same tokens apply when the
+ * device is dark. The two lists below are one list written twice, because a media condition cannot
+ * share a rule with a selector; lib/theme.test.ts fails if they differ.
  */
 :root:is([data-theme='dark'], [data-theme='dark'] *) {
+  color-scheme: dark;
   --background: #121614;
   --foreground: #e8ece9;
   --card: #1a1f1c;
@@ -202,6 +223,59 @@
   --added: #1d4a2e;
   --removed: #5a2520;
   --desk: #0c0f0d;
+}
+
+@media (prefers-color-scheme: dark) {
+  :root:not(
+    :is([data-theme='light'], [data-theme='light'] *, [data-theme='dark'], [data-theme='dark'] *)
+  ) {
+    color-scheme: dark;
+    --background: #121614;
+    --foreground: #e8ece9;
+    --card: #1a1f1c;
+    --card-foreground: #e8ece9;
+    --popover: #202622;
+    --popover-foreground: #e8ece9;
+    --primary: #9aa2f5;
+    --primary-foreground: #12142e;
+    --secondary: #252c28;
+    --secondary-foreground: #e8ece9;
+    --muted: #252c28;
+    --muted-foreground: #a3ada7;
+    --accent: #25284d;
+    --accent-foreground: #c9cefb;
+    --destructive: #f28b82;
+    --border: #333b36;
+    --line-strong: #77837c;
+    --input: #77837c;
+    --ring: #9aa2f5;
+    --sidebar: #121614;
+    --sidebar-foreground: #e8ece9;
+    --sidebar-primary: #9aa2f5;
+    --sidebar-primary-foreground: #12142e;
+    --sidebar-accent: #25284d;
+    --sidebar-accent-foreground: #c9cefb;
+    --sidebar-border: #333b36;
+    --sidebar-ring: #9aa2f5;
+    --comment: #f0b95b;
+    --comment-line: #c98f2c;
+    --comment-wash: #33270f;
+    --proposal: #aab1f7;
+    --proposal-line: #7f88e6;
+    --proposal-wash: #25284d;
+    --finding: #f49a85;
+    --finding-line: #d9705a;
+    --finding-wash: #3a1f1a;
+    --model: #c9a6f2;
+    --model-line: #a47fd6;
+    --model-wash: #2c2140;
+    --ok: #7bd3a3;
+    --ok-line: #4fae7c;
+    --ok-wash: #173024;
+    --added: #1d4a2e;
+    --removed: #5a2520;
+    --desk: #0c0f0d;
+  }
 }
 
 /* Under prefers-reduced-motion every duration is nothing. */
