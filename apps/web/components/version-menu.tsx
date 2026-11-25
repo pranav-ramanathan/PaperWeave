@@ -12,7 +12,13 @@ import {
 import { Check, ChevronDown, GitBranch } from './icon';
 
 /** One place to switch to: "main" (the paper itself) or one of its versions. */
-export type VersionChoice = { id: string; label: string; current: boolean };
+export type VersionChoice = {
+  id: string;
+  label: string;
+  current: boolean;
+  /** Where the entry leads, when it is not the same kind of page of that version (the editor). */
+  href?: string;
+};
 
 /**
  * Which version of the paper this page is about, and the way to another: "main" first, then the
@@ -52,7 +58,7 @@ export function VersionMenu({
         {choices.map((c) => (
           <DropdownMenuItem key={c.id} asChild>
             <a
-              href={`/projects/${c.id}${page}`}
+              href={c.href ?? `/projects/${c.id}${page}`}
               aria-current={c.current ? 'true' : undefined}
               className="flex w-full items-center gap-2"
             >

@@ -267,6 +267,31 @@ export async function listVersions(db: Db, userId: string, projectId: string): P
   }));
 }
 
+/**
+ * Where a file of a paper is in the paper's other versions (and in main): the same file, as the
+ * merge pairs them, when `coalesce(origin_id, id)` agrees. The answer maps a paper of the family
+ * to the file's id there; a paper that does not have the file (or has deleted it) is left out.
+ * Asked with a paper's id and one of its files, for anyone who may see the paper.
+ */
+export async function sameFileIn(
+  db: Db,
+  userId: string,
+  projectId: string,
+  fileId: string,
+): Promise<Map<string, string>> {
+  await authorize(db, userId, id(projectId), 'project.read');
+  const { rows } = await db.query(
+    `select o.project_id as paper, o.id as file
+     from files me
+     join projects p on p.id = me.project_id
+     join projects fam on coalesce(fam.parent_id, fam.id) = coalesce(p.parent_id, p.id)
+     join files o on o.project_id = fam.id and coalesce(o.origin_id, o.id) = coalesce(me.origin_id, me.id)
+     where me.id = $1 and me.project_id = $2`,
+    [fileId, projectId],
+  );
+  return new Map(rows.map((r) => [r.paper as string, r.file as string]));
+}
+
 /** Give a version another name. Owner and editors, as starting one. */
 export async function renameVersion(
   db: Db,

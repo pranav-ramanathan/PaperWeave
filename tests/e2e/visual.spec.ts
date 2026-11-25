@@ -387,24 +387,24 @@ test('something dropped on the visual view goes in as its words, and the source 
 
   // A picture is not opened in the tab, and cannot go into the text: that is said.
   const before = await source();
-  const dropped = await dropOn(paragraph, { file: png });
+  const dropped = await dropOn(paragraph, { file: png, at: 'end' });
   expect(dropped.over, 'the dragover of a picture was cancelled').toBe(true);
   expect(dropped.drop, 'the drop of a picture was cancelled').toBe(true);
   await expect(note).toContainText('A picture or file cannot be dropped into the text.');
   expect(await source()).toBe(before);
 
   // Several paragraphs go in as paragraphs, where they were dropped.
-  await dropOn(paragraph, { text: 'First para.\n\nSecond para.' });
+  await dropOn(paragraph, { text: 'First para.\n\nSecond para.', at: 'end' });
   await expect(page.locator(VISUAL)).toContainText('Second para.');
   await expect(status(page)).toHaveText('All edits saved.');
   await expect.poll(source).toContain('First para.\n\nSecond para.');
 
   // What is dragged along with a list is only its words.
-  await dropOn(paragraph, { html: '<ul><li>a</li><li>b</li></ul>', text: 'a\nb' });
+  await dropOn(paragraph, { html: '<ul><li>a</li><li>b</li></ul>', text: 'a\nb', at: 'end' });
   await expect.poll(source).toContain('a b');
 
   // Characters LaTeX reads are escaped, as when typing.
-  await dropOn(paragraph, { text: '50% of R&D' });
+  await dropOn(paragraph, { text: '50% of R&D', at: 'end' });
   await expect.poll(source).toContain('50\\% of R\\&D');
 
   // The source view takes no file either: it is not opened in the tab, and nothing goes in.

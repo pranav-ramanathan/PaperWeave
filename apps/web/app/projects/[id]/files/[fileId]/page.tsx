@@ -4,11 +4,13 @@ import {
   can,
   importReport,
   listMembers,
+  listVersions,
   modelProcessing,
   openFile,
   paperMacros,
   paperProse,
   paperTextMacros,
+  sameFileIn,
 } from '@paperweave/server';
 import Link from '../../../../Go';
 import { notFound } from 'next/navigation';
@@ -20,7 +22,9 @@ import Files, { FileName } from './Files';
 import { AppBar } from '../../../../../components/app-bar';
 import { LookProvider } from '../../../../../components/look';
 import { buttonVariants } from '../../../../../components/ui/button';
+import { VersionMenu } from '../../../../../components/version-menu';
 import { ui } from '../../../../../lib/ui';
+import { switcherOf, versionsOn } from '../../../../../lib/versions';
 
 export const dynamic = 'force-dynamic';
 
@@ -56,6 +60,23 @@ async function FilePage({
   // A file ID from another paper must not open under this paper's address.
   if (file.projectId !== project.id) notFound();
   const look = await ui('file');
+  // The version switcher, in the new look and only with versions on: each entry leads to this file
+  // in that version when it has it (the same file by origin), else to that version's paper page.
+  let switcher: { choices: ReturnType<typeof switcherOf>; paper: string } | null = null;
+  if (look === 'next' && versionsOn()) {
+    const [family, there] = await Promise.all([
+      listVersions(db(), user.id, id),
+      sameFileIn(db(), user.id, id, fileId),
+    ]);
+    const mainId = family[0]?.paper ?? id;
+    switcher = {
+      choices: switcherOf(mainId, family, id).map((c) => {
+        const file = there.get(c.id);
+        return { ...c, href: file ? `/projects/${c.id}/files/${file}` : `/projects/${c.id}` };
+      }),
+      paper: mainId,
+    };
+  }
   const tree = files.map((f) => ({ id: f.id, path: f.path, readonly: f.readonly }));
   return (
     <main className="editor" data-ui={look}>
@@ -64,8 +85,8 @@ async function FilePage({
           Skip to the text
         </a>
         {look === 'next' ? (
-          // The new look: the app bar holds the same two things, the paper's name (the h1) and the
-          // link to its page, after the mark, the paper and the file being the way there.
+          // The new look: the app bar holds the paper's name (the h1), the link to its page and
+          // the link to its history, after the mark, the paper and the file being the way there.
           <AppBar
             home="/projects"
             crumbs={[
@@ -83,6 +104,14 @@ async function FilePage({
             >
               Paper overview
             </Link>
+            <Link
+              prefetch={false}
+              href={`/projects/${id}/history`}
+              className={buttonVariants({ variant: 'outline', size: 'sm' })}
+            >
+              History
+            </Link>
+            {switcher && <VersionMenu choices={switcher.choices} page="" paper={switcher.paper} />}
           </AppBar>
         ) : (
           <header className="bar">

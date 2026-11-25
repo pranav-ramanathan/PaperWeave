@@ -22,6 +22,7 @@ import { AppBar } from '../../../../components/app-bar';
 import { FileDiffs } from '../../../../components/file-diffs';
 import { Flag, GitBranch, GitMerge, Icon, Pencil, RotateCcw } from '../../../../components/icon';
 import { LookProvider } from '../../../../components/look';
+import { ThemeSwitch } from '../../../../components/theme-switch';
 import { VersionMenu } from '../../../../components/version-menu';
 import { buttonVariants } from '../../../../components/ui/button';
 import { Input } from '../../../../components/ui/input';
@@ -354,6 +355,7 @@ async function History({
             >
               Paper overview
             </Link>
+            <ThemeSwitch />
           </AppBar>
           <CompareProvider>
             <div className="history-grid">
