@@ -39,7 +39,17 @@ export async function mergeAction(main: string, version: string, up: boolean, fo
     if (![ref.target, ref.source, ref.base].every((r) => UUID.test(r)))
       throw new AppError('invalid_input', 'Look at the merge again before you apply it.');
     const [target, source] = up ? [version, main] : [main, version];
-    const made = await applyMerge(db(), blobs(), user.id, target, source, ref, choices);
+    const made = await applyMerge(
+      db(),
+      blobs(),
+      user.id,
+      target,
+      source,
+      ref,
+      choices,
+      {},
+      form.get('carry') === 'on',
+    );
     const said = [
       ...(up ? ['direction=up'] : []),
       `merged=${made.number}`,
@@ -47,6 +57,10 @@ export async function mergeAction(main: string, version: string, up: boolean, fo
       `files=${made.files}`,
       `decided=${made.conflicts}`,
     ];
+    if (made.carried)
+      said.push(
+        `carried=${made.carried.threads}.${made.carried.proposals}.${made.carried.notCarried}`,
+      );
     return `${page}?${said.join('&')}`;
   });
 }

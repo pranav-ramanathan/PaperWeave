@@ -38,7 +38,7 @@ export function SmallPage({
     // The utilities need an element inside the scope element: they do not match the <main> itself.
     <main data-ui="next" className="page">
       <LookProvider look="next">
-        <div className="flex min-h-dvh flex-col items-center gap-6 px-4 py-10 sm:justify-center">
+        <div className="flex min-h-dvh flex-col items-center gap-6 px-4 py-12 sm:justify-center">
           <p
             aria-hidden="true"
             className="flex items-center gap-2 font-heading text-[1.375rem] font-semibold tracking-tight"
@@ -51,7 +51,7 @@ export function SmallPage({
           >
             <CardContent
               className={
-                'grid gap-4 [&_a]:text-primary [&_a]:underline [&_a]:underline-offset-4 [&_a:hover]:no-underline [&_h1]:font-heading [&_h1]:text-[1.75rem] [&_h1]:leading-tight [&_h1]:font-semibold [&_h1]:tracking-tight [&_h1]:text-balance' +
+                'grid gap-4 [&_a]:text-primary [&_a]:underline [&_a]:underline-offset-4 [&_a:hover]:no-underline [&_h1]:font-heading [&_h1]:text-[1.375rem] sm:[&_h1]:text-[1.75rem] [&_h1]:leading-tight [&_h1]:font-semibold [&_h1]:tracking-tight [&_h1]:text-balance' +
                 (className ? ` ${className}` : '')
               }
             >

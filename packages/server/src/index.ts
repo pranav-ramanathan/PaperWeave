@@ -49,6 +49,7 @@ export {
   type PlannedFile,
   type SettingPlan,
 } from './merge.ts';
+export { openReview, type Carried } from './merge-carry.ts';
 export {
   applyMerge,
   SETTING_CHOICES,

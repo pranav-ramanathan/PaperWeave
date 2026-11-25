@@ -13,6 +13,7 @@ import {
   emailedLink,
   person,
   scriptsHeld,
+  selectWord,
   showSource,
   signIn,
   sticksOut,
@@ -239,6 +240,66 @@ if (ON) {
     await expect(merged).toContainText('% main, fourth');
     await expect(merged).toContainText('% version, fourth');
     await expect(merged).toContainText('% typed meanwhile');
+  });
+
+  test('merge: open comments are brought across when asked, once, on the same words', async ({
+    browser,
+  }) => {
+    test.setTimeout(600_000);
+    const owner = await person(browser, 'merge-carry-owner');
+    const { page } = owner;
+    const paper = await newPaper(owner);
+    const version = await startVersion(page, paper);
+    await typeIn(page, version, '% bringable words\n', 'end');
+    // A comment on the version, on words that the merge will bring into main.
+    await page.goto(version);
+    await page.getByRole('link', { name: 'main.tex' }).first().click();
+    await showSource(page);
+    const panel = page.getByRole('region', { name: 'Comments' });
+    await selectWord(page, '.editor .cm-content', 'bringable');
+    await panel.getByRole('button', { name: 'Comment on the selected text' }).click();
+    await panel.getByLabel('Comment', { exact: true }).fill('Are these the right words?');
+    await panel.getByRole('button', { name: 'Start thread' }).click();
+    await expect(page.getByRole('article', { name: 'Thread on “bringable”' })).toBeVisible();
+
+    await page.goto(mergeAt(paper, version));
+    const carry = page.getByRole('checkbox', { name: 'Bring open comments and proposals across' });
+    await expect(carry).not.toBeChecked();
+    await audit(page, 'the merge page with the choice to bring comments across');
+    await carry.check();
+    await into(page).click();
+    await expect(said(page)).toContainText('Merged: main is now revision');
+    await expect(said(page)).toContainText('Brought across: 1 comment thread and 0 proposals.');
+
+    // Main has the comment, on the same words, and the version keeps its own.
+    await page.goto(paper);
+    await page.getByRole('link', { name: 'main.tex' }).first().click();
+    await showSource(page);
+    const main = page.getByRole('region', { name: 'Comments' });
+    const thread = main.getByRole('article', { name: 'Thread on “bringable”' });
+    await expect(thread).toHaveCount(1);
+    await expect(thread).toContainText('Are these the right words?');
+    await expect(thread).toContainText(owner.email);
+    await page.goto(version);
+    await page.getByRole('link', { name: 'main.tex' }).first().click();
+    await expect(page.getByRole('article', { name: 'Thread on “bringable”' })).toHaveCount(1);
+
+    // Another merge does not bring it again: nothing is left to offer.
+    await typeIn(page, version, '% one more note\n', 'end');
+    await page.goto(mergeAt(paper, version));
+    await expect(
+      page.getByRole('checkbox', { name: 'Bring open comments and proposals across' }),
+    ).toHaveCount(0);
+    await into(page).click();
+    await expect(said(page)).toContainText('Merged: main is now revision');
+    await expect(said(page)).not.toContainText('Brought across');
+    await page.goto(paper);
+    await page.getByRole('link', { name: 'main.tex' }).first().click();
+    await expect(
+      page.getByRole('region', { name: 'Comments' }).getByRole('article', {
+        name: 'Thread on “bringable”',
+      }),
+    ).toHaveCount(1);
   });
 
   test('merge: a picture changed on both sides, posted without scripts, and the page at 320 px', async ({

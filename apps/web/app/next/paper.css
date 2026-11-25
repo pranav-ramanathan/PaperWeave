@@ -86,7 +86,7 @@
 :root.paper .paper-grid {
   display: grid;
   grid-template-columns: minmax(0, 1fr);
-  gap: 1.25rem 2.5rem;
+  gap: 1.5rem 2rem;
 }
 :root.paper .paper-flow {
   min-width: 0;
@@ -131,11 +131,11 @@
 
 /* Sections are ruled headings, not cards. */
 :root.paper h2 {
-  margin: 2.5rem 0 0.75rem;
+  margin: 2rem 0 0.75rem;
   padding-bottom: 0.5rem;
   border-bottom: 1px solid color-mix(in srgb, var(--foreground) 80%, transparent);
   font-family: var(--pw-font-serif), 'Iowan Old Style', Georgia, serif;
-  font-size: 1.25rem;
+  font-size: 1.375rem;
   font-weight: 650;
   line-height: 1.3;
   scroll-margin-top: 1.5rem;
@@ -178,6 +178,14 @@
 :root.paper code {
   font-family: var(--pw-font-mono), ui-monospace, Menlo, monospace;
   font-size: 0.8125rem;
+  /* A long file name wraps in a sentence or a notice; in a table the box scrolls instead. */
+  overflow-wrap: anywhere;
+}
+:root.paper table code {
+  overflow-wrap: normal;
+}
+:root.paper td.size {
+  white-space: nowrap;
 }
 :root.paper small,
 :root.paper .role {
@@ -186,7 +194,7 @@
 }
 :root.paper .report {
   margin: 0.5rem 0;
-  padding-left: 1.25rem;
+  padding-left: 1.5rem;
   list-style: disc;
 }
 :root.paper .report li {
@@ -450,7 +458,7 @@
 
 /* First steps: the owner's list, as a row of five marks, green when done. */
 :root.paper section[aria-labelledby='first-steps'] {
-  padding: 1rem 1.25rem;
+  padding: 1rem 1.5rem;
   border-radius: var(--radius-xl);
   background: color-mix(in srgb, var(--accent) 70%, transparent);
 }

@@ -3,6 +3,7 @@ import {
   can,
   diffWords,
   listVersions,
+  openReview,
   planMerge,
   type MergePlan,
   type PlanConflict,
@@ -41,6 +42,8 @@ type Query = {
   kept?: string;
   files?: string;
   decided?: string;
+  carried?: string;
+  left?: string;
 };
 
 export async function generateMetadata({
@@ -169,6 +172,15 @@ async function Merge({
   const merged = Number(query.merged);
   if (Number.isInteger(merged) && merged > 0) {
     const [kept, files, decided] = [query.kept, query.files, query.decided].map(Number);
+    const [ct, cp, left] = (query.carried ?? '').split('.').map(Number);
+    const brought =
+      query.carried !== undefined && [ct, cp].every(Number.isInteger)
+        ? `Brought across: ${plural(ct, 'comment thread')} and ${plural(cp, 'proposal')}.${
+            Number.isInteger(left) && left > 0
+              ? ` ${plural(left, 'item')} could not be placed in the merged text and stayed where ${left === 1 ? 'it was' : 'they were'}.`
+              : ''
+          }`
+        : '';
     said.push(
       <Result key="m">
         Merged: {up ? `the version “${found.name}”` : 'main'} is now revision {merged}
@@ -179,6 +191,7 @@ async function Merge({
         {Number.isInteger(kept) && kept > 0
           ? `The paper as it was is revision ${kept}: restore it on the history page to undo the merge.`
           : ''}{' '}
+        {brought}{' '}
         <Link prefetch={false} href={`/projects/${up ? version : id}/history`}>
           See the history
         </Link>
@@ -186,6 +199,11 @@ async function Merge({
     );
   }
 
+  // What a merge could bring across: the other side's open comments and proposals.
+  const open =
+    plan && writer
+      ? await (up ? openReview(db(), version, id) : openReview(db(), id, version)).catch(() => null)
+      : null;
   const settings = plan
     ? (['root', 'compiler'] as const).map((k) => ({ key: k, ...plan.settings[k] }))
     : [];
@@ -509,6 +527,23 @@ async function Merge({
                       .filter((f) => f.status === 'conflict')
                       .flatMap((f) => f.conflicts.map((c) => card(f, c)))}
                     {settingConflicts.map(settingCard)}
+                  </section>
+                )}
+
+                {!nothing && open && (open.threads > 0 || open.proposals > 0) && (
+                  <section aria-labelledby="merge-review">
+                    <h2 id="merge-review">Comments and proposals</h2>
+                    <p>
+                      {theirsName} has {plural(open.threads, 'open comment thread')} and{' '}
+                      {plural(open.proposals, 'open proposal')} that {oursName} does not. They stay
+                      where they are unless you bring them across. Each is placed on the same words,
+                      with the same author; one whose words are not in the merged text stays behind,
+                      and you are told. Resolved and decided ones are never moved.
+                    </p>
+                    <label className="merge-choice" htmlFor="merge-carry">
+                      <input type="checkbox" id="merge-carry" name="carry" />
+                      <span>Bring open comments and proposals across</span>
+                    </label>
                   </section>
                 )}
 
