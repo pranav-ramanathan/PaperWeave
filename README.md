@@ -80,6 +80,8 @@ at the same time as another run, use another slot: its own ports and its own dat
 | A    | 3100 (default) | 4100 (default)  | `paperweave`   |
 | B    | 3200           | 4200            | `paperweave_b` |
 | C    | 3300           | 4300            | `paperweave_c` |
+| D    | 3400           | 4400            | `paperweave_d` |
+| E    | 3500           | 4500            | `paperweave_e` |
 
 Start a slot with a fresh database (slot B shown), check that its two ports are free (`ss -ltn`),
 and use `--project=e2e` (the `mail-down` project pauses the shared mail container):
