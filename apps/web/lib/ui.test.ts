@@ -114,7 +114,8 @@ test('ui() reads the cookie of the request and the setting', async () => {
   vi.doMock('next/headers', () => ({ cookies: async () => jar }));
   vi.resetModules();
   const fresh = await import('./ui');
-  expect(await fresh.ui('papers')).toBe('classic'); // none moved
+  expect(await fresh.ui('not-yet-moved')).toBe('classic');
+  expect(await fresh.ui('papers')).toBe('next'); // moved, and the cookie says next
   vi.stubEnv('UI_DEFAULT', 'sideways');
   await expect(fresh.ui('papers')).rejects.toThrow('UI_DEFAULT');
   vi.unstubAllEnvs();

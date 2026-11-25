@@ -22,6 +22,7 @@ export const UI_COOKIE = 'pw_ui';
 export const MIGRATED: readonly string[] = [
   'invitation',
   'not-found',
+  'papers',
   'sign-in',
   'sign-in-confirm',
 ];

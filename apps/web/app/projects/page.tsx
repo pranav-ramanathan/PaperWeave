@@ -2,13 +2,14 @@ import { listProjects, TEMPLATES } from '@paperweave/server';
 import Link from '../Go';
 import { reviewWaiting } from '../../lib/review';
 import { db, requireUser } from '../../lib/server';
-import { chosenLook } from '../../lib/ui';
+import { chosenLook, ui } from '../../lib/ui';
 import DirectUpload from '../DirectUpload';
 import Once from '../Once';
 import Result from '../Result';
 import SignOut from '../SignOut';
 import { createAction } from './actions';
 import { lookAction } from './look-action';
+import NextPapers from './NextPapers';
 
 export const dynamic = 'force-dynamic';
 export const metadata = { title: 'Papers' };
@@ -22,6 +23,15 @@ export default async function Projects({
   const projects = await listProjects(db(), user.id);
   const { error, imported, left, deleted } = await searchParams;
   const choice = await chosenLook();
+  if ((await ui('papers')) === 'next')
+    return (
+      <NextPapers
+        email={user.email}
+        projects={projects}
+        said={{ error, imported, left, deleted }}
+        choice={choice}
+      />
+    );
   return (
     <main className="page">
       <header className="bar">

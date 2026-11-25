@@ -1,6 +1,6 @@
 // The switch for the new look (the form at the foot of the papers page): it keeps the person's
-// choice in the cookie `pw_ui`, and while no page has been moved to the new look it changes
-// nothing a person can see but its own button. Runs as it is in both looks of the suite
+// choice in the cookie `pw_ui`, and the papers page (moved to the new look) is drawn in the
+// choice, with the same links and buttons in both. Runs as it is in both looks of the suite
 // (E2E_UI=next starts each person with the cookie set to "next").
 import { expect, test } from '@playwright/test';
 import { person, signIn } from './helpers';
@@ -21,13 +21,16 @@ const appearance = (page: import('@playwright/test').Page) =>
       main: style(document.querySelector('main')),
       h1: style(document.querySelector('h1')),
       body: style(document.body),
-      text: [...document.querySelectorAll('main > :not(form[aria-label="Look of the pages"])')]
-        .map((el) => el.textContent)
-        .join('\n'),
+      // The links and buttons, in the page's order, but the switch: the same in both looks.
+      names: [
+        ...document.querySelectorAll(
+          'main a[href], main button:not(form[aria-label="Look of the pages"] button)',
+        ),
+      ].map((el) => el.textContent),
     };
   });
 
-test('the switch keeps the choice in a cookie, and changes nothing else while no page is moved', async ({
+test('the switch keeps the choice in a cookie, and the papers page is drawn in it with the same links and buttons', async ({
   browser,
 }) => {
   const { page, email } = await person(browser, 'look');
@@ -42,8 +45,8 @@ test('the switch keeps the choice in a cookie, and changes nothing else while no
   await expect(page.getByRole('button', { name: START === 'next' ? TRY : USE_OLD })).toHaveCount(0);
   expect((await cookie())?.value).toBe(START === 'next' ? 'next' : undefined);
   const before = await appearance(page);
-  // No page is in the new look yet, whatever is chosen.
-  expect(before.ui).toBeNull();
+  // The papers page is in the new look when that is what is chosen, and only then.
+  expect(before.ui).toBe(START === 'next' ? 'next' : null);
 
   // The first, then the other: each sets the cookie and comes back to the papers.
   await switchButton.click();
@@ -59,15 +62,20 @@ test('the switch keeps the choice in a cookie, and changes nothing else while no
   });
   // About a year, not a session.
   expect(set!.expires - Date.now() / 1000).toBeGreaterThan(300 * 24 * 3600);
-  expect(await appearance(page)).toEqual(before);
+  const changed = await appearance(page);
+  expect(changed.ui).toBe(other === 'next' ? 'next' : null);
+  // Drawn differently, with the same links and buttons in the same order.
+  expect(changed.main).not.toEqual(before.main);
+  expect(changed.names).toEqual(before.names);
 
   // It is the choice that stays, across a fresh load, and back again.
   await page.reload();
   await expect(page.getByRole('button', { name: START === 'next' ? TRY : USE_OLD })).toBeVisible();
-  expect(await appearance(page)).toEqual(before);
+  expect(await appearance(page)).toEqual(changed);
   await page.getByRole('button', { name: START === 'next' ? TRY : USE_OLD }).click();
   await expect(page.getByRole('button', { name: START === 'next' ? USE_OLD : TRY })).toBeVisible();
   expect((await cookie())?.value).toBe(START);
+  expect(await appearance(page)).toEqual(before);
 });
 
 test('the switch is the last stop in the page, so nothing before it moved', async ({ browser }) => {

@@ -1,5 +1,7 @@
 'use client';
 import { type ReactNode, useEffect, useRef, useState } from 'react';
+import { useLook } from '../components/look';
+import { Notice } from '../components/notice';
 import { waiting } from '../lib/waiting';
 
 /** What a function takes in a request is 4.5 MB (docs/deploy.md); this leaves room for the rest of the form. */
@@ -55,7 +57,10 @@ export default function DirectUpload(props: {
   /** The name of the form's file field. */
   field: string;
   children: ReactNode;
+  /** For the form, in the new look only (a classic form is styled by its page). */
+  className?: string;
 }) {
+  const next = useLook() === 'next';
   const [problem, setProblem] = useState('');
   const [sending, setSending] = useState<{ name: string; done: number; of: number } | null>(null);
   const held = useRef<(() => void) | null>(null);
@@ -85,6 +90,7 @@ export default function DirectUpload(props: {
       method="post"
       action={props.action}
       encType="multipart/form-data"
+      className={next ? props.className : undefined}
       onSubmit={async (event) => {
         const form = event.currentTarget;
         const input = form.elements.namedItem(props.field) as HTMLInputElement;
@@ -137,14 +143,14 @@ export default function DirectUpload(props: {
       }}
     >
       {props.children}
-      <p aria-live="polite">
+      <p aria-live="polite" className={next ? 'empty:hidden' : undefined}>
         {sending &&
           (sending.done === sending.of
             ? `${sending.name} is uploaded. Waiting for the server to take it.`
             : `Uploading ${sending.name} (${(sending.of / 1e6).toFixed(1)} MB). Keep this page open.`)}
       </p>
       {sending && <progress aria-label="Uploaded so far" max={sending.of} value={sending.done} />}
-      {problem && <p role="alert">{problem}</p>}
+      {problem && (next ? <Notice kind="error">{problem}</Notice> : <p role="alert">{problem}</p>)}
     </form>
   );
 }
