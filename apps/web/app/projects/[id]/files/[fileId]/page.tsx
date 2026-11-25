@@ -20,6 +20,7 @@ import { rootDir } from '@paperweave/latex';
 import BuildPane from './BuildPane';
 import FileEditor from './FileEditor';
 import Files, { FileName } from './Files';
+import { ThemeSwitch } from '../../../../../components/theme-switch';
 import { AppBar } from '../../../../../components/app-bar';
 import { LookProvider } from '../../../../../components/look';
 import { buttonVariants } from '../../../../../components/ui/button';
@@ -120,6 +121,7 @@ async function FilePage({
               {switcher && (
                 <VersionMenu choices={switcher.choices} page="" paper={switcher.paper} />
               )}
+              <ThemeSwitch />
             </AppBar>
           ) : (
             <header className="bar">

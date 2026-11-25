@@ -28,8 +28,19 @@ dialog.tool {
 }
 /* No blur behind it: it costs frames and hides the text being worked on. */
 dialog.tool::backdrop {
-  background: color-mix(in oklch, var(--foreground, #161d1a) 40%, transparent);
+  background: var(--scrim, color-mix(in oklch, var(--foreground, #161d1a) 40%, transparent));
   backdrop-filter: none;
+}
+/* Dark (T47): the ink is light, so a veil made of it would lighten the page; the veil is black. */
+dialog.tool:is([data-theme='dark'], [data-theme='dark'] *) {
+  --scrim: rgb(0 0 0 / 0.6);
+}
+@media (prefers-color-scheme: dark) {
+  dialog.tool:not(
+      :is([data-theme='light'], [data-theme='light'] *, [data-theme='dark'], [data-theme='dark'] *)
+    ) {
+    --scrim: rgb(0 0 0 / 0.6);
+  }
 }
 dialog.tool form {
   display: grid;

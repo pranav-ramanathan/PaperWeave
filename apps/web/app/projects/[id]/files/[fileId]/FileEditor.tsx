@@ -227,7 +227,8 @@ const nextTheme = [
       backgroundColor: 'var(--background)',
       borderRight: '1px solid var(--border)',
     },
-    '.cm-activeLine, .cm-activeLineGutter': { backgroundColor: 'transparent' },
+    '.cm-activeLine, .cm-activeLineGutter': { backgroundColor: 'var(--src-active-line)' },
+    '.cm-cursor, .cm-dropCursor': { borderLeftColor: 'var(--foreground)' },
     '.cm-selectionBackground, &.cm-focused > .cm-scroller > .cm-selectionLayer .cm-selectionBackground':
       { backgroundColor: 'var(--accent)' },
   }),
