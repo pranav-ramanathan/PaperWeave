@@ -176,7 +176,9 @@ export function Files({
                         </Link>
                       )}
                     </th>
-                    <td>{f.size < 1024 ? `${f.size} B` : `${Math.round(f.size / 1024)} KB`}</td>
+                    <td className="size">
+                      {f.size < 1024 ? `${f.size} B` : `${Math.round(f.size / 1024)} KB`}
+                    </td>
                     <td>{note(f.path, f.readonly)}</td>
                     <td className="actions">
                       {f.path === project.root && 'Root file '}

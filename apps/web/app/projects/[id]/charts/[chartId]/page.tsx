@@ -287,7 +287,9 @@ export default async function ChartPage({
       )}
       {chart && writer && (
         <form action={removeChartAction.bind(null, id, chart.id)}>
-          <Once type="submit">Remove this chart</Once>{' '}
+          <Once type="submit" variant="outline">
+            Remove this chart
+          </Once>{' '}
           <small>Its files stay in the paper until you delete them.</small>
         </form>
       )}

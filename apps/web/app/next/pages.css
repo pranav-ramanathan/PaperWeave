@@ -182,7 +182,7 @@
 /* Lists of what was found or how a chart was made. */
 :root .form-sheet .report {
   margin: 0;
-  padding-left: 1.25rem;
+  padding-left: 1.5rem;
   list-style: disc;
 }
 :root .form-sheet ol.report {
@@ -219,6 +219,9 @@
 }
 :root .form-sheet tbody tr:last-child > * {
   border-bottom: 0;
+}
+:root .form-sheet table code {
+  overflow-wrap: normal;
 }
 :root .form-sheet td input,
 :root .form-sheet td select {
