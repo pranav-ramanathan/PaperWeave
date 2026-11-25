@@ -39,7 +39,7 @@ export type Revision = {
   id: string;
   number: number;
   name: string | null;
-  kind: 'auto' | 'named' | 'restore';
+  kind: 'auto' | 'named' | 'restore' | 'merge';
   createdAt: string;
   createdBy: string | null;
   /** The number of the revision this one restored, if it is a restore. */
@@ -91,7 +91,7 @@ export async function cutRevision(
 }
 
 /** What a file's text was stored as, and the place in its log that was the text of. */
-type Ready = Map<string, { seq: string; digest: string; size: number }>;
+export type Ready = Map<string, { seq: string; digest: string; size: number }>;
 
 /**
  * Store every edited file's text as it is now, ahead of a cut and without holding anything.
@@ -99,7 +99,11 @@ type Ready = Map<string, { seq: string; digest: string; size: number }>;
  * store inside that hold would make everyone's editing wait on the store; done here first, the
  * cut only has to send again what was edited in the moment between.
  */
-async function putEdited(pool: pg.Pool, store: BlobStore, projectId: string): Promise<Ready> {
+export async function putEdited(
+  pool: pg.Pool,
+  store: BlobStore,
+  projectId: string,
+): Promise<Ready> {
   // Each file's place in its log is read before its log is. An edit landing between the two
   // leaves a place that is already out of date, which the cut sees and does not trust.
   const { rows } = await pool.query(
@@ -128,7 +132,14 @@ export async function cut(
   store: BlobStore,
   userId: string | null,
   projectId: string,
-  opts: { name?: string; kind?: Revision['kind']; restoredFrom?: string; ready?: Ready } = {},
+  opts: {
+    name?: string;
+    kind?: Revision['kind'];
+    restoredFrom?: string;
+    /** For a merge: the revision of the other paper that was merged in. */
+    mergedFrom?: string;
+    ready?: Ready;
+  } = {},
 ): Promise<{ id: string; number: number }> {
   const kind = opts.kind ?? 'auto';
   {
@@ -217,14 +228,15 @@ export async function cut(
     }
     const made = (
       await db.query(
-        `insert into revisions (project_id, number, name, kind, restored_from, root, compiler, content_key, created_by)
-         values ($1, $2, $3, $4, $5, $6, $7, $8, $9) returning id, number`,
+        `insert into revisions (project_id, number, name, kind, restored_from, merged_from, root, compiler, content_key, created_by)
+         values ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10) returning id, number`,
         [
           projectId,
           (last?.number ?? 0) + 1,
           opts.name ?? null,
           kind,
           opts.restoredFrom ?? null,
+          opts.mergedFrom ?? null,
           project.root,
           project.compiler,
           key,
@@ -1299,6 +1311,183 @@ export async function announceRestore(db: Db, projectId: string, number: number)
   await db.query("select pg_notify('restored', $1)", [`${projectId}:${number}`]);
 }
 
+/** What `writeFiles` has to finish once every file is written: see `finishWrites`. */
+export type FileWrites = {
+  appends: { fileId: string; update: Uint8Array }[];
+  restored: { fileId: string; digest: string; size: number }[];
+  renames: { id: string; path: string }[];
+  others: {
+    id: string;
+    digest: string;
+    size: number;
+    eol: string | null;
+    bom: boolean | null;
+    readonly: string | null;
+  }[];
+  leftText: boolean;
+  /** The bytes of edit added so far, for the person's budget. */
+  appended: number;
+};
+
+/** The files of a paper that are live, as `writeFiles` needs them. */
+export type LiveFile = {
+  id: string;
+  path: string;
+  digest: string;
+  eol: string | null;
+  bom: boolean | null;
+};
+
+/**
+ * Write each of `files` (a file of the paper, the path it is to have and the bytes it is to hold)
+ * into the paper: text by the smallest edits, made ahead of time where nobody has typed since
+ * (`prepareRestore`) and made again with the file held where somebody has; anything else by
+ * replacing its row. Every file of the paper is held by the caller. Nothing is sent or charged
+ * until `finishWrites`, so that what waits for the held files is one statement for all of them.
+ * A restore writes with it, and so does a merge.
+ */
+export async function writeFiles(
+  db: Db,
+  store: BlobStore,
+  userId: string,
+  files: RevisionFile[],
+  held: {
+    live: LiveFile[];
+    blobs: Map<string, Uint8Array>;
+    prepared: Awaited<ReturnType<typeof prepareRestore>>;
+    locked: Map<string, { head_seq: string }>;
+  },
+): Promise<FileWrites> {
+  const { live, blobs, prepared, locked } = held;
+  const out: FileWrites = {
+    appends: [],
+    restored: [],
+    renames: [],
+    others: [],
+    leftText: false,
+    appended: 0,
+  };
+  for (const target of files) {
+    const file = live.find((f) => f.id === target.file_id);
+    if (!file) throw new Error(`file ${target.file_id} is gone`);
+    if (file.path !== target.path) out.renames.push({ id: file.id, path: target.path });
+    const bytes = blobs.get(target.digest)!;
+    const decoded = file.eol ? decodeFile(bytes) : null;
+    if (decoded?.editable) {
+      const want = decoded.text;
+      const had = prepared.get(file.id);
+      // Nobody has typed since it was read: the edit made ahead of time is still the edit.
+      if (had && stillStands(had, locked, { id: file.id, eol: file.eol! })) {
+        if (had.update) {
+          out.appends.push({ fileId: file.id, update: had.update });
+          out.appended += had.update.length;
+          // The written file is the bytes given, if they are what its row would encode.
+          if (
+            decoded.meta.eol === file.eol &&
+            decoded.meta.bom === !!file.bom &&
+            !decoded.meta.mixed
+          )
+            out.restored.push({ fileId: file.id, digest: target.digest, size: bytes.length });
+        }
+        continue;
+      }
+      out.appended += await editLocked(db, store, file.id, userId, (text) =>
+        applyRestoreEdits(text, want),
+      );
+    } else if (file.eol) {
+      // Text now, but the new bytes are not: the file goes back to being read-only, and its log
+      // stays where it is. Connected editors are told in `finishWrites`.
+      out.others.push({
+        id: file.id,
+        digest: target.digest,
+        size: bytes.length,
+        eol: null,
+        bom: null,
+        readonly: 'not-utf8',
+      });
+      out.leftText = true;
+    } else if (file.digest !== target.digest) {
+      const meta = fileMeta(target.path, bytes);
+      if (!meta.eol) {
+        out.others.push({
+          id: file.id,
+          digest: target.digest,
+          size: bytes.length,
+          eol: null,
+          bom: null,
+          readonly: meta.readonly,
+        });
+      } else {
+        // Read-only now, text in the new bytes. The row says so first: a log is only edited for
+        // a file that is text.
+        await db.query(
+          `update files set digest = $2, size = $3, eol = $4, bom = $5, readonly_reason = null
+           where id = $1`,
+          [file.id, target.digest, bytes.length, meta.eol, meta.bom],
+        );
+        if (Number(locked.get(file.id)?.head_seq) > 0) {
+          const read = decodeFile(bytes);
+          if (!read.editable)
+            throw new Error(`file ${file.id} is text in one place and not in another`);
+          const want = read.text;
+          out.appended += await editLocked(db, store, file.id, userId, (text) =>
+            applyRestoreEdits(text, want),
+          );
+        }
+      }
+    }
+  }
+  return out;
+}
+
+/**
+ * The second half of writing files: names changed, the edits appended in one statement, the
+ * person charged for them (over budget, the transaction ends and none of it is kept), the sync
+ * server told, and what the files now hold noted in `ready` so that the cut that follows does not
+ * read their logs again. Returns the files appended to, for `compactIfDue` once the transaction ends.
+ */
+export async function finishWrites(
+  db: Db,
+  projectId: string,
+  userId: string,
+  w: FileWrites,
+  ready: Ready,
+  budget: RewriteOpts,
+): Promise<string[]> {
+  if (w.renames.length)
+    await db.query(
+      `update files f set path = c.path from unnest($1::uuid[], $2::text[]) as c(id, path)
+       where f.id = c.id`,
+      [w.renames.map((r) => r.id), w.renames.map((r) => r.path)],
+    );
+  const seqs = await appendUpdates(db, projectId, userId, w.appends);
+  await chargeRewrite(db, userId, projectId, w.appended, budget);
+  await notifyEdits(db, seqs);
+  if (w.others.length)
+    await db.query(
+      `update files f set digest = c.digest, size = c.size, eol = c.eol, bom = c.bom,
+         readonly_reason = c.readonly
+       from unnest($1::uuid[], $2::text[], $3::int[], $4::text[], $5::bool[], $6::text[])
+         as c(id, digest, size, eol, bom, readonly) where f.id = c.id`,
+      [
+        w.others.map((o) => o.id),
+        w.others.map((o) => o.digest),
+        w.others.map((o) => o.size),
+        w.others.map((o) => o.eol),
+        w.others.map((o) => o.bom),
+        w.others.map((o) => o.readonly),
+      ],
+    );
+  // Editors of a file that stopped being text are sent away, as for a removed file.
+  if (w.leftText) await db.query("select pg_notify('acl', $1)", [projectId]);
+  for (const r of w.restored) {
+    const seq = seqs.get(r.fileId);
+    if (seq !== undefined)
+      ready.set(r.fileId, { seq: String(seq), digest: r.digest, size: r.size });
+  }
+  return [...seqs.keys()];
+}
+
 /**
  * Put the paper back to how it was in a revision, as new edits on top of what is there now.
  * Nothing is erased: the restore is itself a new revision, and the ones in between remain. It
@@ -1352,124 +1541,8 @@ export async function restoreRevision(
     await db.query("update files set path = id::text || '.renaming' where id = any($1::uuid[])", [
       moving.map((f) => f.id),
     ]);
-    const appends: { fileId: string; update: Uint8Array }[] = [];
-    const restored: { fileId: string; digest: string; size: number }[] = [];
-    const renames: { id: string; path: string }[] = [];
-    const others: {
-      id: string;
-      digest: string;
-      size: number;
-      eol: string | null;
-      bom: boolean | null;
-      readonly: string | null;
-    }[] = [];
-    let leftText = false;
-    // The bytes of edit this restore adds, for the person's budget.
-    let appended = 0;
-    for (const target of files) {
-      const file = live.find((f) => f.id === target.file_id);
-      if (!file) throw new Error(`file ${target.file_id} of revision ${revisionId} is gone`);
-      if (file.path !== target.path) renames.push({ id: file.id, path: target.path });
-      const bytes = blobs.get(target.digest)!;
-      const decoded = file.eol ? decodeFile(bytes) : null;
-      if (decoded?.editable) {
-        const want = decoded.text;
-        const had = prepared.get(file.id);
-        // Nobody has typed since it was read: the edit made ahead of time is still the edit.
-        if (had && stillStands(had, locked, file)) {
-          if (had.update) {
-            appends.push({ fileId: file.id, update: had.update });
-            appended += had.update.length;
-            // The restored file is the revision's bytes, if they are what its row would encode.
-            if (
-              decoded.meta.eol === file.eol &&
-              decoded.meta.bom === !!file.bom &&
-              !decoded.meta.mixed
-            )
-              restored.push({ fileId: file.id, digest: target.digest, size: bytes.length });
-          }
-          continue;
-        }
-        appended += await editLocked(db, store, file.id, userId, (text) =>
-          applyRestoreEdits(text, want),
-        );
-      } else if (file.eol) {
-        // Text now, but the revision's bytes are not: the file goes back to being read-only, and
-        // its log stays where it is. Connected editors are told below.
-        others.push({
-          id: file.id,
-          digest: target.digest,
-          size: bytes.length,
-          eol: null,
-          bom: null,
-          readonly: 'not-utf8',
-        });
-        leftText = true;
-      } else if (file.digest !== target.digest) {
-        const meta = fileMeta(target.path, bytes);
-        if (!meta.eol) {
-          others.push({
-            id: file.id,
-            digest: target.digest,
-            size: bytes.length,
-            eol: null,
-            bom: null,
-            readonly: meta.readonly,
-          });
-        } else {
-          // Read-only now, text in the revision. The row says so first: a log is only edited for
-          // a file that is text.
-          await db.query(
-            `update files set digest = $2, size = $3, eol = $4, bom = $5, readonly_reason = null
-             where id = $1`,
-            [file.id, target.digest, bytes.length, meta.eol, meta.bom],
-          );
-          if (Number(locked.get(file.id)?.head_seq) > 0) {
-            const read = decodeFile(bytes);
-            if (!read.editable)
-              throw new Error(`file ${file.id} is text in one place and not in another`);
-            const want = read.text;
-            appended += await editLocked(db, store, file.id, userId, (text) =>
-              applyRestoreEdits(text, want),
-            );
-          }
-        }
-      }
-    }
-    if (renames.length)
-      await db.query(
-        `update files f set path = c.path from unnest($1::uuid[], $2::text[]) as c(id, path)
-         where f.id = c.id`,
-        [renames.map((r) => r.id), renames.map((r) => r.path)],
-      );
-    const seqs = await appendUpdates(db, projectId, userId, appends);
-    appendedTo = [...seqs.keys()];
-    // Charged with every edit made: over budget, the transaction ends and none of it is kept.
-    await chargeRewrite(db, userId, projectId, appended, budget);
-    await notifyEdits(db, seqs);
-    if (others.length)
-      await db.query(
-        `update files f set digest = c.digest, size = c.size, eol = c.eol, bom = c.bom,
-           readonly_reason = c.readonly
-         from unnest($1::uuid[], $2::text[], $3::int[], $4::text[], $5::bool[], $6::text[])
-           as c(id, digest, size, eol, bom, readonly) where f.id = c.id`,
-        [
-          others.map((o) => o.id),
-          others.map((o) => o.digest),
-          others.map((o) => o.size),
-          others.map((o) => o.eol),
-          others.map((o) => o.bom),
-          others.map((o) => o.readonly),
-        ],
-      );
-    // Editors of a file that stopped being text are sent away, as for a removed file.
-    if (leftText) await db.query("select pg_notify('acl', $1)", [projectId]);
-    // What those files now hold is known, so the cut below does not read their logs again.
-    for (const r of restored) {
-      const seq = seqs.get(r.fileId);
-      if (seq !== undefined)
-        ready.set(r.fileId, { seq: String(seq), digest: r.digest, size: r.size });
-    }
+    const writes = await writeFiles(db, store, userId, files, { live, blobs, prepared, locked });
+    appendedTo = await finishWrites(db, projectId, userId, writes, ready, budget);
     await db.query(
       `update projects set compiler = $2, manifest_version = manifest_version + 1,
        root_file_id = (select id from files where project_id = $1 and path = $3)
@@ -1496,7 +1569,7 @@ export async function restoreRevision(
  * the revision's, and the place in its log that was the text of. An empty edit is `null`. Files
  * with no log yet are left out: the restore makes their first entry itself, holding them.
  */
-async function prepareRestore(
+export async function prepareRestore(
   pool: pg.Pool,
   projectId: string,
   targets: RevisionFile[],
@@ -1565,6 +1638,13 @@ export type RestoreNote = {
   at: string;
   /** The revision made of the paper as it stood at that moment: what the restore replaced. */
   kept: { id: string; number: number } | null;
+  /**
+   * Set only when the revision is a merge, which is announced as a restore is (the paper was
+   * rewritten, edits typed offline are held): which paper was merged in, as which version (`null`
+   * for the paper itself) and as which of its revisions. A page that does not know it reads the
+   * note as a restore.
+   */
+  merge?: { paper: string; version: string | null; revision: number };
 };
 
 /**
@@ -1578,12 +1658,15 @@ export async function restoreNote(
 ): Promise<RestoreNote | null> {
   const { rows } = await db.query(
     `select r.id, r.number, f.number as "from", f.name as "fromName", u.email as by,
-            r.created_at as at, k.id as "keptId", k.number as "keptNumber"
+            r.created_at as at, k.id as "keptId", k.number as "keptNumber", r.kind,
+            m.number as "mergedNumber", m.project_id as "mergedPaper", mp.version_name as "mergedVersion"
      from revisions r
      left join revisions f on f.id = r.restored_from
+     left join revisions m on m.id = r.merged_from
+     left join projects mp on mp.id = m.project_id
      left join "user" u on u.id = r.created_by
      left join revisions k on k.project_id = r.project_id and k.number = r.number - 1
-     where r.project_id = $1 and r.kind = 'restore' and ($2::int is null or r.number = $2)
+     where r.project_id = $1 and r.kind in ('restore', 'merge') and ($2::int is null or r.number = $2)
      order by r.number desc limit 1`,
     [projectId, number ?? null],
   );
@@ -1597,6 +1680,13 @@ export async function restoreNote(
     by: r.by,
     at: new Date(r.at).toISOString(),
     kept: r.keptId ? { id: r.keptId, number: r.keptNumber } : null,
+    ...(r.kind === 'merge' && {
+      merge: {
+        paper: r.mergedPaper,
+        version: r.mergedVersion ?? null,
+        revision: r.mergedNumber,
+      },
+    }),
   };
 }
 
@@ -1613,7 +1703,7 @@ export async function restoreThatRemoved(
 ): Promise<RestoreNote | null> {
   const { rows } = await db.query(
     `select r.number from all_files f
-     join revisions r on r.project_id = f.project_id and r.kind = 'restore'
+     join revisions r on r.project_id = f.project_id and r.kind in ('restore', 'merge')
        and r.created_at = f.deleted_at
      where f.project_id = $1 and f.id = $2`,
     [projectId, id(fileId)],
