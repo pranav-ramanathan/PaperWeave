@@ -7808,3 +7808,21 @@ pointing to the new page).
     cover the person's address were a few pixels off in a picture of the whole page.
   - The picture run does not compare anything itself: the two folders are compared by a script
     kept outside the repository (it used `sharp`, which the app's dependencies bring).
+
+## Tailwind and the new look's tokens, with nothing shown yet
+
+- **What.** Tailwind v4 through PostCSS, and every package the new look needs (`tailwindcss`,
+  `@tailwindcss/postcss`, `postcss-prefix-selector`, `clsx`, `tailwind-merge`,
+  `class-variance-authority`, `lucide-react`, `radix-ui`), added once so no later change touches
+  the lockfile. `app/next.css` holds the tokens (light, and dark ready for an attribute) and an
+  empty file per area under `app/next/`. Every selector it produces is prefixed with
+  `:where([data-ui='next'])`, so it matches nothing until a page's `<main>` asks for the new look;
+  `:root`, `html` and `body` in it land on that `<main>`. `components.json` and `lib/utils.ts`
+  (`cn`) are ready for the components; `tsconfig.json` gains the `@/*` alias they import by.
+- **Cost.** 9.6 KB of CSS on every page (2.1 KB gzipped), mostly Tailwind's reset copy and the
+  tokens.
+- **Held by** `lib/nextcss.test.ts`: it runs the real pipeline and fails on any selector outside
+  the scope, a bare `:root`, or a change to `legacy.css`, `functional.css` or KaTeX's CSS. The old
+  look's built CSS is byte-for-byte as before; screenshots and computed styles match. `next dev`
+  serves the same scoped CSS.
+- **Not done.** Fonts, components, the dark attribute.
