@@ -33,14 +33,10 @@
 .source .cm-editor {
   height: 100%;
 }
-/* Two placeholders, so that the staged page works until the tasks that own them (T24: the PDF
-   pane, T26: the menu at the caret) replace them in pdf.css and windows.css. The PDF pane is a
-   definite height where the page flows (the wide and tall block below overrides it), and the
-   menu at the caret is where Tools.tsx puts it and no taller than the window. */
-.build .pdf {
-  height: 70vh;
-  border: 1px solid var(--border);
-}
+/* A placeholder, so that the staged page works until the task that owns it (T26: the menu at the
+   caret) replaces it in windows.css: the menu is where Tools.tsx puts it and no taller than the
+   window. The PDF pane's own height (a definite one where the page flows) is in pdf.css; the wide
+   and tall block below overrides it. */
 .menu {
   position: fixed;
   z-index: 10;
