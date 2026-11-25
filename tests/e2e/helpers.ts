@@ -257,18 +257,22 @@ export async function clickAfter(page: Page, within: string, word: string) {
     const at = await measureAfter(page, within, word);
     if (!at) throw new Error(`"${word}" is not shown in ${within}`);
     await page.mouse.move(at.x, at.y);
-    const there = await page.evaluate(
+    const under = await page.evaluate(
       ([sel, x, y]) => {
         const el = document.elementFromPoint(x as number, y as number);
-        return !!el && !!el.closest(sel as string) && !el.closest('button');
+        if (el && el.closest(sel as string) && !el.closest('button')) return null;
+        return el ? `<${el.tagName.toLowerCase()} class="${el.className}">` : 'nothing';
       },
       [within, at.x, at.y] as const,
     );
-    if (there) {
+    if (under === null) {
       await page.mouse.click(at.x, at.y);
       return;
     }
-    if (attempt === 5) throw new Error(`"${word}" in ${within} kept moving from under the pointer`);
+    if (attempt === 5)
+      throw new Error(
+        `"${word}" in ${within} kept moving from under the pointer: ${under} is there`,
+      );
     await page.waitForTimeout(200);
   }
 }
@@ -276,6 +280,25 @@ export async function clickAfter(page: Page, within: string, word: string) {
 async function measureAfter(page: Page, within: string, word: string) {
   return page.evaluate(
     ([sel, w]) => {
+      // The word itself, centred in what scrolls it and in the window. Centring only the element
+      // that holds it is not enough: a long wrapped line can be taller than the editor, and its
+      // middle in view leaves a word at its end below the editor's edge, where the press would
+      // land on whatever is under the editor.
+      const centred = (range: Range) => {
+        let r = range.getBoundingClientRect();
+        for (let s = range.startContainer.parentElement; s; s = s.parentElement) {
+          if (s.scrollHeight <= s.clientHeight) continue;
+          if (!/(auto|scroll)/.test(getComputedStyle(s).overflowY)) continue;
+          const box = s.getBoundingClientRect();
+          s.scrollTop += r.top + r.height / 2 - (box.top + box.height / 2);
+          r = range.getBoundingClientRect();
+        }
+        if (r.top < 0 || r.bottom > innerHeight) {
+          scrollBy(0, r.top + r.height / 2 - innerHeight / 2);
+          r = range.getBoundingClientRect();
+        }
+        return { x: r.right - 1, y: r.y + r.height / 2 };
+      };
       const walker = document.createTreeWalker(document.querySelector(sel)!, NodeFilter.SHOW_TEXT);
       for (let n = walker.nextNode(); n; n = walker.nextNode()) {
         const i = n.textContent!.indexOf(w);
@@ -284,8 +307,7 @@ async function measureAfter(page: Page, within: string, word: string) {
         const range = document.createRange();
         range.setStart(n, i);
         range.setEnd(n, i + w.length);
-        const r = range.getBoundingClientRect();
-        return { x: r.right - 1, y: r.y + r.height / 2 };
+        return centred(range);
       }
       // No single text node holds the word: decorations (a spelling mark on a made-up word, say)
       // split a paragraph's text into several. Look in the joined text of one block.
@@ -313,8 +335,7 @@ async function measureAfter(page: Page, within: string, word: string) {
         const range = document.createRange();
         range.setStart(a.node, a.offset);
         range.setEnd(b.node, b.offset);
-        const r = range.getBoundingClientRect();
-        return { x: r.right - 1, y: r.y + r.height / 2 };
+        return centred(range);
       }
       return null;
     },
