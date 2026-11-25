@@ -4,6 +4,8 @@ import Link from '../../../../../Go';
 import Once from '../../../../../Once';
 import { notFound } from 'next/navigation';
 import { blobs, db, requireUser } from '../../../../../../lib/server';
+import { FormPage, Say } from '../../../../../../components/form-page';
+import { ui } from '../../../../../../lib/ui';
 import { deleteFileAction } from '../../../../actions';
 
 export const dynamic = 'force-dynamic';
@@ -25,6 +27,7 @@ export default async function DeleteFile({
     if (err.code === 'not_found') notFound();
     return err.message;
   });
+  const look = await ui('file-delete');
   const back = (
     <Link prefetch={false} href={`/projects/${id}`}>
       Back to the paper
@@ -32,28 +35,32 @@ export default async function DeleteFile({
   );
   if (typeof uses === 'string')
     return (
-      <main className="page">
-        <header className="bar">
-          <h1>Delete a file</h1>
-          {back}
-        </header>
-        <p role="alert">{uses}</p>
-      </main>
+      <FormPage look={look} title="Delete a file" back={back}>
+        <Say look={look} role="alert">
+          {uses}
+        </Say>
+      </FormPage>
     );
   const files = [...new Set(uses.lines.map((l) => l.path))];
   const count = uses.lines.length;
   const one = count === 1;
   return (
-    <main className="page">
-      <header className="bar">
-        <h1>
+    <FormPage
+      look={look}
+      wide
+      danger
+      title={
+        <>
           Delete <code>{uses.path}</code>
-        </h1>
-        {back}
-      </header>
+        </>
+      }
+      back={back}
+    >
       {error && <Result alert>{error}</Result>}
       {uses.root ? (
-        <p role="alert">This is the root file. Make another file the root first.</p>
+        <Say look={look} role="alert">
+          This is the root file. Make another file the root first.
+        </Say>
       ) : (
         <>
           {count === 0 ? (
@@ -94,6 +101,6 @@ export default async function DeleteFile({
           </form>
         </>
       )}
-    </main>
+    </FormPage>
   );
 }

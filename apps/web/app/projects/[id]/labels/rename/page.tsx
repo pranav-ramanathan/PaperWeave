@@ -4,6 +4,8 @@ import Link from '../../../../Go';
 import Once from '../../../../Once';
 import { notFound } from 'next/navigation';
 import { blobs, db, requireUser } from '../../../../../lib/server';
+import { FormPage, Say } from '../../../../../components/form-page';
+import { ui } from '../../../../../lib/ui';
 import { renameLabelAction } from '../../../actions';
 
 export const dynamic = 'force-dynamic';
@@ -26,6 +28,7 @@ export default async function RenameLabel({
     if (err.code === 'not_found') notFound();
     return err.message;
   });
+  const look = await ui('label-rename');
   const back = (
     <Link prefetch={false} href={`/projects/${id}#labels`}>
       Back to the paper
@@ -33,24 +36,25 @@ export default async function RenameLabel({
   );
   if (typeof proposal === 'string')
     return (
-      <main className="page">
-        <header className="bar">
-          <h1>Rename a label</h1>
-          {back}
-        </header>
-        <p role="alert">{proposal}</p>
-      </main>
+      <FormPage look={look} title="Rename a label" back={back}>
+        <Say look={look} role="alert">
+          {proposal}
+        </Say>
+      </FormPage>
     );
   const files = [...new Set(proposal.changes.map((c) => c.path))];
   const places = proposal.changes.length;
   return (
-    <main className="page">
-      <header className="bar">
-        <h1>
+    <FormPage
+      look={look}
+      wide
+      title={
+        <>
           Rename <code>{proposal.from}</code> to <code>{proposal.to}</code>
-        </h1>
-        {back}
-      </header>
+        </>
+      }
+      back={back}
+    >
       {error && <Result alert>{error}</Result>}
       <p>
         This would change {places} {places === 1 ? 'line' : 'lines'} in {files.length}{' '}
@@ -89,6 +93,6 @@ export default async function RenameLabel({
           Rename in all {files.length === 1 ? 'of it' : `${files.length} files`}
         </Once>
       </form>
-    </main>
+    </FormPage>
   );
 }

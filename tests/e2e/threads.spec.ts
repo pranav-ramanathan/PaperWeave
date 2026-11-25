@@ -596,3 +596,43 @@ test('Resolve refuses a thread someone wrote in after it was drawn', async ({ br
   await expect(mine.getByText('Resolved (1)')).toBeVisible();
   await expect(theirs.getByText('Resolved (1)')).toBeVisible({ timeout: 15_000 });
 });
+
+test('"Show in the text" pressed before the file has arrived waits for it, and never says the text is gone', async ({
+  browser,
+}) => {
+  test.setTimeout(120_000);
+  const owner = await person(browser, 'early-owner');
+  const zip = join(mkdtempSync(join(tmpdir(), 'paperweave-e2e-')), `Early ${run}.zip`);
+  writeFileSync(zip, await writeZip([{ path: 'main.tex', bytes: Buffer.from(MAIN) }]));
+  await owner.page.goto('/sign-in');
+  await signIn(owner.page, owner.email);
+  await owner.page.getByLabel('Or import a ZIP of a LaTeX project').setInputFiles(zip);
+  await owner.page.getByRole('button', { name: 'Import ZIP' }).click();
+  await owner.page.getByRole('link', { name: 'main.tex' }).first().click();
+  const panel = owner.page.getByRole('region', { name: 'Comments' });
+  await selectWord(owner.page, VISUAL, 'forty');
+  await panel.getByRole('button', { name: 'Comment on the selected text' }).click();
+  await panel.getByLabel('Comment', { exact: true }).fill('Median or tail?');
+  await panel.getByRole('button', { name: 'Start thread' }).click();
+  const thread = owner.page.getByRole('article', { name: 'Thread on “forty”' });
+  await expect(thread).toBeVisible();
+
+  // The page is opened again with the sync connection held back: the thread is listed, but the
+  // editor has no text yet.
+  let release!: () => void;
+  const released = new Promise<void>((r) => (release = r));
+  await owner.page.route('**/api/sync-ticket**', async (route) => {
+    await released;
+    await route.continue();
+  });
+  await owner.page.reload();
+  await expect(thread).toBeVisible();
+  await thread.getByRole('button', { name: 'Show in the text' }).click();
+  await owner.page.waitForTimeout(500);
+  await expect(panel).not.toContainText('no longer in the file');
+  release();
+
+  // Once the text is here the words are selected, and the message never showed.
+  await expect.poll(() => owner.page.evaluate(() => getSelection()!.toString())).toBe('forty');
+  await expect(panel).not.toContainText('no longer in the file');
+});

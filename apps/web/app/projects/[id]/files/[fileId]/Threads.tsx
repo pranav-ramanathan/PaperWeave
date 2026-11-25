@@ -128,7 +128,7 @@ export default function Threads(props: {
   /** The stretch selected in the editor now, or null if nothing is. */
   selection(): Stretch | null;
   /** Select a stretch in the editor. False if it is no longer there. */
-  show(from: string, to: string): boolean;
+  show(from: string, to: string): Promise<boolean>;
   /** Where a stretch stands in the editor's text now, or null if nothing is there. */
   standing(from: string, to: string): Stretch | null;
   /** Told the threads each time they are read, so that the editor can mark them in the text. */
@@ -375,8 +375,10 @@ export default function Threads(props: {
             <button
               type="button"
               className={cardButton()}
-              onClick={() =>
-                setNote(props.show(t.from, t.to) ? '' : 'That text is no longer in the file.')
+              onClick={async () =>
+                setNote(
+                  (await props.show(t.from, t.to)) ? '' : 'That text is no longer in the file.',
+                )
               }
             >
               Show in the text
