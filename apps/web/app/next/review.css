@@ -168,3 +168,190 @@
   }
 }
 
+/* ===== T23: the cards ===== */
+.review-card {
+  position: relative;
+  list-style: none;
+}
+.review-card[aria-current='true'] {
+  outline: 3px solid var(--ring);
+  outline-offset: 2px;
+}
+.review-kind {
+  display: flex;
+  align-items: center;
+  gap: 0.375rem;
+  font-size: 0.8125rem;
+  font-weight: 600;
+}
+.review-kind::after {
+  content: 'Comment';
+}
+.review-kind[data-kind='proposal']::after {
+  content: 'Proposed change';
+}
+.review-kind[data-kind='model']::after {
+  content: 'Model review';
+}
+.review-kind[data-kind='finding']::after {
+  content: 'Language';
+}
+.review-kind[data-kind='comment'] {
+  color: var(--comment);
+}
+.review-kind[data-kind='proposal'] {
+  color: var(--proposal);
+}
+.review-kind[data-kind='model'] {
+  color: var(--model);
+}
+.review-kind[data-kind='finding'] {
+  color: var(--finding);
+}
+.review-card p {
+  margin: 0;
+}
+.review-card ol {
+  display: grid;
+  gap: 0.5rem;
+}
+.review-card ol p:not(.note) {
+  white-space: pre-wrap;
+}
+.review-card time,
+.review-card .note {
+  font-size: 0.8125rem;
+  color: var(--muted-foreground);
+}
+.review-card q {
+  quotes: '“' '”';
+}
+.review-card mark {
+  background: var(--comment-wash);
+  color: inherit;
+}
+/* What a proposal takes away and puts in: the old words struck on the removed tint, the new on the
+   added one. Each line says which it is in words, so colour is never the only sign. */
+.review-card .change {
+  font-family: var(--font-serif);
+  font-size: 0.9375rem;
+  white-space: pre-wrap;
+}
+.review-card .change > span:first-child {
+  font-family: var(--font-sans);
+  font-size: 0.8125rem;
+  color: var(--muted-foreground);
+}
+.review-card del {
+  padding-inline: 0.125rem;
+  border-radius: 2px;
+  background: var(--removed);
+  color: var(--foreground);
+  text-decoration: line-through;
+}
+.review-card ins {
+  padding-inline: 0.125rem;
+  border-radius: 2px;
+  background: var(--added);
+  color: var(--foreground);
+  font-weight: 600;
+  text-decoration: none;
+}
+/* What a change would alter about a claim, and LaTeX that would not read as written. */
+.review-card .flags {
+  display: grid;
+  gap: 0.25rem;
+  padding: 0.5rem 0.75rem;
+  border: 1px solid var(--comment-line);
+  border-left-width: 4px;
+  border-radius: 6px;
+  background: var(--comment-wash);
+  color: var(--foreground);
+}
+.review-card .flags ul {
+  list-style: disc;
+  padding-inline-start: 1.125rem;
+}
+/* The forms inside a card. */
+.review-card label {
+  font-size: 0.8125rem;
+  font-weight: 550;
+}
+.review-card .review-form label {
+  display: grid;
+  gap: 0.25rem;
+}
+.review-card textarea,
+.review-card input:not([type]) {
+  display: block;
+  width: 100%;
+  margin-top: 0.25rem;
+  padding: 0.375rem 0.625rem;
+  border: 1px solid var(--input);
+  border-radius: 6px;
+  background: var(--card);
+  color: var(--foreground);
+  font: inherit;
+  font-weight: 400;
+}
+.review-card fieldset {
+  display: grid;
+  gap: 0.25rem;
+  margin: 0;
+  padding: 0;
+  border: 0;
+}
+.review-card legend {
+  padding: 0;
+  font-size: 0.8125rem;
+  font-weight: 550;
+}
+.review-card fieldset label {
+  font-weight: 400;
+}
+.review-card [role='group'][data-ask] {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 0.375rem;
+}
+/* The same forms where they stand outside a card (the one that starts a thread or a proposal). */
+.review > section > form {
+  display: grid;
+  gap: 0.5rem;
+  padding: 0.75rem;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  background: var(--card);
+}
+.review > section > form label {
+  display: grid;
+  gap: 0.25rem;
+  font-size: 0.8125rem;
+  font-weight: 550;
+}
+.review > section > form textarea,
+.review > section > form input:not([type]) {
+  display: block;
+  width: 100%;
+  padding: 0.375rem 0.625rem;
+  border: 1px solid var(--input);
+  border-radius: 6px;
+  background: var(--card);
+  color: var(--foreground);
+  font: inherit;
+  font-weight: 400;
+}
+.review > section > form fieldset {
+  display: grid;
+  gap: 0.25rem;
+  margin: 0;
+  padding: 0;
+  border: 0;
+}
+.review > section > form fieldset label {
+  display: flex;
+  align-items: center;
+  gap: 0.375rem;
+  font-weight: 400;
+}

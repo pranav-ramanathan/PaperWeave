@@ -5,6 +5,15 @@ import { diffWords } from '@paperweave/server/textdiff';
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { whenMarked } from '../../../../../lib/builds';
 import { MOST_AT_ONCE, plain } from '../../../../../lib/proposals';
+import {
+  CardKindMark,
+  cardActions,
+  cardButton,
+  cardClass,
+  cardForm,
+  quoteClass,
+  useReviewCount,
+} from '../../../../../components/review-card';
 import type { Stretch } from './Threads';
 
 const day = (iso: string) => iso.slice(0, 10);
@@ -27,6 +36,7 @@ function Change(props: {
   const sending = useRef(false);
   return (
     <form
+      className={cardForm}
       onSubmit={async (e) => {
         e.preventDefault();
         if (sending.current) return;
@@ -55,12 +65,14 @@ function Change(props: {
         <input value={reason} onChange={(e) => setReason(e.target.value)} maxLength={1000} />
       </label>
       {problem && <p role="alert">{problem}</p>}
-      <button type="submit" aria-disabled={busy || undefined}>
-        {props.button}
-      </button>
-      <button type="button" onClick={props.onCancel}>
-        Cancel
-      </button>
+      <span className={cardActions}>
+        <button type="submit" className={cardButton('primary')} aria-disabled={busy || undefined}>
+          {props.button}
+        </button>
+        <button type="button" className={cardButton()} onClick={props.onCancel}>
+          Cancel
+        </button>
+      </span>
     </form>
   );
 }
@@ -275,7 +287,11 @@ export default function Proposals(props: {
     p.now === '' && (p.status === 'accepted' ? p.replacement : p.expected) !== '';
   const one = (p: Proposal) => (
     <li key={p.id}>
-      <article aria-label={`Proposal to change ${named(p.expected)}`}>
+      <article
+        aria-label={`Proposal to change ${named(p.expected)}`}
+        className={cardClass(p.origin === 'critique' ? 'model' : 'proposal')}
+      >
+        <CardKindMark kind={p.origin === 'critique' ? 'model' : 'proposal'} />
         <Words was={p.expected} now={p.replacement} />
         {p.reason && <p>Why: {p.reason}</p>}
         {p.origin === 'critique' && (
@@ -371,10 +387,11 @@ export default function Proposals(props: {
             }}
           />
         ) : (
-          <p>
+          <p className={cardActions}>
             {p.status !== 'rejected' && p.status !== 'dismissed' && (
               <button
                 type="button"
+                className={cardButton()}
                 onClick={() =>
                   setNote(
                     gone(p)
@@ -392,13 +409,18 @@ export default function Proposals(props: {
               <>
                 <button
                   type="button"
+                  className={cardButton('primary')}
                   disabled={p.stale}
                   aria-describedby={p.stale ? `stale-${p.id}` : undefined}
                   onClick={() => act(p, 'accept')}
                 >
                   Accept
                 </button>
-                <button type="button" onClick={() => act(p, 'reject')}>
+                <button
+                  type="button"
+                  className={cardButton('secondary')}
+                  onClick={() => act(p, 'reject')}
+                >
                   Reject
                 </button>
               </>
@@ -406,13 +428,18 @@ export default function Proposals(props: {
             {gone(p) &&
               (p.status === 'open' || p.status === 'accepted') &&
               (p.mine || canDecide) && (
-                <button type="button" onClick={() => act(p, 'attach')}>
+                <button
+                  type="button"
+                  className={cardButton('secondary')}
+                  onClick={() => act(p, 'attach')}
+                >
                   Find these words again
                 </button>
               )}
             {p.status === 'open' && !gone(p) && !p.placeLost && (p.mine || canDecide) && (
               <button
                 type="button"
+                className={cardButton()}
                 data-revise={p.id}
                 onClick={() => {
                   setOpened(seen(p));
@@ -423,12 +450,17 @@ export default function Proposals(props: {
               </button>
             )}
             {p.status === 'open' && p.mine && (
-              <button type="button" onClick={() => act(p, 'withdraw')}>
+              <button type="button" className={cardButton()} onClick={() => act(p, 'withdraw')}>
                 Withdraw
               </button>
             )}
             {p.status === 'accepted' && canDecide && (
-              <button type="button" disabled={p.stale} onClick={() => act(p, 'undo')}>
+              <button
+                type="button"
+                className={cardButton('secondary')}
+                disabled={p.stale}
+                onClick={() => act(p, 'undo')}
+              >
                 Undo the accept
               </button>
             )}
@@ -439,6 +471,7 @@ export default function Proposals(props: {
   );
   const open = proposals?.filter((p) => p.status === 'open' || held(p)) ?? [];
   const decided = proposals?.filter((p) => p.status !== 'open' && !held(p)) ?? [];
+  useReviewCount('changes', proposals ? open.length : null);
   const plainCount = proposals?.filter((p) => plain(p, revising)).length ?? 0;
   return (
     <section className="threads" id="proposals" aria-label="Proposed changes" ref={section}>
@@ -448,6 +481,7 @@ export default function Proposals(props: {
       {canPropose && !starting && (
         <button
           type="button"
+          className={cardButton('secondary')}
           ref={opener}
           onClick={() => {
             const picked = props.selection();
@@ -461,6 +495,7 @@ export default function Proposals(props: {
       {canPropose && canReview && !starting && (
         <button
           type="button"
+          className={cardButton('secondary')}
           aria-disabled={reviewing || undefined}
           onClick={async () => {
             // aria-disabled, not disabled, so the button keeps the keyboard while it is busy.
@@ -495,7 +530,9 @@ export default function Proposals(props: {
       )}
       {starting && (
         <>
-          {starting.words && <blockquote>{short(starting.words, 200)}</blockquote>}
+          {starting.words && (
+            <blockquote className={quoteClass('comment')}>{short(starting.words, 200)}</blockquote>
+          )}
           <Change
             was={starting.words}
             start={{ replacement: starting.words, reason: '' }}
@@ -520,7 +557,12 @@ export default function Proposals(props: {
       </p>
       {proposals && open.length === 0 && <p>No open proposals on this file.</p>}
       {canDecide && plainCount >= 2 && (
-        <button type="button" aria-disabled={accepting || undefined} onClick={acceptPlain}>
+        <button
+          type="button"
+          className={cardButton('secondary')}
+          aria-disabled={accepting || undefined}
+          onClick={acceptPlain}
+        >
           {plainCount > MOST_AT_ONCE
             ? `Accept the oldest ${MOST_AT_ONCE} of ${plainCount} plain changes`
             : `Accept the ${plainCount} plain changes`}
