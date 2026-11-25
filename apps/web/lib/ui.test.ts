@@ -1,5 +1,39 @@
 import { expect, test, vi } from 'vitest';
-import { look, MIGRATED, STAGED, ui, uiDefault, uiStaged } from './ui';
+import {
+  asLook,
+  chosen,
+  look,
+  MIGRATED,
+  STAGED,
+  ui,
+  UI_COOKIE_OPTIONS,
+  uiDefault,
+  uiStaged,
+} from './ui';
+
+test('the switch shows the person’s choice, then the default, whatever pages have moved', () => {
+  expect(chosen('next', 'classic')).toBe('next');
+  expect(chosen('classic', 'next')).toBe('classic');
+  expect(chosen(undefined, 'next')).toBe('next');
+  expect(chosen('NEXT', 'classic')).toBe('classic');
+  expect(chosen('', 'next')).toBe('next');
+});
+
+test('the switch’s form can put only "next" or "classic" in the cookie', () => {
+  expect(asLook('next')).toBe('next');
+  expect(asLook('classic')).toBe('classic');
+  for (const bad of [null, undefined, '', 'Next', 'next; Path=/', 'x'.repeat(500), 1])
+    expect(() => asLook(bad)).toThrow('"next" or "classic"');
+});
+
+test('the choice is kept for a year, site-wide, Lax and for the server only', () => {
+  expect(UI_COOKIE_OPTIONS).toEqual({
+    httpOnly: true,
+    sameSite: 'lax',
+    path: '/',
+    maxAge: 31_536_000,
+  });
+});
 
 const moved = ['papers'];
 

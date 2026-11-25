@@ -48,6 +48,28 @@ the services in `infra/compose.yaml`.
 | `UI_DEFAULT`                                                                                                                                                  | web                | no                      | Which look pages are drawn in for a person who has not chosen one: `classic` (the default, and what an unset or empty value means) or `next`. A person's own choice is the cookie `pw_ui` (`next` or `classic`), which wins over this; any other value of the cookie is ignored. Only pages that have been moved to the new look (the list in `apps/web/lib/ui.ts`, empty until the first one) ever show it: every page is `classic` for everyone for now. Any other value of the setting stops the web service's first request, saying what it must be. Set `classic` to take everyone back.                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                           |
 | `NODE_ENV`                                                                                                                                                    | web                | set by the framework    | In development the pages' content policy is looser: it also allows `eval` and style sheets it did not send.                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                             |
 
+## Choosing the look
+
+The new look is being brought in page by page, behind a switch, and the old look stays until the
+owner says the new one is final.
+
+- **A person's switch.** At the foot of the papers page, a button reads "Try the new look"; once
+  pressed it reads "Use the old look". It sets the cookie `pw_ui` (`next` or `classic`) for a
+  year, for the whole site, `SameSite=Lax`, `HttpOnly` (only the server reads it). It is a
+  preference, not a credential, so the cookie is not marked `Secure`: it also has to work on the
+  plain-http address local work uses. The choice wins over `UI_DEFAULT`.
+- **Everyone.** `UI_DEFAULT` (above) is the look for a person who has not pressed the button.
+  `classic` is the default and takes everyone back; `next` shows the new look to everyone who has
+  not chosen.
+- **Only moved pages change.** A page is drawn in the new look only when it has been moved (the
+  `MIGRATED` list in `apps/web/lib/ui.ts`). While none has been, the button changes nothing but
+  its own words. A page still being built (`STAGED`) is shown only on a server with
+  `UI_STAGED=1`, and only to a person whose choice is `next`.
+- **In the tests.** `E2E_UI=next` starts every person in the browser tests with the cookie set to
+  `next`. CI runs the browser tests twice: the job `sandbox-and-browser` as they are, and the job
+  `browser-next` with `E2E_UI=next`. Only the first is a required check; the second tells whether
+  the new look breaks anything the old one does not.
+
 ## Fixed in the code
 
 - **The session cookie cache, 60 seconds.** Better Auth keeps a copy of the session in a cookie

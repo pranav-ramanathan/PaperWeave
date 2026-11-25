@@ -69,6 +69,42 @@ export function look(
   return cookie === 'next' || cookie === 'classic' ? cookie : fallback;
 }
 
+/**
+ * What the person has chosen, whether or not any page has been moved yet: the cookie when it is a
+ * choice, else the setting. This is what the switch on the papers page shows; `look` is what a
+ * page is drawn in.
+ */
+export function chosen(cookie: string | undefined, fallback: Look): Look {
+  return cookie === 'next' || cookie === 'classic' ? cookie : fallback;
+}
+
+/** The choice of the person asking (see `chosen`). */
+export async function chosenLook(): Promise<Look> {
+  return chosen((await cookies()).get(UI_COOKIE)?.value, uiDefault());
+}
+
+/**
+ * The value the switch's form sends: "next" or "classic" and nothing else, so that a forged post
+ * cannot put anything else in the cookie.
+ */
+export function asLook(value: unknown): Look {
+  if (value === 'next' || value === 'classic') return value;
+  throw new Error('The look must be "next" or "classic"');
+}
+
+/**
+ * How the choice is kept. A year, for the whole site, and not sent with a request from another
+ * site (Lax). Only the server reads it, so scripts need not (httpOnly). It is a preference, not a
+ * credential, so it is not Secure-only: it must also work on the plain-http address the tests
+ * and local work use.
+ */
+export const UI_COOKIE_OPTIONS = {
+  httpOnly: true,
+  sameSite: 'lax',
+  path: '/',
+  maxAge: 60 * 60 * 24 * 365,
+} as const;
+
 /** The look of a page for the person asking. `page` is the name the page is listed under. */
 export async function ui(page: string): Promise<Look> {
   // The setting is read even for a page that is not moved, so that a wrong one is found at once.
