@@ -108,6 +108,14 @@
 .review > section > button {
   justify-self: start;
 }
+/* A button's words wrap in the panel (the button is made to be as tall as they need, min-h-*), so
+   that a long name at twice the text size is not wider than the panel and does not make the page
+   scroll sideways at 320 px. */
+.review button {
+  max-width: 100%;
+  white-space: normal;
+  text-align: center;
+}
 .review ul,
 .review ol {
   margin: 0;
