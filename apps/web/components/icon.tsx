@@ -21,6 +21,7 @@ export {
   Sparkles,
   TriangleAlert,
   MessageSquare,
+  Monitor,
   Moon,
   Sun,
   X,

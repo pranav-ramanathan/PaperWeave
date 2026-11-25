@@ -2,6 +2,7 @@ import { TEMPLATES, type listProjects } from '@paperweave/server';
 import { AppBar } from '../../components/app-bar';
 import { Icon, MessageSquare } from '../../components/icon';
 import { LookProvider } from '../../components/look';
+import { ThemeSwitch } from '../../components/theme-switch';
 import { Badge } from '../../components/ui/badge';
 import { Input } from '../../components/ui/input';
 import { Label } from '../../components/ui/label';
@@ -41,6 +42,7 @@ export default function NextPapers(props: {
           <AppBar home={null}>
             <span className="text-muted-foreground [overflow-wrap:anywhere]">{email}</span>
             <SignOut variant="ghost" />
+            <ThemeSwitch />
           </AppBar>
           <div className="mx-auto grid max-w-6xl grid-cols-[minmax(0,1fr)] content-start gap-x-10 gap-y-8 px-4 py-8 lg:grid-cols-[minmax(0,1fr)_21rem] lg:py-12">
             <div className="min-w-0">

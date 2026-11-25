@@ -6,11 +6,25 @@
 // do; with it off, that nothing of them shows. Each group runs when its setting is the one the
 // server has; none is skipped for a reason that is not the setting.
 import { expect, type Page, test } from '@playwright/test';
+import { readFileSync } from 'node:fs';
+import { resolve } from 'node:path';
 import { audit, emailedLink, person, signIn, sticksOut } from './helpers';
 import { enlarged, lost, spaced } from './look';
 
 type Person = Awaited<ReturnType<typeof person>>;
 const ON = process.env.VERSIONS === '1';
+/**
+ * One of the lists of pages in apps/web/lib/ui.ts, read from the source (the module itself needs
+ * Next to load, which a spec does not have).
+ */
+const pagesIn = (list: 'MIGRATED' | 'STAGED') => {
+  const source = readFileSync(resolve(import.meta.dirname, '../../apps/web/lib/ui.ts'), 'utf8');
+  const body = new RegExp(`export const ${list}: readonly string\\[\\] = \\[([^\\]]*)\\]`).exec(
+    source,
+  )?.[1];
+  if (body === undefined) throw new Error(`apps/web/lib/ui.ts has no ${list} list`);
+  return [...body.matchAll(/'([^']+)'/g)].map((m) => m[1]);
+};
 const said = (page: Page) =>
   page.locator('.history-said [role=status], .history-said [role=alert]');
 const numberIn = (text: string) => Number(/(\d+)/.exec(text)![1]);
@@ -321,6 +335,62 @@ if (ON) {
     await owner.page.getByRole('button', { name: 'More for version renamed-by-hand' }).click();
     await expect(owner.page.getByRole('menuitem', { name: 'Rename' })).toBeVisible();
     await expect(owner.page.getByRole('menuitem', { name: 'Delete' })).toBeVisible();
+  });
+
+  test('the switcher in the editor lands on the same file, or on the paper page', async ({
+    browser,
+  }) => {
+    // The switcher is in the new look's app bar: the editor must be in the new look, which is when
+    // the run has chosen it and the page is migrated, or is staged and the server has UI_STAGED=1.
+    test.skip(
+      process.env.E2E_UI !== 'next' ||
+        !(
+          pagesIn('MIGRATED').includes('file') ||
+          (pagesIn('STAGED').includes('file') && process.env.UI_STAGED === '1')
+        ),
+      'the editor is not in the new look in this run',
+    );
+    test.setTimeout(300_000);
+    const owner = await person(browser, 'ver-editor');
+    const { page } = owner;
+    const paper = await newPaper(owner);
+    await addFile(page, paper, 'notes.tex');
+    await startNow(page, paper, 'camera-ready');
+    await page.getByRole('link', { name: 'Open the version' }).click();
+    await expect(page.getByRole('button', { name: 'Version: camera-ready' })).toBeVisible();
+    const version = page.url().split('?')[0];
+    await addFile(page, version, 'only-here.tex');
+
+    const files = page.getByRole('navigation', { name: 'Files' });
+    const editorOf = (name: string) => page.getByRole('region', { name: `Editor for ${name}` });
+
+    // From main's notes.tex: the same file in the version, a file of its own there.
+    await page.goto(paper);
+    await page.getByRole('link', { name: 'notes.tex' }).first().click();
+    await expect(editorOf('notes.tex')).toBeVisible();
+    await expect(page.locator('main')).toHaveAttribute('data-ui', 'next');
+    const mainFile = page.url().split('?')[0];
+    await page.getByRole('button', { name: 'Version: main' }).click();
+    await page.getByRole('menuitem', { name: 'camera-ready' }).click();
+    await expect(editorOf('notes.tex')).toBeVisible();
+    expect(page.url()).toMatch(new RegExp(`^${version}/files/[0-9a-f-]{36}$`));
+    expect(page.url()).not.toBe(mainFile);
+    await expect(page.getByRole('button', { name: 'Version: camera-ready' })).toBeVisible();
+
+    // And back: the same file of main.
+    await page.getByRole('button', { name: 'Version: camera-ready' }).click();
+    await page.getByRole('menuitem', { name: /^main/ }).click();
+    await expect(page).toHaveURL(mainFile);
+
+    // A file only the version has: main's paper page.
+    await page.goto(version);
+    await page.getByRole('link', { name: 'only-here.tex' }).first().click();
+    await expect(editorOf('only-here.tex')).toBeVisible();
+    await expect(files.getByRole('link', { name: 'only-here.tex' })).toBeVisible();
+    await page.getByRole('button', { name: 'Version: camera-ready' }).click();
+    await page.getByRole('menuitem', { name: /^main/ }).click();
+    await expect(page).toHaveURL(paper);
+    await expect(page.getByRole('button', { name: 'Version: main' })).toBeVisible();
   });
 
   test('versions at 320 px, spaced, twice as big, and clean for axe', async ({ browser }) => {

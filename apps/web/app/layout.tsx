@@ -10,6 +10,7 @@ import './legacy.css';
 import './next.css';
 import './functional.css';
 import { WENT } from '../lib/leaving';
+import { theme } from '../lib/theme';
 import { fontClasses } from './fonts';
 import Fresh from './Fresh';
 import Waiting from './Waiting';
@@ -54,9 +55,13 @@ export default async function Layout({ children }: { children: ReactNode }) {
   await connection();
   // For the editors, which add style sheets of their own: see lib/nonce.ts.
   const nonce = (await headers()).get('x-nonce') ?? undefined;
+  // The new look's colours, chosen by cookie: on <html> from the first byte, so there is no flash
+  // (lib/theme.ts). No choice, no attribute: the style sheet follows the device. Classic pages never
+  // read it.
+  const chosen = await theme();
   return (
     // The classes only declare the new look's font variables (app/fonts); the old look never uses them.
-    <html lang="en" className={fontClasses}>
+    <html lang="en" className={fontClasses} data-theme={chosen ?? undefined}>
       <head>
         <meta property="csp-nonce" nonce={nonce} />
       </head>
