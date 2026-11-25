@@ -14,7 +14,9 @@ import {
 } from '@playwright/test';
 
 export const MAIL = process.env.MAILPIT_URL ?? 'http://localhost:8025';
-export const run = Date.now().toString(36);
+// Each worker process loads this file itself. The worker's number keeps two workers that start
+// in the same millisecond from sharing addresses and names.
+export const run = `${Date.now().toString(36)}w${process.env.TEST_PARALLEL_INDEX ?? '0'}`;
 export const address = (who: string) => `${who}-${run}@example.org`;
 
 /** The first link in the newest email sent to an address. */
