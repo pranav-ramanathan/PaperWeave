@@ -83,8 +83,10 @@
 }
 .toolbar [role='group'] {
   display: flex;
+  flex-wrap: wrap;
   align-items: center;
   gap: 1px;
+  min-width: 0;
 }
 .toolbar [role='group'] + [role='group'] {
   padding-inline-start: 0.5rem;
@@ -109,6 +111,13 @@
 }
 .toolbar button:hover {
   background: var(--muted);
+}
+/* Narrow: the groups wrap under one another, so no rule between them. */
+@media (max-width: 40rem) {
+  .toolbar [role='group'] + [role='group'] {
+    padding-inline-start: 0;
+    border-inline-start: 0;
+  }
 }
 /* The View switch: two words as one segmented control; the one in use is raised on the sheet. */
 .toolbar [role='group'][aria-label='View'] {
