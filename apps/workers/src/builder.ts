@@ -152,8 +152,10 @@ export function buildNext(
     if (!job) return false;
     const finish = (fields: Record<string, unknown>) => {
       const names = Object.keys(fields);
+      // clock_timestamp(), not now(): the whole build is one transaction, and now() is when
+      // it began, which is when the build was picked up, not when it finished.
       return db.query(
-        `update builds set finished_at = now(), ${names.map((n, i) => `${n} = $${i + 2}`).join(', ')} where id = $1`,
+        `update builds set finished_at = clock_timestamp(),${names.map((n, i) => `${n} = $${i + 2}`).join(', ')} where id = $1`,
         [job.id, ...Object.values(fields)],
       );
     };

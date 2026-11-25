@@ -16,7 +16,7 @@ function paper(buildMs = 1500) {
   const gets: number[] = [];
   // What the server says to the next automatic request, once, instead of building.
   // `cutAt`: a worker that builds a paper as it stood at that mark, whatever has been typed since.
-  const server = { refuse: '', down: false, cutAt: null as number | null };
+  const server = { refuse: '', down: false, status: 0, cutAt: null as number | null };
   const view = (b: Made | null) =>
     b && {
       id: b.id,
@@ -32,6 +32,10 @@ function paper(buildMs = 1500) {
   vi.stubGlobal('fetch', async (_url: string, init?: { method?: string }) => {
     await sleep(L);
     if (server.down) return answer({}, 503);
+    if (server.status && init?.method !== 'POST') {
+      gets.push(Date.now());
+      return answer({ error: 'Not found.' }, server.status);
+    }
     if (init?.method !== 'POST') {
       gets.push(Date.now());
       return answer({ latest: view(latest), lastGood: view(lastGood), edits: `${edits}` });
@@ -240,6 +244,48 @@ test('a server that stops answering is said so after two tries, and unsaid when 
   p.server.down = false;
   await p.wait(6000);
   expect(p.said.problem).toBe('');
+  p.pane.stop();
+});
+
+test('one "not found" does not stop the asking; the next answer is heard', async () => {
+  const p = await quiet();
+  p.server.status = 404;
+  await p.wait(1);
+  p.gets.length = 0;
+  await p.wait(5100);
+  expect(p.gets.length).toBe(1); // asked at the quiet rate, not stopped
+  p.server.status = 0;
+  p.heard.length = 0;
+  await p.wait(5100);
+  expect(p.gets.length).toBe(2);
+  expect(p.heard.length).toBeGreaterThanOrEqual(1);
+  p.pane.stop();
+});
+
+test('two "not found" in a row stop the asking for good', async () => {
+  const p = await quiet();
+  p.server.status = 404;
+  await p.wait(20_000);
+  const n = p.gets.length;
+  expect(n).toBe(2);
+  p.server.status = 0;
+  await p.wait(30_000);
+  expect(p.gets.length).toBe(n);
+  p.pane.stop();
+});
+
+test('"not found", an answer, "not found" does not stop the asking', async () => {
+  const p = await quiet();
+  p.server.status = 404;
+  await p.wait(6000);
+  p.server.status = 0;
+  await p.wait(5100);
+  p.server.status = 404;
+  await p.wait(5100);
+  p.server.status = 0;
+  p.gets.length = 0;
+  await p.wait(20_000);
+  expect(p.gets.length).toBeGreaterThanOrEqual(3);
   p.pane.stop();
 });
 

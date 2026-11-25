@@ -106,7 +106,7 @@ export function drawNext(pool: pg.Pool, store: BlobStore, image: string): Promis
       });
       await db.query(
         `update charts set status = 'drawn', problem = null, drawn_digest = $2, left_out = $3,
-           drawn_at = now() where id = $1`,
+           drawn_at = clock_timestamp() where id = $1`,
         [job.id, table.version, leftOut],
       );
     } catch (err) {

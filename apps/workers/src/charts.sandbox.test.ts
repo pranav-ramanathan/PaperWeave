@@ -112,8 +112,22 @@ test('a chart is drawn from approved data into files of the paper, which a build
   expect(Date.now() - Date.parse(since)).toBeLessThan(60_000);
   expect(await code(chartPng(t.pool, store, users.owner.id, p.id, id))).toBe('not_found');
 
+  const began = Date.now();
   expect(await drawNext(t.pool, store, image)).toBe(true);
+  const ended = Date.now();
   expect(await drawNext(t.pool, store, image)).toBe(false);
+  // Drawn when it was drawn, not when the worker took it up (the transaction's start).
+  const drawn = (
+    await t.pool.query(
+      `select c.drawn_at as c, (select max(drawn_at) from chart_draws where project_id = $1) as d
+       from charts c where c.id = $2`,
+      [p.id, id],
+    )
+  ).rows[0];
+  for (const at of [drawn.c, drawn.d]) {
+    expect(at.getTime()).toBeGreaterThan(began + (ended - began) / 2);
+    expect(at.getTime()).toBeLessThanOrEqual(ended + 50);
+  }
   expect(await charts(p)).toMatchObject([
     {
       status: 'drawn',

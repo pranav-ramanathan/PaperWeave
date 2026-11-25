@@ -548,12 +548,12 @@ test('someone taken off the paper while a file is open is told, and the page sto
   // The build pane asks the server again, and is told "not found". (The panels for comments and
   // proposals ask only when it says there is something new to read.)
   const panels = /\/(threads|proposals|builds)(\?|$)/;
-  const told = ['builds'].map((what) =>
-    page.waitForResponse(
-      (r) => r.url().includes(`/${what}`) && panels.test(r.url()) && r.status() === 404,
-      { timeout: 30_000 },
-    ),
-  );
+  // Twice: one "not found" may be the server recompiling, so it is the second, in a row, that
+  // stops the pane.
+  let notFound = 0;
+  page.on('response', (r) => {
+    if (r.url().includes('/builds') && panels.test(r.url()) && r.status() === 404) notFound++;
+  });
   await owner.page.reload();
   await owner.page.getByRole('button', { name: `Remove ${editor.email}` }).click();
   await expect(status(page)).toHaveText(
@@ -565,7 +565,7 @@ test('someone taken off the paper while a file is open is told, and the page sto
     /^You are no longer a member of this paper, or its owner has deleted it\./,
   );
   await expect(source(page)).toHaveAttribute('contenteditable', 'false');
-  await Promise.all(told);
+  await expect.poll(() => notFound, { timeout: 30_000 }).toBeGreaterThanOrEqual(2);
   // Then it stops. Before, a page left open went on asking every few seconds, for as long as it
   // stayed open, and was told "not found" each time.
   let asked = 0;

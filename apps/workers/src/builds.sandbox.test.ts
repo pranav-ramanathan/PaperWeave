@@ -176,6 +176,30 @@ test('a paper builds to a PDF, and the same inputs are never built twice', async
   expect(await build(project)).toMatchObject({ status: 'succeeded', cached: false });
 });
 
+test('a build records when it finished, not when the worker picked it up', async () => {
+  const { project, main } = await paper();
+  // Words nobody has built before, so that the build is a real one and takes its time.
+  await edit(main, (text) =>
+    text.insert(text.toString().indexOf('Collaborative'), `Unbuilt ${Date.now()}. `),
+  );
+  const now = async () =>
+    (await t.pool.query('select clock_timestamp() as at')).rows[0].at.getTime() as number;
+  const id = await requestBuild(t.pool, owner.id, project);
+  const began = await now();
+  expect(await buildNext(t.pool, store, image)).toBe(true);
+  const ended = await now();
+  const row = (await t.pool.query('select finished_at from builds where id = $1', [id])).rows[0];
+  const { latest } = await latestBuilds(t.pool, owner.id, project);
+  expect(latest).toMatchObject({ id, status: 'succeeded', cached: false });
+  // The build took a while: the test is of nothing if it did not.
+  expect(ended - began).toBeGreaterThan(1000);
+  const finished = row.finished_at.getTime() as number;
+  expect(finished).toBeLessThanOrEqual(ended);
+  // Within a second of the end: it was the transaction's start (`now()`) before.
+  expect(ended - finished).toBeLessThan(1000);
+  expect(finished - began).toBeGreaterThan(1000);
+});
+
 test('a build is up to date with a paper whose text it has, however the log has moved', async () => {
   const { project, main } = await paper('ieee-multifile');
   const intro = (await listFiles(t.pool, owner.id, project)).find(

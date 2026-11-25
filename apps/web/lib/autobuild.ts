@@ -44,6 +44,8 @@ export function autobuild(opts: {
   let stop = false;
   // Polls in a row that got no answer at all.
   let silent = 0;
+  // Polls in a row that were answered "not found".
+  let gone = 0;
   // The paper's mark at the last poll, to see that it has been still since.
   let seen: string | null = null;
   // The paper's mark, and the revision of the newest build, when this pane last asked for a
@@ -106,8 +108,13 @@ export function autobuild(opts: {
     // Whether the answer can be of the paper as this editor left it.
     const wasMine = mine;
     const res = await fetch(opts.url, { signal: AbortSignal.timeout(15_000) }).catch(() => null);
-    if (notTheirs(res)) return STOP;
+    // One "not found" may be the dev server compiling; the second in a row is someone taken off
+    // the paper. Until then, the next poll comes at the usual rate.
+    gone = notTheirs(res) ? gone + 1 : 0;
+    if (gone >= 2) return STOP;
     if (stop) return;
+    // Asked again at the quiet rate, whatever was under way.
+    if (gone) busy = false;
     // A 5xx counts as no answer: it is what the server says when the database did not answer.
     silent = res && res.status < 500 ? 0 : silent + 1;
     if (silent >= 2) opts.problem(NO_ANSWER);

@@ -489,8 +489,10 @@ export async function recordDraw(
   draw: Omit<ChartDraw, 'drawnAt'>,
 ) {
   await db.query(
-    `insert into chart_draws (project_id, name, pdf_digest, png_digest, record)
-     select $1, $2, $3, $4, $5::jsonb where not exists (
+    // drawn_at is when it was drawn: the worker runs this inside the transaction that took the
+    // chart, where the column's default `now()` would be when the chart was picked up.
+    `insert into chart_draws (project_id, name, pdf_digest, png_digest, record, drawn_at)
+     select $1, $2, $3, $4, $5::jsonb, clock_timestamp() where not exists (
        select 1 from chart_draws
        where project_id = $1 and name = $2 and pdf_digest = $3 and png_digest = $4 and record = $5::jsonb)`,
     [projectId, name, draw.pdf, draw.png, JSON.stringify(draw.record)],

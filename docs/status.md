@@ -7699,6 +7699,43 @@ pointing to the new page).
 - **Not tried.** Anything on Railway itself, including a bucket, the TCP proxy's certificate and a
   Sandbox as a worker. The page lists them.
 
+## One "not found" no longer stops the build pane
+
+- **What was wrong.** `poll` in `apps/web/lib/autobuild.ts` stopped the pane for good on any
+  "not found" from the paper's builds (`notTheirs`, see "Someone taken off the paper while a
+  file is open"). One answer of that kind while the dev server was recompiling left the pane at
+  "Compiling…", "Compile now" disabled and the old PDF, until the page was loaded again.
+- **Now** the pane stops after two "not found" in a row, as it treats a server error (`silent`);
+  any other answer resets the count. After the first it asks again at the quiet rate (five
+  seconds). Someone really taken off the paper is still stopped, one poll later. Nothing else
+  uses `whileShown` or `notTheirs`, so nothing else changed.
+- **Held by** `autobuild.test.ts` (one "not found" keeps asking; two in a row stop; "not found",
+  an answer, "not found" keeps asking) and a browser test (`pdfstale.spec`), which failed on the
+  old code with the pane at "Compiling…". The browser test for someone taken off the paper
+  (`recover.spec`) now waits for two "not found" before it checks that the asking has stopped.
+- **Not done.** A server that answers "not found" to every second poll is never stopped.
+
+## Build and chart times are when they happened
+
+- **What was wrong.** The worker takes and builds a build in one transaction, and Postgres'
+  `now()` is the time that transaction began. `finish()` in `apps/workers/src/builder.ts`
+  therefore wrote `finished_at` as when the build was picked up. Charts did the same:
+  `charts.drawn_at` and, through its column default, `chart_draws.drawn_at`.
+- **Now** these three are `clock_timestamp()`. Left as `now()`, on purpose: the "last hour"
+  windows in `takeBuild` and `drawNext` (the fairness count) and in the build metrics, which
+  want one fixed instant per statement; and `created_at` and `asked_at`, which are when the
+  request was made (a different transaction). Files written by a chart's drawing keep the
+  default `now()` in `created_at`: it is the time the drawing began, a few seconds early.
+- **Read by.** Only `builds.ts` (`finishedAt`, and the metrics' "finished in the last hour"
+  counts), and the chart pages' "Drawn <date>" and the list of drawings, which show a date or
+  a minute. No duration is computed from `finished_at` anywhere, and no figure in
+  `docs/benchmarks.md` is derived from it. Rows already written keep the early time; the
+  hourly counts for a build that crossed the hour could differ, by at most the build time.
+- **Held by** sandbox tests: `builds.sandbox.test` ("a build records when it finished") and the
+  chart test, which fail on the old code (finished 1.9 s before the end of a 2.6 s test build;
+  `drawn_at` at the start of the drawing).
+- **Not done.** Old rows were not corrected; the real time is not recoverable.
+
 ## Text spacing, text size and a narrow window were not checked
 
 - **What was wrong.** `docs/accessibility.md` listed three things as not checked: WCAG 1.4.12 text
