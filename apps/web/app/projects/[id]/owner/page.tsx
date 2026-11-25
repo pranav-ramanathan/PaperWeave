@@ -4,6 +4,8 @@ import Link from '../../../Go';
 import Once from '../../../Once';
 import Result from '../../../Result';
 import { db, requireUser } from '../../../../lib/server';
+import { FormPage, Say } from '../../../../components/form-page';
+import { ui } from '../../../../lib/ui';
 import { transferOwnerAction } from '../../actions';
 
 export const dynamic = 'force-dynamic';
@@ -27,6 +29,7 @@ export default async function HandOver({
       if (err.code === 'not_found') notFound();
       return null;
     });
+  const look = await ui('owner');
   const back = (
     <Link prefetch={false} href={`/projects/${id}`}>
       Back to the paper
@@ -34,21 +37,15 @@ export default async function HandOver({
   );
   if (!found || found.project.role !== 'owner')
     return (
-      <main className="page">
-        <header className="bar">
-          <h1>Hand the paper to someone</h1>
-          {back}
-        </header>
-        <p role="alert">Only the owner of a paper can hand it to someone else.</p>
-      </main>
+      <FormPage look={look} title="Hand the paper to someone" back={back}>
+        <Say look={look} role="alert">
+          Only the owner of a paper can hand it to someone else.
+        </Say>
+      </FormPage>
     );
   const others = found.members.filter((m) => m.role !== 'owner');
   return (
-    <main className="page">
-      <header className="bar">
-        <h1>Hand “{found.project.name}” to someone</h1>
-        {back}
-      </header>
+    <FormPage look={look} title={<>Hand “{found.project.name}” to someone</>} back={back}>
       {error && <Result alert>{error}</Result>}
       {others.length === 0 ? (
         <p>
@@ -81,6 +78,6 @@ export default async function HandOver({
           </form>
         </>
       )}
-    </main>
+    </FormPage>
   );
 }
