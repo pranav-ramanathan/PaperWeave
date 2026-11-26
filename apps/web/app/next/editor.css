@@ -16,17 +16,37 @@
 .workspace > nav[aria-label='Files'] {
   grid-area: tree;
 }
-.workspace > section[aria-label^='Editor for'] {
-  grid-area: text;
+/* The text and the PDF are inside the panes (Panes.tsx), the tree is the grid's own. */
+.workspace section[aria-label^='Editor for'] {
   min-width: 0;
 }
-.workspace > .build {
-  grid-area: pdf;
+.workspace .build {
   min-width: 0;
+}
+.panes {
+  grid-area: panes;
+  min-width: 0;
+}
+/* Below 60rem the panes are stacked, as in the old look: no handle, and plain blocks one under
+   another whatever sizes the library has put on them (hence the !important: they are inline
+   styles). From 60rem the library's own flex row is what is wanted, and nothing is said. */
+@media (max-width: 59.99rem) {
+  .panes,
+  .panes > [data-panel],
+  .panes > [data-panel] > .pane {
+    display: block !important;
+    flex: none !important;
+    overflow: visible !important;
+    max-height: none !important;
+    max-width: none !important;
+  }
+  .panes > [data-separator] {
+    display: none !important;
+  }
 }
 /* A gutter for the text's column where the page flows (from 60rem it has its own, below). The
    review panel keeps its full width: review.css. */
-.workspace > section[aria-label^='Editor for'] {
+.workspace section[aria-label^='Editor for'] {
   padding: 0.75rem;
 }
 .source,
@@ -121,31 +141,25 @@ span.files-entry {
   color: var(--accent-foreground);
 }
 
-/* Wide: three columns. A fourth, "review", is for the review panel (T22) from 85rem: it is auto,
-   so it is nothing wide while nothing is in it. */
+/* Wide: the tree, and beside it the panes (the text with, from 85rem, the review panel in it, and
+   the PDF), which the handle between them (T53) lets a person size. */
 @media (min-width: 60rem) {
   .workspace {
     display: grid;
-    grid-template-columns: 14rem minmax(0, 1fr) minmax(0, 1fr);
-    grid-template-areas: 'tree text pdf';
+    grid-template-columns: 14rem minmax(0, 1fr);
+    grid-template-areas: 'tree panes';
     align-items: start;
   }
   .workspace > nav[aria-label='Files'] {
     border-inline-end: 1px solid var(--border);
   }
-  .workspace > .build {
+  .workspace .build {
     border-inline-start: 1px solid var(--border);
     padding: 0.75rem;
     background: var(--desk);
   }
-  .workspace > section[aria-label^='Editor for'] {
+  .workspace section[aria-label^='Editor for'] {
     padding: 0.75rem;
-  }
-}
-@media (min-width: 85rem) {
-  .workspace {
-    grid-template-columns: 14rem minmax(0, 1.3fr) auto minmax(0, 1fr);
-    grid-template-areas: 'tree text review pdf';
   }
 }
 
@@ -165,30 +179,35 @@ span.files-entry {
     align-items: stretch;
   }
   .workspace > nav[aria-label='Files'],
-  .workspace > section[aria-label^='Editor for'],
-  .workspace > .build {
+  .workspace section[aria-label^='Editor for'],
+  .workspace .build {
     min-height: 0;
+    height: 100%;
     overflow: auto;
   }
-  .workspace > .build {
+  /* A pane's frame is the panel's, and what is in it scrolls by itself. */
+  .panes > [data-panel] > .pane {
+    overflow: hidden;
+  }
+  .workspace .build {
     display: flex;
     flex-direction: column;
   }
-  .workspace > .build .pdf {
+  .workspace .build .pdf {
     flex: 1 1 0;
     min-height: 16rem;
     height: auto;
   }
   /* The text fills what is left of its column, under the bar and the toolbar. The section is a
      column here (from 85rem review.css makes it a grid with the same last row). */
-  .workspace > section[aria-label^='Editor for'] {
+  .workspace section[aria-label^='Editor for'] {
     display: flex;
     flex-direction: column;
   }
-  .workspace > section[aria-label^='Editor for'] > :not(#text) {
+  .workspace section[aria-label^='Editor for'] > :not(#text) {
     flex: none;
   }
-  .workspace > section[aria-label^='Editor for'] > #text {
+  .workspace section[aria-label^='Editor for'] > #text {
     display: flex;
     flex: 1 0 auto;
     flex-direction: column;

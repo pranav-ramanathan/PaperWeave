@@ -7978,4 +7978,26 @@ pointing to the new page).
 - **Left alone.** On Tailwind buttons the focus ring takes 120 ms to change colour. In light, the
   shared outline Button has a faint border.
 - **Next.** What remains waits for the owner: T45 (versions on by default), T51 (the new look by
-  default), T52 (remove the classic look) and T53 (resizable panes, optional, a new dependency).
+  default), T52 (remove the classic look) and T53 (resizable panes, now done, below).
+
+## Resizable panes (T53)
+
+- **What.** In the new look, from 60rem, a handle between the text (with the review panel in it)
+  and the PDF sizes the two. `react-resizable-panels` 4.20.0 is the one new dependency;
+  `components/ui/resizable.tsx` is the wrapper, `files/[fileId]/Panes.tsx` the use, and
+  `app/next/editor.css` and `review.css` lay it out (the text's section is its own grid of the
+  text and the panel now, not a subgrid of the page's). The sizes are kept in `localStorage`
+  (this browser's) and set once the page is up, so the server's page is the same for everyone.
+  The classic look is not touched: `page.tsx` makes `Panes` only for the new look.
+- **Cost of a drag.** `resizePreviewMode="separator"`: a line follows the pointer, and the panes
+  (so the PDF's layout) change on release. A key press is its own release.
+- **Kept accessible.** The handle is a `role=separator` named "Resize the editor and the PDF",
+  with the arrow keys, Home and End, and the page's 2 px focus outline. It is after the text and
+  before the PDF in the page's order, so the Tab counts to the text are as they were. Below 60rem
+  it is `display: none` (no stop, no name) and the panes are stacked blocks as before. The
+  library adopts a style sheet rather than adding a `<style>`, so it needs no nonce and the policy
+  is not changed. `resize.spec` covers drag, release, reload, keys, order, narrow, and axe in
+  light and dark.
+- **Not done.** One handle only: the file tree and the review panel are not sized (the panel is
+  still 14 to 20rem inside the text's pane). A double click resets to the library's default,
+  which is the 55/45 default. Sizes do not follow a person to another browser.
