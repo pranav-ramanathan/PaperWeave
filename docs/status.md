@@ -8067,10 +8067,10 @@ pointing to the new page).
 - **Kept.** Every setup and run instruction the old README had, unchanged: install, lint,
   typecheck and test; the compose services, `.env.example`, migrate and `pnpm dev`; the sync
   server; the TeX image and the workers; `SPIKE=1`; the sandbox and browser tests; and the test slots.
-- **Screenshots.** Four, in `docs/images/` (`editor-visual-light.png`, `editor-source-dark.png`,
-  `papers-list-light.png`, `chart-light.png`), each under 250 KB. They are from the T52 test
-  fixtures at 1440 wide. The pink blocks that the capture put over addresses and times were
-  filled with a neutral grey; nothing else was changed.
+- **Screenshots.** Four, in `docs/images/` (`editor-visual-light.png`, `editor-dark.png`,
+  `papers-list-light.png`, `chart-light.png`), each under 250 KB. They were taken by
+  `tests/ui-shots.spec.ts` at 1440 wide from its test fixtures, with its masks off for once, so
+  addresses and times show as the fixtures have them (`@example.org`).
 - **Badges.** CI is the workflow badge for `ci.yml`. The others state the engine and tools in
   `package.json`. There is no licence badge because there is no `LICENSE` file, and no coverage
   or version number.

@@ -16,7 +16,7 @@ source, a source editor, and the compiled PDF, side by side.
 [Quick start](#quick-start) · [Features](#features) · [How it fits together](#how-it-fits-together) · [Docs](#documentation) · [Testing](#testing)
 
 <picture>
-  <source media="(prefers-color-scheme: dark)" srcset="docs/images/editor-source-dark.png">
+  <source media="(prefers-color-scheme: dark)" srcset="docs/images/editor-dark.png">
   <img src="docs/images/editor-visual-light.png" alt="The PaperWeave editor: the file tree, the visual editor, the review panel with a proposed change and a comment, and the compiled PDF" width="100%">
 </picture>
 
