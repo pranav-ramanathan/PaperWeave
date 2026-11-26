@@ -20,6 +20,7 @@ import { rootDir } from '@paperweave/latex';
 import BuildPane from './BuildPane';
 import FileEditor from './FileEditor';
 import Files, { FileName } from './Files';
+import Panes from './Panes';
 import { ThemeSwitch } from '../../../../../components/theme-switch';
 import { AppBar } from '../../../../../components/app-bar';
 import { LookProvider } from '../../../../../components/look';
@@ -84,6 +85,36 @@ async function FilePage({
   // The new look's menus (the version switcher) mount in the overlay root, inside <main>, where
   // its rules and colours are; without it they would go to <body>, outside both.
   const Overlays = look === 'next' ? OverlayRoot : Fragment;
+  const editor = (
+    <FileEditor
+      key={fileId}
+      projectId={id}
+      fileId={fileId}
+      visual={/\.(tex|ltx)$/i.test(file.path)}
+      macros={macros}
+      prose={prose}
+      words={words}
+      sourceOnly={!!report?.files.find((f) => f.path === file.path)?.sourceOnly}
+      path={file.path}
+      canWrite={file.canWrite}
+      role={project.role}
+      canComment={can(project.role, 'comment.write')}
+      canReview={canReview}
+      members={members
+        .filter((m) => m.userId !== user.id)
+        .map((m) => ({ userId: m.userId, email: m.email }))}
+      user={user.email}
+      syncUrl={process.env.SYNC_URL ?? 'ws://localhost:4100'}
+    />
+  );
+  const pdf = (
+    <BuildPane
+      projectId={id}
+      canBuild={can(project.role, 'build.run')}
+      files={files.map((f) => ({ id: f.id, path: f.path, readonly: f.readonly }))}
+      rootDir={rootDir(report?.root ?? '')}
+    />
+  );
   return (
     <main className="editor" data-ui={look}>
       <LookProvider look={look}>
@@ -133,32 +164,14 @@ async function FilePage({
           )}
           <div className="workspace">
             <Files projectId={id} fileId={fileId} files={tree} root={report?.root} />
-            <FileEditor
-              key={fileId}
-              projectId={id}
-              fileId={fileId}
-              visual={/\.(tex|ltx)$/i.test(file.path)}
-              macros={macros}
-              prose={prose}
-              words={words}
-              sourceOnly={!!report?.files.find((f) => f.path === file.path)?.sourceOnly}
-              path={file.path}
-              canWrite={file.canWrite}
-              role={project.role}
-              canComment={can(project.role, 'comment.write')}
-              canReview={canReview}
-              members={members
-                .filter((m) => m.userId !== user.id)
-                .map((m) => ({ userId: m.userId, email: m.email }))}
-              user={user.email}
-              syncUrl={process.env.SYNC_URL ?? 'ws://localhost:4100'}
-            />
-            <BuildPane
-              projectId={id}
-              canBuild={can(project.role, 'build.run')}
-              files={files.map((f) => ({ id: f.id, path: f.path, readonly: f.readonly }))}
-              rootDir={rootDir(report?.root ?? '')}
-            />
+            {look === 'next' ? (
+              <Panes text={editor} pdf={pdf} />
+            ) : (
+              <>
+                {editor}
+                {pdf}
+              </>
+            )}
           </div>
         </Overlays>
       </LookProvider>
