@@ -37,8 +37,13 @@
   border-radius: 999px;
   background: var(--ok-line);
 }
+/* Offline: the sign functional.css puts before it, not a dot with a sign inside it. */
 .editor-bar [role='status'][data-state='offline']::before {
-  background: var(--comment-line);
+  width: auto;
+  height: auto;
+  border-radius: 0;
+  background: none;
+  color: var(--comment);
 }
 .editor-bar [role='group'] {
   display: flex;
@@ -111,6 +116,15 @@
 }
 .toolbar button:hover {
   background: var(--muted);
+}
+.toolbar button:disabled,
+.editor-bar button:disabled,
+.editor-notice button:disabled {
+  opacity: 0.55;
+  cursor: not-allowed;
+}
+.toolbar button:disabled:hover {
+  background: transparent;
 }
 /* Narrow: the groups wrap under one another, so no rule between them. */
 @media (max-width: 40rem) {

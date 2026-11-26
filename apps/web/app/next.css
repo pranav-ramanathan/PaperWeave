@@ -302,12 +302,17 @@
     outline: 2px solid var(--ring);
     outline-offset: 2px;
   }
+  /* Nothing animates and nothing transitions. Not "a duration of 0.01 ms": an element that had no
+     transition then has one on every property (the initial transition-property is `all`), and a
+     property that is changed is read back at its old value until the next frame. zoom.spec's
+     "text twice as big" sets each element's font-size and reads the computed ones: it read the
+     size it had just removed, and doubled it again at every call (13px to 832px in six). */
   @media (prefers-reduced-motion: reduce) {
     *,
     *::before,
     *::after {
-      animation-duration: 0.01ms !important;
-      transition-duration: 0.01ms !important;
+      animation: none !important;
+      transition: none !important;
     }
   }
 }

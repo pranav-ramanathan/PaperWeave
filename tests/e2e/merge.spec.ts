@@ -572,6 +572,31 @@ if (ON) {
     await expect(notice(editor.page)).toHaveCount(1);
     await notice(editor.page).getByRole('button', { name: 'Dismiss' }).click();
     await expect(notice(editor.page)).toHaveCount(0);
+
+    // Offline with an edit of their own unsent while main is brought into the version again: the
+    // edit is held, as it is across a restore, and the words say it was a merge that came.
+    await typeIn(owner.page, paper, '% main once more\n', 'start');
+    await source(editor.page).click();
+    await editor.page.context().setOffline(true);
+    await expect(editorStatus(editor.page)).toContainText('Offline.');
+    await editor.page.keyboard.press('ControlOrMeta+Home');
+    await editor.page.keyboard.type('% typed offline\n');
+    await owner.page.goto(mergeAt(paper, version, true));
+    await upToDate(owner.page).click();
+    await expect(said(owner.page)).toContainText('Merged');
+    await editor.page.context().setOffline(false);
+    await expect(editorStatus(editor.page)).toContainText('changed by a merge', {
+      timeout: 30_000,
+    });
+    await expect(editorStatus(editor.page)).toContainText('not saved');
+    await expect(editorStatus(editor.page)).not.toContainText('restored');
+    await expect(
+      editor.page.getByRole('button', { name: 'Apply my edits to the merged paper' }),
+    ).toBeVisible();
+    await expect(editor.page.getByRole('button', { name: /restored paper/ })).toHaveCount(0);
+    await editor.page.getByRole('button', { name: 'Apply my edits to the merged paper' }).click();
+    await expect(editorStatus(editor.page)).toHaveText('All edits saved.', { timeout: 30_000 });
+    await expect(source(editor.page)).toContainText('% typed offline');
   });
 } else {
   test('with VERSIONS off there is no merge page', async ({ browser }) => {

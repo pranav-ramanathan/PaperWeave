@@ -56,6 +56,8 @@ import {
   restoreChanges,
   restoreHistory,
   restoredWords,
+  heldWords,
+  applyWords,
   whyGone,
 } from '../../../../../lib/restored';
 import { setTyping } from '../../../../../lib/typing';
@@ -1279,7 +1281,7 @@ export default function FileEditor(props: {
     : sync.tooLarge
       ? 'An edit of yours is too large to save, so your unsaved edits cannot be kept. Copy what you need from them, then discard them. To add a large file to the paper, upload it.'
       : sync.held
-        ? 'This paper was restored to an earlier revision while you were offline. Your edits from before that are not saved.'
+        ? heldWords(restore)
         : sync.signedOut
           ? `You are signed out. Sign in again in another tab and this page will carry on. ${sync.unsaved ? 'Your edits are kept here until then.' : ''}`.trim()
           : sync.role
@@ -1321,7 +1323,7 @@ export default function FileEditor(props: {
           <span role="group" aria-label="Your unsaved edits">
             {sync.held && !sync.tooLarge && (
               <button type="button" onClick={() => keepEdits.current()}>
-                Apply my edits to the restored paper
+                {applyWords(restore)}
               </button>
             )}
             <button type="button" onClick={() => discardEdits.current()}>

@@ -1,7 +1,9 @@
 import type { RestoreNote } from '@paperweave/server';
 import { expect, test } from 'vitest';
 import {
+  applyWords,
   goneWords,
+  heldWords,
   isNews,
   restoreChanges,
   restoreHistory,
@@ -141,4 +143,19 @@ test('a merge is said in its own words: who merged which version into which pape
 test('the history page opens on the restore, or on the timeline if the paper before was not kept', () => {
   expect(restoreHistory('p1', note())).toBe('/projects/p1/history?from=id-8&to=id-9');
   expect(restoreHistory('p1', note({ kept: null }))).toBe('/projects/p1/history');
+});
+
+test('edits held across a restore or a merge are told which it was', () => {
+  // The restore's words are unchanged, and are what is said when no note came with the news.
+  const restore =
+    'This paper was restored to an earlier revision while you were offline. Your edits from before that are not saved.';
+  expect(heldWords(note())).toBe(restore);
+  expect(heldWords(null)).toBe(restore);
+  expect(applyWords(note())).toBe('Apply my edits to the restored paper');
+  expect(applyWords(null)).toBe('Apply my edits to the restored paper');
+  const merge = { paper: 'v1', version: 'camera-ready', revision: 4 };
+  expect(heldWords(note({ merge }))).toBe(
+    'This paper was changed by a merge while you were offline. Your edits from before that are not saved.',
+  );
+  expect(applyWords(note({ merge }))).toBe('Apply my edits to the merged paper');
 });
