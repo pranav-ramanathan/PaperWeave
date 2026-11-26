@@ -105,10 +105,11 @@ const members = async (projectId: string) =>
     )
   ).rows;
 
-test('the VERSIONS setting is on for 1, off for 0 or nothing, and an error for anything else', () => {
-  expect(versionsEnabled({})).toBe(false);
-  expect(versionsEnabled({ VERSIONS: '' })).toBe(false);
+test('the VERSIONS setting is on for 1 or nothing, off for 0, and an error for anything else', () => {
+  expect(versionsEnabled({})).toBe(true);
+  expect(versionsEnabled({ VERSIONS: '' })).toBe(true);
   expect(versionsEnabled({ VERSIONS: '0' })).toBe(false);
+  expect(versionsEnabled({ VERSIONS: ' 0 ' })).toBe(false);
   expect(versionsEnabled({ VERSIONS: ' 1 ' })).toBe(true);
   for (const bad of ['true', 'yes', '2', 'on'])
     expect(() => versionsEnabled({ VERSIONS: bad })).toThrow(/VERSIONS must be 1 or 0/);
@@ -116,7 +117,7 @@ test('the VERSIONS setting is on for 1, off for 0 or nothing, and an error for a
 
 test('with the setting off, no version is started, and nothing is made', async () => {
   const p = await paper();
-  for (const env of [{}, { VERSIONS: '0' }])
+  for (const env of [{ VERSIONS: '0' }, { VERSIONS: ' 0' }])
     expect(
       await code(startVersion(t.pool, store, users.owner.id, p.id, p.revision, 'x', { env })),
     ).toBe('not_found');

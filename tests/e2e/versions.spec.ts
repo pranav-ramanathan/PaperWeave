@@ -1,8 +1,8 @@
 // Versions in the pages (PLAN.md section 14.2, T39): the switcher, the list on the history page,
 // starting a version from a revision or from the paper as it is, renaming, deleting, and who may do
 // which. A version is a paper of its own that was begun at one of main's revisions. Everything is
-// behind the `VERSIONS` setting, which is off unless the server was started with VERSIONS=1 (the
-// new-look job in ci.yml does). So there are two groups of tests: with the setting on, what versions
+// behind the `VERSIONS` setting, which is on unless the server was started with VERSIONS=0 (one
+// step of the browser job in ci.yml does). So there are two groups of tests: with the setting on, what versions
 // do; with it off, that nothing of them shows. Each group runs when its setting is the one the
 // server has; none is skipped for a reason that is not the setting.
 import { expect, type Page, test } from '@playwright/test';
@@ -12,7 +12,8 @@ import { audit, emailedLink, person, signIn, sticksOut } from './helpers';
 import { enlarged, lost, spaced } from './look';
 
 type Person = Awaited<ReturnType<typeof person>>;
-const ON = process.env.VERSIONS === '1';
+// On unless the server was started with VERSIONS=0, as versionsEnabled reads it.
+const ON = process.env.VERSIONS?.trim() !== '0';
 /**
  * One of the lists of pages in apps/web/lib/ui.ts, read from the source (the module itself needs
  * Next to load, which a spec does not have).
