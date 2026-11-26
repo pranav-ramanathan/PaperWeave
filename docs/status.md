@@ -7978,6 +7978,19 @@ pointing to the new page).
 - **Left alone.** On Tailwind buttons the focus ring takes 120 ms to change colour. In light, the
   shared outline Button has a faint border.
 - **Next.** What remains waits for the owner: T45 (versions on by default), T51 (the new look by
+  default), T52 (remove the classic look) and T53 (resizable panes, optional, a new dependency).
+
+## Versions on by default (T45)
+
+- **What.** `VERSIONS` unset now means on, and `0` turns versions off for everyone (anything else
+  is still an error). This was the owner's decision (decision 18).
+- **Tests.** The specs read the setting the way `versionsEnabled` does. The new-look browser job
+  runs the whole suite with the default, versions on. The classic browser job runs it with
+  `VERSIONS=0`, as before, so the tests that check nothing of versions shows still run.
+- **Not done.** The old look has no version switcher (it was built in the new look only), so a
+  person who chooses the old look reaches versions from the history page alone. T51 makes the new
+  look the default and T52 removes the old one.
+
   default), T52 (remove the classic look) and T53 (resizable panes, now done, below).
 
 ## Resizable panes (T53)

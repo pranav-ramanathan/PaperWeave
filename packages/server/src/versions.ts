@@ -22,14 +22,14 @@ import type { Db } from './db.ts';
 export const MAX_VERSIONS = 10;
 
 /**
- * Whether versions are turned on: `VERSIONS` is `1` (on) or `0` or unset (off). Anything else is
- * a mistake in the deployment and stops the one that asks, rather than being read as one or the
- * other.
+ * Whether versions are turned on: `VERSIONS` is `1` or unset (on, the default) or `0` (off).
+ * Anything else is a mistake in the deployment and stops the one that asks, rather than being read
+ * as one or the other.
  */
 export function versionsEnabled(env: Record<string, string | undefined> = process.env): boolean {
   const value = env.VERSIONS?.trim();
-  if (value === undefined || value === '' || value === '0') return false;
-  if (value === '1') return true;
+  if (value === undefined || value === '' || value === '1') return true;
+  if (value === '0') return false;
   throw new Error(`VERSIONS must be 1 or 0, not "${value}"`);
 }
 

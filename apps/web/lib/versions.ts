@@ -1,6 +1,6 @@
 // What the pages offer about versions, in one place. A version is a paper of its own that was begun
 // at a revision of another (packages/server/src/versions.ts); everything here is behind the
-// `VERSIONS` setting (docs/settings.md), off by default, and with it off no page shows a trace.
+// `VERSIONS` setting (docs/settings.md), on by default; with it off (`0`) no page shows a trace.
 import { can, versionsEnabled, type Role, type Version } from '@paperweave/server';
 
 /** Whether versions are turned on. */

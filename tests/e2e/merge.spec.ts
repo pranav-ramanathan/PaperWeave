@@ -22,7 +22,8 @@ import {
 import { enlarged, lost, spaced } from './look';
 
 type Person = Awaited<ReturnType<typeof person>>;
-const ON = process.env.VERSIONS === '1';
+// On unless the server was started with VERSIONS=0, as versionsEnabled reads it.
+const ON = process.env.VERSIONS?.trim() !== '0';
 const said = (page: Page) => page.locator('.merge-said [role=status], .merge-said [role=alert]');
 const source = (page: Page) => page.locator('.editor .cm-content');
 const editorStatus = (page: Page) =>

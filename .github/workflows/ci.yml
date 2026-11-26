@@ -85,11 +85,18 @@ jobs:
       - run: docker build -t paperweave-tex infra/tex
       - run: docker compose -f infra/compose.yaml up -d --wait || (docker compose -f infra/compose.yaml logs --tail 60; exit 1)
       - run: pnpm exec playwright install --with-deps chromium
+      # VERSIONS=0: versions are on by default (T45), and the new-look job below runs the suite
+      # that way. This job runs it with them off, so that the tests that say nothing of versions
+      # shows (versions.spec, merge.spec, history-versions.spec) still run. The old look has no
+      # version switcher, so versions on are tested in the new look only.
       - run: pnpm e2e --project=e2e --shard=${{ matrix.shard }}/3
         env:
           E2E_WORKERS: 2
+          VERSIONS: 0
       - if: matrix.shard == 3
         run: pnpm e2e --project=mail-down --no-deps
+        env:
+          VERSIONS: 0
       # What each failed browser test's page looked like, kept for a week. The log alone says
       # which line failed, not what was on the screen.
       - if: failure()
@@ -128,19 +135,14 @@ jobs:
       - run: docker build -t paperweave-tex infra/tex
       - run: docker compose -f infra/compose.yaml up -d --wait || (docker compose -f infra/compose.yaml logs --tail 60; exit 1)
       - run: pnpm exec playwright install --with-deps chromium
-      # VERSIONS=1: this job runs the whole suite with versions turned on (versions.spec has the
-      # tests that need it; the job above has the one that needs it off). The flag stays off by
-      # default; turning it on for people is the owner's call (docs/settings.md).
       - run: pnpm e2e --project=e2e --shard=${{ matrix.shard }}/3
         env:
           E2E_WORKERS: 2
           E2E_UI: next
-          VERSIONS: 1
       - if: matrix.shard == 3
         run: pnpm e2e --project=mail-down --no-deps
         env:
           E2E_UI: next
-          VERSIONS: 1
       - if: failure()
         uses: actions/upload-artifact@v4
         with:
