@@ -7979,3 +7979,11 @@ pointing to the new page).
   shared outline Button has a faint border.
 - **Next.** What remains waits for the owner: T45 (versions on by default), T51 (the new look by
   default), T52 (remove the classic look) and T53 (resizable panes, optional, a new dependency).
+
+## Versions on by default (T45)
+
+- **What.** `VERSIONS` unset now means on, and `0` turns versions off for everyone (anything else
+  is still an error). This was the owner's decision (decision 18).
+- **Tests.** The specs read the setting the way `versionsEnabled` does. The classic browser job
+  runs the whole suite with versions on, which is now the default. Its shard 2 then runs the three
+  specs that check nothing of versions shows, against a server started with `VERSIONS=0`.
