@@ -2,7 +2,6 @@
 import type { LucideIcon } from 'lucide-react';
 import { type KeyboardEvent, type ReactNode, useLayoutEffect, useRef } from 'react';
 import { Icon } from '../../../../../components/icon';
-import { useLook } from '../../../../../components/look';
 import {
   Tooltip,
   TooltipContent,
@@ -45,7 +44,6 @@ export default function Toolbar(props: { label: string; children: ReactNode }) {
     e.preventDefault(); // or the page scrolls
     all[to].focus(); // the focus handler makes it the stop
   };
-  const look = useLook();
   const row = (
     <div
       className="toolbar"
@@ -58,15 +56,14 @@ export default function Toolbar(props: { label: string; children: ReactNode }) {
       {props.children}
     </div>
   );
-  // Tooltips (the new look's icon buttons) share one provider; it draws nothing itself.
-  return look === 'next' ? <TooltipProvider>{row}</TooltipProvider> : row;
+  // Tooltips (the icon buttons') share one provider; it draws nothing itself.
+  return <TooltipProvider>{row}</TooltipProvider>;
 }
 
 /**
- * One button of the toolbar. In the old look it is the text button it always was. In the new look
- * it is an icon button: the same words stay in it as hidden text (so the accessible name is
- * unchanged), and a tooltip says the name and the shortcut on hover and on keyboard focus.
- * `shortcut` is what the old look shows as the button's title (for example "Ctrl+B").
+ * One button of the toolbar: an icon button. The words stay in it as hidden text (so the
+ * accessible name is the words), and a tooltip says the name and the shortcut on hover and on
+ * keyboard focus. `shortcut` is what the tooltip shows (for example "Ctrl+B").
  */
 export function Tool(props: {
   name: string;
@@ -75,19 +72,6 @@ export function Tool(props: {
   keys?: string;
   shortcut?: string;
 }) {
-  const look = useLook();
-  if (look !== 'next') {
-    return (
-      <button
-        type="button"
-        onClick={props.onClick}
-        aria-keyshortcuts={props.keys}
-        title={props.shortcut}
-      >
-        {props.name}
-      </button>
-    );
-  }
   return (
     <Tooltip>
       <TooltipTrigger asChild>

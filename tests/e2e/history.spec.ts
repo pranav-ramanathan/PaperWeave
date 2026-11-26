@@ -1,6 +1,6 @@
 // The history page (/projects/[id]/history): the timeline, comparing in place, restoring through a
 // dialog, naming a revision, downloads, the empty and narrow states, and who may do what. The page
-// has no classic version: it is drawn in the new look for everyone, so these run in both looks.
+// has no old version.
 import { expect, type Locator, type Page, test } from '@playwright/test';
 import { audit, emailedLink, person, signIn, sticksOut } from './helpers';
 import { enlarged, lost, spaced } from './look';

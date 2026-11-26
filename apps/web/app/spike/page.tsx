@@ -2,6 +2,7 @@ import { readdirSync, readFileSync, statSync } from 'node:fs';
 import { join, relative } from 'node:path';
 import { decodeFile, findRoot, includeGraph } from '@paperweave/latex';
 import { notFound } from 'next/navigation';
+import './spike.css';
 import Spike from './Spike';
 
 const FIXTURES = join(process.cwd(), '../../fixtures');

@@ -8022,3 +8022,37 @@ pointing to the new page).
 - **Not done.** One handle only: the file tree and the review panel are not sized (the panel is
   still 14 to 20rem inside the text's pane). A double click resets to the library's default,
   which is the 55/45 default. Sizes do not follow a person to another browser.
+
+## The old look removed (T52)
+
+- **What went.** `app/legacy.css`; every `look === 'next' ? … : …` branch (the pages, `SmallPage`,
+  `FormPage`, `Say`, `Header`, `Files`, `Toolbar`, `Tools`, `FileEditor`, `SignInForm`,
+  `ReviewPanel`, `CardKindMark`), with the classic-only markup under them; `components/look.tsx`
+  (`LookProvider`, `useLook`); the switch on the papers page and its action
+  (`projects/look-action.ts`); `lib/ui.ts` (`MIGRATED`, `STAGED`, `ui`, `uiDefault`, `uiStaged`,
+  the cookie `pw_ui`) and its test, and the first-request check in `lib/server.ts`; the settings
+  `UI_DEFAULT` and `UI_STAGED`; `E2E_UI`, `CHOSEN` and `LOOK` in the tests; the job
+  `browser-classic`. An old `pw_ui` cookie is not read, so it is ignored (`look.spec`).
+- **What was kept.** `functional.css` (it gained `body` and `.waiting`, the two rules that
+  `legacy.css` had outside its scope). `components/kit.tsx` (`KitProvider`, `useKit`) replaces
+  the look context for the three components that have a plain and a kit drawing (`Once`,
+  `Result`, `DirectUpload`): the paper's page never had the provider, so they are plain there and
+  styled by `paper.css`; every other page provides it. Taking the plain drawing away would have
+  changed that page. The `/spike` workbench is not in the new look, so its rules moved from
+  `legacy.css` to `app/spike/spike.css`, scoped to `main.spike`, as they were.
+- **The scope prefix stays.** `next.css` is still prefixed with `:where([data-ui='next'])` and
+  every `<main>` still has `data-ui="next"`. In the sheet, `:root`, `html` and `body` stand for
+  `<main>` and `*` reaches only what is inside it; without the prefix they would be the page's
+  own `<html>` and `<body>` and everything outside `<main>`, and rendering would change. Only the
+  look-dependence went: the attribute is now unconditional. The test that nothing but the editor
+  is one screen high (`nextcss.test.ts`) is unchanged.
+- **CI.** The versions-off tests (`versions.spec`, `merge.spec`, `history-versions.spec` with
+  `VERSIONS=0`) run as a step of `browser` in shard 2. `browser-dark` lost `E2E_UI`.
+- **Pixel compare** against T51's head (light and dark, 1440 and 390 wide, 35 pictures each):
+  the one difference is the removed button, "Use the old look" (130 by 34 pixels on the papers
+  page; 56 pixels less height on the narrow list), and ±1/255 antialiasing on five or eight
+  pixels of one chart picture. No computed style differs.
+- **Removed tests.** `look.spec`'s switch tests (the cookie, the button, the last stop) became one
+  test that an old cookie changes nothing and no switch is there; `theme.spec` lost its closing
+  part (dark chosen with the classic look: the page as it was, with no control); the
+  `editorIsNext` and `pagesIn` helpers and the skips on `LOOK` went with their conditions.

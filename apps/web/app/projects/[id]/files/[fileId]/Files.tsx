@@ -2,7 +2,6 @@
 import { Fragment, useEffect, useState } from 'react';
 import Link from '../../../../Go';
 import { FileText, Folder } from '../../../../../components/icon';
-import { useLook } from '../../../../../components/look';
 import { onFiles, type PaperFile } from '../../../../../lib/paperfiles';
 
 /**
@@ -28,7 +27,7 @@ export function FileName(props: {
 
 /**
  * The list of the paper's files beside the editor. It follows files added, removed and renamed.
- * `root` is the path of the root file; only the new look says which it is.
+ * `root` is the path of the root file.
  */
 export default function Files(props: {
   projectId: string;
@@ -37,34 +36,13 @@ export default function Files(props: {
   root?: string;
 }) {
   const files = useFiles(props.projectId, props.files);
-  if (useLook() === 'next') return <Tree {...props} files={files} />;
-  return (
-    <nav aria-label="Files">
-      <ul>
-        {files.map((f) => (
-          <li key={f.id}>
-            {f.readonly ? (
-              <span title="Cannot be edited as text">{f.path}</span>
-            ) : (
-              <Link
-                prefetch={false}
-                href={`/projects/${props.projectId}/files/${f.id}`}
-                aria-current={f.id === props.fileId ? 'page' : undefined}
-              >
-                {f.path}
-              </Link>
-            )}
-          </li>
-        ))}
-      </ul>
-    </nav>
-  );
+  return <Tree {...props} files={files} />;
 }
 
 /**
- * The new look's tree. The same links in the same order, each with its whole path as its text
+ * The tree. The links are in order, each with its whole path as its text
  * (the folders it sits in are said by a hidden prefix and drawn as a heading row above), so a
- * link's name is what it is in the old look. A folder row is shown when the folder differs from
+ * link's name is its path. A folder row is shown when the folder differs from
  * the one the file before it sat in; it is not read out, the paths already say it.
  */
 function Tree(props: { projectId: string; fileId: string; files: PaperFile[]; root?: string }) {

@@ -2,11 +2,8 @@ import { headers } from 'next/headers';
 import { connection } from 'next/server';
 import type { ReactNode } from 'react';
 import 'katex/dist/katex.min.css';
-// Today's look (scoped, so that a page in the new look is not touched), then what every look
-// needs, which wins where it is as strong as a look's rule: see the top of functional.css.
-import './legacy.css';
 // The new look (see next.css), every selector prefixed with its scope. Before functional.css, so
-// that what both looks need still wins a tie of strength by coming later.
+// that what the app needs whatever the look still wins a tie of strength by coming later.
 import './next.css';
 import './functional.css';
 import { WENT } from '../lib/leaving';
@@ -56,11 +53,10 @@ export default async function Layout({ children }: { children: ReactNode }) {
   // For the editors, which add style sheets of their own: see lib/nonce.ts.
   const nonce = (await headers()).get('x-nonce') ?? undefined;
   // The new look's colours, chosen by cookie: on <html> from the first byte, so there is no flash
-  // (lib/theme.ts). No choice, no attribute: the style sheet follows the device. Classic pages never
-  // read it.
+  // (lib/theme.ts). No choice, no attribute: the style sheet follows the device.
   const chosen = await theme();
   return (
-    // The classes only declare the new look's font variables (app/fonts); the old look never uses them.
+    // The classes only declare the font variables (app/fonts).
     <html lang="en" className={fontClasses} data-theme={chosen ?? undefined}>
       <head>
         <meta property="csp-nonce" nonce={nonce} />

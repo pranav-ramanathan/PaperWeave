@@ -24,7 +24,7 @@ import type { ReactNode } from 'react';
 import { AppBar } from '../../../../components/app-bar';
 import { FileDiffs } from '../../../../components/file-diffs';
 import { Flag, GitBranch, GitMerge, Icon, Pencil, RotateCcw } from '../../../../components/icon';
-import { LookProvider } from '../../../../components/look';
+import { KitProvider } from '../../../../components/kit';
 import { ThemeSwitch } from '../../../../components/theme-switch';
 import { VersionMenu } from '../../../../components/version-menu';
 import { buttonVariants } from '../../../../components/ui/button';
@@ -504,7 +504,7 @@ async function History({
 
   return (
     <main data-ui="next" className="page history">
-      <LookProvider look="next">
+      <KitProvider>
         <OverlayRoot>
           <AppBar
             home="/projects"
@@ -700,7 +700,7 @@ async function History({
             </div>
           </CompareProvider>
         </OverlayRoot>
-      </LookProvider>
+      </KitProvider>
     </main>
   );
 }

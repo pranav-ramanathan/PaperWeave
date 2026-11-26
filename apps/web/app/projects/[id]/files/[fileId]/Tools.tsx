@@ -13,7 +13,6 @@ import {
   useRef,
   useState,
 } from 'react';
-import { useLook } from '../../../../../components/look';
 import { Button } from '../../../../../components/ui/button';
 import { numbers } from '../../../../../lib/numbers';
 import { tooLongText, TooLong } from '../../../../../lib/mathlimit';
@@ -33,10 +32,9 @@ function useDialog(open: boolean): RefObject<HTMLDialogElement | null> {
 
 /**
  * One of the small windows: a native <dialog> that holds the focus while it is open (`box`, from
- * useDialog), with its title and a form. The same element in both looks; the new look only draws
- * it differently (windows.css) and gives its buttons the kit's classes.
+ * useDialog), with its title and a form, drawn by windows.css; its buttons are the kit's.
  *
- * It stays a native <dialog> in the new look, not Radix's Dialog (PLAN.md section 7, fallback):
+ * It is a native <dialog>, not Radix's Dialog (PLAN.md section 7, fallback):
  * Radix hides the rest of the page from the accessibility tree while it is open (aria-hidden on
  * everything outside it), and the figure and footnote specs read the page behind a window that
  * is still open after a refusal. The native one keeps the rest inert without hiding it, takes
@@ -66,38 +64,26 @@ function Window(props: {
   );
 }
 
-/** A button of the window: the new look's button there, the plain one in the old. */
-function Btn({ variant, ...rest }: ComponentProps<'button'> & { variant?: 'outline' | 'default' }) {
-  if (useLook() === 'next') return <Button variant={variant ?? 'default'} {...rest} />;
-  return <button {...rest} />;
-}
-
 /**
- * The window's buttons: the action, then Cancel, in that order for the keyboard. The new look
- * draws them as the footer of a dialog, Cancel first, and so lays them out in the other direction.
+ * The window's buttons: the action, then Cancel, in that order for the keyboard. They are drawn
+ * as the footer of a dialog, Cancel first, and so laid out in the other direction.
  */
 function Actions(props: { action: ComponentProps<'button'>; label: string; onCancel(): void }) {
   const cancel = (
-    <Btn variant="outline" type="button" onClick={props.onCancel}>
+    <Button variant="outline" type="button" onClick={props.onCancel}>
       Cancel
-    </Btn>
+    </Button>
   );
   const action = (
-    <Btn type="submit" {...props.action}>
+    <Button type="submit" {...props.action}>
       {props.label}
-    </Btn>
+    </Button>
   );
-  if (useLook() === 'next')
-    return (
-      <div className="tool-actions">
-        {action}
-        {cancel}
-      </div>
-    );
   return (
-    <p>
-      {action} {cancel}
-    </p>
+    <div className="tool-actions">
+      {action}
+      {cancel}
+    </div>
   );
 }
 
@@ -455,9 +441,9 @@ export function FloatBox(props: {
           {load === 'failed' && (
             <p className="note">
               Could not load the pictures.{' '}
-              <Btn variant="outline" type="button" onClick={() => setAttempt((n) => n + 1)}>
+              <Button variant="outline" type="button" onClick={() => setAttempt((n) => n + 1)}>
                 Retry
-              </Btn>
+              </Button>
             </p>
           )}
           {load === 'ready' && pictures.length === 0 && (

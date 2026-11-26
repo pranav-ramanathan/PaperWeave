@@ -4,7 +4,6 @@ import Once from '../../Once';
 import { currentUser, invitationOf, requireUser } from '../../../lib/server';
 import SignOut from '../../SignOut';
 import { SmallPage } from '../../../components/small-page';
-import { ui } from '../../../lib/ui';
 import { joinAction } from '../../projects/actions';
 
 export const dynamic = 'force-dynamic';
@@ -32,10 +31,9 @@ export default async function Invitation({
   const user = await requireUser(`/invitations/${token}`);
   const invitation = await invitationOf(token, user.id);
   const { error } = await searchParams;
-  const look = await ui('invitation');
   if (!invitation)
     return (
-      <SmallPage look={look}>
+      <SmallPage>
         <h1>This invitation is not valid any more</h1>
         <p>
           It may have been used already or have expired. Ask the paper&rsquo;s owner for a new one.
@@ -47,7 +45,7 @@ export default async function Invitation({
     );
   if (invitation.memberRole)
     return (
-      <SmallPage look={look}>
+      <SmallPage>
         <h1>You are already on &ldquo;{invitation.project}&rdquo;</h1>
         <p>
           You are already on this paper as {invitation.memberRole === 'editor' ? 'an' : 'a'}{' '}
@@ -61,7 +59,7 @@ export default async function Invitation({
     );
   if (invitation.email !== user.email.toLowerCase())
     return (
-      <SmallPage look={look}>
+      <SmallPage>
         <h1>This invitation is for someone else</h1>
         {error && <Result alert>{error}</Result>}
         <p>
@@ -72,7 +70,7 @@ export default async function Invitation({
       </SmallPage>
     );
   return (
-    <SmallPage look={look}>
+    <SmallPage>
       <h1>Join &ldquo;{invitation.project}&rdquo;</h1>
       {error && <Result alert>{error}</Result>}
       <p>

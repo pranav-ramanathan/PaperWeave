@@ -1,13 +1,12 @@
-/* What every look of the app needs, and what the tests assert about styles. Never scoped: the
-   old look (legacy.css) and the new one both stand on it. A rule goes here when taking it away
-   would break something that is not a matter of taste: a screen reader's text, the page's width
-   on a narrow window, the PDF and its words, a mark that must not depend on colour, a speed. Where
-   a rule mixes the two, the look is left in legacy.css and only the functional part is here.
+/* What the app needs whatever the look says, and what the tests assert about styles. Never scoped:
+   it stands under the new look (next.css). A rule goes here when taking it away would break
+   something that is not a matter of taste: a screen reader's text, the page's width on a narrow
+   window, the PDF and its words, a mark that must not depend on colour, a speed.
 
-   Rules here are plain, with no scope in front. This file is loaded after legacy.css (layout.tsx),
-   so that where a rule here and one of a look are equally strong, this one wins: the busy button
-   below is greyed whatever a look says about the cursor of buttons. Colours come from the
-   variables below; a look that wants other colours for these rules sets the variables, not the
+   Rules here are plain, with no scope in front. This file is loaded after next.css (layout.tsx),
+   so that where a rule here and one of the look are equally strong, this one wins: the busy button
+   below is greyed whatever the look says about the cursor of buttons. Colours come from the
+   variables below; the look that wants other colours for these rules sets the variables, not the
    rules. */
 
 :root {
@@ -22,6 +21,28 @@
 }
 * {
   box-sizing: border-box;
+}
+
+/* The page itself: <body>, which nothing in <main> can be above. */
+body {
+  margin: 0;
+  font:
+    15px/1.5 system-ui,
+    sans-serif;
+  color: var(--ink);
+  background: var(--wash);
+}
+/* Where the page says that it is waiting for the server (Waiting.tsx). Fixed, so that nothing moves. */
+.waiting {
+  position: fixed;
+  bottom: 1rem;
+  right: 1rem;
+  max-width: 24rem;
+  margin: 0;
+  padding: 0.5rem 0.75rem;
+  background: var(--warn-wash);
+  border: 1px solid var(--warn);
+  color: var(--ink);
 }
 
 /* Text for screen readers only; a link that is seen only when it has the keyboard. */

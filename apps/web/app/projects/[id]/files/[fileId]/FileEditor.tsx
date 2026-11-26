@@ -33,7 +33,6 @@ import { useEffect, useLayoutEffect, useRef, useState } from 'react';
 import { flushSync } from 'react-dom';
 import { yCollab, yUndoManagerKeymap } from 'y-codemirror.next';
 import * as Y from 'yjs';
-import { useLook } from '../../../../../components/look';
 import { setBibliography } from '../../../../../lib/bibliography';
 import { pageNonce } from '../../../../../lib/nonce';
 import {
@@ -205,9 +204,9 @@ const rememberView = (m: Mode) => {
 };
 
 /**
- * The source view in the new look: the mono face, the new look's colours, and three token colours
+ * The source view: the mono face, the colours of the look, and three token colours
  * (a comment, a control sequence, a dollar sign). Only face and colour: no size, line height or
- * padding is set, so a line is as tall as in the classic look and the caret lands in the same
+ * padding is set, so a line is as tall as the editor's own and the caret lands in the same
  * places. The token colours are variables (next/source.css), so the dark theme changes them there.
  */
 const nextTokens = {
@@ -290,8 +289,6 @@ export default function FileEditor(props: {
   canReview: boolean;
 }) {
   const { projectId, fileId, canWrite, user, syncUrl, sourceOnly } = props;
-  // Read when the editors are made: the look does not change while a page is open.
-  const nextLook = useLook() === 'next';
   const host = useRef<HTMLDivElement>(null);
   const visualHost = useRef<HTMLDivElement>(null);
   const live = useRef<{ view: EditorView; visual: Visual | null; undo: Y.UndoManager }>(null);
@@ -794,7 +791,7 @@ export default function FileEditor(props: {
             },
           }),
           lineNumbers(),
-          ...(nextLook ? nextTheme : []),
+          ...nextTheme,
           // Spaces and zero-width characters that pdfLaTeX stops at are shown as a red dot, with
           // their code on hover. U+00A0, U+200C, U+200D and U+3000 build and are left alone.
           highlightSpecialChars({

@@ -1,15 +1,12 @@
-// The handle between the text and the PDF in the new look (T53): dragging, the keyboard, the size
-// kept in this browser, where the handle is in the Tab order, no handle in a narrow window, and
-// the PDF still drawn after a resize. Only in the new look (the default; not with
-// E2E_UI=classic). Needs Docker, the TeX image, the services and the worker (for the PDF).
+// The handle between the text and the PDF (T53): dragging, the keyboard, the size kept in this
+// browser, where the handle is in the Tab order, no handle in a narrow window, and the PDF still
+// drawn after a resize. Needs Docker, the TeX image, the services and the worker (for the PDF).
 import { expect, type Page, test } from '@playwright/test';
 import { mkdtempSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { writeZip } from '../../packages/server/src/archive';
-import { audit, LOOK, ORIGIN, person, run, signIn } from './helpers';
-
-test.skip(LOOK !== 'next', 'the pages are in the old look (E2E_UI=classic)');
+import { audit, ORIGIN, person, run, signIn } from './helpers';
 
 const MAIN = [
   '\\documentclass{article}',

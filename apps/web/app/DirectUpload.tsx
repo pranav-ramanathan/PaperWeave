@@ -1,6 +1,6 @@
 'use client';
 import { type ReactNode, useEffect, useRef, useState } from 'react';
-import { useLook } from '../components/look';
+import { useKit } from '../components/kit';
 import { Notice } from '../components/notice';
 import { waiting } from '../lib/waiting';
 
@@ -57,10 +57,10 @@ export default function DirectUpload(props: {
   /** The name of the form's file field. */
   field: string;
   children: ReactNode;
-  /** For the form, in the new look only (a classic form is styled by its page). */
+  /** For the form, where the page has the kit (a plain form is styled by its page). */
   className?: string;
 }) {
-  const next = useLook() === 'next';
+  const next = useKit();
   const [problem, setProblem] = useState('');
   const [sending, setSending] = useState<{ name: string; done: number; of: number } | null>(null);
   const held = useRef<(() => void) | null>(null);

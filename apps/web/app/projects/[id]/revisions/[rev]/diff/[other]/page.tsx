@@ -4,7 +4,6 @@ import { FileDiffs } from '../../../../../../../components/file-diffs';
 import { notFound } from 'next/navigation';
 import { blobs, db, requireUser } from '../../../../../../../lib/server';
 import { FormPage } from '../../../../../../../components/form-page';
-import { ui } from '../../../../../../../lib/ui';
 
 export const dynamic = 'force-dynamic';
 
@@ -31,10 +30,8 @@ export default async function Diff({
     if (err instanceof AppError && err.code === 'not_found') notFound();
     throw err;
   });
-  const look = await ui('revisions-diff');
   return (
     <FormPage
-      look={look}
       wide
       title={
         <>

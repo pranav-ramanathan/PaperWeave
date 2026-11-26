@@ -1,11 +1,10 @@
-// The colours a page is drawn in: light, dark, or (no choice) the device's own. The new look only;
-// the classic look has one set of colours and ignores all of this.
+// The colours a page is drawn in: light, dark, or (no choice) the device's own.
 //
 // The choice is the person's cookie `pw_theme` ("light" or "dark"). Without it, the page follows
 // the device (`prefers-color-scheme`, in next.css). The layout puts the choice on <html> as
 // data-theme, on the server, so that the first paint is already in it: nothing is decided by a
 // script after the page has been drawn, and nothing flashes. With no choice there is no
-// attribute at all, and a classic page carries exactly what it always did.
+// attribute at all.
 import { cookies } from 'next/headers';
 
 export type Theme = 'light' | 'dark';
@@ -33,7 +32,7 @@ export function asTheme(value: unknown): Theme | null {
   throw new Error('The theme must be "light", "dark" or "system"');
 }
 
-/** How the choice is kept: as the look's cookie is (lib/ui.ts), a year, for the whole site. */
+/** How the choice is kept: a year, for the whole site. */
 export const THEME_COOKIE_OPTIONS = {
   httpOnly: true,
   sameSite: 'lax',

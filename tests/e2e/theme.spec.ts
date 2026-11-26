@@ -1,9 +1,8 @@
 // The colours of the new look (apps/web/lib/theme.ts): the control in the app bar and the cookie
 // `pw_theme`, the page being drawn in the choice from its first byte, the device's own colours when
-// nothing is chosen, the classic look that ignores all of it, and every page of the new look
-// outside the editor in dark: axe (contrast above all), 320 px wide, spaced text, text twice as
-// big, and the editor in both views with its marks, an open window and the menu at the caret.
-// Only in a run in the new look (the default; not with E2E_UI=classic).
+// nothing is chosen, and every page outside the editor in dark: axe (contrast above all), 320 px
+// wide, spaced text, text twice as big, and the editor in both views with its marks, an open
+// window and the menu at the caret.
 import { expect, type Page, test } from '@playwright/test';
 import { mkdtempSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
@@ -14,7 +13,6 @@ import {
   clickAfter,
   confirmSignIn,
   emailedLink,
-  LOOK,
   person,
   run,
   selectWord,
@@ -23,8 +21,6 @@ import {
   sticksOut,
 } from './helpers';
 import { enlarged, lost, spaced } from './look';
-
-test.skip(LOOK !== 'next', 'the pages are in the old look (E2E_UI=classic)');
 
 const MAIN = [
   '\\documentclass{article}',
@@ -61,7 +57,7 @@ const choose = (page: Page, theme: 'light' | 'dark' | 'system') =>
         ],
   );
 
-test('the control: three states in a cookie, the page in them from the first byte, the device’s own when nothing is chosen, classic untouched', async ({
+test('the control: three states in a cookie, the page in them from the first byte, the device’s own when nothing is chosen', async ({
   browser,
 }) => {
   test.setTimeout(120_000);
@@ -111,7 +107,6 @@ test('the control: three states in a cookie, the page in them from the first byt
   expect(await desk(page)).toBe(DESK);
   const first = await (await page.request.get('/projects')).text();
   expect(first).toMatch(/<html[^>]* data-theme="dark"/);
-  // The control, and nothing else, is what the look test (look.spec) leaves out: one more button.
   await page.reload();
   expect(await desk(page)).toBe(DESK);
 
@@ -121,29 +116,6 @@ test('the control: three states in a cookie, the page in them from the first byt
   expect(await cookie()).toBeUndefined();
   await expect(page.locator('html')).not.toHaveAttribute('data-theme', /.*/);
   expect(await desk(page)).toBe(LIGHT_DESK);
-
-  // Dark chosen, the classic look chosen: the page is what it always was, and has no control.
-  await button(/Switch to light$/).click();
-  await button(/Switch to dark$/).click();
-  await expect(page.locator('html')).toHaveAttribute('data-theme', 'dark');
-  await page.context().addCookies([{ name: 'pw_ui', value: 'classic', url: page.url() }]);
-  await page.reload();
-  await expect(page.locator('main')).not.toHaveAttribute('data-ui', 'next');
-  await expect(page.getByRole('form', { name: 'Theme' })).toHaveCount(0);
-  const classicColours = await page.evaluate(() => {
-    const s = getComputedStyle(document.body);
-    const m = getComputedStyle(document.querySelector('main')!);
-    return [s.backgroundColor, s.color, m.backgroundColor, m.color, s.colorScheme];
-  });
-  await page.context().clearCookies({ name: 'pw_theme' });
-  await page.reload();
-  expect(
-    await page.evaluate(() => {
-      const s = getComputedStyle(document.body);
-      const m = getComputedStyle(document.querySelector('main')!);
-      return [s.backgroundColor, s.color, m.backgroundColor, m.color, s.colorScheme];
-    }),
-  ).toEqual(classicColours);
 });
 
 /** What every page of the new look must pass, in the colours it is in. */

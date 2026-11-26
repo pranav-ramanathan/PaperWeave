@@ -1,7 +1,6 @@
 'use client';
 
 import { useEffect, useState } from 'react';
-import { useLook } from '../../components/look';
 import { Notice } from '../../components/notice';
 import { Button } from '../../components/ui/button';
 import { Input } from '../../components/ui/input';
@@ -16,9 +15,6 @@ export default function SignInForm({ next }: { next: string }) {
   // would read the field: the button waits for the script.
   const [ready, setReady] = useState(false);
   useEffect(() => setReady(true), []);
-  // The new look draws the same words in the components of components/ui; the classic markup is
-  // left exactly as it was.
-  const fresh = useLook() === 'next';
 
   const words = (
     <>
@@ -26,8 +22,7 @@ export default function SignInForm({ next }: { next: string }) {
       &ldquo;Sign in&rdquo;. It works once and expires in 15 minutes.
     </>
   );
-  if (state === 'sent')
-    return fresh ? <Notice kind="success">{words}</Notice> : <p role="status">{words}</p>;
+  if (state === 'sent') return <Notice kind="success">{words}</Notice>;
   const unsent =
     'The link could not be sent: the email service did not answer. Try again in a few minutes.';
   const refused = why || 'The link could not be sent. Check the address and try again in a minute.';
@@ -58,31 +53,17 @@ export default function SignInForm({ next }: { next: string }) {
     );
     setState(res?.ok ? 'sent' : res && res.status < 500 ? 'refused' : 'unsent');
   };
-  if (fresh)
-    return (
-      <form onSubmit={submit} className="grid gap-4">
-        <div className="grid gap-1.5">
-          <Label htmlFor="email">Email address</Label>
-          <Input id="email" type="email" name="email" required autoComplete="email" />
-        </div>
-        <Button type="submit" disabled={!ready || state === 'sending'}>
-          {state === 'sending' ? 'Sending…' : 'Email me a sign-in link'}
-        </Button>
-        {state === 'unsent' && <Notice kind="error">{unsent}</Notice>}
-        {state === 'refused' && <Notice kind="error">{refused}</Notice>}
-      </form>
-    );
   return (
-    <form onSubmit={submit}>
-      <label>
-        Email address
-        <input type="email" name="email" required autoComplete="email" />
-      </label>
-      <button type="submit" disabled={!ready || state === 'sending'}>
+    <form onSubmit={submit} className="grid gap-4">
+      <div className="grid gap-1.5">
+        <Label htmlFor="email">Email address</Label>
+        <Input id="email" type="email" name="email" required autoComplete="email" />
+      </div>
+      <Button type="submit" disabled={!ready || state === 'sending'}>
         {state === 'sending' ? 'Sending…' : 'Email me a sign-in link'}
-      </button>
-      {state === 'unsent' && <p role="alert">{unsent}</p>}
-      {state === 'refused' && <p role="alert">{refused}</p>}
+      </Button>
+      {state === 'unsent' && <Notice kind="error">{unsent}</Notice>}
+      {state === 'refused' && <Notice kind="error">{refused}</Notice>}
     </form>
   );
 }

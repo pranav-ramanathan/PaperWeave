@@ -4,7 +4,7 @@
 // only, served from /_next/static/media (font-src 'self').
 //
 // Each one only declares a custom property (layout.tsx puts the classes on <html>); next.css reads
-// them inside the [data-ui='next'] scope. The old look never names them, so no page in it changes.
+// them inside the [data-ui='next'] scope.
 // Preloaded: the new look is the default (T51), so most pages use all three from the first paint.
 import localFont from 'next/font/local';
 

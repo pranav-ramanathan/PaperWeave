@@ -1,43 +1,32 @@
 import type { ReactNode } from 'react';
-import type { Look } from '../lib/ui';
-import { LookProvider } from './look';
+import { KitProvider } from './kit';
 import { Mark } from './mark';
 import { Card, CardContent } from './ui/card';
 
 /**
  * The frame of a one-form page: sign-in, the page the emailed link leads to, an invitation, "nothing
- * here". Classic: the <main> it has always had. New look: the page's own <main data-ui='next'>, the
- * word and mark centred above a sheet that holds the page's content (PLAN.md sections 2 and 4).
+ * here": the page's own <main data-ui='next'>, the word and mark centred above a sheet that holds
+ * the page's content (PLAN.md sections 2 and 4).
  *
  * The word and mark are not a link and not read out (the heading says where this is): a link here
  * would be a tab stop before the page's own, and the tests press Tab from the top of the page.
  * `className` is for the sheet's content.
  */
 export function SmallPage({
-  look,
   children,
   className,
-  bare = false,
   wide = false,
-  classic,
 }: {
-  look: Look;
   children: ReactNode;
   className?: string;
-  /** Classic only: a <main> with no class at all, as "nothing here" has always had. */
-  bare?: boolean;
-  /** New look: a wider sheet, for a page that shows lines of text or a table (48rem, not 28rem). */
+  /** A wider sheet, for a page that shows lines of text or a table (48rem, not 28rem). */
   wide?: boolean;
-  /** Classic only: the <main>'s class, when it is not "page narrow" (a form page is "page"). */
-  classic?: string;
 }) {
-  if (look !== 'next')
-    return <main className={bare ? undefined : (classic ?? 'page narrow')}>{children}</main>;
   return (
     // `page` keeps the "Problem: " that functional.css puts before an alert.
     // The utilities need an element inside the scope element: they do not match the <main> itself.
     <main data-ui="next" className="page">
-      <LookProvider look="next">
+      <KitProvider>
         <div className="flex min-h-dvh flex-col items-center gap-6 px-4 py-12 sm:justify-center">
           <p
             aria-hidden="true"
@@ -65,7 +54,7 @@ export function SmallPage({
             </CardContent>
           </Card>
         </div>
-      </LookProvider>
+      </KitProvider>
     </main>
   );
 }

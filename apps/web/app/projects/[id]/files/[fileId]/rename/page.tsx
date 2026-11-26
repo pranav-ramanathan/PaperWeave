@@ -5,7 +5,6 @@ import Once from '../../../../../Once';
 import { notFound } from 'next/navigation';
 import { blobs, db, requireUser } from '../../../../../../lib/server';
 import { FormPage, Say } from '../../../../../../components/form-page';
-import { ui } from '../../../../../../lib/ui';
 import { renameFileAction } from '../../../../actions';
 
 export const dynamic = 'force-dynamic';
@@ -29,7 +28,6 @@ export default async function RenameFile({
     if (err.code === 'not_found') notFound();
     return err.message;
   });
-  const look = await ui('file-rename');
   const back = (
     <Link prefetch={false} href={`/projects/${id}`}>
       Back to the paper
@@ -37,17 +35,14 @@ export default async function RenameFile({
   );
   if (typeof proposal === 'string')
     return (
-      <FormPage look={look} title="Rename a file" back={back}>
-        <Say look={look} role="alert">
-          {proposal}
-        </Say>
+      <FormPage title="Rename a file" back={back}>
+        <Say role="alert">{proposal}</Say>
       </FormPage>
     );
   const files = [...new Set(proposal.changes.map((c) => c.path))];
   const lines = proposal.changes.length;
   return (
     <FormPage
-      look={look}
       wide
       title={
         <>

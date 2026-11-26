@@ -2,13 +2,13 @@
  * The new look: Tailwind v4, shadcn's variables, PaperWeave's tokens. Read PLAN.md section 8.
  *
  * Every selector that comes out of this file is prefixed with :where([data-ui='next']) by
- * postcss-prefix-selector (postcss.config.mjs, this file only), so on a page that is not in the
- * new look nothing here matches anything, and :where adds no specificity. Consequences when
+ * postcss-prefix-selector (postcss.config.mjs, this file only), so that nothing here matches
+ * outside the page's <main>, and :where adds no specificity. Consequences when
  * writing here:
  *  - Write plain selectors. `:root` (and html, body) stand for the scope element itself, which is
  *    the <main data-ui='next'> of a page: `:root { --x: 1 }` declares --x on it.
- *  - The variables are declared on that element, not on the real :root: the old look has its own
- *    --accent and --muted with other meanings.
+ *  - The variables are declared on that element, not on the real :root: functional.css declares
+ *    --accent and --muted there, with other meanings.
  *  - @keyframes and @property are not prefixed (they are global names); give a keyframe a name
  *    that starts with pw-.
  *  - One @import per area below, and a file per area in next/. A task writes in its own area
