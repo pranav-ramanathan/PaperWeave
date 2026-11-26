@@ -203,12 +203,27 @@ export async function person(browser: Browser, who: string) {
   return { page, email: address(who) };
 }
 
-/** The line the caret is on in the source view. */
+/**
+ * The line the caret is on in the source view, as the editor counts it. Not the place of its
+ * `.cm-line` among its siblings: CodeMirror draws only the lines near the screen, and lines far
+ * above stand as one `.cm-gap`, so a long line scrolled away (a narrow column wraps it tall) would
+ * make line 7 the third child. The editor is found from the DOM as `EditorView.findFromDOM` does.
+ */
 export const caretLine = (page: Page) =>
   page.evaluate(() => {
-    const node = getSelection()?.anchorNode;
-    const line = (node instanceof Element ? node : node?.parentElement)?.closest('.cm-line');
-    return line ? [...line.parentElement!.children].indexOf(line) + 1 : 0;
+    const sel = getSelection();
+    const node = sel?.anchorNode;
+    const content = (node instanceof Element ? node : node?.parentElement)
+      ?.closest('.cm-line')
+      ?.closest('.cm-content');
+    type View = {
+      posAtDOM(node: Node, offset: number): number;
+      state: { doc: { lineAt(pos: number): { number: number } } };
+    };
+    const view = (content as (Element & { cmTile?: { root?: { view?: View } } }) | undefined)
+      ?.cmTile?.root?.view;
+    if (!content || !view) return 0;
+    return view.state.doc.lineAt(view.posAtDOM(node!, sel!.anchorOffset)).number;
   });
 
 /** On a file's page, switch to the LaTeX source view. The choice is remembered by the browser. */
