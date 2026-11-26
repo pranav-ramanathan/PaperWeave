@@ -5,8 +5,8 @@
  *
  * The panel is `div.review` (components/review-card.tsx), the last thing in the editor's
  * section, and it holds the three lists as they were, in their order. From 85rem it stands in the
- * grid's "review" column beside the text (the section spans the text and review columns and hands
- * them on as a subgrid); below that it is under the text, as it always was.
+ * second column of the text's section beside the text (the section is a grid of the text and the
+ * panel, inside its pane of Panes.tsx); below that it is under the text, as it always was.
  */
 
 /* ===== T22: the frame ===== */
@@ -147,23 +147,19 @@
   margin-top: 0.5rem;
 }
 
-/* Beside the text. The section of the text takes the text and review columns, and its own
+/* Beside the text. The section of the text is a grid of the text and the panel, and its own
    children keep to the first of the two. */
 @media (min-width: 85rem) {
-  .workspace {
-    grid-template-columns: 14rem minmax(0, 1.3fr) minmax(16rem, 20rem) minmax(0, 1fr);
-  }
-  .workspace > section[aria-label^='Editor for'] {
-    grid-area: 1 / 2 / 2 / 4;
+  .workspace section[aria-label^='Editor for'] {
     display: grid;
-    grid-template-columns: subgrid;
+    grid-template-columns: minmax(0, 1fr) minmax(14rem, 20rem);
     align-content: start;
   }
-  .workspace > section[aria-label^='Editor for'] > :not(.review) {
+  .workspace section[aria-label^='Editor for'] > :not(.review) {
     grid-column: 1;
     min-width: 0;
   }
-  .workspace > section[aria-label^='Editor for'] > .review {
+  .workspace section[aria-label^='Editor for'] > .review {
     grid-column: 2;
     grid-row: 1 / span 8;
     align-self: start;
@@ -173,7 +169,7 @@
 }
 /* And when the window is tall enough for each pane to scroll by itself, the panel does too. */
 @media (min-width: 85rem) and (min-height: 37.5rem) {
-  .workspace > section[aria-label^='Editor for'] > .review {
+  .workspace section[aria-label^='Editor for'] > .review {
     position: sticky;
     top: 0;
     height: calc(100dvh - 4.5rem);
@@ -181,10 +177,10 @@
     overscroll-behavior: contain;
   }
   /* The text's own row takes what the bar, the toolbar and the notice leave. */
-  .workspace > section[aria-label^='Editor for'] {
+  .workspace section[aria-label^='Editor for'] {
     grid-template-rows: auto auto auto 1fr;
   }
-  .workspace > section[aria-label^='Editor for'] > #text {
+  .workspace section[aria-label^='Editor for'] > #text {
     grid-row: 4;
   }
 }
