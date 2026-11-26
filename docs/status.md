@@ -7978,7 +7978,7 @@ pointing to the new page).
 - **Left alone.** On Tailwind buttons the focus ring takes 120 ms to change colour. In light, the
   shared outline Button has a faint border.
 - **Next.** What remains waits for the owner: T45 (versions on by default), T51 (the new look by
-  default), T52 (remove the classic look) and T53 (resizable panes, optional, a new dependency).
+  default), T52 (remove the classic look) and T53 (resizable panes, now done, below).
 
 ## Versions on by default (T45)
 
@@ -8000,8 +8000,6 @@ pointing to the new page).
   job runs the default. `browser-next` became `browser-classic` (`E2E_UI=classic`,
   `VERSIONS=0`).
 - **Next.** T52 removes the old look.
-
-  default), T52 (remove the classic look) and T53 (resizable panes, now done, below).
 
 ## Resizable panes (T53)
 
