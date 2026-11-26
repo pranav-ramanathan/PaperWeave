@@ -8056,3 +8056,23 @@ pointing to the new page).
   test that an old cookie changes nothing and no switch is there; `theme.spec` lost its closing
   part (dark chosen with the classic look: the page as it was, with no control); the
   `editorIsNext` and `pagesIn` helpers and the skips on `LOOK` went with their conditions.
+
+## README refreshed
+
+- **What.** `README.md` was rewritten as a front page: a title, tagline and badges (CI, Node, pnpm,
+  TypeScript, Next.js), a screenshot of the editor (light, with a dark one for dark pages), what
+  PaperWeave is for, features grouped as write, review, build and submit, and versions, two more
+  screens, a quick start, a diagram of how the services connect, the testing commands and the
+  test slots (collapsed), and a table of the docs.
+- **Kept.** Every setup and run instruction the old README had, unchanged: install, lint,
+  typecheck and test; the compose services, `.env.example`, migrate and `pnpm dev`; the sync
+  server; the TeX image and the workers; `SPIKE=1`; the sandbox and browser tests; and the test slots.
+- **Screenshots.** Four, in `docs/images/` (`editor-visual-light.png`, `editor-source-dark.png`,
+  `papers-list-light.png`, `chart-light.png`), each under 250 KB. They are from the T52 test
+  fixtures at 1440 wide. The pink blocks that the capture put over addresses and times were
+  filled with a neutral grey; nothing else was changed.
+- **Badges.** CI is the workflow badge for `ci.yml`. The others state the engine and tools in
+  `package.json`. There is no licence badge because there is no `LICENSE` file, and no coverage
+  or version number.
+- **Not checked.** The diagram and the badges were not rendered on github.com, only written to
+  its Markdown. The README's feature text follows the docs; it was not re-run against the app.
