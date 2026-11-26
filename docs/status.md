@@ -7984,6 +7984,9 @@ pointing to the new page).
 
 - **What.** `VERSIONS` unset now means on, and `0` turns versions off for everyone (anything else
   is still an error). This was the owner's decision (decision 18).
-- **Tests.** The specs read the setting the way `versionsEnabled` does. The classic browser job
-  runs the whole suite with versions on, which is now the default. Its shard 2 then runs the three
-  specs that check nothing of versions shows, against a server started with `VERSIONS=0`.
+- **Tests.** The specs read the setting the way `versionsEnabled` does. The new-look browser job
+  runs the whole suite with the default, versions on. The classic browser job runs it with
+  `VERSIONS=0`, as before, so the tests that check nothing of versions shows still run.
+- **Not done.** The old look has no version switcher (it was built in the new look only), so a
+  person who chooses the old look reaches versions from the history page alone. T51 makes the new
+  look the default and T52 removes the old one.

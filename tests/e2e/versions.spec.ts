@@ -1,8 +1,8 @@
 // Versions in the pages (PLAN.md section 14.2, T39): the switcher, the list on the history page,
 // starting a version from a revision or from the paper as it is, renaming, deleting, and who may do
 // which. A version is a paper of its own that was begun at one of main's revisions. Everything is
-// behind the `VERSIONS` setting, which is on unless the server was started with VERSIONS=0 (one
-// step of the browser job in ci.yml does). So there are two groups of tests: with the setting on, what versions
+// behind the `VERSIONS` setting, which is on unless the server was started with VERSIONS=0 (the
+// classic-look browser job in ci.yml is). So there are two groups of tests: with the setting on, what versions
 // do; with it off, that nothing of them shows. Each group runs when its setting is the one the
 // server has; none is skipped for a reason that is not the setting.
 import { expect, type Page, test } from '@playwright/test';
