@@ -1,11 +1,12 @@
 // The switch for the new look (the form at the foot of the papers page): it keeps the person's
 // choice in the cookie `pw_ui`, and the papers page (moved to the new look) is drawn in the
 // choice, with the same links and buttons in both. Runs as it is in both looks of the suite
-// (E2E_UI=next starts each person with the cookie set to "next").
+// (E2E_UI=next or classic starts each person with the cookie set to it; unset, there is no cookie
+// and the page is in the default, the new look).
 import { expect, test } from '@playwright/test';
-import { person, signIn } from './helpers';
+import { CHOSEN, LOOK, person, signIn } from './helpers';
 
-const START = process.env.E2E_UI === 'next' ? 'next' : 'classic';
+const START = LOOK;
 const TRY = 'Try the new look';
 const USE_OLD = 'Use the old look';
 
@@ -43,7 +44,7 @@ test('the switch keeps the choice in a cookie, and the papers page is drawn in i
   await expect(switchButton).toBeVisible();
   // Only one of the two is there at a time.
   await expect(page.getByRole('button', { name: START === 'next' ? TRY : USE_OLD })).toHaveCount(0);
-  expect((await cookie())?.value).toBe(START === 'next' ? 'next' : undefined);
+  expect((await cookie())?.value).toBe(CHOSEN);
   const before = await appearance(page);
   // The papers page is in the new look when that is what is chosen, and only then.
   expect(before.ui).toBe(START === 'next' ? 'next' : null);

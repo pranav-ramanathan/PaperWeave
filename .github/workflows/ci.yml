@@ -52,7 +52,8 @@ jobs:
       - run: docker compose -f infra/compose.yaml up -d --wait || (docker compose -f infra/compose.yaml logs --tail 60; exit 1)
       - run: pnpm test:sandbox
 
-  # The browser tests, in three shards that run side by side, each with its own containers.
+  # The browser tests, in the default look (the new one since T51), in three shards that run side
+  # by side, each with its own containers.
   browser:
     runs-on: ubuntu-latest
     strategy:
@@ -85,18 +86,11 @@ jobs:
       - run: docker build -t paperweave-tex infra/tex
       - run: docker compose -f infra/compose.yaml up -d --wait || (docker compose -f infra/compose.yaml logs --tail 60; exit 1)
       - run: pnpm exec playwright install --with-deps chromium
-      # VERSIONS=0: versions are on by default (T45), and the new-look job below runs the suite
-      # that way. This job runs it with them off, so that the tests that say nothing of versions
-      # shows (versions.spec, merge.spec, history-versions.spec) still run. The old look has no
-      # version switcher, so versions on are tested in the new look only.
       - run: pnpm e2e --project=e2e --shard=${{ matrix.shard }}/3
         env:
           E2E_WORKERS: 2
-          VERSIONS: 0
       - if: matrix.shard == 3
         run: pnpm e2e --project=mail-down --no-deps
-        env:
-          VERSIONS: 0
       # What each failed browser test's page looked like, kept for a week. The log alone says
       # which line failed, not what was on the screen.
       - if: failure()
@@ -107,16 +101,15 @@ jobs:
           if-no-files-found: ignore
           retention-days: 7
 
-  # The same browser tests with the new look chosen: every person starts with the cookie
-  # `pw_ui=next` (E2E_UI, tests/e2e/helpers.ts). A page not yet moved to the new look ignores it,
-  # so this is "new where moved, old everywhere else". It is a job of its own, not a second step
-  # of the one above, so that it runs beside it on its own runner (no wall-clock added: the
-  # slower of the two decides) and so that the name of `sandbox-and-browser` stays what branch
-  # protection knows it as. It is not a required check: it is told apart by name, and the owner
-  # decides when it becomes one. The unit tests, lint and the sandbox tests do not depend on the
-  # look and are not run again.
+  # The same browser tests in the old look: every person starts with the cookie `pw_ui=classic`
+  # (E2E_UI, tests/e2e/helpers.ts). The job above runs the default, the new look (T51); this one
+  # keeps the old look working for those who choose it, until it is removed (T52). It is a job of
+  # its own, not a second step of the one above, so that it runs beside it on its own runner (no
+  # wall-clock added: the slower of the two decides) and so that the name of `sandbox-and-browser`
+  # stays what branch protection knows it as. It is not a required check. The unit tests, lint
+  # and the sandbox tests do not depend on the look and are not run again.
   # Sharded like the job above, for the same reason and the same way.
-  browser-next:
+  browser-classic:
     runs-on: ubuntu-latest
     strategy:
       fail-fast: false
@@ -135,18 +128,24 @@ jobs:
       - run: docker build -t paperweave-tex infra/tex
       - run: docker compose -f infra/compose.yaml up -d --wait || (docker compose -f infra/compose.yaml logs --tail 60; exit 1)
       - run: pnpm exec playwright install --with-deps chromium
+      # VERSIONS=0: versions are on by default (T45), and the job above runs the suite that way.
+      # This job runs it with them off, so that the tests that say nothing of versions shows
+      # (versions.spec, merge.spec, history-versions.spec) still run. The old look has no version
+      # switcher, so versions on are tested in the new look only.
       - run: pnpm e2e --project=e2e --shard=${{ matrix.shard }}/3
         env:
           E2E_WORKERS: 2
-          E2E_UI: next
+          E2E_UI: classic
+          VERSIONS: 0
       - if: matrix.shard == 3
         run: pnpm e2e --project=mail-down --no-deps
         env:
-          E2E_UI: next
+          E2E_UI: classic
+          VERSIONS: 0
       - if: failure()
         uses: actions/upload-artifact@v4
         with:
-          name: browser-next-test-results-${{ matrix.shard }}
+          name: browser-classic-test-results-${{ matrix.shard }}
           path: test-results/
           if-no-files-found: ignore
           retention-days: 7

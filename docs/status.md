@@ -7978,7 +7978,7 @@ pointing to the new page).
 - **Left alone.** On Tailwind buttons the focus ring takes 120 ms to change colour. In light, the
   shared outline Button has a faint border.
 - **Next.** What remains waits for the owner: T45 (versions on by default), T51 (the new look by
-  default), T52 (remove the classic look) and T53 (resizable panes, optional, a new dependency).
+  default), T52 (remove the classic look) and T53 (resizable panes, now done, below).
 
 ## Versions on by default (T45)
 
@@ -7991,7 +7991,15 @@ pointing to the new page).
   person who chooses the old look reaches versions from the history page alone. T51 makes the new
   look the default and T52 removes the old one.
 
-  default), T52 (remove the classic look) and T53 (resizable panes, now done, below).
+## The new look by default (T51)
+
+- **What.** `UI_DEFAULT` unset now means `next`: a person who has not pressed the switch sees the
+  new look. `classic` takes everyone who has not chosen back. The three fonts are preloaded.
+- **Tests.** In `tests/e2e/helpers.ts`, `E2E_UI=next` or `classic` sets the cookie, and `LOOK` is
+  the look the pages are in (the default, the new look, when it is unset). The required `browser`
+  job runs the default. `browser-next` became `browser-classic` (`E2E_UI=classic`,
+  `VERSIONS=0`).
+- **Next.** T52 removes the old look.
 
 ## Resizable panes (T53)
 

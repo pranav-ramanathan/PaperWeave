@@ -5,8 +5,7 @@
 //
 // Each one only declares a custom property (layout.tsx puts the classes on <html>); next.css reads
 // them inside the [data-ui='next'] scope. The old look never names them, so no page in it changes.
-// `preload: false`: no <link rel=preload> goes to a page that does not use them, until the look is
-// the default.
+// Preloaded: the new look is the default (T51), so most pages use all three from the first paint.
 import localFont from 'next/font/local';
 
 export const literata = localFont({
@@ -16,7 +15,7 @@ export const literata = localFont({
   ],
   variable: '--pw-font-serif',
   display: 'swap',
-  preload: false,
+  preload: true,
   fallback: ['Iowan Old Style', 'Georgia', 'serif'],
 });
 
@@ -30,7 +29,7 @@ export const atkinson = localFont({
   ],
   variable: '--pw-font-sans',
   display: 'swap',
-  preload: false,
+  preload: true,
   fallback: ['system-ui', 'sans-serif'],
 });
 
@@ -44,7 +43,7 @@ export const atkinsonMono = localFont({
   ],
   variable: '--pw-font-mono',
   display: 'swap',
-  preload: false,
+  preload: true,
   fallback: ['ui-monospace', 'Menlo', 'monospace'],
 });
 

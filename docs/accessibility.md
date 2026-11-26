@@ -184,10 +184,10 @@ the keyboard (`insert.spec`).
 
 ## The new look: what is checked and how
 
-The editor, and every page, can be shown in the new look (the cookie `pw_ui=next`, which the
-tests set with `E2E_UI=next`) and in dark colours (`pw_theme=dark`, `E2E_THEME=dark`). CI runs the
-browser suite in the classic look, in the new look, and (as a check that is not required) in the
-new look in dark; a change to the new look is also compared with the classic look's screenshots
+Every page is shown in the new look by default (T51); the old look is the cookie
+`pw_ui=classic`, which the tests set with `E2E_UI=classic`. Dark colours are `pw_theme=dark`
+(`E2E_THEME=dark`). CI runs the browser suite in the new look (required), in the classic look,
+and (as a check that is not required) in the new look in dark; a change to the new look is also compared with the classic look's screenshots
 pixel for pixel, by a script outside the suite. What
 follows holds for the new look in light and in dark unless it says otherwise.
 

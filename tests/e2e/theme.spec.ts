@@ -3,7 +3,7 @@
 // nothing is chosen, the classic look that ignores all of it, and every page of the new look
 // outside the editor in dark: axe (contrast above all), 320 px wide, spaced text, text twice as
 // big, and the editor in both views with its marks, an open window and the menu at the caret.
-// Only in a run with the new look chosen (E2E_UI=next).
+// Only in a run in the new look (the default; not with E2E_UI=classic).
 import { expect, type Page, test } from '@playwright/test';
 import { mkdtempSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
@@ -14,6 +14,7 @@ import {
   clickAfter,
   confirmSignIn,
   emailedLink,
+  LOOK,
   person,
   run,
   selectWord,
@@ -23,7 +24,7 @@ import {
 } from './helpers';
 import { enlarged, lost, spaced } from './look';
 
-test.skip(process.env.E2E_UI !== 'next', 'the new look is chosen with E2E_UI=next');
+test.skip(LOOK !== 'next', 'the pages are in the old look (E2E_UI=classic)');
 
 const MAIN = [
   '\\documentclass{article}',

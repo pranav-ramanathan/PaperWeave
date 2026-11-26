@@ -111,8 +111,8 @@ test('UI_STAGED is 1, 0, or not set; anything else says what to set it to', () =
 });
 
 test('UI_DEFAULT is classic, next, or not set; anything else says what to set it to', () => {
-  expect(uiDefault(undefined)).toBe('classic');
-  expect(uiDefault('')).toBe('classic');
+  expect(uiDefault(undefined)).toBe('next');
+  expect(uiDefault('')).toBe('next');
   expect(uiDefault('classic')).toBe('classic');
   expect(uiDefault('next')).toBe('next');
   expect(() => uiDefault('new')).toThrow('UI_DEFAULT is "new": it must be "classic" or "next"');
