@@ -7954,3 +7954,28 @@ pointing to the new page).
 - Slots D (3400) and E (3500) are in the store's allowed origins and in README.md.
 - A fresh store on a machine with little free disk refused every write: it sized volumes at 30 GB
   and made too few. `infra/compose.yaml` now gives it 1 GB volumes and room for 100.
+
+## Motion in the new look (T48)
+
+- **What.** `app/next/motion.css`, CSS only and on opening only. Menus and tooltips rise 4 px,
+  dialogs and the small windows settle from 98 %, and the shade behind a dialog fades. "Show in
+  PDF" fades its band in once, and the card the review panel points at gets a soft halo. What
+  opens is never see-through: a fade on a window let axe measure its buttons mid-fade
+  (colour-contrast in `history.spec` and `insert.spec` in CI), so only shades fade.
+- **Not yet.** The card fade-out and the save status's cross-fade need script (PLAN.md section 11).
+
+## The editor in the new look, polished and audited (T50)
+
+- **Reduced motion** turns animation and transition off (`none`). A 0.01 ms duration gave every
+  element a transition on every property, and `zoom.spec`'s "text twice as big" read a font size
+  it had just changed at its old value. That was the cause of the failure at `zoom.spec:385`.
+- **Held edits after a merge** say "changed by a merge" and "Apply my edits to the merged
+  paper". `heldWords` and `applyWords` in `lib/restored.ts` do this, and `merge.spec` covers it.
+- **Layout.** The text and source panes fill the column (no fixed `70dvh`). Narrow windows have
+  a gutter. The PDF status pill shows its sign alone. Disabled buttons look disabled, and a long
+  file name keeps its icon on the first line.
+- **Docs.** `docs/accessibility.md` has "The new look: what is checked and how".
+- **Left alone.** On Tailwind buttons the focus ring takes 120 ms to change colour. In light, the
+  shared outline Button has a faint border.
+- **Next.** What remains waits for the owner: T45 (versions on by default), T51 (the new look by
+  default), T52 (remove the classic look) and T53 (resizable panes, optional, a new dependency).

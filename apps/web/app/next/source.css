@@ -30,3 +30,10 @@
 .cm-editor .pw-src-math {
   color: var(--src-math);
 }
+
+/* The gutter is as tall as the pane where the text is not (CodeMirror's `min-height: 100%`), and its
+   box then clips what is a few pixels taller than the pane (spaced text, zoom.spec). The numbers
+   are inside the scroller, which scrolls to them; nothing is drawn outside it. */
+.source .cm-editor .cm-gutter {
+  overflow: visible;
+}

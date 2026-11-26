@@ -182,6 +182,74 @@ else edits the same paragraph (`spike.spec`), switching views with the selection
 (`visual.spec`), and the equation, reference, citation, figure and table windows opened from
 the keyboard (`insert.spec`).
 
+## The new look: what is checked and how
+
+The editor, and every page, can be shown in the new look (the cookie `pw_ui=next`, which the
+tests set with `E2E_UI=next`) and in dark colours (`pw_theme=dark`, `E2E_THEME=dark`). CI runs the
+browser suite in the classic look, in the new look, and (as a check that is not required) in the
+new look in dark; a change to the new look is also compared with the classic look's screenshots
+pixel for pixel, by a script outside the suite. What
+follows holds for the new look in light and in dark unless it says otherwise.
+
+- **axe** (WCAG 2.1 A and AA) runs in every spec that already called `audit`, in each look:
+  the editor in both views with a thread, a proposal, a finding and the PDF showing, the windows
+  that open over it, the menu at the caret, the stopped and read-only states (`recover.spec`),
+  and every page outside the editor. In dark the colour-contrast rule is the one that matters
+  most: the marks over the text, the cards of the review panel, the pill that says what the
+  build did, and the colours of the source view are all measured by axe (`theme.spec`).
+  Contrast was also computed on paper for the source view's three token colours (light: 7.3, 6.5
+  and 6.8 to 1; dark: 7.1, 7.2 and 9.4) and for the tints of the marks.
+- **320 CSS pixels** (WCAG 1.4.10): no page scrolls sideways, in both looks and in dark
+  (`a11y.spec`, `zoom.spec`, `theme.spec`). In the editor the review panel and the PDF sit under
+  the text below 60rem; the text has a gutter of its own from there, and the panel runs across
+  the whole width.
+- **Text spacing** (WCAG 1.4.12) and **text twice as big** (WCAG 1.4.4) on the same walk, with the
+  windows over the editor open (`zoom.spec`), and in dark for the pages (`theme.spec`).
+  Windows at least 60rem wide and 37.5rem tall give each pane its own scroll; anything smaller,
+  and any enlargement of the text, falls back to the flowing page, which is what keeps these two
+  checks from cutting text off.
+- **Reduced motion.** `motion.spec` checks that with motion a dialog settles in at full opacity
+  (so that its contrast is whole from the first frame) and that with `prefers-reduced-motion:
+reduce` no animation runs. Under reduced motion every animation and transition is off
+  (`animation: none` and `transition: none`, in `next.css`). A duration of 0.01 ms, which was
+  used before, is not the same: it gives every element a transition on every property, and a
+  property that has just been changed is read back at its old value for one frame. `zoom.spec`'s
+  "text twice as big" (which sets each element's font size and reads the computed ones) read the
+  size it had just removed and doubled it again at each call, until a word had moved from under
+  the pointer. Run with `reducedMotion: 'reduce'`, `a11y`, `zoom` and `motion` pass.
+- **Dark and the system's choice.** The control for the colours has three states (light, dark,
+  the device's own), held in a cookie and applied from the first byte of the page, so there is no
+  flash of the wrong colours (`theme.spec`). The PDF's pages and a drawn chart stay white in dark.
+- **The keyboard.** Nothing new is a Tab stop in the new look, and the order is the classic
+  look's (`keys.spec` in both). Every Tab stop in the editor shows a ring of at least 2 px, in
+  light and in dark: it was walked stop by stop on the editor as an owner, a viewer and a
+  reviewer, at 1440 and 390 pixels wide, and every stop had one (the text itself takes the ring on
+  the pane around it). A button that is busy is `aria-disabled`, not `disabled`, so that it stays
+  reachable, and looks dimmer.
+- **Without colour.** The kinds of review keep their line styles and words in the new look
+  (solid, dashed, wavy, dotted; "Comment", "Proposed change", "Language", "Model review"), and the
+  build pill says what happened with a sign (a tick, a cross, an exclamation mark, an ellipsis) as
+  well as in colour. The offline state of the editor has a warning sign before its words.
+- **Held edits say what came.** When the paper is restored or merged while someone is offline with
+  edits of their own, the line and the button say "restored" or "merged" to match (the merge's
+  words are "changed by a merge" and "Apply my edits to the merged paper"). `restored.test.ts` and
+  `merge.spec.ts` hold both.
+
+**Known limits of the new look's checks.**
+
+- The screenshots of the editor at 1440, 1360, 1280, 390 and 320 pixels, light and dark, were
+  looked at by a person for spacing, alignment and states, once, when the look was polished. No
+  test compares them, so a later change can undo it without a failure.
+- The ring of every Tab stop was measured in a walk, not by a test that stays in the suite.
+- Contrast is measured by axe on the states the specs visit; a state they do not visit (a long
+  model review, a finding of every kind at once) is as measured on paper only.
+- The tooltips on the toolbar's icon buttons are not the buttons' names and are not a Tab stop;
+  nobody has listened to how a screen reader reads a button with a name and a shortcut.
+- A very long file name or path wraps anywhere in the tree and the bar, so it is never cut off,
+  but at 200% text the path of a deep file takes a good part of the file list.
+- The same lack of real screen readers, browsers other than Chromium and input methods applies as
+  to the classic look (see "Not checked").
+
 ## What the audit and that flow found, now fixed
 
 - The PDF pane scrolled but could not be reached from the keyboard. It now takes the keyboard

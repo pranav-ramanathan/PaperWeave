@@ -44,6 +44,18 @@ function first(r: RestoreNote, me: string, time: string) {
 /** What the notice calls the event: "restore" or "merge". */
 export const eventName = (r: RestoreNote) => (r.merge ? 'merge' : 'restore');
 
+/**
+ * The status line when the paper was changed while this person was offline with edits of their
+ * own, which are now held: a restore or a merge, whichever it was. With no note (the server sent
+ * none) it is the restore's words, as it always was.
+ */
+export const heldWords = (r: RestoreNote | null) =>
+  `This paper was ${r?.merge ? 'changed by a merge' : 'restored to an earlier revision'} while you were offline. Your edits from before that are not saved.`;
+
+/** The button that puts the held edits into the paper as it now is. */
+export const applyWords = (r: RestoreNote | null) =>
+  `Apply my edits to the ${r?.merge ? 'merged' : 'restored'} paper`;
+
 export function restoredWords(r: RestoreNote, me: string, time: string, held = false): string {
   const kept = r.kept
     ? r.merge

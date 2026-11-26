@@ -10,6 +10,12 @@
  */
 
 /* ===== T22: the frame ===== */
+@media (max-width: 59.99rem) {
+  /* Under the text, across the column: the section's gutter is not the panel's. */
+  .review {
+    margin-inline: -0.75rem;
+  }
+}
 .review {
   display: grid;
   gap: 0.75rem;
@@ -173,6 +179,13 @@
     height: calc(100dvh - 4.5rem);
     overflow: auto;
     overscroll-behavior: contain;
+  }
+  /* The text's own row takes what the bar, the toolbar and the notice leave. */
+  .workspace > section[aria-label^='Editor for'] {
+    grid-template-rows: auto auto auto 1fr;
+  }
+  .workspace > section[aria-label^='Editor for'] > #text {
+    grid-row: 4;
   }
 }
 

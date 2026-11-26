@@ -24,6 +24,11 @@
   grid-area: pdf;
   min-width: 0;
 }
+/* A gutter for the text's column where the page flows (from 60rem it has its own, below). The
+   review panel keeps its full width: review.css. */
+.workspace > section[aria-label^='Editor for'] {
+  padding: 0.75rem;
+}
 .source,
 .visual {
   height: 74vh;
@@ -68,7 +73,7 @@
 }
 .files-entry {
   display: flex;
-  align-items: center;
+  align-items: flex-start;
   gap: 0.5rem;
   min-height: 1.75rem;
   padding: 0.125rem 0.5rem;
@@ -92,6 +97,7 @@ span.files-entry {
 .files-icon {
   width: 0.875rem;
   height: 0.875rem;
+  margin-top: 0.1875rem;
   flex: none;
   opacity: 0.65;
 }
@@ -173,9 +179,26 @@ span.files-entry {
     min-height: 16rem;
     height: auto;
   }
+  /* The text fills what is left of its column, under the bar and the toolbar. The section is a
+     column here (from 85rem review.css makes it a grid with the same last row). */
+  .workspace > section[aria-label^='Editor for'] {
+    display: flex;
+    flex-direction: column;
+  }
+  .workspace > section[aria-label^='Editor for'] > :not(#text) {
+    flex: none;
+  }
+  .workspace > section[aria-label^='Editor for'] > #text {
+    display: flex;
+    flex: 1 0 auto;
+    flex-direction: column;
+    min-height: 0;
+  }
   .source,
   .visual {
-    height: 70dvh;
+    flex: 1 1 0;
+    height: auto;
+    min-height: 20rem;
   }
 }
 

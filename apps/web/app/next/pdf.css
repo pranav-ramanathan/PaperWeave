@@ -48,6 +48,11 @@
 /* The kind is said in the words and by a sign before them, not by the colour alone. */
 .build .editor-bar [role='status']::before {
   flex: none;
+  /* The sign, not toolbar.css's dot for the save status. */
+  width: auto;
+  height: auto;
+  border-radius: 0;
+  background: none;
   content: '\2026' / '';
 }
 .build .editor-bar [role='status'][data-kind='ok'] {
@@ -98,6 +103,13 @@
 }
 .build button:hover {
   background: var(--secondary);
+}
+/* Busy: still in the tab order (aria-disabled), and said to be so by its look. */
+.build button[aria-disabled='true']:hover {
+  background: var(--card);
+}
+.build .editor-bar > button[aria-disabled='true']:hover {
+  background: var(--primary);
 }
 .build .editor-bar > button {
   border-color: var(--primary);
