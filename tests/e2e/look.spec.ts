@@ -1,17 +1,11 @@
-// The switch for the new look (the form at the foot of the papers page): it keeps the person's
-// choice in the cookie `pw_ui`, and the papers page (moved to the new look) is drawn in the
-// choice, with the same links and buttons in both. Runs as it is in both looks of the suite
-// (E2E_UI=next or classic starts each person with the cookie set to it; unset, there is no cookie
-// and the page is in the default, the new look).
-import { expect, test } from '@playwright/test';
-import { CHOSEN, LOOK, person, signIn } from './helpers';
+// The old look and its switch were removed (T52). A browser that still carries the cookie `pw_ui`
+// that the switch set (`classic` or `next`, or anything else) is not told apart from one without
+// it: the same page, drawn the same way, with no switch anywhere.
+import { expect, type Page, test } from '@playwright/test';
+import { person, signIn } from './helpers';
 
-const START = LOOK;
-const TRY = 'Try the new look';
-const USE_OLD = 'Use the old look';
-
-/** What the person sees of the page, without the switch itself. */
-const appearance = (page: import('@playwright/test').Page) =>
+/** What the person sees of the papers page: how it is drawn, and its links and buttons in order. */
+const appearance = (page: Page) =>
   page.evaluate(() => {
     const style = (el: Element | null) => {
       const s = el ? getComputedStyle(el) : null;
@@ -22,75 +16,53 @@ const appearance = (page: import('@playwright/test').Page) =>
       main: style(document.querySelector('main')),
       h1: style(document.querySelector('h1')),
       body: style(document.body),
-      // The links and buttons, in the page's order, but the switch: the same in both looks.
       names: [
         ...document.querySelectorAll(
-          'main a[href], main button:not(form[aria-label="Look of the pages"] button, form[aria-label="Theme"] button)',
+          'main a[href], main button, main input:not([type=hidden]), main select, main textarea',
         ),
-      ].map((el) => el.textContent),
+      ].map((el) => el.textContent || el.getAttribute('name')),
     };
   });
 
-test('the switch keeps the choice in a cookie, and the papers page is drawn in it with the same links and buttons', async ({
+test('an old pw_ui cookie is ignored: the papers page is the same, with no switch', async ({
   browser,
 }) => {
   const { page, email } = await person(browser, 'look');
   await page.goto('/sign-in');
   await signIn(page, email);
   await expect(page.getByRole('heading', { name: 'Your papers' })).toBeVisible();
+  const url = page.url();
+  const bare = await appearance(page);
+  expect(bare.ui).toBe('next');
+  // The page has no switch for the look, and no form for one.
+  const gone = async () => {
+    await expect(page.getByRole('button', { name: /new look|old look/i })).toHaveCount(0);
+    await expect(page.getByRole('form', { name: 'Look of the pages' })).toHaveCount(0);
+    await expect(page.locator('input[name="look"]')).toHaveCount(0);
+  };
+  await gone();
 
-  const cookie = async () => (await page.context().cookies()).find((c) => c.name === 'pw_ui');
-  const switchButton = page.getByRole('button', { name: START === 'next' ? USE_OLD : TRY });
-  await expect(switchButton).toBeVisible();
-  // Only one of the two is there at a time.
-  await expect(page.getByRole('button', { name: START === 'next' ? TRY : USE_OLD })).toHaveCount(0);
-  expect((await cookie())?.value).toBe(CHOSEN);
-  const before = await appearance(page);
-  // The papers page is in the new look when that is what is chosen, and only then.
-  expect(before.ui).toBe(START === 'next' ? 'next' : null);
-
-  // The first, then the other: each sets the cookie and comes back to the papers.
-  await switchButton.click();
-  const other = START === 'next' ? 'classic' : 'next';
-  await expect(page.getByRole('button', { name: START === 'next' ? TRY : USE_OLD })).toBeVisible();
-  await expect(page).toHaveURL(/\/projects$/);
-  const set = await cookie();
-  expect(set).toMatchObject({
-    value: other,
-    path: '/',
-    httpOnly: true,
-    sameSite: 'Lax',
-  });
-  // About a year, not a session.
-  expect(set!.expires - Date.now() / 1000).toBeGreaterThan(300 * 24 * 3600);
-  const changed = await appearance(page);
-  expect(changed.ui).toBe(other === 'next' ? 'next' : null);
-  // Drawn differently, with the same links and buttons in the same order.
-  expect(changed.main).not.toEqual(before.main);
-  expect(changed.names).toEqual(before.names);
-
-  // It is the choice that stays, across a fresh load, and back again.
-  await page.reload();
-  await expect(page.getByRole('button', { name: START === 'next' ? TRY : USE_OLD })).toBeVisible();
-  expect(await appearance(page)).toEqual(changed);
-  await page.getByRole('button', { name: START === 'next' ? TRY : USE_OLD }).click();
-  await expect(page.getByRole('button', { name: START === 'next' ? USE_OLD : TRY })).toBeVisible();
-  expect((await cookie())?.value).toBe(START);
-  expect(await appearance(page)).toEqual(before);
+  for (const value of ['classic', 'next', 'something-else']) {
+    await page.context().addCookies([{ name: 'pw_ui', value, url }]);
+    await page.reload();
+    await expect(page.getByRole('heading', { name: 'Your papers' })).toBeVisible();
+    expect(await appearance(page), `pw_ui=${value}`).toEqual(bare);
+    await gone();
+    // Nothing answers to it either: the cookie is not kept, changed or removed by the server.
+    expect(
+      (await page.context().cookies()).find((c) => c.name === 'pw_ui')?.value,
+      `pw_ui=${value} is as it was set`,
+    ).toBe(value);
+  }
 });
 
-test('the switch is the last stop in the page, so nothing before it moved', async ({ browser }) => {
-  const { page, email } = await person(browser, 'look-order');
+test('with the cookie pw_ui=classic from before, the sign-in page is the new look', async ({
+  browser,
+}) => {
+  const { page } = await person(browser, 'look-signin');
   await page.goto('/sign-in');
-  await signIn(page, email);
-  await expect(page.getByRole('heading', { name: 'Your papers' })).toBeVisible();
-  const last = await page.evaluate(() => {
-    const stops = [
-      ...document.querySelectorAll<HTMLElement>(
-        'main a[href], main button, main input:not([type=hidden]), main select, main textarea',
-      ),
-    ];
-    return stops.at(-1)?.textContent;
-  });
-  expect(last).toBe(START === 'next' ? USE_OLD : TRY);
+  await page.context().addCookies([{ name: 'pw_ui', value: 'classic', url: page.url() }]);
+  await page.reload();
+  await expect(page.locator('main')).toHaveAttribute('data-ui', 'next');
+  await expect(page.getByRole('heading', { name: 'Sign in to PaperWeave' })).toBeVisible();
 });

@@ -1,6 +1,6 @@
-// The two style sheets of the old look (apps/web/app/functional.css, legacy.css): what is
-// scoped and what is not. Plain text reading: the point is that a rule added at the top of
-// legacy.css, outside the scope, is noticed, as it would restyle a page in the new look.
+// The style sheets that next.css does not scope (apps/web/app/functional.css, spike/spike.css):
+// plain text reading. The point is that functional.css names no look and no <main>, and that the
+// workbench's sheet restyles nothing but its own page.
 import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { expect, test } from 'vitest';
@@ -25,27 +25,12 @@ function topLevel(css: string) {
   return found;
 }
 
-test('legacy.css: everything is inside the scope, but <body> and the note that the page waits', () => {
-  expect(topLevel(read('legacy.css'))).toEqual([
-    'body',
-    '.waiting',
-    ":where(main:not([data-ui='next']))",
-  ]);
+test("spike.css: everything is inside the workbench's own <main>", () => {
+  expect(topLevel(read('spike/spike.css'))).toEqual([':where(main.spike)']);
 });
 
 test('functional.css: nothing in it is scoped to a look', () => {
   const css = read('functional.css');
   expect(css).not.toMatch(/data-ui/);
   expect(css).not.toMatch(/\bmain\b/);
-});
-
-test('a rule is in one of the two, not both', () => {
-  const selectors = (css: string) =>
-    new Set(
-      topLevel(css)
-        .flatMap((s) => s.split(','))
-        .map((s) => s.trim()),
-    );
-  const functional = selectors(read('functional.css'));
-  for (const s of selectors(read('legacy.css'))) expect(functional.has(s), s).toBe(false);
 });

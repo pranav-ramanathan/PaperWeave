@@ -174,19 +174,8 @@ export async function person(browser: Browser, who: string) {
   // would report.
   const ip = `10.${Math.floor(Math.random() * 250)}.${Math.floor(Math.random() * 250)}.${++people}`;
   const context = await browser.newContext({ extraHTTPHeaders: { 'x-forwarded-for': ip } });
-  // E2E_UI=next or classic: the person has chosen that look (apps/web/lib/ui.ts), as the switch on
-  // the papers page sets it. Unset: no choice, so the server's default (the new look since T51).
-  if (CHOSEN)
-    await context.addCookies([
-      {
-        name: 'pw_ui',
-        value: CHOSEN,
-        domain: new URL(test.info().project.use.baseURL ?? ORIGIN).hostname,
-        path: '/',
-      },
-    ]);
   // E2E_THEME=dark (or light): the person has chosen the colours (apps/web/lib/theme.ts), as the
-  // control in the app bar sets them. Only the new look reads it.
+  // control in the app bar sets them.
   if (process.env.E2E_THEME === 'dark' || process.env.E2E_THEME === 'light')
     await context.addCookies([
       {
@@ -202,14 +191,6 @@ export async function person(browser: Browser, who: string) {
   const page = await context.newPage();
   return { page, email: address(who) };
 }
-
-/** The look each person has chosen at the start (the cookie `pw_ui`), if the run chose one. */
-export const CHOSEN =
-  process.env.E2E_UI === 'next' || process.env.E2E_UI === 'classic'
-    ? process.env.E2E_UI
-    : undefined;
-/** The look the pages are drawn in for each person: their choice, or the default, the new look. */
-export const LOOK: 'next' | 'classic' = CHOSEN ?? 'next';
 
 /**
  * The line the caret is on in the source view, as the editor counts it. Not the place of its

@@ -1,15 +1,12 @@
-// The paper page in the new look (apps/web/app/projects/[id]): the checks that matter to how it
-// reads, not what it does (the other specs do that, in both looks). Only in a run in the new
-// look (the default; not with E2E_UI=classic).
+// The paper page (apps/web/app/projects/[id]): the checks that matter to how it reads, not what
+// it does (the other specs do that).
 import { expect, type Page, test } from '@playwright/test';
 import { mkdirSync, mkdtempSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { writeZip } from '../../packages/server/src/archive';
-import { audit, LOOK, person, run, signIn, sticksOut } from './helpers';
+import { audit, person, run, signIn, sticksOut } from './helpers';
 import { enlarged, lost, spaced } from './look';
-
-test.skip(LOOK !== 'next', 'the pages are in the old look (E2E_UI=classic)');
 
 const MAIN = [
   '\\documentclass{article}',
@@ -64,7 +61,7 @@ test('the paper page is in the new look, passes the audit, and has not got wider
   await expect(page.getByRole('link', { name: 'All papers' })).toHaveCount(1);
   const bar = page.getByRole('navigation', { name: 'Where you are' });
   await expect(bar.getByRole('link', { name: 'All papers' })).toBeVisible();
-  // The first stop in the page is the same as in the old look: that link.
+  // The first stop in the page is that link.
   await page.keyboard.press('Tab');
   await expect(page.getByRole('link', { name: 'All papers' })).toBeFocused();
 

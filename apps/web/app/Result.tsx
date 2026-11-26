@@ -1,19 +1,19 @@
 'use client';
 import { type ReactNode, useEffect, useRef } from 'react';
 import { CircleCheck, Icon, TriangleAlert } from '../components/icon';
-import { useLook } from '../components/look';
+import { useKit } from '../components/kit';
 import { cn } from '../lib/utils';
 
 /**
  * What a form on the page said, taken from the address. It has the keyboard when it appears or
  * says something new, so the next Tab goes on from the form that was sent. Next leaves focus alone
- * on a navigation. In the new look it is drawn as a notice (components/notice.tsx): the words are
+ * on a navigation. Where the page has the kit it is drawn as a notice (components/notice.tsx): the words are
  * still the live region, and the one that has the keyboard.
  */
 export default function Result(props: { children: ReactNode; alert?: boolean }) {
   const line = useRef<HTMLParagraphElement>(null);
   const last = useRef('');
-  const next = useLook() === 'next';
+  const next = useKit();
   useEffect(() => {
     const text = line.current?.textContent ?? '';
     if (text !== last.current) line.current?.focus();

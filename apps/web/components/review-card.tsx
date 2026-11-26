@@ -1,8 +1,8 @@
 'use client';
 // The review panel's frame and the look of its cards (PLAN.md section 4, "Review card"). The
 // three lists (Proposals, Threads, Language) keep their own DOM and words; what this file gives
-// them is class names (Tailwind utilities, which only match inside the new look), and, in the new
-// look only, the panel's header: how many are open, and buttons that scroll to a list.
+// them is class names (Tailwind utilities), and
+// the panel's header: how many are open, and buttons that scroll to a list.
 import {
   createContext,
   type ReactNode,
@@ -15,14 +15,13 @@ import {
 import { cn } from '../lib/utils';
 import { buttonVariants } from './ui/button';
 import { Icon, MessageSquare, Pencil, Sparkles, TriangleAlert } from './icon';
-import { useLook } from './look';
 
 export type CardKind = 'comment' | 'proposal' | 'model' | 'finding';
 type Counted = 'comments' | 'changes' | 'language';
 
 const Counts = createContext<((kind: Counted, n: number) => void) | null>(null);
 
-/** Tell the panel how many are open in a list. Nothing happens outside the panel (old look). */
+/** Tell the panel how many are open in a list. Nothing happens outside the panel. */
 export function useReviewCount(kind: Counted, n: number | null) {
   const report = useContext(Counts);
   useEffect(() => {
@@ -80,8 +79,6 @@ const KIND_ICON = {
  * the tests and the screen reader read: the card's name already says what it is.
  */
 export function CardKindMark({ kind }: { kind: CardKind }) {
-  const look = useLook();
-  if (look !== 'next') return null;
   return (
     <span className="review-kind" data-kind={kind} aria-hidden="true">
       <Icon icon={KIND_ICON[kind]} />
@@ -97,11 +94,9 @@ const FILTERS: { key: 'all' | Counted; label: string; id: string }[] = [
 ];
 
 /**
- * The panel round the three lists. In the old look it is nothing (no element). In the new look it
- * is the column beside the text (or under it, narrow), with a header that counts and scrolls.
+ * The panel round the three lists: the column beside the text (or under it, narrow), with a header that counts and scrolls.
  */
 export function ReviewPanel({ children }: { children: ReactNode }) {
-  const look = useLook();
   const [counts, setCounts] = useState<Record<Counted, number | null>>({
     comments: null,
     changes: null,
@@ -116,7 +111,6 @@ export function ReviewPanel({ children }: { children: ReactNode }) {
     () => Object.values(counts).reduce<number>((a, n) => a + (n ?? 0), 0),
     [counts],
   );
-  if (look !== 'next') return <>{children}</>;
   return (
     <Counts.Provider value={report}>
       <div className="review" data-review>

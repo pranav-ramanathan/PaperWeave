@@ -1,7 +1,8 @@
 // The new look's style sheet (apps/web/app/next.css), compiled the way the build compiles it: the
 // plugins named in postcss.config.mjs, Tailwind first. The point: not one rule that comes out of it
-// may match on a page outside the scope (<main data-ui='next'>), as it would restyle a page in the
-// old look; and the old look's two sheets must come through the same pipeline unchanged.
+// may match outside the scope (<main data-ui='next'>): the page's <html> and <body>, the error
+// pages and the developer workbench are not in it; and the other style sheets must come through the
+// same pipeline unchanged.
 import { readFileSync } from 'node:fs';
 import { createRequire } from 'node:module';
 import { join } from 'node:path';
@@ -112,11 +113,11 @@ test('only the editor is held to one screen: no rule makes every page in the new
   expect(screenHigh).not.toContain('');
 });
 
-test('legacy.css, functional.css and katex come through the same pipeline untouched', async () => {
+test('functional.css, spike.css and katex come through the same pipeline untouched', async () => {
   const run = await pipeline();
   for (const file of [
-    join(APP, 'legacy.css'),
     join(APP, 'functional.css'),
+    join(APP, 'spike/spike.css'),
     require.resolve('katex/dist/katex.min.css'),
   ]) {
     const css = readFileSync(file, 'utf8');

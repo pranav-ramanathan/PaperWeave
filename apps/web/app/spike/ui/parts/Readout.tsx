@@ -1,11 +1,11 @@
 'use client';
-import { useLook } from '../../../../components/look';
+import { useKit } from '../../../../components/kit';
 
-/** What a component that branches on the look is told here: for the specimen's test. */
+/** What a component that has two drawings is told here: for the specimen's test. */
 export default function Readout() {
   return (
     <p>
-      The look context says: <code data-testid="look">{useLook()}</code>
+      The kit context says: <code data-testid="kit">{useKit() ? 'kit' : 'plain'}</code>
     </p>
   );
 }

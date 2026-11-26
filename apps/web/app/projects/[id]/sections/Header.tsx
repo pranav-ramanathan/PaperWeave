@@ -6,16 +6,14 @@ import Once from '../../../Once';
 import Result from '../../../Result';
 import { renamePaperAction } from '../../actions';
 
-/** The paper's name and the reader's role in it. `next` is the new look's top: a bar, then the title. */
+/** The paper's name and the reader's role in it: a bar, then the title. */
 export function Header({
   name,
   role,
-  next = false,
   versions,
 }: {
   name: string;
   role: string;
-  next?: boolean;
   /** Only with versions turned on: the switcher's entries, and the address of main. */
   versions?: { choices: VersionChoice[]; paper: string; merge?: boolean };
 }) {
@@ -33,51 +31,41 @@ export function Header({
       {role}
     </span>
   );
-  if (next)
-    return (
-      <>
-        {/* The mark and the word are not a link here: a link before "All papers" would be a new
-            stop for the keyboard before the ones the page has. */}
-        <header className="paper-bar">
-          <span className="paper-brand">
-            <Mark />
-            PaperWeave
-          </span>
-          <nav aria-label="Where you are">
-            <ol>
-              <li>
-                <ChevronRight aria-hidden="true" />
-                <Link prefetch={false} href="/projects">
-                  All papers
-                </Link>
-              </li>
-            </ol>
-          </nav>
-          {versions && (
-            <div className="paper-versions">
-              <VersionMenu
-                choices={versions.choices}
-                page=""
-                paper={versions.paper}
-                merge={versions.merge}
-              />
-            </div>
-          )}
-        </header>
-        <div className="paper-title">
-          <h1>{name}</h1>
-          {who}
-        </div>
-      </>
-    );
   return (
-    <header className="bar">
-      <h1>{name}</h1>
-      {who}
-      <Link prefetch={false} href="/projects">
-        All papers
-      </Link>
-    </header>
+    <>
+      {/* The mark and the word are not a link here: a link before "All papers" would be a new
+          stop for the keyboard before the ones the page has. */}
+      <header className="paper-bar">
+        <span className="paper-brand">
+          <Mark />
+          PaperWeave
+        </span>
+        <nav aria-label="Where you are">
+          <ol>
+            <li>
+              <ChevronRight aria-hidden="true" />
+              <Link prefetch={false} href="/projects">
+                All papers
+              </Link>
+            </li>
+          </ol>
+        </nav>
+        {versions && (
+          <div className="paper-versions">
+            <VersionMenu
+              choices={versions.choices}
+              page=""
+              paper={versions.paper}
+              merge={versions.merge}
+            />
+          </div>
+        )}
+      </header>
+      <div className="paper-title">
+        <h1>{name}</h1>
+        {who}
+      </div>
+    </>
   );
 }
 

@@ -25,10 +25,8 @@ import {
   modelProcessing,
 } from '@paperweave/server';
 import { notFound } from 'next/navigation';
-import { Fragment } from 'react';
 import { OverlayRoot } from '../../../components/ui/overlay-root';
 import { blobs, db, forTitle, paperOf, requireUser } from '../../../lib/server';
-import { ui } from '../../../lib/ui';
 import { switcherOf, versionPowers, versionsOn } from '../../../lib/versions';
 import { Assistance } from './sections/Assistance';
 import { Bibliography, CheckNotices } from './sections/Bibliography';
@@ -152,10 +150,8 @@ async function Project({
   const showBibliography = cited.entries.length > 0 || cited.missing.length > 0;
   const showData = dataFiles.length > 0;
   const showReview = threads.length + proposals.length > 0;
-  const look = await ui('paper');
-  const next = look === 'next';
-  // The version switcher, in the new look and only with versions on: main and each version of it.
-  const family = next && versionsOn() ? await listVersions(db(), user.id, id) : null;
+  // The version switcher, only with versions on: main and each version of it.
+  const family = versionsOn() ? await listVersions(db(), user.id, id) : null;
   const mainId = family?.[0]?.paper ?? id;
   const switcher = family && {
     choices: switcherOf(mainId, family, id),
@@ -171,8 +167,7 @@ async function Project({
       owner={owner}
     />
   );
-  // Everything after the list of sections. In the new look the list sits beside it, in a grid of
-  // two columns; in the old look both are the page's own children, as they were.
+  // Everything after the list of sections, which sits beside it, in a grid of two columns.
   const sections = (
     <>
       <ErrorNotice error={query.error} />
@@ -262,30 +257,17 @@ async function Project({
       )}
     </>
   );
-  // The new look's menus (the version switcher) mount in the overlay root, inside <main>, where
+  // The menus (the version switcher) mount in the overlay root, inside <main>, where
   // its rules and colours are; without it they would go to <body>, outside both.
-  const Overlays = next ? OverlayRoot : Fragment;
   return (
-    <main className={next ? 'page paper' : 'page'} data-ui={look}>
-      <Overlays>
-        <Header
-          name={project.name}
-          role={project.role}
-          next={next}
-          versions={switcher ?? undefined}
-        />
-        {next ? (
-          <div className="paper-grid">
-            {onThisPage}
-            <div className="paper-flow">{sections}</div>
-          </div>
-        ) : (
-          <>
-            {onThisPage}
-            {sections}
-          </>
-        )}
-      </Overlays>
+    <main className="page paper" data-ui="next">
+      <OverlayRoot>
+        <Header name={project.name} role={project.role} versions={switcher ?? undefined} />
+        <div className="paper-grid">
+          {onThisPage}
+          <div className="paper-flow">{sections}</div>
+        </div>
+      </OverlayRoot>
     </main>
   );
 }

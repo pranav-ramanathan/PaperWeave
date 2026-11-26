@@ -1,7 +1,7 @@
 'use client';
 import { type ButtonHTMLAttributes, useEffect, useRef } from 'react';
 import { useFormStatus } from 'react-dom';
-import { useLook } from '../components/look';
+import { useKit } from '../components/kit';
 import { buttonVariants } from '../components/ui/button';
 import { cn } from '../lib/utils';
 import { waiting } from '../lib/waiting';
@@ -15,11 +15,11 @@ export default function Once({
   className,
   ...props
 }: ButtonHTMLAttributes<HTMLButtonElement> & {
-  /** In the new look: which button it is drawn as (the primary one by default). */
+  /** In the kit: which button it is drawn as (the primary one by default). */
   variant?: 'default' | 'outline' | 'destructive';
 }) {
   const { pending } = useFormStatus();
-  const next = useLook() === 'next';
+  const next = useKit();
   const going = useRef(false);
   const button = useRef<HTMLButtonElement>(null);
   // A form with a server action: free again when the action has answered, which is also when

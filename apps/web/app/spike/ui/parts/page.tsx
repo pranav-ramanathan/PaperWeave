@@ -2,7 +2,7 @@ import type { Metadata } from 'next';
 import { notFound } from 'next/navigation';
 import { AppBar } from '../../../../components/app-bar';
 import { Icon, MessageSquare, Moon, Sparkles, Sun } from '../../../../components/icon';
-import { LookProvider } from '../../../../components/look';
+import { KitProvider } from '../../../../components/kit';
 import { Mark } from '../../../../components/mark';
 import { Notice } from '../../../../components/notice';
 import {
@@ -36,7 +36,7 @@ export default async function Page({
       data-ui="next"
       data-theme={dark ? 'dark' : undefined}
     >
-      <LookProvider look="next">
+      <KitProvider>
         <TooltipProvider>
           <AppBar
             home="/spike/ui/parts"
@@ -131,15 +131,15 @@ export default async function Page({
               </p>
             </section>
 
-            <section aria-labelledby="look" className="grid gap-3">
-              <h2 id="look" className="font-heading text-xl font-semibold">
-                The look context
+            <section aria-labelledby="kit" className="grid gap-3">
+              <h2 id="kit" className="font-heading text-xl font-semibold">
+                The kit context
               </h2>
               <Readout />
             </section>
           </div>
         </TooltipProvider>
-      </LookProvider>
+      </KitProvider>
     </main>
   );
 }

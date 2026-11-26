@@ -184,11 +184,11 @@ the keyboard (`insert.spec`).
 
 ## The new look: what is checked and how
 
-Every page is shown in the new look by default (T51); the old look is the cookie
-`pw_ui=classic`, which the tests set with `E2E_UI=classic`. Dark colours are `pw_theme=dark`
-(`E2E_THEME=dark`). CI runs the browser suite in the new look (required), in the classic look,
-and (as a check that is not required) in the new look in dark; a change to the new look is also compared with the classic look's screenshots
-pixel for pixel, by a script outside the suite. What
+Every page is in the new look; the old look was removed in T52, and so were its cookie `pw_ui`
+and `E2E_UI`. Dark colours are `pw_theme=dark` (`E2E_THEME=dark`). CI runs the browser suite
+(required) and, as a check that is not required, the specs that audit each page in dark. A change
+to the look is also compared pixel for pixel with screenshots taken before it, by a script outside
+the suite. What
 follows holds for the new look in light and in dark unless it says otherwise.
 
 - **axe** (WCAG 2.1 A and AA) runs in every spec that already called `audit`, in each look:

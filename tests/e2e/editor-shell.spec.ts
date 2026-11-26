@@ -1,20 +1,11 @@
-// The editor's workspace shell in the new look (T18): the app bar, the three-pane grid and the
-// file tree. While the editor is a STAGED page (apps/web/lib/ui.ts) it is in the new look only on
-// a server with UI_STAGED=1; once it is MIGRATED, always, for a person whose cookie is
-// `pw_ui=next`. This spec sets that cookie itself; if the editor is not in the new look at all,
-// these tests have nothing to look at.
+// The editor's workspace shell (T18): the app bar, the three-pane grid and the file tree.
 import { expect, type Page, test } from '@playwright/test';
 import { mkdtempSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { writeZip } from '../../packages/server/src/archive';
-import { audit, ORIGIN, person, run, signIn, sticksOut } from './helpers';
-import { editorIsNext, enlarged, lost, spaced } from './look';
-
-test.skip(
-  !editorIsNext(),
-  'the editor is in the new look only once it is moved (or staged, with UI_STAGED=1)',
-);
+import { audit, person, run, signIn, sticksOut } from './helpers';
+import { enlarged, lost, spaced } from './look';
 
 const MAIN = [
   '\\documentclass{article}',
@@ -28,12 +19,9 @@ const MAIN = [
 
 const files = (page: Page) => page.getByRole('navigation', { name: 'Files' });
 
-/** A paper with a folder, opened in its root file, with the new look chosen. */
+/** A paper with a folder, opened in its root file. */
 async function open(browser: Parameters<typeof person>[0], who: string) {
   const { page, email } = await person(browser, who);
-  await page
-    .context()
-    .addCookies([{ name: 'pw_ui', value: 'next', domain: new URL(ORIGIN).hostname, path: '/' }]);
   await page.goto('/sign-in');
   await signIn(page, email);
   const zip = join(mkdtempSync(join(tmpdir(), 'paperweave-e2e-')), `Shell ${run}.zip`);
@@ -60,7 +48,7 @@ test('the shell passes the accessibility audit, with the app bar, the tree and t
   test.setTimeout(180_000);
   const { page, name } = await open(browser, 'shell-audit');
 
-  // The same names, roles and order as the old look.
+  // The files' names, roles and order.
   await expect(page.getByRole('heading', { level: 1 })).toHaveText(name);
   await expect(page.getByRole('link', { name: 'Paper overview' })).toBeVisible();
   const links = files(page).getByRole('link');

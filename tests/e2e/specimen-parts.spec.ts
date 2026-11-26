@@ -1,4 +1,4 @@
-// The new look's app parts (app bar, mark, notice, tooltip, the look context) on their specimen
+// The new look's app parts (app bar, mark, notice, tooltip, the kit context) on their specimen
 // page, /spike/ui/parts, which is there only where SPIKE is on. Needs no sign-in.
 import { expect, test } from '@playwright/test';
 import { audit, refusals, sticksOut } from './helpers';
@@ -87,8 +87,8 @@ test('a tooltip shows on hover and on keyboard focus, is no tab stop and not the
   await expect(page.getByRole('tooltip')).toHaveCount(0);
 });
 
-test('the look context says next on this page', async ({ page }) => {
+test('the kit context says kit on this page', async ({ page }) => {
   refusals(page.context());
   await page.goto('/spike/ui/parts');
-  await expect(page.getByTestId('look')).toHaveText('next');
+  await expect(page.getByTestId('kit')).toHaveText('kit');
 });

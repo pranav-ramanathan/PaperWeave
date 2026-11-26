@@ -7,7 +7,6 @@ import { notFound } from 'next/navigation';
 import { blobs, db, forTitle, paperOf, requireUser } from '../../../../../lib/server';
 import { approveDatasetAction } from '../../../actions';
 import { FormPage, Say } from '../../../../../components/form-page';
-import { ui } from '../../../../../lib/ui';
 
 export const dynamic = 'force-dynamic';
 const HOLDS = { number: 'numbers', date: 'dates', text: 'text' } as const;
@@ -37,7 +36,6 @@ export default async function Describe({
     if (err.code === 'not_found') notFound();
     return err.message;
   });
-  const look = await ui('data-file');
   const back = (
     <Link prefetch={false} href={`/projects/${id}#data`}>
       Back to the paper
@@ -45,10 +43,8 @@ export default async function Describe({
   );
   if (typeof loaded === 'string')
     return (
-      <FormPage look={look} title="Describe a data file" back={back}>
-        <Say look={look} role="alert">
-          {loaded}
-        </Say>
+      <FormPage title="Describe a data file" back={back}>
+        <Say role="alert">{loaded}</Say>
       </FormPage>
     );
   const [project, { path, version, guess, approved }] = loaded;
@@ -59,7 +55,6 @@ export default async function Describe({
   const spellings = [...new Set([...guess.missing, ...(approved?.missing ?? [])])];
   return (
     <FormPage
-      look={look}
       wide
       title={
         <>
@@ -76,7 +71,7 @@ export default async function Describe({
         this version of the file.
       </p>
       {approved?.changed && (
-        <Say look={look} role="status" tone="warning">
+        <Say role="status" tone="warning">
           The file has changed since its description was approved on{' '}
           {approved.approvedAt.slice(0, 10)}. Look at it again and approve this version.
         </Say>

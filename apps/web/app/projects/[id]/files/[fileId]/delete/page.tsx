@@ -5,7 +5,6 @@ import Once from '../../../../../Once';
 import { notFound } from 'next/navigation';
 import { blobs, db, requireUser } from '../../../../../../lib/server';
 import { FormPage, Say } from '../../../../../../components/form-page';
-import { ui } from '../../../../../../lib/ui';
 import { deleteFileAction } from '../../../../actions';
 
 export const dynamic = 'force-dynamic';
@@ -27,7 +26,6 @@ export default async function DeleteFile({
     if (err.code === 'not_found') notFound();
     return err.message;
   });
-  const look = await ui('file-delete');
   const back = (
     <Link prefetch={false} href={`/projects/${id}`}>
       Back to the paper
@@ -35,10 +33,8 @@ export default async function DeleteFile({
   );
   if (typeof uses === 'string')
     return (
-      <FormPage look={look} title="Delete a file" back={back}>
-        <Say look={look} role="alert">
-          {uses}
-        </Say>
+      <FormPage title="Delete a file" back={back}>
+        <Say role="alert">{uses}</Say>
       </FormPage>
     );
   const files = [...new Set(uses.lines.map((l) => l.path))];
@@ -46,7 +42,6 @@ export default async function DeleteFile({
   const one = count === 1;
   return (
     <FormPage
-      look={look}
       wide
       danger
       title={
@@ -58,9 +53,7 @@ export default async function DeleteFile({
     >
       {error && <Result alert>{error}</Result>}
       {uses.root ? (
-        <Say look={look} role="alert">
-          This is the root file. Make another file the root first.
-        </Say>
+        <Say role="alert">This is the root file. Make another file the root first.</Say>
       ) : (
         <>
           {count === 0 ? (

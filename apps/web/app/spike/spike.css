@@ -1,0 +1,272 @@
+/* The style of the developer workbench at /spike (SPIKE=1, docs/settings.md): its own <main
+   class='spike'>, outside the new look, so nothing here reaches any other page. Moved here, as it
+   was, from the old look's style sheet when that went (T52). `:where()` adds no strength, so each
+   rule is as strong as it was. Colours are the variables of functional.css. */
+
+:where(main.spike) {
+  & header {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 0.75rem 1.25rem;
+    align-items: center;
+    padding: 0.75rem 1rem;
+    background: var(--paper);
+    border-bottom: 1px solid var(--line);
+  }
+  & h1 {
+    font-size: 1.1rem;
+    margin: 0;
+  }
+  & h2 {
+    font-size: 0.95rem;
+    margin: 0 0 0.5rem;
+  }
+  & header p {
+    margin: 0;
+    color: var(--muted);
+    flex-basis: 100%;
+    min-height: 1.5em;
+  }
+  & input[type='number'] {
+    width: 5rem;
+  }
+  & button,
+  & select,
+  & input {
+    font: inherit;
+    padding: 0.2rem 0.55rem;
+    border: 1px solid var(--line);
+    border-radius: 6px;
+    background: var(--paper);
+    color: var(--ink);
+  }
+  & button {
+    cursor: pointer;
+  }
+  & button:hover {
+    border-color: var(--accent);
+  }
+  & button[aria-pressed='true'] {
+    background: var(--warn-wash);
+    border-color: var(--warn);
+  }
+  & :focus-visible {
+    outline: 2px solid var(--accent);
+    outline-offset: 1px;
+  }
+  .authors {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 1rem;
+    padding: 1rem;
+  }
+  .authors section {
+    min-width: 0;
+  }
+  .toolbar {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 0.4rem;
+    margin-bottom: 0.5rem;
+  }
+  .panes {
+    display: grid;
+    grid-template-rows: 46vh 30vh;
+    gap: 0.5rem;
+  }
+  .visual,
+  .source {
+    background: var(--paper);
+    border: 1px solid var(--line);
+    border-radius: 8px;
+    overflow: auto;
+    min-width: 0;
+  }
+  .source .cm-editor {
+    height: 100%;
+    font-size: 13px;
+  }
+  .source .cm-editor.cm-focused,
+  .visual:focus-within {
+    outline: 2px solid var(--accent);
+  }
+  .visual .ProseMirror {
+    padding: 1rem 1.25rem;
+    min-height: 100%;
+    outline: none;
+    font-family: Georgia, 'Times New Roman', serif;
+    font-size: 16px;
+  }
+  .visual p {
+    margin: 0 0 0.8em;
+  }
+  .visual h2,
+  .visual h3,
+  .visual h4 {
+    font-family: system-ui, sans-serif;
+    margin: 1.1em 0 0.4em;
+  }
+  .visual h2 {
+    font-size: 1.25rem;
+  }
+  .visual h3 {
+    font-size: 1.08rem;
+  }
+  .visual ul,
+  .visual ol {
+    margin: 0 0 0.8em;
+    padding-left: 1.5em;
+  }
+  .pw-atom {
+    font-family: ui-monospace, monospace;
+    font-size: 0.82em;
+  }
+  & span.pw-atom {
+    background: var(--wash);
+    border: 1px solid var(--line);
+    border-radius: 4px;
+    padding: 0 0.25em;
+    white-space: nowrap;
+  }
+  /* A logo such as \LaTeX reads as the word it prints; its source is in the title. */
+  & span.pw-atom.pw-word {
+    background: none;
+    border: none;
+    padding: 0;
+    font: inherit;
+  }
+  /* A comment inside a paragraph prints nothing: it reads as a quiet italic note; the source is in the title. */
+  & span.pw-atom.pw-comment {
+    background: none;
+    border: none;
+    padding: 0;
+    font: inherit;
+    font-style: italic;
+    font-size: 0.85em;
+    color: var(--muted);
+  }
+  /* A command that prints nothing (\noindent, \-, \\) is a small quiet mark; the source is in the title. */
+  & span.pw-atom.pw-quiet {
+    background: none;
+    border: none;
+    padding: 0;
+    font: inherit;
+    font-size: 0.8em;
+    color: var(--muted);
+  }
+  /* A \label inside a paragraph reads as its key, small and quiet; the source is in the title. */
+  & span.pw-atom.pw-tag {
+    color: var(--muted);
+    font-size: 0.75em;
+  }
+  & span.pw-math:not(.pw-raw) {
+    background: none;
+    border: none;
+    font-size: 1em;
+  }
+  /* A number taken from a PDF that is behind the text, and a reference LaTeX could not resolve. */
+  .pw-stale.pw-ref,
+  .pw-stale .katex-tag {
+    font-style: italic;
+    color: var(--muted);
+  }
+  .pw-unknown {
+    color: var(--warn);
+    border-color: var(--warn);
+  }
+  .pw-cite,
+  .pw-ref {
+    color: var(--accent);
+  }
+  .pw-block {
+    display: block;
+    margin: 0 0 0.8em;
+  }
+  & div.pw-math:not(.pw-raw) {
+    font-size: 1em;
+    text-align: center;
+  }
+  & div.pw-raw,
+  & div.pw-frozen {
+    border: 1px dashed var(--line);
+    border-radius: 6px;
+    padding: 0.4rem 0.6rem;
+    background: var(--wash);
+  }
+  & div.pw-frozen {
+    border: 1px solid var(--warn);
+    background: var(--warn-wash);
+  }
+  & div.pw-frozen strong {
+    display: block;
+    font-family: system-ui, sans-serif;
+    color: var(--warn);
+  }
+  .pw-last {
+    font-family: Georgia, serif;
+    color: var(--muted);
+    margin: 0.2rem 0;
+  }
+  .pw-last:empty {
+    display: none;
+  }
+  .pw-label {
+    color: var(--muted);
+    font-family: system-ui, sans-serif;
+  }
+  .pw-block pre {
+    margin: 0.2rem 0;
+    white-space: pre-wrap;
+    max-height: 9em;
+    overflow: auto;
+  }
+  .pw-block button {
+    min-height: 24px;
+    font-family: system-ui, sans-serif;
+    font-size: 0.85em;
+  }
+  /* A lone \label, an environment's \begin or \end line, the end of the document: one line. */
+  & div.pw-raw.pw-slim {
+    display: flex;
+    align-items: baseline;
+    gap: 0.5em;
+    margin: 0 0 0.3em;
+    padding: 0;
+    border: none;
+    background: none;
+    font-size: 0.8em;
+  }
+  .pw-slim-begin .pw-label {
+    font-weight: 600;
+    color: var(--ink);
+  }
+  .pw-block.pw-slim button {
+    min-height: 24px;
+    border: none;
+    background: none;
+    padding: 0 0.25em;
+    color: var(--accent);
+    text-decoration: underline;
+    cursor: pointer;
+  }
+  .ProseMirror-selectednode {
+    outline: 2px solid var(--accent);
+  }
+
+  .problems {
+    margin: 1rem 1rem 0;
+    padding: 0.6rem 0.9rem;
+    border: 1px solid var(--warn);
+    border-radius: 8px;
+    background: var(--warn-wash);
+  }
+  .problems ul {
+    margin: 0.3rem 0 0;
+    padding-left: 1.2rem;
+    font-family: ui-monospace, monospace;
+    font-size: 0.85em;
+  }
+  & a {
+    color: var(--accent);
+  }
+}

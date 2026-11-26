@@ -2,30 +2,16 @@
 // starting a version from a revision or from the paper as it is, renaming, deleting, and who may do
 // which. A version is a paper of its own that was begun at one of main's revisions. Everything is
 // behind the `VERSIONS` setting, which is on unless the server was started with VERSIONS=0 (the
-// browser-classic job in ci.yml is). So there are two groups of tests: with the setting on, what
+// versions-off step of the browser job in ci.yml is). So there are two groups of tests: with the setting on, what
 // versions do; with it off, that nothing of them shows. Each group runs when its setting is the
 // one the server has; none is skipped for a reason that is not the setting.
 import { expect, type Page, test } from '@playwright/test';
-import { readFileSync } from 'node:fs';
-import { resolve } from 'node:path';
-import { audit, emailedLink, LOOK, person, signIn, sticksOut } from './helpers';
+import { audit, emailedLink, person, signIn, sticksOut } from './helpers';
 import { enlarged, lost, spaced } from './look';
 
 type Person = Awaited<ReturnType<typeof person>>;
 // On unless the server was started with VERSIONS=0, as versionsEnabled reads it.
 const ON = process.env.VERSIONS?.trim() !== '0';
-/**
- * One of the lists of pages in apps/web/lib/ui.ts, read from the source (the module itself needs
- * Next to load, which a spec does not have).
- */
-const pagesIn = (list: 'MIGRATED' | 'STAGED') => {
-  const source = readFileSync(resolve(import.meta.dirname, '../../apps/web/lib/ui.ts'), 'utf8');
-  const body = new RegExp(`export const ${list}: readonly string\\[\\] = \\[([^\\]]*)\\]`).exec(
-    source,
-  )?.[1];
-  if (body === undefined) throw new Error(`apps/web/lib/ui.ts has no ${list} list`);
-  return [...body.matchAll(/'([^']+)'/g)].map((m) => m[1]);
-};
 const said = (page: Page) =>
   page.locator('.history-said [role=status], .history-said [role=alert]');
 const numberIn = (text: string) => Number(/(\d+)/.exec(text)![1]);
@@ -341,16 +327,6 @@ if (ON) {
   test('the switcher in the editor lands on the same file, or on the paper page', async ({
     browser,
   }) => {
-    // The switcher is in the new look's app bar: the editor must be in the new look, which is when
-    // the run has chosen it and the page is migrated, or is staged and the server has UI_STAGED=1.
-    test.skip(
-      LOOK !== 'next' ||
-        !(
-          pagesIn('MIGRATED').includes('file') ||
-          (pagesIn('STAGED').includes('file') && process.env.UI_STAGED === '1')
-        ),
-      'the editor is not in the new look in this run',
-    );
     test.setTimeout(300_000);
     const owner = await person(browser, 'ver-editor');
     const { page } = owner;
@@ -430,14 +406,10 @@ if (ON) {
   test('the switcher, open, in light and in dark: inside the page, in its colours, clean for axe', async ({
     browser,
   }) => {
-    // The menu mounts in the page's overlay root, inside <main data-ui='next'>, where the new
-    // look's rules and colours are. Mounted on <body> instead, it has neither: no surface of its
-    // own, and in dark the page's light text on the classic white (axe: color-contrast).
-    test.skip(LOOK !== 'next', 'the switcher is in the new look only');
+    // The menu mounts in the page's overlay root, inside <main data-ui='next'>, where the look's
+    // rules and colours are. Mounted on <body> instead, it has neither: no surface of its own,
+    // and in dark the page's light text on white (axe: color-contrast).
     test.setTimeout(180_000);
-    const editorNext =
-      pagesIn('MIGRATED').includes('file') ||
-      (pagesIn('STAGED').includes('file') && process.env.UI_STAGED === '1');
     const owner = await person(browser, 'ver-menu-theme');
     const { page } = owner;
     const paper = await newPaper(owner);
@@ -457,7 +429,7 @@ if (ON) {
         ]);
       for (const [where, url] of [
         ['the paper page', paper],
-        ...(editorNext ? [['the editor', file]] : []),
+        ['the editor', file],
       ]) {
         await page.goto(url);
         await page.getByRole('button', { name: /^Version: main/ }).click();

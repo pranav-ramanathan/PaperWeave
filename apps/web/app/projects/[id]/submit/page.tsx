@@ -19,7 +19,6 @@ import { notFound } from 'next/navigation';
 import { blobs, db, forTitle, paperOf, requireUser } from '../../../../lib/server';
 import { buildNowAction } from '../../actions';
 import { FormPage, Say } from '../../../../components/form-page';
-import { ui } from '../../../../lib/ui';
 
 export const dynamic = 'force-dynamic';
 
@@ -102,10 +101,8 @@ async function Submit({
         (await bblInRevision(db(), user.id, id, checks.revisionId)) !== null
       : false;
   const revision = `/projects/${id}/revisions/${checks.revisionId}`;
-  const look = await ui('submit');
   return (
     <FormPage
-      look={look}
       wide
       // While a build runs, look again every two seconds.
       before={checks.building && <Again />}
@@ -119,7 +116,7 @@ async function Submit({
       {error && <Result alert>{error}</Result>}
       {checks.ready ? (
         <>
-          <Say look={look} role="status" tone="success">
+          <Say role="status" tone="success">
             Nothing stands in the way. The ZIP and the PDF below are of the same revision.
           </Say>
           {can(project.role, 'project.export') ? (

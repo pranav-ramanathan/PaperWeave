@@ -13,7 +13,7 @@ import {
 import { notFound } from 'next/navigation';
 import type { ReactNode } from 'react';
 import { AppBar } from '../../../../../../components/app-bar';
-import { LookProvider } from '../../../../../../components/look';
+import { KitProvider } from '../../../../../../components/kit';
 import { Notice } from '../../../../../../components/notice';
 import { buttonVariants } from '../../../../../../components/ui/button';
 import { OverlayRoot } from '../../../../../../components/ui/overlay-root';
@@ -420,7 +420,7 @@ async function Merge({
 
   return (
     <main data-ui="next" className="page merge">
-      <LookProvider look="next">
+      <KitProvider>
         <OverlayRoot>
           <AppBar
             home="/projects"
@@ -561,7 +561,7 @@ async function Merge({
             )}
           </div>
         </OverlayRoot>
-      </LookProvider>
+      </KitProvider>
     </main>
   );
 }

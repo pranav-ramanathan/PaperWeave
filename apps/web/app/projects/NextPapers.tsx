@@ -1,43 +1,37 @@
 import { TEMPLATES, type listProjects } from '@paperweave/server';
 import { AppBar } from '../../components/app-bar';
 import { Icon, MessageSquare } from '../../components/icon';
-import { LookProvider } from '../../components/look';
+import { KitProvider } from '../../components/kit';
 import { ThemeSwitch } from '../../components/theme-switch';
 import { Badge } from '../../components/ui/badge';
 import { Input } from '../../components/ui/input';
 import { Label } from '../../components/ui/label';
 import { NativeSelect } from '../../components/ui/native-select';
 import { reviewWaiting } from '../../lib/review';
-import type { Look } from '../../lib/ui';
 import DirectUpload from '../DirectUpload';
 import Link from '../Go';
 import Once from '../Once';
 import Result from '../Result';
 import SignOut from '../SignOut';
 import { createAction } from './actions';
-import { lookAction } from './look-action';
 
 /**
- * The papers list in the new look (PLAN.md section 4, mock: after/papers-1440-light.png). The same
- * words, links, labels and buttons as the classic page, in the same order in the page: the list on
- * the left of a wide window and the forms beside it are placed by the grid, not by moving them, and
- * the switch for the look stays the last thing, so that nothing before it has moved.
+ * The papers list (PLAN.md section 4, mock: after/papers-1440-light.png): the list on the left of
+ * a wide window and the forms beside it are placed by the grid, not by moving them.
  *
- * Only what the page has is drawn: no search, no sorting, no counts of people or of builds. The
- * classic page's own markup stays in page.tsx until the old look is removed.
+ * Only what the page has is drawn: no search, no sorting, no counts of people or of builds.
  */
 export default function NextPapers(props: {
   email: string;
   projects: Awaited<ReturnType<typeof listProjects>>;
   said: { error?: string; imported?: string; left?: string; deleted?: string };
-  choice: Look;
 }) {
-  const { email, projects, said, choice } = props;
+  const { email, projects, said } = props;
   const { error, imported, left, deleted } = said;
   return (
     // `page` keeps the "Problem: " that functional.css puts before an alert.
     <main data-ui="next" className="page">
-      <LookProvider look="next">
+      <KitProvider>
         <div className="min-h-dvh">
           <AppBar home={null}>
             <span className="text-muted-foreground [overflow-wrap:anywhere]">{email}</span>
@@ -177,17 +171,10 @@ export default function NextPapers(props: {
                   Import ZIP or tar
                 </Once>
               </DirectUpload>
-              {/* Last in the page, after every form above (see lib/ui.ts and look.spec.ts). */}
-              <form action={lookAction} aria-label="Look of the pages" className="flex">
-                <input type="hidden" name="look" value={choice === 'next' ? 'classic' : 'next'} />
-                <Once variant="outline" className="border-input">
-                  {choice === 'next' ? 'Use the old look' : 'Try the new look'}
-                </Once>
-              </form>
             </div>
           </div>
         </div>
-      </LookProvider>
+      </KitProvider>
     </main>
   );
 }
