@@ -4,7 +4,7 @@
 // is the same for a person who has chosen the new look as for one who has not.
 //
 // The choice is the person's cookie `pw_ui` ("next" or "classic"). With no cookie, the setting
-// UI_DEFAULT is the answer (docs/settings.md); with neither, "classic". A page puts the answer on
+// UI_DEFAULT is the answer (docs/settings.md); with neither, "next" (since T51). A page puts the answer on
 // its own <main data-ui="...">, not on <html>: the layout is not drawn again when a person moves
 // from page to page, and an attribute there would be wrong after the first move.
 import { cookies } from 'next/headers';
@@ -57,12 +57,12 @@ export function uiStaged(value: string | undefined = process.env.UI_STAGED): boo
 }
 
 /**
- * What UI_DEFAULT says: "classic" or "next", and "classic" when it is not set. Anything else
- * stops whoever asks (the service's first request, and so every one after it) with a message that
- * says what to set it to, rather than quietly showing the old look to everyone.
+ * What UI_DEFAULT says: "classic" or "next", and "next" when it is not set. Anything else stops
+ * whoever asks (the service's first request, and so every one after it) with a message that says
+ * what to set it to, rather than quietly showing one look or the other to everyone.
  */
 export function uiDefault(value: string | undefined = process.env.UI_DEFAULT): Look {
-  if (value === undefined || value === '') return 'classic';
+  if (value === undefined || value === '') return 'next';
   if (value === 'classic' || value === 'next') return value;
   throw new Error(`UI_DEFAULT is "${value}": it must be "classic" or "next" (or not set)`);
 }

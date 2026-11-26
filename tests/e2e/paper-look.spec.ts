@@ -1,15 +1,15 @@
 // The paper page in the new look (apps/web/app/projects/[id]): the checks that matter to how it
-// reads, not what it does (the other specs do that, in both looks). Only in a run with the new
-// look chosen (E2E_UI=next).
+// reads, not what it does (the other specs do that, in both looks). Only in a run in the new
+// look (the default; not with E2E_UI=classic).
 import { expect, type Page, test } from '@playwright/test';
 import { mkdirSync, mkdtempSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { writeZip } from '../../packages/server/src/archive';
-import { audit, person, run, signIn, sticksOut } from './helpers';
+import { audit, LOOK, person, run, signIn, sticksOut } from './helpers';
 import { enlarged, lost, spaced } from './look';
 
-test.skip(process.env.E2E_UI !== 'next', 'the new look is chosen with E2E_UI=next');
+test.skip(LOOK !== 'next', 'the pages are in the old look (E2E_UI=classic)');
 
 const MAIN = [
   '\\documentclass{article}',

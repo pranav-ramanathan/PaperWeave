@@ -7990,3 +7990,13 @@ pointing to the new page).
 - **Not done.** The old look has no version switcher (it was built in the new look only), so a
   person who chooses the old look reaches versions from the history page alone. T51 makes the new
   look the default and T52 removes the old one.
+
+## The new look by default (T51)
+
+- **What.** `UI_DEFAULT` unset now means `next`: a person who has not pressed the switch sees the
+  new look. `classic` takes everyone who has not chosen back. The three fonts are preloaded.
+- **Tests.** In `tests/e2e/helpers.ts`, `E2E_UI=next` or `classic` sets the cookie, and `LOOK` is
+  the look the pages are in (the default, the new look, when it is unset). The required `browser`
+  job runs the default. `browser-next` became `browser-classic` (`E2E_UI=classic`,
+  `VERSIONS=0`).
+- **Next.** T52 removes the old look.

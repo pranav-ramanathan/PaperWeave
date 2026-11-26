@@ -2,13 +2,13 @@
 // starting a version from a revision or from the paper as it is, renaming, deleting, and who may do
 // which. A version is a paper of its own that was begun at one of main's revisions. Everything is
 // behind the `VERSIONS` setting, which is on unless the server was started with VERSIONS=0 (the
-// classic-look browser job in ci.yml is). So there are two groups of tests: with the setting on, what versions
-// do; with it off, that nothing of them shows. Each group runs when its setting is the one the
-// server has; none is skipped for a reason that is not the setting.
+// browser-classic job in ci.yml is). So there are two groups of tests: with the setting on, what
+// versions do; with it off, that nothing of them shows. Each group runs when its setting is the
+// one the server has; none is skipped for a reason that is not the setting.
 import { expect, type Page, test } from '@playwright/test';
 import { readFileSync } from 'node:fs';
 import { resolve } from 'node:path';
-import { audit, emailedLink, person, signIn, sticksOut } from './helpers';
+import { audit, emailedLink, LOOK, person, signIn, sticksOut } from './helpers';
 import { enlarged, lost, spaced } from './look';
 
 type Person = Awaited<ReturnType<typeof person>>;
@@ -344,7 +344,7 @@ if (ON) {
     // The switcher is in the new look's app bar: the editor must be in the new look, which is when
     // the run has chosen it and the page is migrated, or is staged and the server has UI_STAGED=1.
     test.skip(
-      process.env.E2E_UI !== 'next' ||
+      LOOK !== 'next' ||
         !(
           pagesIn('MIGRATED').includes('file') ||
           (pagesIn('STAGED').includes('file') && process.env.UI_STAGED === '1')
@@ -433,7 +433,7 @@ if (ON) {
     // The menu mounts in the page's overlay root, inside <main data-ui='next'>, where the new
     // look's rules and colours are. Mounted on <body> instead, it has neither: no surface of its
     // own, and in dark the page's light text on the classic white (axe: color-contrast).
-    test.skip(process.env.E2E_UI !== 'next', 'the switcher is in the new look only');
+    test.skip(LOOK !== 'next', 'the switcher is in the new look only');
     test.setTimeout(180_000);
     const editorNext =
       pagesIn('MIGRATED').includes('file') ||
